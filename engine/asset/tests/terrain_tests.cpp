@@ -332,3 +332,147 @@ TEST_CASE("a ray finds a cave's roof before its floor")
     CHECK(roof->position.y == doctest::Approx(6.0).epsilon(0.2));
     CHECK(roof->material == 9);
 }
+
+// --- Editing the field (F1) --------------------------------------------------
+
+TEST_CASE("adding a ball to empty air makes ground you can stand on")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    const EditReport report = fillBall(field, core::DVec3{0.0, 0.0, 0.0}, 3.0, 1);
+
+    CHECK(report.touched > 0);
+    // The ball's middle is solid and a point well outside it is not.
+    CHECK(field.sample(0, 0, 0).distance <= 0.0f);
+    CHECK(field.sample(0, 20, 0).distance > 0.0f);
+}
+
+TEST_CASE("digging into a hillside from the side makes a cave, and the cave is bricked")
+{
+    // **The promotion rule, which is the whole hybrid in one test.** A ball
+    // removed from INSIDE solid ground leaves air with ground above it, so the
+    // column stops being a height function and has to carry voxels.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(TileArea, 20.0f);
+    const std::vector<core::u8> materials(TileArea, core::u8{1});
+    field.setTile(TileKey{0, 0}, heights, materials);
+
+    REQUIRE_FALSE(field.isBricked(8, 8));
+    const core::usize bricksBefore = field.brickCount();
+
+    // Ten metres down, well below the surface at twenty.
+    const EditReport report = fillBall(field, core::DVec3{4.0, 10.0, 4.0}, 2.0, 0);
+
+    CHECK(report.promoted > 0);
+    CHECK(field.brickCount() > bricksBefore);
+    CHECK(field.isBricked(8, 8));
+
+    // And the cave is air with ground above AND below it, which is what a height
+    // function cannot express.
+    CHECK(field.sample(8, 20, 8).distance > 0.0f);
+    CHECK(field.sample(8, 30, 8).distance <= 0.0f);
+    CHECK(field.sample(8, 10, 8).distance <= 0.0f);
+}
+
+TEST_CASE("lowering the ground from above stays in the cheap encoding")
+{
+    // The common edit, and the one that must NOT promote: a ball taken out of
+    // the top of a hill leaves one surface, lower down. A design that bricked
+    // this would pay voxel prices for ordinary sculpting.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(TileArea, 10.0f);
+    const std::vector<core::u8> materials(TileArea, core::u8{1});
+    field.setTile(TileKey{0, 0}, heights, materials);
+
+    const EditReport report = fillBall(field, core::DVec3{4.0, 11.0, 4.0}, 2.5, 0);
+
+    CHECK(report.promoted == 0);
+    CHECK(field.brickCount() == 0);
+    CHECK_FALSE(field.isBricked(8, 8));
+
+    // And the ground is lower than it was.
+    const std::optional<float> after = heightAt(field, 4.0, 4.0);
+    REQUIRE(after.has_value());
+    CHECK(*after < 10.0f);
+}
+
+TEST_CASE("a block is a box rather than a rounded lump")
+{
+    // `blockDepth` takes the MINIMUM over the three axes, and taking the maximum
+    // is the mistake that rounds every corner off. A point near a corner is the
+    // one that tells them apart.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    fillBlock(field, core::DVec3{0.0, 0.0, 0.0}, core::Vec3{8.0f, 8.0f, 8.0f}, 1);
+
+    // The middle, a face, and a corner are all inside a box.
+    CHECK(field.sample(0, 0, 0).distance <= 0.0f);
+    CHECK(field.sample(6, 0, 0).distance <= 0.0f);
+    CHECK(field.sample(6, 6, 6).distance <= 0.0f);
+    // And just outside the corner is not.
+    CHECK(field.sample(10, 10, 10).distance > 0.0f);
+}
+
+TEST_CASE("heightAt answers about the height layer and admits when it cannot")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    CHECK_FALSE(heightAt(field, 0.0, 0.0).has_value());
+
+    const std::vector<float> heights(TileArea, 7.5f);
+    const std::vector<core::u8> materials(TileArea, core::u8{1});
+    field.setTile(TileKey{0, 0}, heights, materials);
+
+    const std::optional<float> found = heightAt(field, 2.0, 2.0);
+    REQUIRE(found.has_value());
+    CHECK(static_cast<double>(*found) == doctest::Approx(7.5).epsilon(0.001));
+
+    // Outside any tile is still nothing rather than zero, because zero is a
+    // legitimate height and "no ground" is not a height at all.
+    CHECK_FALSE(heightAt(field, 1000.0, 1000.0).has_value());
+}
+
+TEST_CASE("an edit is deterministic: the same brush on the same field twice agrees")
+{
+    // **R10.** Every column is examined before any is written and the columns are
+    // visited in a fixed order, precisely so a promotion does not depend on the
+    // order voxels happened to be reached -- and a promotion decides which
+    // encoding a column is in, which is hashed.
+    const auto sculpted = [] {
+        TerrainField field(FieldSettings{.voxelSize = 0.5f});
+        const std::vector<float> heights(TileArea, 12.0f);
+        const std::vector<core::u8> materials(TileArea, core::u8{1});
+        field.setTile(TileKey{0, 0}, heights, materials);
+        fillBall(field, core::DVec3{4.0, 6.0, 4.0}, 2.0, 0);
+        fillBall(field, core::DVec3{6.0, 13.0, 4.0}, 1.5, 2);
+        return field;
+    };
+
+    CHECK(sculpted().digest() == sculpted().digest());
+}
+
+TEST_CASE("compact gives a column back only when its bricks carry nothing")
+{
+    // **Nothing does this automatically**, which is the decision: the
+    // representation is part of the world's state, so a field that recompacted
+    // itself would be a world that changed when nobody touched it.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(TileArea, 20.0f);
+    const std::vector<core::u8> materials(TileArea, core::u8{1});
+    field.setTile(TileKey{0, 0}, heights, materials);
+
+    fillBall(field, core::DVec3{4.0, 10.0, 4.0}, 2.0, 0);
+    const core::usize withCave = field.brickCount();
+    REQUIRE(withCave > 0);
+
+    // **Nothing is redundant, because the edit no longer writes redundant
+    // bricks.** The first version of this test expected that and got three of
+    // four bricks reclaimed -- the examined column runs a brick above and below
+    // the brush, so promoting used to allocate levels that only repeated the
+    // height layer. `writeBricks` skips creating those now, and `compact` is
+    // left as the verb for reclaiming what LATER edits made redundant rather
+    // than as a required step after every dig.
+    CHECK(compact(field) == 0);
+    CHECK(field.brickCount() == withCave);
+
+    // And the cave survives, which is the half a reclaim count cannot say.
+    CHECK(field.sample(8, 20, 8).distance > 0.0f);
+    CHECK(field.sample(8, 30, 8).distance <= 0.0f);
+}

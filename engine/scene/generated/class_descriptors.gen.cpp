@@ -1006,6 +1006,110 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     weldDesc.detachComponents = native::detachWeldComponents;
     classes.registerClass(weldDesc);
 
+    // --- Terrain ---
+    static std::array<PropertyDesc, 5> terrainProperties;
+    terrainProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("VoxelSize"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How coarse the field is, in metres. Half a metre resolves a doorway; two metres resolves a hillside and costs a sixteenth as much.\012\012**Only settable while the terrain is empty.** Changing it under a sculpted world would mean resampling every tile and brick onto a different lattice, which is a lossy operation nobody asked for -- so it is refused, by name, rather than done quietly. Clear it first if that is really what you want.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.terrain_not_empty"),
+            .get = native::getTerrainVoxelSize,
+            .set = native::setTerrainVoxelSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CellSize"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = true,
+            .doc = "How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own spacing, and a terrain that disagreed with it would have cells that load and unload on different boundaries from everything else in the world.\012\012**Reads back faithfully and nothing acts on it yet.** The collider mirror and the streaming half of F1 are what will, and until one of them does this is a number that describes an intention rather than a behaviour.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getTerrainCellSize,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MinHeight"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The lowest this terrain may ever be dug to, in metres.\012\012**Decided once and reserved, rather than measured as you go.** A collider's height precision is spread across this range when the cell is built and cannot be widened afterwards, so digging past it does not deepen the world -- it stops. Set it to the deepest cave you will ever want before you start.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getTerrainMinHeight,
+            .set = native::setTerrainMinHeight,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MaxHeight"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The highest this terrain may ever be raised to, in metres. The upper half of the same reservation `MinHeight` describes.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getTerrainMaxHeight,
+            .set = native::setTerrainMaxHeight,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CellCount"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "How many cells of terrain currently hold anything. Zero for a terrain nobody has sculpted, which is what `Clear` returns it to.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getTerrainCellCount,
+            .set = nullptr,
+        },
+    }};
+    static std::array<MethodDesc, 5> terrainMethods;
+    terrainMethods = {{
+        MethodDesc{
+            .name = atoms.intern("FillBall"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it changed.\012\012This is the verb a sculpting brush is made of, and it is the same one a script uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.",
+        },
+        MethodDesc{
+            .name = atoms.intern("FillBlock"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The same, as an axis-aligned box. Returns how many cells it changed.",
+        },
+        MethodDesc{
+            .name = atoms.intern("HeightAt"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The height of the ground at this column, in metres.\012\012**It answers about the height layer and says nothing about caves**, which is the honest shape of the question: a column with a cave in it has no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first surface along a direction rather than the top of the ground.",
+        },
+        MethodDesc{
+            .name = atoms.intern("Clear"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Removes every cell. The terrain is empty afterwards and `VoxelSize` becomes settable again.",
+        },
+        MethodDesc{
+            .name = atoms.intern("Compact"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Converts back to the cheap encoding every column that no longer needs voxels, and returns how many it converted.\012\012**Nothing does this automatically, deliberately.** Which columns carry voxels is part of the world's state -- it is saved, and it is in the world hash -- so a terrain that quietly recompacted itself would be a world that changed when nobody touched it. Filling a cave back in leaves the bricks behind until you ask.",
+        },
+    }};
+    ClassDescriptor terrainDesc;
+    terrainDesc.name = atoms.intern("Terrain");
+    terrainDesc.super = instanceClass;
+    terrainDesc.flags = ClassFlags::None;
+    terrainDesc.defaultName = atoms.intern("Terrain");
+    terrainDesc.doc = "A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.\012\012**It is a volume and not a height map**, which is what makes caves and overhangs possible. Underneath, one signed-distance field is stored two ways -- a height layer for the ground that is a single-valued height function, which is most of it, and voxel bricks where it stops being one. Nothing you write here has to know which: `FillBall` through a hillside converts what it needs to and leaves the rest cheap.\012\012There is one per `Workspace`, reached as `workspace.Terrain`, because a world has one ground. Creating a second is legal and it simply is not the one the workspace names.\012\012**Every verb here is a write to the field**, and the field is part of the world -- so a sculpt is undoable in the editor, it moves the world hash, and it saves with the project.";
+    terrainDesc.properties = terrainProperties;
+    terrainDesc.methods = terrainMethods;
+    terrainDesc.attachComponents = native::attachTerrainComponents;
+    terrainDesc.detachComponents = native::detachTerrainComponents;
+    classes.registerClass(terrainDesc);
+
     // --- WeldConstraint ---
     static std::array<PropertyDesc, 4> weldConstraintProperties;
     weldConstraintProperties = {{
@@ -1249,7 +1353,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(dataModelDesc);
 
     // --- Workspace ---
-    static std::array<PropertyDesc, 2> workspaceProperties;
+    static std::array<PropertyDesc, 3> workspaceProperties;
     workspaceProperties = {{
         PropertyDesc{
             .name = atoms.intern("Gravity"),
@@ -1273,6 +1377,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
             .get = native::getWorkspaceCurrentCamera,
             .set = native::setWorkspaceCurrentCamera,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Terrain"),
+            .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Terrain"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "This world's ground, or nil in a world that has none.\012\012Read-only because it names rather than owns: a `Terrain` is an ordinary instance parented under the workspace, and this is how you reach the one the engine treats as the world's ground. Parent a second one and it is a perfectly good terrain that this does not point at.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getWorkspaceTerrain,
+            .set = nullptr,
         },
     }};
     static std::array<MethodDesc, 3> workspaceMethods;

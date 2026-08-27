@@ -865,6 +865,51 @@ declare extern type Weld extends Instance with
     Enabled: boolean
 end
 
+declare extern type Terrain extends Instance with
+    --- How coarse the field is, in metres. Half a metre resolves a doorway; two metres resolves a
+    --- hillside and costs a sixteenth as much. **Only settable while the terrain is empty.** Changing
+    --- it under a sculpted world would mean resampling every tile and brick onto a different lattice,
+    --- which is a lossy operation nobody asked for -- so it is refused, by name, rather than done
+    --- quietly. Clear it first if that is really what you want.
+    VoxelSize: number
+    --- How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own
+    --- spacing, and a terrain that disagreed with it would have cells that load and unload on different
+    --- boundaries from everything else in the world. **Reads back faithfully and nothing acts on it
+    --- yet.** The collider mirror and the streaming half of F1 are what will, and until one of them
+    --- does this is a number that describes an intention rather than a behaviour.
+    read CellSize: number
+    --- The lowest this terrain may ever be dug to, in metres. **Decided once and reserved, rather than
+    --- measured as you go.** A collider's height precision is spread across this range when the cell is
+    --- built and cannot be widened afterwards, so digging past it does not deepen the world -- it
+    --- stops. Set it to the deepest cave you will ever want before you start.
+    MinHeight: number
+    --- The highest this terrain may ever be raised to, in metres. The upper half of the same
+    --- reservation `MinHeight` describes.
+    MaxHeight: number
+    --- How many cells of terrain currently hold anything. Zero for a terrain nobody has sculpted, which
+    --- is what `Clear` returns it to.
+    read CellCount: number
+    --- Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it
+    --- changed. This is the verb a sculpting brush is made of, and it is the same one a script uses --
+    --- an explosion crater is `FillBall(hit.Position, 4, 0)`.
+    function FillBall(self, center: Vector3, radius: number, material: number): number
+    --- The same, as an axis-aligned box. Returns how many cells it changed.
+    function FillBlock(self, center: Vector3, size: Vector3, material: number): number
+    --- The height of the ground at this column, in metres. **It answers about the height layer and says
+    --- nothing about caves**, which is the honest shape of the question: a column with a cave in it has
+    --- no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first
+    --- surface along a direction rather than the top of the ground.
+    function HeightAt(self, x: number, z: number): number
+    --- Removes every cell. The terrain is empty afterwards and `VoxelSize` becomes settable again.
+    function Clear(self): ()
+    --- Converts back to the cheap encoding every column that no longer needs voxels, and returns how
+    --- many it converted. **Nothing does this automatically, deliberately.** Which columns carry voxels
+    --- is part of the world's state -- it is saved, and it is in the world hash -- so a terrain that
+    --- quietly recompacted itself would be a world that changed when nobody touched it. Filling a cave
+    --- back in leaves the bricks behind until you ask.
+    function Compact(self): number
+end
+
 declare extern type WeldConstraint extends Instance with
     --- The anchor, as on Weld.
     Part0: BasePart?
@@ -1412,6 +1457,11 @@ declare extern type Workspace extends Instance with
     --- the engine invented, because a view nobody asked for is harder to debug than a black frame that
     --- says why.
     CurrentCamera: Camera?
+    --- This world's ground, or nil in a world that has none. Read-only because it names rather than
+    --- owns: a `Terrain` is an ordinary instance parented under the workspace, and this is how you
+    --- reach the one the engine treats as the world's ground. Parent a second one and it is a perfectly
+    --- good terrain that this does not point at.
+    read Terrain: Terrain?
     --- The nearest thing a ray from `origin` hits, or nil. The direction is NOT normalised: its length
     --- is how far the ray reaches, so `direction * 100` is a hundred-metre ray. A tie between two
     --- surfaces at the same distance resolves the same way on every run, because a query whose answer
@@ -2133,6 +2183,7 @@ declare Instance: {
         & (("FixedConstraint") -> FixedConstraint)
         & (("Ragdoll") -> Ragdoll)
         & (("Weld") -> Weld)
+        & (("Terrain") -> Terrain)
         & (("WeldConstraint") -> WeldConstraint)
         & (("CharacterBody") -> CharacterBody)
         & (("Camera") -> Camera)

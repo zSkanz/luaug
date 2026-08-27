@@ -18,6 +18,7 @@ offers is on the base's page, which is what keeps one added member on
 |---|---|---|---|---|
 | `CurrentCamera` | `Camera?` | — | read/write | The camera the world is rendered from. Nil renders nothing rather than falling back to a camera the engine invented, because a view nobody asked for is harder to debug than a black frame that says why. |
 | `Gravity` | `vector` | `vector.create(0, -9.81, 0)` | read/write | The acceleration applied to every unanchored part, in metres per second squared. SI and signed, so the default points down; a game wanting moon gravity scales it rather than reaching for a separate multiplier. |
+| `Terrain` | `Terrain?` | — | read-only | This world's ground, or nil in a world that has none.<br><br>Read-only because it names rather than owns: a `Terrain` is an ordinary instance parented under the workspace, and this is how you reach the one the engine treats as the world's ground. Parent a second one and it is a perfectly good terrain that this does not point at. |
 
 ## Methods
 

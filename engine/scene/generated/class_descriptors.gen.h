@@ -213,6 +213,18 @@ bool setWeldEnabled(World& world, core::InstanceId id, const Value& value);
 void attachWeldComponents(World& world, core::InstanceId id);
 void detachWeldComponents(World& world, core::InstanceId id);
 
+// Terrain
+Value getTerrainVoxelSize(const World& world, core::InstanceId id);
+bool setTerrainVoxelSize(World& world, core::InstanceId id, const Value& value);
+Value getTerrainCellSize(const World& world, core::InstanceId id);
+Value getTerrainMinHeight(const World& world, core::InstanceId id);
+bool setTerrainMinHeight(World& world, core::InstanceId id, const Value& value);
+Value getTerrainMaxHeight(const World& world, core::InstanceId id);
+bool setTerrainMaxHeight(World& world, core::InstanceId id, const Value& value);
+Value getTerrainCellCount(const World& world, core::InstanceId id);
+void attachTerrainComponents(World& world, core::InstanceId id);
+void detachTerrainComponents(World& world, core::InstanceId id);
+
 // WeldConstraint
 Value getWeldConstraintPart0(const World& world, core::InstanceId id);
 bool setWeldConstraintPart0(World& world, core::InstanceId id, const Value& value);
@@ -247,6 +259,7 @@ Value getWorkspaceGravity(const World& world, core::InstanceId id);
 bool setWorkspaceGravity(World& world, core::InstanceId id, const Value& value);
 Value getWorkspaceCurrentCamera(const World& world, core::InstanceId id);
 bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& value);
+Value getWorkspaceTerrain(const World& world, core::InstanceId id);
 void attachWorkspaceComponents(World& world, core::InstanceId id);
 void detachWorkspaceComponents(World& world, core::InstanceId id);
 

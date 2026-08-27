@@ -215,6 +215,7 @@ struct NameIndex
     X(RagdollComponent, ragdolls)                                                                                      \
     X(MaterialComponent, materials)                                                                                    \
     X(WorkspaceComponent, workspaces)                                                                                  \
+    X(TerrainComponent, terrains)                                                                                      \
     X(ModelComponent, models)                                                                                          \
     X(ScriptComponent, scripts)                                                                                        \
     X(SoundComponent, sounds)                                                                                          \
@@ -626,6 +627,12 @@ public:
     [[nodiscard]] const ComponentPool<RigidBodyComponent>& rigidBodies() const noexcept { return m_rigidBodies; }
     [[nodiscard]] ComponentPool<WeldComponent>& welds() noexcept { return m_welds; }
     [[nodiscard]] const ComponentPool<WeldComponent>& welds() const noexcept { return m_welds; }
+    // The world's ground (ADR 0067). Hand-written like every other pair: there
+    // is no generic `pool<T>()`, and this header records that the generic one
+    // was deferred and never built.
+    [[nodiscard]] ComponentPool<TerrainComponent>& terrains() noexcept { return m_terrains; }
+    [[nodiscard]] const ComponentPool<TerrainComponent>& terrains() const noexcept { return m_terrains; }
+
     [[nodiscard]] ComponentPool<AttachmentComponent>& attachments() noexcept { return m_attachments; }
     [[nodiscard]] const ComponentPool<AttachmentComponent>& attachments() const noexcept { return m_attachments; }
     [[nodiscard]] ComponentPool<ConstraintComponent>& constraints() noexcept { return m_constraints; }

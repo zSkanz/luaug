@@ -166,6 +166,7 @@
   "app.err.launcher_start_failed": "The editor could not be started for that project.",
   "app.info.launcher_opening": "Opening {path}.",
   "asset.chunk.err.magic": "That file is not a LuauG world chunk.",
+  "scene.err.terrain_not_empty": "VoxelSize can only be set while the terrain is empty. Clear it first.",
   "asset.terrain.err.malformed": "The terrain cell is malformed: a count, an offset or a key points outside it.",
   "asset.terrain.err.too_large": "The terrain cell declares more tiles or bricks than this engine will load.",
   "asset.terrain.err.version": "This build reads terrain cell format {expected}; that cell is format {found}.",

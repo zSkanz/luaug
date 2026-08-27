@@ -18,6 +18,7 @@ luaug_add_module(asset
         src/terrain_mesher.cpp
         src/terrain_raycast.cpp
         src/terrain_cell.cpp
+        src/terrain_edit.cpp
         src/image.cpp
         src/gltf.cpp
         src/mesh_format.cpp

@@ -2008,6 +2008,108 @@
       "Events": []
     },
     {
+      "Name": "Terrain",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CellCount",
+          "Type": "number",
+          "ReadOnly": true
+        },
+        {
+          "Name": "CellSize",
+          "Type": "number",
+          "ReadOnly": true,
+          "Default": "64",
+          "Inert": true
+        },
+        {
+          "Name": "MaxHeight",
+          "Type": "number",
+          "Default": "256"
+        },
+        {
+          "Name": "MinHeight",
+          "Type": "number",
+          "Default": "-256"
+        },
+        {
+          "Name": "VoxelSize",
+          "Type": "number",
+          "Default": "0.5"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Clear",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Compact",
+          "Parameters": [],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FillBall",
+          "Parameters": [
+            {
+              "Name": "center",
+              "Type": "Vector3"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            },
+            {
+              "Name": "material",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FillBlock",
+          "Parameters": [
+            {
+              "Name": "center",
+              "Type": "Vector3"
+            },
+            {
+              "Name": "size",
+              "Type": "Vector3"
+            },
+            {
+              "Name": "material",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "HeightAt",
+          "Parameters": [
+            {
+              "Name": "x",
+              "Type": "number"
+            },
+            {
+              "Name": "z",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "TextButton",
       "Extends": "TextLabel",
       "Tags": [],
@@ -2401,6 +2503,11 @@
           "Name": "Gravity",
           "Type": "vector",
           "Default": "vector.create(0, -9.81, 0)"
+        },
+        {
+          "Name": "Terrain",
+          "Type": "Terrain?",
+          "ReadOnly": true
         }
       ],
       "Methods": [

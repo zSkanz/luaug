@@ -73,6 +73,7 @@ guided tour.
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |
 | [`Sound`](sound.md) | [`Instance`](instance.md) | One sound, playing or not (§2.2). |
 | [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its parent's forward direction. |
+| [`Terrain`](terrain.md) | [`Instance`](instance.md) | A sculpted, collidable landscape: ground you dig into rather than a floor made of parts. |
 | [`TextButton`](textbutton.md) | [`TextLabel`](textlabel.md) | A `TextLabel` that is meant to be pressed. |
 | [`TextInput`](textinput.md) | [`TextLabel`](textlabel.md) | A single-line editable field (§2.2). |
 | [`TextLabel`](textlabel.md) | [`UIObject`](uiobject.md) | Text in a box (§2.2). |

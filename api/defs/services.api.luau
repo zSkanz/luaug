@@ -147,6 +147,16 @@ local Classes: { Schema.Class } = {
                     .. "camera the engine invented, because a view nobody asked for is harder to debug than a black "
                     .. "frame that says why.",
             },
+            {
+                Name = "Terrain",
+                Type = "Terrain?",
+                ReadOnly = true,
+                Doc = "This world's ground, or nil in a world that has none.\n\n"
+                    .. "Read-only because it names rather than owns: a `Terrain` is an ordinary instance "
+                    .. "parented under the workspace, and this is how you reach the one the engine treats "
+                    .. "as the world's ground. Parent a second one and it is a perfectly good terrain that "
+                    .. "this does not point at.",
+            },
         } :: { Schema.Property },
         Methods = {
             {

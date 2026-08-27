@@ -971,6 +971,107 @@ int methodRagdollBuild(lua_State* L)
 // What `Instance` and `Model` declare. `WaitForChild` is absent on purpose: it
 // parks on a tree state rather than on a value this file can produce, so it is
 // implemented beside the services that make the tree move.
+// --- Terrain (ADR 0067) ------------------------------------------------------
+//
+// **Every verb here writes the field, and the field is part of the world.** So a
+// sculpt is undoable in the editor, it moves the world hash, and it saves with
+// the project -- none of which needed anything special, because the field lives
+// in a component like every other piece of world state.
+//
+// Hand-bound rather than generated for the reason the table below exists at all:
+// a `MethodDesc` carries a name, whether it yields and its thread safety, and
+// every argument is checked here with `luaL_check*`. A generated method would
+// need the IDL to describe argument checking, which is a language nobody asked
+// for.
+
+int methodTerrainFillBall(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const auto radius = static_cast<double>(luaL_checknumber(L, 3));
+    const auto material = static_cast<core::u8>(luaL_checkinteger(L, 4));
+
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+
+    // A `Vector3` from a script is `f32` and a brush takes a world position,
+    // which is `f64` (R9). Widened explicitly: Clang diagnoses the implicit form
+    // and MSVC does not, so leaving it implicit is a Linux-only build break.
+    const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
+    const asset::EditReport report = asset::fillBall(terrain->field, wide, radius, material);
+    lua_pushinteger(L, static_cast<int>(report.touched));
+    return 1;
+}
+
+int methodTerrainFillBlock(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const core::Vec3 size = checkVector3(L, 3);
+    const auto material = static_cast<core::u8>(luaL_checkinteger(L, 4));
+
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+
+    const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
+    const asset::EditReport report = asset::fillBlock(terrain->field, wide, size, material);
+    lua_pushinteger(L, static_cast<int>(report.touched));
+    return 1;
+}
+
+int methodTerrainHeightAt(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const auto x = static_cast<double>(luaL_checknumber(L, 2));
+    const auto z = static_cast<double>(luaL_checknumber(L, 3));
+
+    const scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    // **Nil where there is no ground, rather than zero.** Zero is a legitimate
+    // height and "there is nothing here" is not a height at all, so a script
+    // that placed a tree wherever this answered would otherwise plant a forest
+    // at sea level across every unsculpted cell.
+    const std::optional<float> height = asset::heightAt(terrain->field, x, z);
+    if (!height.has_value()) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushnumber(L, static_cast<double>(*height));
+    return 1;
+}
+
+int methodTerrainClear(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    if (scene::TerrainComponent* terrain = world(L).terrains().find(id); terrain != nullptr) {
+        terrain->field = asset::TerrainField(terrain->field.settings());
+    }
+    return 0;
+}
+
+int methodTerrainCompact(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    const core::u32 converted = asset::compact(terrain->field);
+    lua_pushinteger(L, static_cast<int>(converted));
+    return 1;
+}
+
 constexpr InstanceMethodBinding InstanceMethods[] = {
     {"Instance", "FindFirstChild", methodFindFirstChild},
     {"Instance", "FindFirstChildOfClass", methodFindFirstChildOfClass},
@@ -1000,6 +1101,11 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"CharacterBody", "Move", methodCharacterMove},
     {"CharacterBody", "Jump", methodCharacterJump},
     {"Ragdoll", "Build", methodRagdollBuild},
+    {"Terrain", "FillBall", methodTerrainFillBall},
+    {"Terrain", "FillBlock", methodTerrainFillBlock},
+    {"Terrain", "HeightAt", methodTerrainHeightAt},
+    {"Terrain", "Clear", methodTerrainClear},
+    {"Terrain", "Compact", methodTerrainCompact},
 };
 
 } // namespace

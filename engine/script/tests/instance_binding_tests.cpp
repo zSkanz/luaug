@@ -535,12 +535,17 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `InputService:IsKeyDown` arrived with ADR 0041's raw event surface, and 67
     // once `InputService:SetVirtualState` opened the non-device seam; 70 at
     // M7, which added `StreamingService:AddFocus`, `:RemoveFocus` and
-    // `:LoadAreaAsync`; and 71 at E9, which added `Ragdoll:Build`. This number
-    // is what makes a DECLARED-but-unbound method impossible to ship: the IDL
-    // would count it and the binding table would not, which is `Inert` for a
-    // method.
-    CHECK(coverage.declared == 71);
-    CHECK(coverage.bound == 71);
+    // `:LoadAreaAsync`; 71 at E9, which added `Ragdoll:Build`; and 76 at F1,
+    // which added `Terrain:FillBall`, `:FillBlock`, `:HeightAt`, `:Clear` and
+    // `:Compact`. This number is what makes a DECLARED-but-unbound method
+    // impossible to ship: the IDL would count it and the binding table would
+    // not, which is `Inert` for a method.
+    //
+    // **It earned its keep at F1.** Five methods were declared in the IDL in one
+    // commit and this failed on the next build, before anything could reach a
+    // script and find a name that answered nothing.
+    CHECK(coverage.declared == 76);
+    CHECK(coverage.bound == 76);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

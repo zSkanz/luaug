@@ -1082,6 +1082,134 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Property },
     },
     {
+        Name = "Terrain",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Terrain",
+        Doc = "A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.\n\n"
+            .. "**It is a volume and not a height map**, which is what makes caves and overhangs possible. "
+            .. "Underneath, one signed-distance field is stored two ways -- a height layer for the ground "
+            .. "that is a single-valued height function, which is most of it, and voxel bricks where it "
+            .. "stops being one. Nothing you write here has to know which: `FillBall` through a hillside "
+            .. "converts what it needs to and leaves the rest cheap.\n\n"
+            .. "There is one per `Workspace`, reached as `workspace.Terrain`, because a world has one "
+            .. "ground. Creating a second is legal and it simply is not the one the workspace names.\n\n"
+            .. "**Every verb here is a write to the field**, and the field is part of the world -- so a "
+            .. "sculpt is undoable in the editor, it moves the world hash, and it saves with the project.",
+        Properties = {
+            {
+                Name = "VoxelSize",
+                Type = "number",
+                Default = "0.5",
+                ErrorKey = "scene.err.terrain_not_empty",
+                Doc = "How coarse the field is, in metres. Half a metre resolves a doorway; two metres "
+                    .. "resolves a hillside and costs a sixteenth as much.\n\n"
+                    .. "**Only settable while the terrain is empty.** Changing it under a sculpted world "
+                    .. "would mean resampling every tile and brick onto a different lattice, which is a "
+                    .. "lossy operation nobody asked for -- so it is refused, by name, rather than done "
+                    .. "quietly. Clear it first if that is really what you want.",
+            },
+            {
+                Name = "CellSize",
+                Type = "number",
+                ReadOnly = true,
+                Default = "64",
+                Inert = true,
+                Doc = "How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming "
+                    .. "grid's own spacing, and a terrain that disagreed with it would have cells that "
+                    .. "load and unload on different boundaries from everything else in the world.\n\n"
+                    .. "**Reads back faithfully and nothing acts on it yet.** The collider mirror and the "
+                    .. "streaming half of F1 are what will, and until one of them does this is a number "
+                    .. "that describes an intention rather than a behaviour.",
+            },
+            {
+                Name = "MinHeight",
+                Type = "number",
+                Default = "-256",
+                Doc = "The lowest this terrain may ever be dug to, in metres.\n\n"
+                    .. "**Decided once and reserved, rather than measured as you go.** A collider's "
+                    .. "height precision is spread across this range when the cell is built and cannot be "
+                    .. "widened afterwards, so digging past it does not deepen the world -- it stops. Set "
+                    .. "it to the deepest cave you will ever want before you start.",
+            },
+            {
+                Name = "MaxHeight",
+                Type = "number",
+                Default = "256",
+                Doc = "The highest this terrain may ever be raised to, in metres. The upper half of the "
+                    .. "same reservation `MinHeight` describes.",
+            },
+            {
+                Name = "CellCount",
+                Type = "number",
+                ReadOnly = true,
+                Doc = "How many cells of terrain currently hold anything. Zero for a terrain nobody has "
+                    .. "sculpted, which is what `Clear` returns it to.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "FillBall",
+                Parameters = {
+                    { Name = "center", Type = "Vector3" },
+                    { Name = "radius", Type = "number" },
+                    { Name = "material", Type = "number" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Adds a ball of ground, or removes one when `material` is zero. Returns how many "
+                    .. "cells it changed.\n\n"
+                    .. "This is the verb a sculpting brush is made of, and it is the same one a script "
+                    .. "uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.",
+            },
+            {
+                Name = "FillBlock",
+                Parameters = {
+                    { Name = "center", Type = "Vector3" },
+                    { Name = "size", Type = "Vector3" },
+                    { Name = "material", Type = "number" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "The same, as an axis-aligned box. Returns how many cells it changed.",
+            },
+            {
+                Name = "HeightAt",
+                Parameters = {
+                    { Name = "x", Type = "number" },
+                    { Name = "z", Type = "number" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "The height of the ground at this column, in metres.\n\n"
+                    .. "**It answers about the height layer and says nothing about caves**, which is the "
+                    .. "honest shape of the question: a column with a cave in it has no single height. "
+                    .. "Cast a ray at it with `Workspace:Raycast` when what you want is the first surface "
+                    .. "along a direction rather than the top of the ground.",
+            },
+            {
+                Name = "Clear",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Removes every cell. The terrain is empty afterwards and `VoxelSize` becomes "
+                    .. "settable again.",
+            },
+            {
+                Name = "Compact",
+                Parameters = {},
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Converts back to the cheap encoding every column that no longer needs voxels, and "
+                    .. "returns how many it converted.\n\n"
+                    .. "**Nothing does this automatically, deliberately.** Which columns carry voxels is "
+                    .. "part of the world's state -- it is saved, and it is in the world hash -- so a "
+                    .. "terrain that quietly recompacted itself would be a world that changed when nobody "
+                    .. "touched it. Filling a cave back in leaves the bricks behind until you ask.",
+            },
+        } :: { Schema.Method },
+    },
+    {
         Name = "WeldConstraint",
         Extends = "Instance",
         Module = "scene",

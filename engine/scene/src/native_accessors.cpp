@@ -196,6 +196,31 @@ Value getWorkspaceCurrentCamera(const World& world, core::InstanceId id)
     return Value{workspace->currentCamera};
 }
 
+Value getWorkspaceTerrain(const World& world, core::InstanceId id)
+{
+    // **Found rather than stored**, which is what "names rather than owns" means
+    // in code: a `Terrain` is an ordinary instance parented under the workspace,
+    // and this walks for the first one instead of keeping a reference that a
+    // reparent or a destroy would have to be taught to update.
+    //
+    // The walk is over direct children only, and it is O(the workspace's
+    // children) on a read nobody performs in a loop. A cached id would be a
+    // second source of truth about which terrain is the world's, and the E9
+    // stamp work is a whole milestone of what those cost.
+    if (world.workspaces().find(id) == nullptr)
+        return Value{};
+
+    const ClassId terrainClass = world.classes().findId(world.atoms().lookup("Terrain"));
+    if (terrainClass == InvalidClass)
+        return Value{};
+
+    for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+        if (world.classOf(child) == terrainClass)
+            return Value{child};
+    }
+    return Value{};
+}
+
 bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& value)
 {
     WorkspaceComponent* workspace = world.workspaces().find(id);
@@ -254,6 +279,102 @@ void detachWorkspaceComponents(World& world, core::InstanceId id)
 }
 
 // --- Attachment ---------------------------------------------------------------
+
+// --- Terrain (ADR 0067) ------------------------------------------------------
+
+void attachTerrainComponents(World& world, core::InstanceId id)
+{
+    world.terrains().add(id, TerrainComponent{});
+}
+
+void detachTerrainComponents(World& world, core::InstanceId id)
+{
+    world.terrains().remove(id);
+}
+
+Value getTerrainVoxelSize(const World& world, core::InstanceId id)
+{
+    const TerrainComponent* terrain = world.terrains().find(id);
+    return terrain == nullptr ? Value{} : Value{static_cast<f64>(terrain->field.settings().voxelSize)};
+}
+
+bool setTerrainVoxelSize(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* size = std::get_if<f64>(&value);
+    TerrainComponent* terrain = world.terrains().find(id);
+    if (size == nullptr || terrain == nullptr)
+        return false;
+    if (!finite(*size) || *size <= 0.0)
+        return false;
+
+    // **Only while it is empty**, and refused by name rather than done quietly.
+    // Changing the lattice under a sculpted world would mean resampling every
+    // tile and brick onto a different one, which is lossy in a way nobody asked
+    // for -- and the alternative to refusing is a terrain that silently loses
+    // detail when somebody adjusts a number in a properties grid.
+    if (terrain->field.tileCount() > 0 || terrain->field.brickCount() > 0)
+        return false;
+
+    asset::FieldSettings settings = terrain->field.settings();
+    settings.voxelSize = static_cast<f32>(*size);
+    terrain->field = asset::TerrainField(settings);
+    return true;
+}
+
+Value getTerrainCellSize(const World& world, core::InstanceId id)
+{
+    const TerrainComponent* terrain = world.terrains().find(id);
+    return terrain == nullptr ? Value{} : Value{static_cast<f64>(terrain->cellSize)};
+}
+
+Value getTerrainMinHeight(const World& world, core::InstanceId id)
+{
+    const TerrainComponent* terrain = world.terrains().find(id);
+    return terrain == nullptr ? Value{} : Value{static_cast<f64>(terrain->minHeight)};
+}
+
+bool setTerrainMinHeight(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* height = std::get_if<f64>(&value);
+    TerrainComponent* terrain = world.terrains().find(id);
+    if (height == nullptr || terrain == nullptr)
+        return false;
+    // **A range that is not a range is refused.** An inverted or empty one would
+    // make every collider built from it quantise into nothing, and the symptom
+    // would be terrain that cannot be dug rather than an error.
+    if (!finite(*height) || static_cast<f32>(*height) >= terrain->maxHeight)
+        return false;
+    terrain->minHeight = static_cast<f32>(*height);
+    return true;
+}
+
+Value getTerrainMaxHeight(const World& world, core::InstanceId id)
+{
+    const TerrainComponent* terrain = world.terrains().find(id);
+    return terrain == nullptr ? Value{} : Value{static_cast<f64>(terrain->maxHeight)};
+}
+
+bool setTerrainMaxHeight(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* height = std::get_if<f64>(&value);
+    TerrainComponent* terrain = world.terrains().find(id);
+    if (height == nullptr || terrain == nullptr)
+        return false;
+    if (!finite(*height) || static_cast<f32>(*height) <= terrain->minHeight)
+        return false;
+    terrain->maxHeight = static_cast<f32>(*height);
+    return true;
+}
+
+Value getTerrainCellCount(const World& world, core::InstanceId id)
+{
+    const TerrainComponent* terrain = world.terrains().find(id);
+    if (terrain == nullptr)
+        return Value{};
+    // Tiles and bricks both count as occupancy: a cell holding only a cave is a
+    // cell that holds something.
+    return Value{static_cast<f64>(terrain->field.tileCount() + terrain->field.brickCount())};
+}
 
 void attachAttachmentComponents(World& world, core::InstanceId id)
 {

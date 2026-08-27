@@ -31,6 +31,7 @@
 // still the answer for the day a module ABOVE scene brings a third batch.
 #pragma once
 
+#include "luaug/asset/terrain.h"
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
@@ -445,6 +446,36 @@ struct WorkspaceComponent
     core::InstanceId currentCamera;
     // SI and signed, so the default points down (api-design.md §2.1).
     core::Vec3 gravity{0.0f, -9.81f, 0.0f};
+};
+
+// `Terrain`'s own state: the field, and the reservation that bounds it.
+//
+// **The field lives in `asset` and is held here by value** rather than being
+// re-declared. `TerrainField` is two sorted vectors of `shared_ptr<const T>`, so
+// a copy of this component copies pointers and bumps refcounts -- which is what
+// makes `World::snapshot`, and therefore the editor's sixty-four-deep undo
+// stack, affordable over a sculpted world.
+//
+// **Neither `field` nor `fieldRevision` has a property**, deliberately. The
+// field IS the terrain -- megabytes of samples that no inspector row could show
+// and no `scene::Value` could carry -- and it is read by the mesher and the
+// collider builder through this pool rather than through an accessor. Both are
+// in `inertcheck`'s `StorageOnly` list with that argument written down.
+struct TerrainComponent
+{
+    asset::TerrainField field;
+
+    // How wide one streamed cell is, in metres. Not settable from a script: it
+    // is the streaming grid's own spacing, and a terrain that disagreed with it
+    // would load and unload on different boundaries from everything else.
+    f32 cellSize = 64.0f;
+
+    // **The range this terrain may ever be dug or raised to.** Reserved rather
+    // than measured, because a height field's precision is spread across it when
+    // a cell's collider is built and cannot be widened afterwards (ADR 0066) --
+    // so digging past it does not deepen the world, it stops.
+    f32 minHeight = -256.0f;
+    f32 maxHeight = 256.0f;
 };
 
 // `PVInstance`'s own state, and therefore attached to every `BasePart`, `Model`

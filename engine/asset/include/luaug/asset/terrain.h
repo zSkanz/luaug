@@ -229,6 +229,50 @@ private:
 [[nodiscard]] core::u8 quantiseDistance(float metres, float voxelSize) noexcept;
 [[nodiscard]] float dequantiseDistance(core::u8 quantised, float voxelSize) noexcept;
 
+// --- Editing the field -------------------------------------------------------
+//
+// **This is where the hybrid is decided, column by column.** Every edit writes
+// the field and then asks each column it touched a single question: is this
+// still a height function? A column with one surface -- solid below, air above --
+// is, and stays in the cheap encoding. A column with more than one is not, and
+// promotes to bricks.
+//
+// Asking the resulting field rather than predicting from the brush's shape is
+// what makes the rule total: a ball dug into a hillside, a block raised beside a
+// cliff and an arch cut through a ridge all reach the same test, and none of them
+// needs a case of its own.
+
+// How much a column may hold before the promotion test gives up and bricks it,
+// and what one edit changed.
+struct EditReport
+{
+    // Columns whose encoding is now bricks, having been heights before.
+    core::u32 promoted = 0;
+    // Columns written at all, in either encoding.
+    core::u32 touched = 0;
+};
+
+// Adds or removes a ball of ground. `material` of zero removes; anything else
+// adds with that material.
+EditReport fillBall(TerrainField& field, core::DVec3 center, double radius, core::u8 material);
+
+// The same, as an axis-aligned box. `size` is the full extent, never a half.
+EditReport fillBlock(TerrainField& field, core::DVec3 center, core::Vec3 size, core::u8 material);
+
+// The height of the ground at this column, in metres, or nothing where there is
+// no ground. **Answers about the height layer and says nothing about caves**,
+// which is the honest shape of the question: a column with a cave in it has no
+// single height.
+[[nodiscard]] std::optional<float> heightAt(const TerrainField& field, double x, double z);
+
+// Converts back to the cheap encoding every column that no longer needs voxels,
+// and answers how many it converted.
+//
+// **Nothing calls this automatically**, deliberately: which columns carry voxels
+// is part of the world's state, so a field that quietly recompacted itself would
+// be a world that changed when nobody touched it.
+core::u32 compact(TerrainField& field);
+
 // --- Raycasting the field directly -------------------------------------------
 
 // Where a ray met the ground.

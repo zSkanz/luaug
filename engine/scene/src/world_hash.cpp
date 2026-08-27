@@ -258,6 +258,48 @@ u64 World::worldHash() const
             hasher.flag(action->pressed);
         }
 
+        // **The terrain field, which no property can carry** (ADR 0067). It is
+        // megabytes of samples, so it is not in the walk below and has to be
+        // here -- and three rules decide how, each of which is a way to get it
+        // silently wrong.
+        //
+        // **Per-object digests, not bytes.** Every tile and brick computes an
+        // xxh3 of its arrays once, at construction, so this is O(objects)
+        // instead of O(bytes): a cell of a hundred tiles costs a hundred
+        // eight-byte reads rather than half a megabyte, on every tick that hashes.
+        //
+        // **The key goes in beside the digest**, because two fields holding the
+        // same ground in different places are different fields, and a digest over
+        // contents alone would miss a move.
+        //
+        // **Nothing about the SHARING is hashed** -- no pointer, no refcount, no
+        // address. Two runs that share a brick and two runs that cloned it hash
+        // identically, which is the property that lets copy-on-write be an
+        // implementation detail rather than part of the world.
+        //
+        // The representation itself is state and is covered for free: which
+        // columns carry bricks decides which digests appear here, promotion
+        // happens exactly at an edit, demotion only at an explicit `Compact`,
+        // and `.lterrain` preserves it -- so a save and a reload hash the same.
+        if (const TerrainComponent* terrain = m_terrains.find(id); terrain != nullptr) {
+            hasher.number(static_cast<f64>(terrain->field.settings().voxelSize));
+            hasher.number(static_cast<f64>(terrain->minHeight));
+            hasher.number(static_cast<f64>(terrain->maxHeight));
+            for (const asset::TileKey key : terrain->field.tileKeys()) {
+                hasher.pod(key.x);
+                hasher.pod(key.z);
+                if (const asset::HeightTile* tile = terrain->field.findTile(key); tile != nullptr)
+                    hasher.pod(tile->digest);
+            }
+            for (const asset::BrickKey key : terrain->field.brickKeys()) {
+                hasher.pod(key.x);
+                hasher.pod(key.y);
+                hasher.pod(key.z);
+                if (const asset::Brick* brick = terrain->field.findBrick(key); brick != nullptr)
+                    hasher.pod(brick->digest);
+            }
+        }
+
         // Class-specific state, reached through the same generated accessors a
         // script would use. Hashing the components directly would be faster and
         // would silently stop covering a property whose storage moved.
