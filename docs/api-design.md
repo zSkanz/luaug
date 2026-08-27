@@ -484,6 +484,13 @@ kind", and `HingeConstraint`, `BallSocketConstraint` and `FixedConstraint` now
 ship over `Attachment` pairs, and a `Ragdoll` is assembled from them rather than
 owning bodies of its own. `SpringConstraint` and `Motor6D` are still absent.
 
+**The rest of that list now has an owner** (roadmap post-v1 phase 2, opened
+2026-08-27): Terrain — voxel, so caves are possible — `ParticleEmitter`,
+`SurfaceGui`/billboards and rich text are all being built. Video is not, and has
+no phase. This paragraph stays until each one ships rather than being edited in
+advance: **a surface is documented as absent while it is absent**, which is the
+same rule that forbids a declared class nothing implements.
+
 **`Instance` base members:** `Name`, `Parent`; `ClassName` (read-only); tree:
 `FindFirstChild`, `FindFirstChildOfClass`, `FindFirstChildWhichIsA`,
 `FindFirstAncestor`, `FindFirstAncestorOfClass`, `GetChildren`,
@@ -849,7 +856,7 @@ save/load pair for bindings in v1.
 | 21 | Deprecated camelCase aliases (`:connect`) | Never existed | Strict, single spelling |
 | 22 | Optional typing | 100% `--!strict`, fully typed defs, new solver | Non-negotiable quality bar |
 | 23 | TextXAlignment/TextYAlignment | `HorizontalAlignment`/`VerticalAlignment` (shared enums w/ layout) | One alignment vocabulary |
-| 24 | RemoteEvent/RemoteFunction | v1: none; `@std/net` primitives; replication reserved | Honest scope; portable backends (ADR 0012) |
+| 24 | RemoteEvent/RemoteFunction | v1: none; `@std/net` primitives; replication reserved. **Reserved no longer** — post-v1 phase 4 opened 2026-08-27, and `NetworkService` is being built over `ITransport`. `@std/net` stays PARALLEL to it and not underneath: one talks to the author's backend, the other to the players in the match | Honest scope; portable backends (ADR 0012) |
 | 25 | A destroyed instance stays readable forever | Handles stop resolving at the end of the drain in which `Destroying` fired; using one raises `script.err.instance_dead` | The ECS reclaims the slot (architecture §4). Use-after-destroy becomes a keyed error instead of a silent read of a corpse |
 | 26 | Dot-access to children (`workspace.Baseplate`, `folder.ChildName`) | `FindFirstChild("Baseplate")` — or `WaitForChild`, which is what the habit really wanted | An `__index` fallback to children is untypeable under a 100%-strict surface (ADR 0018): the analyzer cannot know what a child name resolves to, so every such access would be `any` and the typing story would leak out through the most-used syntax in the language. It is also the habit that made `WaitForChild` load-bearing in the first place — a name that resolves or errors depending on load order. Members and children now live in separate namespaces, and `scene.err.unknown_member` (§2.2) says which one you missed. **ADR 0061 records the price of reversing this** and the three places the refusal is now legible: the runtime names the child and the accessor when the name IS one, the script editor underlines it while you type, and the completion offers children only where they can be typed |
 | 27 | `AnimationTrack.IsPlaying` | `AnimationTrack.Playing` | §9's own rule: a boolean PROPERTY carries no `Is` prefix and a boolean METHOD does. `Sound.Playing` was already spelled this way, and one engine cannot have both |
@@ -994,6 +1001,15 @@ or by being in the world the scene describes; no client/server folders yet.
   the @std convergence story keeping process boundaries honest from day one.
   `src/client`/`src/server` folder names and `Enum.RunContext` are reserved;
   the CLI warns if they exist in v1.
+
+  **"Later" started 2026-08-27**, when phase 4 opened. Two things about this
+  paragraph survive it rather than being replaced by it, and both matter: the
+  sibling backend is **not** superseded — it owns the ACCOUNT (inventory,
+  progression, persistence) where replication owns the match, and the roadmap's
+  rule is that the backend is called at the start and the end and never inside a
+  tick. And the reservations become definitions: `src/client`, `src/server` and
+  `Enum.RunContext` stop being names the CLI warns about and start being names
+  it acts on.
 
 ### 3.1 Deferred execution: one queue, one order
 
