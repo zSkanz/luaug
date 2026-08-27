@@ -1445,8 +1445,36 @@ that sends the next session to the wrong place.
       calling it "the CI threshold", which named a place instead of a
       mechanism, and named the wrong place: nothing in `.github/workflows`
       knows what a bench scene costs.
-- [ ] **S8.6** The release: where the editor archive attaches, and what version
-      it carries.
+- [x] **S8.6** The release — **prepared, and the tag is the one act left
+      beside making the repository public.** Decision 9 answered *where*: a new
+      `v1.1.0`, cut when the editor phase closes, which E9's close made true.
+      What this item owed was the rest.
+
+      **The version is declared**: `project(LuauG VERSION 1.1.0)`, which ADR
+      0031 makes the single source, and every generated artefact regenerated
+      against it. Verified end to end rather than asserted — the editor
+      profile builds, `tools/repo/package.luau` writes `LuauG-1.1.0-win64`, and
+      the binary inside it says `LuauG 1.1.0 (editor)`.
+
+      **The changelog said "Unreleased — nothing yet"** while nine milestones
+      of editor had landed. It now carries the 1.1.0 entry, written from the
+      api-dump diff against `v1.0.0` rather than from memory: ten new classes,
+      one new enum, and eleven properties, each named.
+
+      **And cutting it found a real defect** — D148, which nothing else could
+      have found, because nothing had changed the version since the traces were
+      recorded. The world hash reaches class state through the generated
+      accessors, and that walk reached `DataModel.EngineVersion`: the bump broke
+      every determinism trace at tick ZERO. The obvious response — re-record
+      them — would have masked any R10 regression shipped in the same commit,
+      which is the one thing those traces exist to catch. Fixed with `HostFact`
+      in the IDL and break-verified at version 9.9.9.
+
+      **What is left is not work, it is an act**: `git tag v1.1.0 && git push
+      --tags`, and attaching the archive to the release page. Both are the
+      owner's, for the same reason S8.7 is — and neither would do anything
+      today regardless, because Actions is dark on a payment failure and CI
+      publishes no release job in any case.
 - [ ] **S8.7** Hand back to the owner with one act left: make it public.
 
 ---

@@ -46,6 +46,8 @@ local Classes: { Schema.Class } = {
                 Type = "string",
                 ReadOnly = true,
                 ThreadSafety = "Safe",
+                -- A fact about the build, not about the world.
+                HostFact = true,
                 Doc = "The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: "
                     .. "the runtime is chosen before the VM exists, so nothing a script does can change it.",
             },
@@ -54,6 +56,8 @@ local Classes: { Schema.Class } = {
                 Type = "string",
                 ReadOnly = true,
                 ThreadSafety = "Safe",
+                -- A fact about the build, not about the world.
+                HostFact = true,
                 Doc = "The version of the Luau language runtime this engine build embeds. Read-only, and fixed per "
                     .. "engine release: a language upgrade is an engine release rather than a silent change "
                     .. "underneath a running project.",
@@ -996,6 +1000,8 @@ local Classes: { Schema.Class } = {
                 Type = "Rect",
                 ReadOnly = true,
                 Transient = true,
+                -- A fact about the window, not about the world.
+                HostFact = true,
                 Doc = "How far in from each window edge it is safe to draw, in pixels -- what a notch, a "
                     .. "rounded corner or a system gesture bar takes away. Zero on a desktop window, which is "
                     .. "why a HUD that ignores it looks fine until it does not.",
@@ -1005,6 +1011,9 @@ local Classes: { Schema.Class } = {
                 Type = "number",
                 ReadOnly = true,
                 Transient = true,
+                -- A fact about the display, not about the world. A trace recorded
+                -- on a doubled screen must replay on an ordinary one.
+                HostFact = true,
                 Doc = "The window's pixel density relative to its logical size: 2 on a doubled display. UI "
                     .. "coordinates are in PIXELS, so this is what a game multiplies by when it wants a "
                     .. "measurement to mean the same physical size on two screens.",

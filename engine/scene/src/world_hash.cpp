@@ -267,6 +267,19 @@ u64 World::worldHash() const
                 for (const PropertyDesc& property : current->properties) {
                     if (property.get == nullptr)
                         continue;
+                    // A fact about the host, not about the world -- the engine
+                    // version, the Luau version, the display's scale. Excluded
+                    // for the same reason a `ClassId` is above: it is a property
+                    // of the build or the machine rather than of the operation
+                    // sequence R10 says this hash is a function of.
+                    //
+                    // Found by bumping the engine to 1.1.0, which moved every
+                    // determinism trace at tick zero. The churn is not the
+                    // problem; what it HIDES is. A release expected to move
+                    // every trace is a release in which a real determinism
+                    // regression looks exactly like the expected movement.
+                    if (property.hostFact)
+                        continue;
                     hasher.text(m_atoms.text(property.name));
                     hashValue(hasher, property.get(*this, id));
                 }

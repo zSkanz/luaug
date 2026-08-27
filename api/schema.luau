@@ -152,6 +152,27 @@ export type Property = {
     --- Not a substitute for a signal. `Changed` still fires only for a
     --- subscriber; this decides whether the change reaches the queue at all.
     Observed: boolean?,
+    --- Whether this property describes the HOST rather than the world, and is
+    --- therefore not part of the world hash.
+    ---
+    --- R10 requires the hash to be a function of the operation sequence.
+    --- `world_hash.cpp` already excludes a `ClassId` on exactly this ground --
+    --- "registration order is a property of the engine build rather than of the
+    --- world" -- but it reaches every declared property through its accessor,
+    --- so `DataModel.EngineVersion` was in the hash. Bumping the engine from
+    --- 1.0.0 to 1.1.0 moved every checked-in determinism trace, at tick zero,
+    --- with nothing about any world having changed.
+    ---
+    --- **The point is not the churn, it is what the churn hides.** If a release
+    --- is expected to move every trace, a real determinism regression shipped in
+    --- that same release is indistinguishable from the expected movement, and
+    --- the traces stop being able to detect the one thing they exist for.
+    ---
+    --- Excluding these loses nothing. A script that BRANCHES on the engine
+    --- version or on a display scale still moves the world, and that shows up in
+    --- the ordinary hashed properties the branch wrote to. What is excluded is
+    --- only the fact itself, which no operation produced.
+    HostFact: boolean?,
     Doc: string,
 }
 

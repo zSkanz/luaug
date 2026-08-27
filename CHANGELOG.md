@@ -11,6 +11,82 @@ does not is engine work and belongs in the git history rather than in this file.
 
 Nothing yet.
 
+## [1.1.0] — unreleased
+
+**The editor.** v1.0.0 shipped an engine you wrote games for in a text editor;
+this is the phase that gave it a window. Nine milestones, E1 through E9.
+
+### The editor
+
+- **`luaug edit`** — an application with a menu bar and dockable panels, a
+  viewport you click, fly and select in, play/pause/step/stop/save, a content
+  browser whose folders and context menus open a scene by double-clicking it,
+  undo and redo, and a scene format that is what a project's world data IS
+  rather than an export of it.
+- **Direct manipulation**: translate, rotate and scale gizmos, creating
+  instances, reparenting by drag, multi-select, `Group` and `Ungroup`, a snap
+  step you can change with a grid that shows it, and a gizmo that sits where you
+  say over a selection rather than where an average lands.
+- **Prefabs as stamps** (ADRs 0048, 0051, 0060): `content/` holds SOURCES and an
+  instance in the world may be a LINK to one. Editing a linked instance is an
+  OVERRIDE and the link survives — the reverse of what ADR 0048 first said,
+  reversed while the milestone was building it. A placed stamp can be asked
+  which of its properties are its own, and each one reverted or applied back.
+- **A launcher** (ADR 0055): `luaug-host` with no project opens a project
+  browser instead of printing a usage error — recent projects, a new one from
+  a template, a folder picker.
+- **A script editor** (ADR 0057): any number of scripts as tabs beside the
+  viewport, Luau colour from the engine's own lexer, find and replace, errors
+  underlined where the parser puts them, autocomplete from the reflection
+  tables, and a working debugger with breakpoints, stepping, the call stack and
+  the locals — the script parked and the frame loop still drawing.
+- **A look of its own** (ADR 0056): one theme as data rather than
+  `StyleColorsDark` plus nine literals, Inter instead of a 13 px bitmap face,
+  and a palette measured against WCAG rather than argued about.
+- **A downloadable folder** (ADR 0054), and an Explorer that costs what is open
+  rather than what exists.
+
+### Assets
+
+- **A world you author becomes a world that streams** (ADR 0053), with no
+  generator script and nothing sorted by hand. `Model.StreamingMode` makes the
+  model the unit rather than the part.
+- **Everything arrives compiled** (ADR 0065). A loose `.gltf` is a source, not
+  an asset: opening a project compiles what has no compiled form, in every host
+  mode, so a clone from git works with no command. What this buys is what the
+  compiler was always producing and the runtime was not reading — LOD chains,
+  meshlets, and BC7 with mips instead of raw RGBA8. It is also the only reason
+  an FBX has ever loaded.
+- **A model becomes a `Model` of named parts**, one per primitive, each
+  addressable as a URN fragment and each able to carry its own material.
+
+### The public surface
+
+New classes: `Attachment`, `Bone`, `Constraint`, `BallSocketConstraint`,
+`HingeConstraint`, `FixedConstraint`, `Ragdoll`, `Material`, `BaseScript`,
+`ModuleScript`. New enum: `AlphaMode`.
+
+- `BasePart.Material` — a part points at a material, and `BasePart.Color`
+  multiplies it, so white on both sides is the identity and no existing scene
+  changes (ADR 0060). `BasePart.CanTouch`.
+- `Model.Scale` — absolute rather than cumulative, about the pivot, and one
+  undo takes it back. `Model.StreamingMode`.
+- `MeshPart.MeshSize` — authored rather than derived, so a headless run and a
+  rendered one cannot disagree about how big a mesh is.
+- `PointLight.Enabled` and `SpotLight.Enabled` stop being inert and cast.
+- `StreamingService` gains separate structure and terrain radii.
+
+### Known limits, stated plainly
+
+Unchanged from 1.0.0 except where the list above closes a row. Still not built,
+each with an owner in the roadmap's post-v1 phases: particles, decals, terrain,
+`SurfaceGui`, rich text, navmesh pathfinding, a 2D workflow, multiplayer and
+replication, and mobile.
+
+**E5, E7 and E8 are built and awaiting a human's review**, which is a person
+looking at pictures and using a script editor rather than anything a gate can
+answer. E9's own by-hand walkthrough is open for the same reason.
+
 ## [1.0.0] — 2026-08-22
 
 The first release. Eleven milestones, M0 through M8, each signed off by a human
@@ -103,4 +179,5 @@ every value collides as a box. Properties the engine stores and does not read
 are marked `Inert` in the inspector and the api-dump, and a gate stops a new one
 appearing quietly.
 
+[1.1.0]: https://github.com/zSkanz/LuauG/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zSkanz/LuauG/releases/tag/v1.0.0

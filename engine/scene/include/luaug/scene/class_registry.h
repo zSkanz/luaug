@@ -159,6 +159,27 @@ struct PropertyDesc
     // nothing happen.
     bool inert = false;
 
+    // Whether this property describes the HOST rather than the world, and is
+    // therefore left out of `World::worldHash`.
+    //
+    // R10 wants the hash to be a function of the operation sequence.
+    // `world_hash.cpp` already refuses to hash a `ClassId` on that ground --
+    // registration order is a fact about the build -- but it reaches every
+    // declared property through its accessor, which put `DataModel.EngineVersion`
+    // in. Bumping the engine to 1.1.0 moved every checked-in determinism trace at
+    // tick ZERO with nothing about any world having changed.
+    //
+    // **What that churn hides is the reason this exists.** If a release is
+    // expected to move every trace, a determinism regression shipped in the same
+    // release cannot be told apart from the expected movement -- and detecting
+    // exactly that is what the traces are for.
+    //
+    // Nothing is lost by excluding them: a script that BRANCHES on one still
+    // moves the world, and the branch's effects are in the ordinary hashed
+    // properties it wrote. Only the fact itself is excluded, and no operation
+    // produced it.
+    bool hostFact = false;
+
     // The property's own documentation, in English, from the IDL. Points at
     // generated static storage and is never null: `""` is what a hand-built
     // descriptor carries, so a caller needs no null check before printing it.
