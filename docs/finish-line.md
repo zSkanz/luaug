@@ -917,7 +917,37 @@ that sends the next session to the wrong place.
       And a lavapipe twin, `lavapipe_golden_ui`, which is where an exact
       comparison earns most of all — a tolerance wide enough to survive two
       rasterizers is wide enough to hide a character drawn in the wrong place.
-- [ ] **S8.5** D131's residual, D047, D044, D003's rotational half.
+- [x] **S8.5** Four named. Checking each rather than trusting the list found
+      **three already closed and one real**, which is the same ratio S7.10 had.
+
+      **D131's residual was never the leak, it was the silence.** The leak was
+      fixed at four call sites; what remained is that `readFileAsync` returns an
+      invalid request when the pool is full and every caller falls through to a
+      synchronous read — right, and exactly why nothing broke. So a pool taken
+      to 512 by any FUTURE leak would again stop every asynchronous path in the
+      process at once, in silence: thumbnails, material textures and world
+      streaming, all of them, with nothing said. It logs now, once per episode
+      — not per call, because a full pool is asked hundreds of times a second,
+      and not once per process, because a pool that fills, drains and fills
+      again has told you two different things — and outside the mutex, so a
+      formatter that allocates cannot put the pump thread behind a logger. A
+      case asserts the ceiling: 512 allocate, the 513th is refused rather than
+      hung, one release restores capacity, and the pool comes back WHOLE.
+      Break-verified by removing the release from `cancelIo`, which reports "the
+      pool came back short: slot 4".
+
+      **D003's rotational half is D050**, fixed 2026-08-22, and this row said so
+      nowhere: the snap rounded an absolute position in a light space that turns
+      with the sun, and rounding against last frame's box fixed it — 201 then
+      1,312 pixels between consecutive frames before, which is a discrete jump,
+      against 224 / 570 / 1,029 / 1,571 after, which is what sliding looks like.
+      D003's row now points at it instead of reading like an open residual.
+
+      **D047 and D044 are closed with no residual at all.** D047's caveat is
+      written into its own row and is a rule rather than a defect — a camera
+      driven on `PreRender` is blended slightly towards the last tick, which is
+      why every example drives it on `Heartbeat`. D044 records its own cost,
+      0.54 ms at 1080p, in `perf-baselines.md` rather than burying it.
 - [x] **S8.8** `perf-baselines.md` states the wrong `churn10k` budget and
       misdescribes where thresholds are enforced — corrected. `churn10k`'s
       budget is 32 ms, not 16, and it was wrong in FOUR rows rather than three

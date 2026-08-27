@@ -65,6 +65,7 @@
   "engine.cli.version.abi": "Luau ABI: bytecode {bytecode}, types {types}, vector {vectorSize}-wide {vectorPrecision}",
   "platform.err.init_failed": "Could not start the platform layer.",
   "platform.err.window_failed": "Could not create the game window.",
+  "platform.warn.io_pool_exhausted": "All {count} asynchronous read slots are in use; reads are falling back to the blocking path until one is released.",
   "platform.window.title": "LuauG {version}",
   "engine.frame.warn.catch_up_clamped": "Frame took {ms} ms; dropped simulated time after {ticks} catch-up ticks.",
   "engine.frame.info.stats": "{frames} measured frames: median {median} ms, worst {worst} ms, {draws} draws for {objects} visible objects, {triangles} triangles.",

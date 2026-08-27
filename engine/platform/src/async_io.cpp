@@ -1,5 +1,8 @@
 #include "luaug/platform/async_io.h"
 
+#include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
+
 #include <SDL3/SDL_asyncio.h>
 #include <SDL3/SDL_stdinc.h>
 #include <algorithm>
@@ -67,6 +70,9 @@ struct Service
 
     std::array<Request, MaxIoRequests> requests{};
     std::vector<u32> freeSlots;
+    // Whether the current exhaustion episode has already been reported (D131's
+    // residual). See `readFileAsync`.
+    bool exhaustedReported = false;
     // Slot indices waiting for a place in flight. Kept unsorted and scanned on
     // admission: it is at most a few hundred entries, admission happens a
     // handful of times a frame, and a scan is cheaper to keep correct than a
@@ -119,6 +125,10 @@ void releaseSlotLocked(Service& s, u32 slot)
         request.generation = 1;
     }
     s.freeSlots.push_back(slot);
+    // Out of the exhausted state, so a LATER episode is reported too. Reported
+    // once per episode rather than once per process: a pool that fills, drains
+    // and fills again has told you two different things.
+    s.exhaustedReported = false;
 }
 
 // Caller holds the lock. The most urgent queued slot, or `MaxIoRequests` when
@@ -328,8 +338,34 @@ bool isIoInitialized() noexcept
 IoRequest readFileAsync(const std::filesystem::path& path, IoPriority priority, IoCallback callback)
 {
     Service& s = service();
-    const std::lock_guard<std::mutex> lock(s.mutex);
-    if (!s.initialized || s.freeSlots.empty()) {
+
+    // **Exhaustion is reported, and that is D131's residual** (S8.5). This
+    // returns an invalid request when the pool is full, and every caller falls
+    // through to a synchronous read -- which is right, and is why nothing
+    // BREAKS. What it also is, is silent: a leaked slot took the pool to 512 and
+    // thumbnails, material textures and world streaming all quietly stopped
+    // being asynchronous at once, process-wide, with nothing said in any
+    // direction. The leak is fixed; the way it hid is not, and the next one will
+    // hide the same way.
+    //
+    // Once per EPISODE, not once per call -- a full pool is asked hundreds of
+    // times a second -- and not once per process either, because a pool that
+    // fills, drains and fills again has told you two different things.
+    // One critical section, and a `unique_lock` only so the exhaustion path can
+    // drop it before logging: `core::log` formats and may allocate, and holding
+    // the IO service's mutex across that puts the pump thread behind a logger.
+    std::unique_lock<std::mutex> lock(s.mutex);
+    if (!s.initialized) {
+        return {};
+    }
+    if (s.freeSlots.empty()) {
+        const bool report = !s.exhaustedReported;
+        s.exhaustedReported = true;
+        lock.unlock();
+        if (report) {
+            const core::I18nArg args[] = {{"count", static_cast<core::i64>(MaxIoRequests)}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("platform.warn.io_pool_exhausted"), args);
+        }
         return {};
     }
 

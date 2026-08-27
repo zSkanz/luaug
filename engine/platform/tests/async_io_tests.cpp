@@ -320,3 +320,76 @@ TEST_CASE("a read requested without the service running is refused rather than l
     CHECK_FALSE(request.valid());
     CHECK(ioStatus(request) == IoStatus::Unknown);
 }
+
+// --- The pool's ceiling, and what happens when it is reached (S8.5, D131) ----
+//
+// D131 was a leaked slot: every read that FAILED kept its slot for ever, and
+// past 512 thumbnails, material textures and world streaming all stopped being
+// asynchronous at once, process-wide, in silence. The leak was fixed at four
+// call sites. **The silence was not**, and that is what these cover: the
+// contract at the ceiling, and the fact that reaching it now says so.
+//
+// Nothing here asserts the log LINE -- there is no sink to read it back from at
+// this layer. What is asserted is the behaviour that made the leak invisible:
+// the refusal is a refusal rather than a hang, and capacity comes back.
+
+TEST_CASE("the pool refuses past its ceiling and recovers when slots come back")
+{
+    Fixture fixture(4);
+
+    const std::filesystem::path file = fixture.write("ceiling.bin", "x");
+
+    // Filled with reads that are QUEUED rather than in flight -- `maxInFlight`
+    // is far below the pool size, so all but a handful sit waiting and hold
+    // their slots without touching the disk. Nothing is pumped, so nothing
+    // completes and nothing is released.
+    std::vector<luaug::platform::IoRequest> held;
+    held.reserve(luaug::platform::MaxIoRequests);
+    for (luaug::core::u32 index = 0; index < luaug::platform::MaxIoRequests; ++index) {
+        const luaug::platform::IoRequest request = luaug::platform::readFileAsync(file, IoPriority::Normal);
+        REQUIRE_MESSAGE(request.valid(), "slot " << index << " of the pool would not allocate");
+        held.push_back(request);
+    }
+
+    // **The 513th is refused, not queued and not blocked.** A caller that got a
+    // hang here would be a frame that stopped; a caller that got a valid handle
+    // to a slot that does not exist would be worse. It falls back to the
+    // synchronous read, which is why nothing ever broke -- and why nobody
+    // noticed for a milestone.
+    const luaug::platform::IoRequest refused = luaug::platform::readFileAsync(file, IoPriority::Normal);
+    CHECK_FALSE(refused.valid());
+
+    // Give one slot back. Capacity returns immediately: the ceiling is a
+    // ceiling and not a one-way door.
+    luaug::platform::cancelIo(held.back());
+    held.pop_back();
+
+    const luaug::platform::IoRequest afterRelease = luaug::platform::readFileAsync(file, IoPriority::Normal);
+    CHECK(afterRelease.valid());
+
+    luaug::platform::cancelIo(afterRelease);
+    for (const luaug::platform::IoRequest& request : held) {
+        luaug::platform::cancelIo(request);
+    }
+
+    // **Pumped, because cancelling an IN-FLIGHT read cannot release its slot on
+    // the spot.** SDL is reading into that request's buffer; the slot has to
+    // survive until the completion lands, and `pumpIo` is what collects it.
+    // Four of these were in flight -- `maxInFlight` above -- so without this the
+    // refill below falls exactly four short, which looks like a leak and is the
+    // opposite of one.
+    pumpUntil([]() { return ioStats().inFlight == 0; });
+
+    // And the pool is whole again -- which is the assertion D131 would have
+    // failed. A leak leaves this short by one for every read that failed.
+    std::vector<luaug::platform::IoRequest> refilled;
+    refilled.reserve(luaug::platform::MaxIoRequests);
+    for (luaug::core::u32 index = 0; index < luaug::platform::MaxIoRequests; ++index) {
+        const luaug::platform::IoRequest request = luaug::platform::readFileAsync(file, IoPriority::Normal);
+        REQUIRE_MESSAGE(request.valid(), "the pool came back short: slot " << index << " would not allocate");
+        refilled.push_back(request);
+    }
+    for (const luaug::platform::IoRequest& request : refilled) {
+        luaug::platform::cancelIo(request);
+    }
+}
