@@ -672,7 +672,42 @@ that sends the next session to the wrong place.
       `https://` stays refused for v1. R15 closes the scope, ADR 0012 makes
       `@std/net` primitives-only, and the documented shape — a backend on
       localhost or a LAN — does not need it.
-- [ ] **S6.6** KTX2 HDR; glTF topologies; the second UV set half-importer.
+- [x] **S6.6** Three named, and checking each against the code found **two
+      already honest and one silent.**
+
+      **KTX2 HDR** is refused by name — `asset.texture.err.hdr_unsupported`,
+      raised where `transcoder.is_hdr()` is true, with the comment saying the
+      engine has no HDR texture path. Nothing imports half of one.
+
+      **glTF topologies** are refused loudly with the mode number in the
+      diagnostic. The comment states the rule and prices it: a points or lines
+      primitive has no triangle to draw, and a strip or fan would have to be
+      expanded into a list — "worth doing the day a file needs it, and worth
+      refusing loudly rather than importing something that draws nothing until
+      then."
+
+      **The second UV set was the real one, and not in the way the item's word
+      "half-importer" suggests.** The importer records `TextureRef::uvSet` as
+      the file declares it, which is right: the frozen field exists so a second
+      set is representable, and losing the number would make a material that
+      samples TEXCOORD_1 indistinguishable from one that samples TEXCOORD_0. And
+      the loader already refuses to draw it — a texture on a non-zero set is
+      DROPPED rather than sampled with the wrong coordinates, because
+      "untextured is a visible wrong, silently-wrong-texture is not."
+
+      **What was missing is that it happened in silence.** Somebody imports a
+      model with a lightmap, one surface comes up untextured, and nothing
+      anywhere says the file asked for a second UV set. That is the same shape
+      as a refusal answering "has no member named" about a thing you can see in
+      the Explorer — true, and useless. It warns now, naming the mesh and the
+      set, **once per mesh rather than per material**: a file with a second UV
+      set usually has it on several, and eight identical lines is a log people
+      stop reading.
+
+      Honouring it properly means a second UV in the vertex layout, which is the
+      frozen RHI (ADR 0037) and a format change — a real milestone's work, and
+      not something to half-do. What ships is the honest version of the current
+      behaviour rather than a worse version of the future one.
 - [x] **S6.7** A text caret — built. `TextInput`'s doc has promised "typed
       text, backspace and a caret" since the class existed, and the caret was
       the one it did not have: the editor appended and backspaced at the END,

@@ -109,7 +109,8 @@ constexpr std::string_view kAssetScheme = "asset://";
 // the way in differ in how they arrive and in nothing after that -- and one
 // copy of this is what keeps them agreeing.
 void fillEntry(MeshLibrary::Entry& entry, const core::AABB& bounds, std::span<const asset::Submesh> submeshes,
-               std::span<const asset::MaterialDef> materials, std::span<const rhi::TextureHandle> images)
+               std::span<const asset::MaterialDef> materials, std::span<const rhi::TextureHandle> images,
+               std::string_view urn = {})
 {
     entry.bounds = bounds;
     entry.sectionCount = static_cast<u32>(submeshes.size());
@@ -117,6 +118,7 @@ void fillEntry(MeshLibrary::Entry& entry, const core::AABB& bounds, std::span<co
     for (const asset::Submesh& submesh : submeshes)
         entry.sectionMaterial.push_back(submesh.material);
 
+    bool warnedSecondUvSet = false;
     const auto textureOf = [&](const asset::TextureRef& reference) -> rhi::TextureHandle {
         if (!reference.present() || reference.image >= images.size())
             return {};
@@ -124,8 +126,26 @@ void fillEntry(MeshLibrary::Entry& entry, const core::AABB& bounds, std::span<co
         // layout carries one. A material sampling TEXCOORD_1 would silently
         // read TEXCOORD_0, so it is dropped instead -- untextured is a visible
         // wrong, silently-wrong-texture is not.
-        if (reference.uvSet != 0)
+        //
+        // **And it says so** (S6.6). Dropping was already right; doing it in
+        // silence was the half that was left. Somebody imports a model with a
+        // lightmap, one surface comes up untextured, and nothing anywhere tells
+        // them the file asked for a second UV set -- which is the same shape as
+        // a refusal that answers "has no member named" about a thing you can
+        // see. Once per mesh rather than per material: a file with a second UV
+        // set usually has it on several, and eight identical lines is a log
+        // people stop reading.
+        if (reference.uvSet != 0) {
+            if (!warnedSecondUvSet) {
+                warnedSecondUvSet = true;
+                const core::I18nArg args[] = {
+                    {"mesh", urn.empty() ? std::string_view{"a mesh"} : urn},
+                    {"set", static_cast<core::i64>(reference.uvSet)},
+                };
+                core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.second_uv_set"), args);
+            }
             return {};
+        }
         return images[reference.image];
     };
 
@@ -604,7 +624,7 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             // is how many draws an instance emits, and every level has the same
             // submeshes in the same order -- so the flattened list would emit a
             // draw per section PER LEVEL and render the mesh several times over.
-            fillEntry(entry, geometry.bounds, compiled.lods[0].submeshes, compiled.materials, images);
+            fillEntry(entry, geometry.bounds, compiled.lods[0].submeshes, compiled.materials, images, urn);
             entry.positions.reserve(geometry.vertices.size());
             for (const asset::Vertex& vertex : geometry.vertices)
                 entry.positions.push_back(vertex.position);
@@ -691,7 +711,7 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
                 images.push_back(texture);
             }
 
-            fillEntry(entry, model.mesh.bounds, model.mesh.submeshes, model.materials, images);
+            fillEntry(entry, model.mesh.bounds, model.mesh.submeshes, model.materials, images, urn);
             entry.positions.reserve(model.mesh.vertices.size());
             for (const asset::Vertex& vertex : model.mesh.vertices)
                 entry.positions.push_back(vertex.position);

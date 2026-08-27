@@ -176,6 +176,7 @@
   "assetc.err.chunk_source": "The chunk source is malformed: {detail}.",
   "scene.err.streaming_focus_unlocatable": "A streaming focus must be something with a position in the world.",
   "scene.err.number_positive": "It takes a number greater than zero.",
+  "render.warn.second_uv_set": "{mesh} has a material that samples UV set {set}; this engine's vertices carry one, so that texture is left off rather than drawn with the wrong coordinates.",
   "render.err.shader_format_unknown": "The graphics device reports no shader format, so no shaders can be loaded.",
   "render.err.shader_manifest_missing": "No shader manifest at {path}. Build the shaders, or check that content shipped beside the executable.",
   "render.err.shader_manifest_invalid": "The shader manifest is not valid JSON.",
