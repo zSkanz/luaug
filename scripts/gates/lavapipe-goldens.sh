@@ -57,6 +57,8 @@ if [[ $record -eq 1 ]]; then
         --screenshot=tests/screenshots/lavapipe/meshes.png
     "$host" tests/screenshots/specular --headless --frames=120 --exit \
         --screenshot=tests/screenshots/lavapipe/specular.png
+    "$host" tests/rendercapture/uipanel --headless --frames=2 --exit \
+        --screenshot=tests/screenshots/lavapipe/ui.png
     echo "== recorded =="
     ls -l tests/screenshots/lavapipe/
     exit 0

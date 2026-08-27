@@ -768,6 +768,36 @@ if(LUAUG_BUILD_TESTS)
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 120)
 
+    # **The UI's pixels, which nothing compared for three milestones** (S8.4).
+    #
+    # `tests/screenshots/ui-1280x720.png` has been checked in since M6 as the
+    # gate record's evidence, read by no test and re-recorded by nothing -- so it
+    # drifted out of date, silently, and by the time anybody looked it differed
+    # from the renderer by 1,585 pixels.
+    #
+    # It is worth reading rather than deleting, and D026 is the reason: `upload`
+    # records a buffer's SIZE and not its contents, so the capture gate beside
+    # this one is structurally blind to the QUADS. The two capture goldens prove
+    # the scissors, the viewport and the draw count; only pixels can say the
+    # layout put anything where it belongs. Between them and `luaug_ui_tests`,
+    # which asserts the rectangles exactly, this is the third leg.
+    add_test(NAME screenshot_gate_ui
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/ui-1280x720.png
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot-gate-ui.png
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/rendercapture/uipanel
+            -DFRAMES=2
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+    # `gpu-golden` for the reason the other two carry it: this frame is mostly
+    # text, and glyph rasterization is the first thing to differ between one GPU
+    # and another.
+    set_tests_properties(screenshot_gate_ui PROPERTIES
+        LABELS "gpu-golden"
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 120)
+
     # The INSTANCED path's golden, and it exists because that path shipped at
     # M7.5 drawing nothing at all (D043). Every gate the milestone had was
     # satisfied: the draw-call count fell from 15,250 to 22, the command stream
@@ -841,7 +871,22 @@ if(LUAUG_BUILD_TESTS)
                 -DTOLERANCE=0
                 -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
 
-        set_tests_properties(lavapipe_golden_meshes lavapipe_golden_specular PROPERTIES
+        # The UI, and this is the one of the three where an EXACT comparison
+        # earns the most: the frame is mostly glyphs, and a tolerance wide
+        # enough to survive two rasterizers is wide enough to hide a character
+        # rendered in the wrong place.
+        add_test(NAME lavapipe_golden_ui
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DIMGCMP=$<TARGET_FILE:imgcmp>
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/lavapipe/ui.png
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/lavapipe-ui.png
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/rendercapture/uipanel
+                -DFRAMES=2
+                -DTOLERANCE=0
+                -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+
+        set_tests_properties(lavapipe_golden_meshes lavapipe_golden_specular lavapipe_golden_ui PROPERTIES
             LABELS "lavapipe-golden"
             SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
             TIMEOUT 300)
