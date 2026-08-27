@@ -751,7 +751,41 @@ that sends the next session to the wrong place.
       stall and a dropped frame. The A/B is in `perf-baselines.md` rather than
       only the new number, because the delta is the fact and it would be
       unrecoverable from a table of absolutes.
-- [ ] **S6.11** The four outstanding items of the rendering reference decision.
+- [x] **S6.11** Checked against the code rather than against the list, which is
+      the third time in this campaign that changed the answer. **ADR 0038's four
+      are all delivered**, parameters included, and what was actually outstanding
+      was a roadmap box that had been stale for a milestone.
+
+      The decision names four techniques with the parameters the literature
+      publishes, so that the milestone was buildable rather than aspirational.
+      Every one of them is in the tree at the published value:
+
+      | ADR 0038 asks for | In the code |
+      |---|---|
+      | Four cascades, GPU Gems 3 λ splits | `kShadowCascadeCount = 4`, `kShadowSplitLambda = 0.85` |
+      | Normal-offset bias replacing depth-only | the shadow params carry it; D051 is about keeping it in step |
+      | A hardware comparison sampler | `Gather` — arithmetically `SampleCmp`'s result at one texture op, so `SamplerDesc` stayed frozen (M7.5 §2) |
+      | PCF between 2×2 and 7×7 | 7×7, rotated per pixel (D054) |
+      | Clustered, Doom's 16×9×24, exponential slicing | `kClusterTilesX/Y/Z = 16/9/24`, the published grid, untuned |
+      | Split-sum IBL: prefiltered cubemap + BRDF LUT | 128-texel base, 64-square table — "the size Karis" |
+      | Post: exposure, bloom, AO, anti-aliasing | all four, FXAA for the last, with TAA's prerequisites named rather than built |
+
+      **What was outstanding was the record.** `roadmap.md` still carried
+      `PointLight.Shadows` / `SpotLight.Shadows` as an open box, saying "STILL
+      OPEN, and it is the only item on this list that is" and that "the question
+      the box asks is still the question". Decision 5 answered it and S6.1 built
+      it: an atlas, a 2D map per spot and a cube per point, a per-frame caster
+      budget by apparent size with creation order breaking ties. The box is
+      ticked with what actually happened, and **`docs/roadmap.md` now has zero
+      unticked boxes.**
+
+      The instrument is worth naming because its absence is why the property sat
+      inert for three milestones while being accepted, read back and plumbed to
+      `RenderLight::shadows`: `local_shadow_differential` renders the same scene
+      with the flag on and off and requires the images to DIFFER. Not a
+      `gpu-golden` — there is no checked-in image and no reference GPU —
+      which is what makes it a gate on every machine rather than only where a
+      golden was recorded.
 - [x] **S6.12** All three instruments, and the decision record that states the
       price. **ADR 0061.**
 

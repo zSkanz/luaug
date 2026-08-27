@@ -429,24 +429,31 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
         the step behind a six-texel penumbra floor and a seven-by-seven kernel
         rotated per pixel, which took the worst single step from 3.58 pixels
         to 0.75.
-  - [ ] **`PointLight.Shadows` and `SpotLight.Shadows` accept a write and change
-        nothing.** Stored, extracted, never read: one cascade from the sun is
-        all this release has. The M4 brief names it as deliberate, in a C++
-        comment and a NOT-in-scope list — neither of which is where the person
-        clicking the inspector reads. Decide it the way Transparency was
-        decided: honour it, or remove the property until the milestone that
-        renders it.
+  - [x] **`PointLight.Shadows` and `SpotLight.Shadows` accept a write and change
+        nothing.** Stored, extracted, never read: one cascade from the sun was
+        all v1 had. The M4 brief named it as deliberate, in a C++ comment and a
+        NOT-in-scope list — neither of which is where the person clicking the
+        inspector reads. Decide it the way Transparency was decided: honour it,
+        or remove the property until the milestone that renders it.
 
-        **STILL OPEN, and it is the only item on this list that is.** M4.5
-        answered it with a third option rather than either of the two the box
-        asks for: the properties stayed and were marked `Inert`, so the IDL, the
-        inspector and the api-dump all now say plainly that nothing acts on
-        them. That made the surface honest and left it inert, which is a
-        different thing from deciding it. M7.5 did not change it either — it
-        brought four cascades and clustered lights, and `pbr.hlsl` still opens
-        "one shadowed" light. `native_accessors.cpp` stores the flag and reports
-        it back under a comment saying so. The question the box asks is still
-        the question.
+        **Honoured, and the box was stale for a milestone after it was.** M4.5
+        answered with a third option rather than either of the two — the
+        properties stayed and were marked `Inert`, which made the surface honest
+        and left it inert, a different thing from deciding it. The campaign's
+        decision 5 took the decision the box actually asks for: a shadow atlas,
+        a 2D map per spot light and a cube map per point light, a per-frame
+        caster budget ordered by apparent size with creation order breaking
+        ties, sampled from the clustered pass. `renderer_default.cpp` reads
+        `light.shadows` and allocates tiles from it.
+
+        **And it is gated.** `local_shadow_differential` renders the same scene
+        with the flag on and off and requires the images to DIFFER — not a
+        `gpu-golden`, because there is no checked-in image and no reference GPU,
+        which is what makes it a gate on every machine rather than only where a
+        golden was recorded. That is the instrument whose absence let the
+        property sit inert for three milestones while being "accepted, read back
+        and plumbed to `RenderLight::shadows`" (S6.11 verified this box against
+        the code on 2026-08-27 and found it stale).
   - [x] **The pivot is a `Model` concept, and in the reference API it is not.**
         Replaces an item that said `Model.PrimaryPart` has no consumer, which
         was wrong: `modelPivot` reads it, and the sweep that "found" it searched
