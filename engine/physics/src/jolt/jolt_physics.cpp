@@ -37,6 +37,8 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Constraints/DistanceConstraint.h>
@@ -450,6 +452,91 @@ struct CharacterPair
                 core::Vec3{point.x * desc.pointScale.x, point.y * desc.pointScale.y, point.z * desc.pointScale.z}));
         }
         JPH::ConvexHullShapeSettings settings(points);
+        settings.SetEmbedded();
+        const JPH::ShapeSettings::ShapeResult result = settings.Create();
+        if (result.HasError()) {
+            return {};
+        }
+        return result.Get();
+    }
+    case ShapeType::HeightField: {
+        // **The grid has to be big enough to have blocks in it.** Jolt requires
+        // `sampleCount / blockSize >= 2`, and a smaller one asserts inside the
+        // builder rather than returning an error -- so it is refused here, where
+        // a refusal is a body that does not appear rather than a crash.
+        const core::u32 samples = desc.heightSampleCount;
+        const core::u32 block = std::max(desc.heightBlockSize, 1u);
+        if (samples < block * 2 || desc.heights.size() < static_cast<core::usize>(samples) * samples) {
+            return {};
+        }
+
+        // The surface Jolt builds is `offset + scale * (x, sample, z)` for
+        // integer x and z. So the scale spreads `samples - 1` intervals across
+        // the footprint `size` describes, the offset centres it, and **the y
+        // scale is one** -- which is what makes a sample a height in local
+        // metres rather than a number needing a second document to interpret.
+        const f32 span = static_cast<f32>(samples - 1);
+        const JPH::Vec3 scale(desc.size.x / span, 1.0f, desc.size.z / span);
+        const JPH::Vec3 offset(-desc.size.x * 0.5f, 0.0f, -desc.size.z * 0.5f);
+
+        JPH::HeightFieldShapeSettings settings(desc.heights.data(), offset, scale, samples);
+        settings.mBlockSize = block;
+        // **The range the field may ever hold, reserved now because it cannot be
+        // widened later.** Jolt spreads its sample bits across
+        // `[min(mMinHeightValue, samples...), max(mMaxHeightValue, samples...)]`
+        // and bakes that mapping into the shape, so `SetHeights` clamps
+        // everything it is later given back into it. A flat field built from
+        // all-zero samples gets a zero-wide range, and then every edit succeeds
+        // and changes nothing.
+        //
+        // Only when the caller asked for a wider range than its samples span.
+        // Left at the default the two are equal, Jolt's own defaults stand, and
+        // the range is the samples' -- which is right for a field nobody edits.
+        if (desc.heightMax > desc.heightMin) {
+            settings.mMinHeightValue = desc.heightMin;
+            settings.mMaxHeightValue = desc.heightMax;
+        }
+        settings.SetEmbedded();
+        const JPH::ShapeSettings::ShapeResult result = settings.Create();
+        if (result.HasError()) {
+            return {};
+        }
+        return result.Get();
+    }
+    case ShapeType::TriangleMesh: {
+        // Triples, and a partial one is a description this cannot honour. Three
+        // vertices is the fewest a surface can have.
+        if (desc.points.size() < 3 || desc.indices.size() < 3 || desc.indices.size() % 3 != 0) {
+            return {};
+        }
+
+        JPH::VertexList vertices;
+        vertices.reserve(desc.points.size());
+        for (const core::Vec3& point : desc.points) {
+            vertices.push_back(
+                JPH::Float3(point.x * desc.pointScale.x, point.y * desc.pointScale.y, point.z * desc.pointScale.z));
+        }
+
+        JPH::IndexedTriangleList triangles;
+        triangles.reserve(desc.indices.size() / 3);
+        const auto vertexCount = static_cast<core::u32>(desc.points.size());
+        for (core::usize at = 0; at + 2 < desc.indices.size(); at += 3) {
+            const core::u32 a = desc.indices[at];
+            const core::u32 b = desc.indices[at + 1];
+            const core::u32 c = desc.indices[at + 2];
+            // **An index past the end is refused rather than clamped.** Clamping
+            // would build a degenerate triangle out of somebody's bug and hide
+            // it inside a collider that behaves almost right.
+            if (a >= vertexCount || b >= vertexCount || c >= vertexCount) {
+                return {};
+            }
+            triangles.push_back(JPH::IndexedTriangle(a, b, c));
+        }
+
+        // `Sanitize` runs inside this constructor -- duplicate and degenerate
+        // triangles are removed for us, which a mesher's output at a cell
+        // boundary produces routinely.
+        JPH::MeshShapeSettings settings(std::move(vertices), std::move(triangles));
         settings.SetEmbedded();
         const JPH::ShapeSettings::ShapeResult result = settings.Create();
         if (result.HasError()) {
@@ -905,6 +992,70 @@ public:
         // holds a pointer to the destroyed one. Rebuilt in creation order, so a
         // resized limb stays attached and the solve sequence does not move.
         rebuildConstraintsOn(handle);
+        return true;
+    }
+
+    // The in-place height edit (ADR 0066). Everything `updateBody` above does --
+    // destroy, recreate, re-insert into the broadphase, rebuild constraints --
+    // is skipped, because the shape object itself is edited.
+    [[nodiscard]] bool updateHeightField(BodyHandle handle, u32 x, u32 z, u32 sizeX, u32 sizeZ,
+                                         std::span<const float> heights)
+    {
+        BodyRecord* record = resolve(handle);
+        if (record == nullptr || record->id.IsInvalid() || sizeX == 0 || sizeZ == 0) {
+            return false;
+        }
+        if (heights.size() < static_cast<core::usize>(sizeX) * sizeZ) {
+            return false;
+        }
+
+        // **The lock is SCOPED, and that is load-bearing rather than tidy.**
+        // `NotifyShapeChanged` below takes a body lock of its own, and taking
+        // one while holding another of the same priority is a lock-order
+        // violation Jolt detects and reports -- "this can create a deadlock" --
+        // and then deadlocks on. It cost an hour of a hung test process to
+        // learn, and it was invisible until the physics tests were given the
+        // message catalogue that turns `assertFailedImpl`'s report from a hash
+        // into a file and a line.
+        {
+            const JPH::BodyLockWrite lock(m_system.GetBodyLockInterface(), record->id);
+            if (!lock.Succeeded()) {
+                return false;
+            }
+            // A `const_cast` because `GetShape` answers const and the edit is
+            // the one mutation Jolt sanctions on a live shape. Checked rather
+            // than assumed: a body of any other kind returns null from the cast
+            // and is refused, so a caller that got its handles crossed gets
+            // false instead of memory reinterpreted as a height field.
+            const auto* const shape = dynamic_cast<const JPH::HeightFieldShape*>(lock.GetBody().GetShape());
+            if (shape == nullptr) {
+                return false;
+            }
+
+            // **Jolt ASSERTS on a misaligned or out-of-range rectangle**, so
+            // every one of its preconditions is a refusal here. An assert is a
+            // crash in a debug build and undefined behaviour in a shipping one,
+            // and a brush dragged to the edge of a cell reaches all of these.
+            const u32 samples = shape->GetSampleCount();
+            const u32 block = shape->GetBlockSize();
+            if (block == 0 || x % block != 0 || z % block != 0) {
+                return false;
+            }
+            if (x >= samples || z >= samples || x + sizeX > samples || z + sizeZ > samples) {
+                return false;
+            }
+
+            const_cast<JPH::HeightFieldShape*>(shape)->SetHeights(x, z, sizeX, sizeZ, heights.data(),
+                                                                  static_cast<intptr_t>(sizeX), m_temp);
+        }
+
+        // **The broadphase still holds the old bounds.** `SetHeights` changes
+        // the shape's local bounding box, and nothing recomputes the body's
+        // world bounds on its own -- so a valley dug below the old minimum is
+        // outside the box the broadphase culls against and stops being hit by
+        // anything, which is a collider that silently has a hole in it.
+        m_system.GetBodyInterface().NotifyShapeChanged(record->id, JPH::Vec3::sZero(), false,
+                                                       JPH::EActivation::DontActivate);
         return true;
     }
 
@@ -1862,13 +2013,25 @@ private:
         record.alive = true;
         record.collidable = desc.collidable;
         record.queryable = desc.queryable;
-        record.motion = desc.motion;
         record.group = desc.group;
         record.userData = desc.userData;
 
+        // **A shape that can only be static IS static, whatever was asked for**
+        // (ADR 0066). Both `HeightFieldShape` and `MeshShape` report
+        // `MustBeStatic()`, and both report a volume of zero -- so a dynamic
+        // one would take its mass from the clamp below, weigh a gram, be
+        // activated, and leave, taking a kilometre of terrain with it.
+        //
+        // The shape is asked rather than the kinds being listed here, so a third
+        // static-only shape added later is handled without this line knowing
+        // about it. It is corrected rather than refused, because refusing leaves
+        // a world with a hole where the ground should be, and silently-static
+        // ground is a far smaller surprise than absent ground.
+        const MotionType motion = shape->MustBeStatic() ? MotionType::Static : desc.motion;
+        record.motion = motion;
+
         JPH::BodyCreationSettings settings(shape, toLocal(desc.transform.position), toJolt(desc.transform.rotation),
-                                           toJoltMotion(desc.motion),
-                                           encodeLayer(desc.group, desc.motion != MotionType::Static));
+                                           toJoltMotion(motion), encodeLayer(desc.group, motion != MotionType::Static));
         settings.mFriction = desc.friction;
         settings.mRestitution = desc.restitution;
         settings.mIsSensor = !desc.collidable;
@@ -1882,8 +2045,8 @@ private:
         settings.mMassPropertiesOverride.mMass = std::max(shape->GetVolume() * std::max(desc.density, 0.0001f), 0.001f);
 
         JPH::BodyInterface& bodies = m_system.GetBodyInterface();
-        record.id = bodies.CreateAndAddBody(settings, desc.motion == MotionType::Static ? JPH::EActivation::DontActivate
-                                                                                        : JPH::EActivation::Activate);
+        record.id = bodies.CreateAndAddBody(settings, motion == MotionType::Static ? JPH::EActivation::DontActivate
+                                                                                   : JPH::EActivation::Activate);
         return !record.id.IsInvalid();
     }
 
@@ -2443,6 +2606,13 @@ public:
     {
         JoltWorld* world = resolve(handle);
         return world != nullptr && world->updateBody(body, desc);
+    }
+
+    bool updateHeightField(WorldHandle handle, BodyHandle body, u32 x, u32 z, u32 sizeX, u32 sizeZ,
+                           std::span<const float> heights) override
+    {
+        JoltWorld* world = resolve(handle);
+        return world != nullptr && world->updateHeightField(body, x, z, sizeX, sizeZ, heights);
     }
 
     void setBodyMaterial(WorldHandle handle, BodyHandle body, f32 friction, f32 restitution) override

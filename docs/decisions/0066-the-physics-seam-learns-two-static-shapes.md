@@ -56,6 +56,24 @@ all, because a reshaped body persists and its pairs are still about a body that
 exists. So the correctness argument for `SetHeights` is gone and only the
 performance one remains, which is the honest state and a smaller seam.
 
+### The range a height field may ever hold is reserved at construction
+
+`ShapeDesc` carries **`heightMin` and `heightMax`**, and they are not the current
+samples' range — they are the heights the terrain is *allowed to reach*.
+
+**This is the least obvious thing about a height field and it is silent when got
+wrong.** Jolt spreads a field's sample bits across
+`[min(mMinHeightValue, samples…), max(mMaxHeightValue, samples…)]` and bakes that
+mapping into the shape; `SetHeights` then quantises with
+`Clamp((h − mOffset.y) / mScale.y, 0, …)` against it. A field built from all-zero
+samples has a zero-wide range, so **every later edit clamps back to the height it
+already had, the call reports success, and nothing moves.**
+
+It was found the way it will be found again by anybody who does not read this:
+two tests that dug a pit and raised a plateau both left the ground exactly where
+it was, with `updateHeightField` returning true. So a cell that will be dug forty
+metres down and raised two hundred up says so on the day it is created.
+
 ### The forced-Static rule
 
 `instantiate` computes mass as

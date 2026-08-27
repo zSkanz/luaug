@@ -68,10 +68,14 @@ enum class MotionType : u8
     Dynamic,
 };
 
-// The shapes `Enum.PartShape` names, plus the convex hull a `MeshPart` collapses
-// to. There is no triangle mesh: that is asset-pipeline work (M7), and a shape
-// this enum cannot express is a shape the caller must approximate knowingly
-// rather than one this module silently substitutes.
+// The shapes `Enum.PartShape` names, the convex hull a `MeshPart` collapses to,
+// and the two STATIC shapes terrain needs (ADR 0066).
+//
+// A shape this enum cannot express is a shape the caller must approximate
+// knowingly rather than one this module silently substitutes. That rule is why
+// `HeightField` and `TriangleMesh` are here at all: a sculpted surface is
+// concave by construction -- which is what a cave IS -- so no convex hull
+// describes it and no primitive comes close.
 enum class ShapeType : u8
 {
     Box,
@@ -79,6 +83,24 @@ enum class ShapeType : u8
     Capsule,
     Cylinder,
     ConvexHull,
+
+    // **Both of these can only ever be static, and the backend enforces it
+    // rather than trusting the description** (ADR 0066). Jolt's own classes
+    // report `MustBeStatic()`, and both report a volume of zero -- so a body
+    // created dynamic would take its mass from `volume x density`, clamp to the
+    // one-gram floor, be activated, and leave. Asking the shape is better than
+    // listing the kinds here, because a third static-only shape added later is
+    // handled without this enum's readers knowing about it.
+
+    // A regular grid of heights over the shape's `size` footprint: cheap,
+    // sub-rectangle updatable in place, and single-valued, so it cannot express
+    // an overhang. `heights` and `heightSampleCount` describe it.
+    HeightField,
+    // The triangles themselves. `points` is the vertex list and `indices` is
+    // triples into it. What `Enum.CollisionFidelity.Precise` has been waiting
+    // for -- though F1 does not wire `MeshPart` to it, and that enum item's
+    // documentation stays as honest as it is until something does.
+    TriangleMesh,
 };
 
 // Sized in the same units `BasePart.Size` is: `size` is the FULL extent, never
@@ -121,6 +143,69 @@ struct ShapeDesc
     // already copies each point into its own array to build the hull, so this
     // rides along for nothing.
     core::Vec3 pointScale{1.0f, 1.0f, 1.0f};
+
+    // --- The two static shapes (ADR 0066) ---------------------------------
+    //
+    // **Every span below lives under the same rule as `points`**: it must
+    // outlive the call it is handed to and no longer, and nobody may keep it. A
+    // mirror comparing two descriptions across ticks uses `geometryRevision`
+    // for exactly the reason it uses `pointsRevision` -- comparing the spans
+    // would mean keeping one.
+
+    // `TriangleMesh` only: triples indexing into `points`, which is the vertex
+    // list. Reused rather than given a second vertex span, because `points` is
+    // already "positions in the part's local space" with the lifetime rule this
+    // needs.
+    std::span<const core::u32> indices;
+
+    // `HeightField` only: `heightSampleCount * heightSampleCount` samples in row
+    // order, each the height in the part's local space.
+    //
+    // The footprint comes from `size`, so a sample is a height and nothing else:
+    // the surface is `(x, heights[z * n + x], z)` scaled to fit `size.x` by
+    // `size.z` and centred, which makes a height field describe the same box a
+    // `Box` of the same `size` would occupy.
+    std::span<const float> heights;
+
+    // The grid's edge, in samples. Jolt requires `heightSampleCount /
+    // heightBlockSize` to be at least 2, and a power of two is the cheapest.
+    core::u32 heightSampleCount = 0;
+
+    // The block a height field is culled and updated in. **This is also the
+    // alignment an in-place update must respect**: `updateHeightField` asserts
+    // that its rectangle starts on a multiple of it, so a caller grows a brush's
+    // affected area outward to a block boundary before handing it over.
+    //
+    // Two is Jolt's own default and the finest available, which is what a
+    // sculpting tool wants: a bigger block makes an edit rewrite more than it
+    // touched.
+    core::u32 heightBlockSize = 2;
+
+    // **The range a height field may ever hold, which is decided ONCE, when the
+    // shape is built, and cannot be widened afterwards.**
+    //
+    // This is the single least obvious thing about a height field and it is
+    // silent when got wrong. A field's samples are quantised into a fixed number
+    // of bits spread across `[min, max]`, and that mapping is baked at
+    // construction -- so `updateHeightField` CLAMPS every sample it is given
+    // into the range the shape was born with. Build a flat field from all-zero
+    // samples and its range is zero wide; every edit afterwards then quantises
+    // back to the height it already had, the call reports success, and nothing
+    // moves.
+    //
+    // So these are the heights the terrain is ALLOWED to reach, not the heights
+    // it currently has: a cell that will be dug 40 m down and raised 200 m up
+    // says so here on the day it is created. Left equal (the default), the range
+    // is whatever the initial samples span, which is right for a field nobody
+    // will edit and wrong for all terrain.
+    float heightMin = 0.0f;
+    float heightMax = 0.0f;
+
+    // Which VERSION of `indices` or `heights`, for the reason `pointsRevision`
+    // exists. Counted up whenever the geometry behind an otherwise identical
+    // description is replaced -- and terrain replaces it on every brush stroke,
+    // so this is the field that stops a mirror concluding nothing happened.
+    core::u64 geometryRevision = 0;
 };
 
 // --- Constraints -------------------------------------------------------------

@@ -443,6 +443,43 @@ put a number to.
    dilation column, until that region is sustained for longer than the give-up
    width.* That is falsifiable and it is what was tested.
 
+### A2 — the two static shapes, built (2026-08-27)
+
+`ShapeType::HeightField` and `ShapeType::TriangleMesh`, their `buildShape` cases,
+`IPhysics3D::updateHeightField`, the forced-Static rule, and six cases in
+`engine/physics/tests/terrain_shape_tests.cpp`. **Three things went wrong on the
+way and each is worth the next person's time.**
+
+**A height field's editable range is baked when the shape is built**, and this is
+the one that would have cost a milestone. Jolt quantises samples across
+`[min(mMinHeightValue, samples…), max(mMaxHeightValue, samples…)]` and
+`SetHeights` clamps into that mapping for ever after. A field built from flat
+samples has a zero-wide range, so **an edit clamps back to the height it already
+had, returns true, and moves nothing.** Two tests — dig a pit, raise a plateau —
+both left the ground exactly where it was with the call reporting success. The
+plan's own draft of `ShapeDesc` listed `heightMin`/`heightMax` and they were
+dropped as redundant with `size` while writing it; they are not redundant, they
+are the reservation, and they are back with the reason on them.
+
+**A `NotifyShapeChanged` inside a `BodyLockWrite` is a real deadlock**, not a
+theoretical one. `SetHeights` changes the shape's local bounds and nothing
+recomputes the body's world bounds, so a pit dug below the old minimum falls
+outside what the broadphase culls against and the collider quietly has a hole in
+it — hence the notify. Taking it while still holding the body lock is a
+lock-order violation Jolt detects, reports, and then hangs on: a test process
+alive for ten minutes at 0.015 seconds of CPU.
+
+**And it was invisible.** `assertFailedImpl` reports Jolt's file, line and
+expression through the message catalogue, and the physics tests loaded no
+catalogue — so two asserts arrived as `[i18n:missing:78f42142]` twice, which says
+an assert happened and nothing about which. The target now gets
+`LUAUG_TEST_CATALOG` like every other test binary, and the assert named the file
+and the line on the first run afterwards.
+
+The third was mine and not the engine's: a test quad wound so its normal pointed
+down. A `MeshShape` is one-sided, so the slab was there, facing away, and the
+cube fell through the floor it should have landed on.
+
 ## Risks entering F1
 
 1. **The slope precondition cascades.** Measured at A5 before anything depends

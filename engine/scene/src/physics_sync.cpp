@@ -52,14 +52,26 @@ namespace {
 // keeping one, and `ShapeDesc::points` may not outlive the create call.
 [[nodiscard]] bool sameShape(const physics::ShapeDesc& a, const physics::ShapeDesc& b) noexcept
 {
-    return a.type == b.type && a.size == b.size && a.pointScale == b.pointScale && a.pointsRevision == b.pointsRevision;
+    return a.type == b.type && a.size == b.size && a.pointScale == b.pointScale &&
+           a.pointsRevision == b.pointsRevision && a.geometryRevision == b.geometryRevision &&
+           a.heightSampleCount == b.heightSampleCount && a.heightBlockSize == b.heightBlockSize &&
+           a.heightMin == b.heightMin && a.heightMax == b.heightMax;
 }
 
-// The description as a RECORD may keep it: everything except the span, whose
-// documented lifetime is the call it was handed to.
+// The description as a RECORD may keep it: everything except the spans, whose
+// documented lifetime is the call they were handed to.
+//
+// **Every span, not just `points`** (ADR 0066). `indices` and `heights` arrived
+// with the two static shapes under the same rule, and a record that kept either
+// would be holding a view into a buffer the next brush stroke replaces -- a
+// dangling read rather than a stale one. `geometryRevision` is what lets
+// `sameShape` above answer "are these the same triangles" without keeping any
+// of them, exactly as `pointsRevision` does for a hull.
 [[nodiscard]] physics::ShapeDesc withoutPoints(physics::ShapeDesc shape) noexcept
 {
     shape.points = {};
+    shape.indices = {};
+    shape.heights = {};
     return shape;
 }
 

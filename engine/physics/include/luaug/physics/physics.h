@@ -82,6 +82,28 @@ public:
     // what makes the next genuinely different description try again.
     [[nodiscard]] virtual bool updateBody(WorldHandle world, BodyHandle body, const BodyDesc& desc) = 0;
 
+    // **Rewrites a rectangle of a `HeightField` body's heights in place**
+    // (ADR 0066), which is the only in-place shape edit this seam has and the
+    // reason a height field is worth being its own kind.
+    //
+    // `updateBody` above is `RemoveBody` + `DestroyBody` + `CreateAndAddBody`:
+    // a new Jolt body, a broadphase removal and insertion, and every constraint
+    // on it rebuilt. This changes the samples of the shape that is already
+    // there -- same shape object, same underlying body, nothing to re-insert --
+    // which is what makes dragging a brush across ground affordable at all.
+    //
+    // **`x`, `z`, `sizeX` and `sizeZ` must be multiples of the body's
+    // `heightBlockSize`**, and the rectangle must lie inside the grid. That is
+    // Jolt's rule rather than this seam's: it asserts on a misaligned start, so
+    // a caller grows a brush's affected area outward to a block boundary before
+    // calling. A description this cannot honour returns false and changes
+    // nothing.
+    //
+    // `heights` is `sizeX * sizeZ` samples in row order, and like every other
+    // span in this module it must outlive the call and no longer.
+    [[nodiscard]] virtual bool updateHeightField(WorldHandle world, BodyHandle body, u32 x, u32 z, u32 sizeX, u32 sizeZ,
+                                                 std::span<const float> heights) = 0;
+
     // Friction, restitution, collidability, queryability and group, none of
     // which need the body rebuilt.
     virtual void setBodyMaterial(WorldHandle world, BodyHandle body, f32 friction, f32 restitution) = 0;

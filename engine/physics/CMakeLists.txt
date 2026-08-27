@@ -48,6 +48,18 @@ luaug_add_module_tests(physics
     SOURCES
         tests/constraint_tests.cpp
         tests/physics_tests.cpp
+        tests/terrain_shape_tests.cpp
     MODULES
         ${luaug_physics_test_modules}
 )
+
+# **So a Jolt assert is readable when it fires.** `assertFailedImpl` logs
+# `physics.jolt.err.assert` with the file, the line and the expression, and with
+# no catalog loaded that arrives as `[i18n:missing:<hash>]` -- which says an
+# assert happened and nothing about which one. Two of those cost an hour during
+# F1's A2, on an assert that turned out to be one line away from the guard that
+# should have caught it.
+if(LUAUG_BUILD_TESTS)
+    target_compile_definitions(luaug_physics_tests PRIVATE
+        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
+endif()

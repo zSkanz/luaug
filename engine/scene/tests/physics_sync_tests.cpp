@@ -163,6 +163,29 @@ public:
         return !refuseUpdates;
     }
 
+    // **Recorded and refused** (ADR 0066). The mirror has no caller for this
+    // yet -- terrain reaches it directly rather than through a `BasePart` -- so
+    // what this override is for is being present: `IPhysics3D` is the seam a
+    // second backend implements, and a fake that silently stopped compiling
+    // when it grew is the fake nobody updates.
+    bool updateHeightField(physics::WorldHandle, physics::BodyHandle handle, u32 x, u32 z, u32 sizeX, u32 sizeZ,
+                           std::span<const float> heights) override
+    {
+        heightEdits.push_back(HeightEdit{handle, x, z, sizeX, sizeZ, heights.size()});
+        return true;
+    }
+
+    struct HeightEdit
+    {
+        physics::BodyHandle body;
+        u32 x = 0;
+        u32 z = 0;
+        u32 sizeX = 0;
+        u32 sizeZ = 0;
+        core::usize samples = 0;
+    };
+    std::vector<HeightEdit> heightEdits;
+
     // Set by a case that wants to see what the mirror does when the backend
     // will not take a description -- a degenerate hull is the real one.
     bool refuseUpdates = false;
