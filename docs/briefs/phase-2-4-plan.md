@@ -381,6 +381,68 @@ never recomputed. Check the build's exit code, not the diff.
       cave under it, walk into the cave, save, reopen, and have the cave still
       be there. The one row nothing automated closes.
 
+## Findings
+
+Written as each step answers something, before the step below it starts. This is
+the section E9's brief carries for the same reason: so the same discovery is not
+paid for twice.
+
+### A5 — the slope precondition, measured (2026-08-27)
+
+`tools/repo/terrainsurvey.luau`. Assumption 1 asked whether the hybrid's
+`|dH| <= voxelSize` precondition survives real ground. **It does, and the curve
+that matters is not the one the assumption expected.**
+
+**The flagship's ground: 0.0000% of sample pairs are steep, worst slope 6.3°.**
+Nowhere near the 45° limit, with two orders of magnitude of margin. Stated with
+its bias rather than as a triumph: `examples/10-open-world` is the only analytic
+ground in this repository and it is *deliberately* gentle — `generate_world.luau`
+refuses to write a world whose step over a 16 m tile exceeds the character's
+`AutoStepHeight` of 0.6 m. It is the gentlest ground here by construction, so
+on its own it answers a weaker question than the one asked.
+
+**A cliff promotes the cliff, not the terrain around it.** Sweeping a 4 m band
+from a 1 m drop to a 64 m drop, the steep fraction rises and then *saturates* at
+16.667% — which is exactly `(4 m band / 16 m extent) × (2 of 3 sampled
+directions)`, so the measurement is self-consistent. The fraction is bounded by
+**how much of the world is cliff**, never by how steep the cliff is. That is the
+property the hybrid needs and it holds.
+
+**The real finding inverts the intuition, and it is about WIDTH rather than
+steepness.** Promotion dilates outward until the boundary is shallow again and
+gives up at 8 columns — which at a 0.5 m voxel is **4 metres of sustained 45°+
+slope**. Sweeping a 16 m drop by the width it falls over:
+
+| band | steep columns | outcome |
+|---|---|---|
+| 0.5 m — a near-vertical cliff | 1 | height layer survives |
+| 4 m | 8 | survives, exactly at the limit |
+| 6 m | 10 | whole cell bricks |
+| 16 m — a 45° mountainside | 18 | whole cell bricks |
+
+**The dramatic case is the cheap one.** A vertical cliff is one steep column. A
+long moderate ramp is what bricks a cell, and a mountainside is a long moderate
+ramp — much longer than four metres. So assumption 1's worry ("real mountainsides
+are steeper than 45° routinely") is right, and it lands on a threshold nobody had
+put a number to.
+
+**Three consequences for Part B, and none of them is "the design is wrong".**
+
+1. **The failure is graceful and that was the design's own claim.** A cell that
+   gives up converts to pure voxel, which is the baseline the hybrid was compared
+   against. It loses the saving; it does not break.
+2. **8 columns must be a tunable, not a constant.** The number decides how much
+   of a world pays for the second encoding, it is worth different values on a
+   rolling island and an alpine map, and nothing about the algorithm needs it
+   fixed. It goes in the `.lterrain` cell header so a world records the value it
+   was built with.
+3. **The claim to make in ADR 0067 is narrower than the one the design made.**
+   Not "the height layer carries the majority" — that is a statement about worlds
+   nobody has authored yet. What is measured is: *the height layer carries every
+   surface shallower than 45°, and a steep region costs its own area plus one
+   dilation column, until that region is sustained for longer than the give-up
+   width.* That is falsifiable and it is what was tested.
+
 ## Risks entering F1
 
 1. **The slope precondition cascades.** Measured at A5 before anything depends
