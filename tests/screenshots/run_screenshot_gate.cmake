@@ -6,7 +6,12 @@
 #
 # Invoked as:
 #   cmake -DHOST=<luaug-host> -DSCRIPT=<luau> -DIMGCMP=<imgcmp> -DGOLDEN=<png>
-#         -DOUTPUT=<png> -DFRAMES=<n> -P run_screenshot_gate.cmake
+#         -DOUTPUT=<png> -DFRAMES=<n> [-DTOLERANCE=<n>] -P run_screenshot_gate.cmake
+#
+# `TOLERANCE` is optional and defaults to 2, which is the right answer when a
+# golden has to survive a move between GPUs. The lavapipe suite passes 0: it
+# compares a software rasterizer against itself, which is bit-identical, and
+# there is nothing there for a tolerance to absorb except a real change.
 
 # The host's exit code for "this machine has no usable GPU".
 set(LUAUG_NO_DEVICE_EXIT_CODE 4)
@@ -48,11 +53,15 @@ if(NOT EXISTS "${OUTPUT}")
     message(FATAL_ERROR "screenshot gate: the host reported success but wrote no file")
 endif()
 
-# Tolerance 2 per channel: GPUs round the last bit of a unorm conversion
-# differently, and a gate that fires on that is a gate that gets switched off.
-# Zero differing pixels, though -- a real change is never one pixel.
+# Tolerance 2 per channel by default: GPUs round the last bit of a unorm
+# conversion differently, and a gate that fires on that is a gate that gets
+# switched off. Zero differing pixels, though -- a real change is never one pixel.
+if(NOT DEFINED TOLERANCE)
+    set(TOLERANCE 2)
+endif()
+
 execute_process(
-    COMMAND "${IMGCMP}" "${OUTPUT}" "${GOLDEN}" --tolerance 2 --max-different-pixels 0
+    COMMAND "${IMGCMP}" "${OUTPUT}" "${GOLDEN}" --tolerance "${TOLERANCE}" --max-different-pixels 0
         "--diff" "${OUTPUT}.diff.png"
     RESULT_VARIABLE compare_result
     OUTPUT_VARIABLE compare_output

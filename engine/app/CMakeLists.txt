@@ -797,4 +797,53 @@ if(LUAUG_BUILD_TESTS)
         LABELS "gpu-golden"
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 180)
+
+    # --- The lavapipe goldens, which both documents promise (S7.6) -----------
+    #
+    # The same two scenes as the gates above, against images recorded on Mesa's
+    # software rasterizer instead of on the dev machine's GPU. The comparison is
+    # EXACT -- tolerance 0, zero pixels allowed to differ -- and that is not
+    # optimism: lavapipe renders the same scene to the same bytes twice, which
+    # was measured before these were recorded. A golden that spans two
+    # rasterizers has to widen its tolerance until it cannot see a real change;
+    # one that spans none does not.
+    #
+    # Registered only under `LUAUG_LAVAPIPE_GOLDENS`, which is OFF. Both
+    # `architecture.md` §9 and the roadmap say this suite is non-blocking, and a
+    # Mesa upgrade in the base image moves every pixel of it -- so it must not be
+    # able to redden a gate anybody runs before a push. `scripts/localgate.ps1
+    # -Only lavapipe` and the nightly job are what turn it on.
+    if(LUAUG_LAVAPIPE_GOLDENS)
+        add_test(NAME lavapipe_golden_meshes
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DIMGCMP=$<TARGET_FILE:imgcmp>
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/lavapipe/meshes.png
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/lavapipe-meshes.png
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/examples/02-meshes
+                -DFRAMES=30
+                -DTOLERANCE=0
+                -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+
+        # The instanced path, and it is here for D043: that path shipped drawing
+        # NOTHING while every gate it had was satisfied -- the draw count fell,
+        # the command stream matched its capture, the frame got faster, because
+        # the geometry was being transformed off-screen. A command stream and a
+        # counter can both be right about a frame that is empty.
+        add_test(NAME lavapipe_golden_specular
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DIMGCMP=$<TARGET_FILE:imgcmp>
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/lavapipe/specular.png
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/lavapipe-specular.png
+                -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/screenshots/specular
+                -DFRAMES=120
+                -DTOLERANCE=0
+                -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+
+        set_tests_properties(lavapipe_golden_meshes lavapipe_golden_specular PROPERTIES
+            LABELS "lavapipe-golden"
+            SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+            TIMEOUT 300)
+    endif()
 endif()

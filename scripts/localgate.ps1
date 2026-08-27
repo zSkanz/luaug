@@ -20,6 +20,9 @@
 #   scripts/localgate.ps1 -Only asan   # address and UB sanitizers, opt-in (see below)
 #   scripts/localgate.ps1 -Only winprofiles   # the three profiles a Windows release
 #                                             # ships, on MSVC, opt-in (see below)
+#   scripts/localgate.ps1 -Only lavapipe      # the real-image goldens, on Mesa's
+#                                             # software rasterizer, opt-in
+#   scripts/localgate.ps1 -Only lavapipe -Record   # ...rewrite those goldens
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
 #   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
 #   scripts/localgate.ps1 -AllowSkips         # ONLY on a machine with no GPU
@@ -41,14 +44,18 @@
 [CmdletBinding()]
 param(
     [switch]$SkipLinux,
-    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan', 'winprofiles')]
+    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan', 'winprofiles', 'lavapipe')]
     [string]$Only,
     # Only meaningful with -Only format: reformat in place rather than report.
     # Off by default, because a gate that edits your tree without being asked is
     # not a gate.
     [switch]$Fix,
     # Accept skipped tests instead of failing on them. See the note above.
-    [switch]$AllowSkips
+    [switch]$AllowSkips,
+    # Only meaningful with -Only lavapipe: rewrite the goldens rather than
+    # compare against them. A flag, and never something a comparison run can do
+    # on its own -- a gate that rewrites its own expectation is not a gate.
+    [switch]$Record
 )
 
 # 'Continue', not 'Stop', and this is not laziness. Windows PowerShell 5.1 turns
@@ -106,7 +113,7 @@ function Invoke-Stage {
     # Both container stages answer to the same switch: -SkipLinux means "Docker
     # is not available here", and the formatting gate runs in that same image
     # because that is where the pinned clang-format lives.
-    if (($Name -eq 'linux' -or $Name -eq 'format' -or $Name -eq 'shipping') -and $SkipLinux) { return }
+    if (($Name -eq 'linux' -or $Name -eq 'format' -or $Name -eq 'shipping' -or $Name -eq 'lavapipe') -and $SkipLinux) { return }
 
     Write-Host ""
     Write-Host "=== $Name ===" -ForegroundColor Cyan
@@ -457,6 +464,42 @@ set LUAUG_EDITOR_PRESET=win-msvc-editor
     } finally {
         Remove-Item $temp -ErrorAction SilentlyContinue
     }
+}
+
+# **The real-image golden suite, which two documents promise and neither had**
+# (S7.6). `architecture.md` §9: "a small real-image golden suite (lavapipe on
+# Linux, WARP/D3D12 on Windows) runs nightly, non-blocking". `roadmap.md` says
+# the same. What existed was one recorded PNG that nothing compared, with a
+# README explaining that a golden spanning a discrete GPU and a software
+# rasterizer cannot see a real change any more.
+#
+# It does not span them. lavapipe renders a scene to the same bytes twice --
+# measured at zero differing pixels, tolerance zero, before the goldens were
+# recorded -- so these compare EXACTLY and a single changed pixel is a change.
+#
+# Opt-in and non-blocking, which is what both documents say: a Mesa upgrade in
+# the Tier-2 image moves every pixel of every one of these, and that must not
+# redden the gate somebody runs before a push. The nightly job runs the same
+# script.
+Invoke-Stage 'lavapipe' {
+    if (-not $Only) {
+        Write-Host '[gate] lavapipe: skipped (opt-in; run scripts/localgate.ps1 -Only lavapipe)' -ForegroundColor DarkGray
+        return
+    }
+    Initialize-Tier2Image
+    docker volume create luaug-tier2-build | Out-Null
+
+    $existing = docker ps -aq --filter 'name=^luaug-lavapipe-gate$'
+    if ($existing) { docker rm -f luaug-lavapipe-gate | Out-Null }
+
+    $arguments = @('bash', 'scripts/gates/lavapipe-goldens.sh')
+    if ($Record) { $arguments += '--record' }
+
+    docker run --name luaug-lavapipe-gate `
+        -v "${repo}:/repo" `
+        -v "luaug-tier2-build:/build" `
+        luaug-tier2:latest @arguments
+    if ($LASTEXITCODE -ne 0) { throw "the lavapipe goldens did not match" }
 }
 
 Pop-Location

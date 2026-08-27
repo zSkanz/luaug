@@ -71,11 +71,16 @@ milestone exists: the first one was rendered by a renderer that never read
 `Lighting`, so it showed a scene lit by a sun standing straight up rather than
 by the one its script describes.
 
-**Nothing compares it, deliberately.** A software rasterizer's output is not
-bit-identical to a discrete GPU's, and the pixel gate's own note above explains
-what happens to a golden that tries to span both. Promoting this to a comparison
-is what the roadmap means by "stable for two consecutive milestones", and that
-is M6's decision, not this one's.
+**Nothing compared it, deliberately** -- and that has been resolved rather than
+left open. A software rasterizer's output is not bit-identical to a discrete
+GPU's, and the pixel gate's own note above explains what happens to a golden
+that tries to span both. What the note did not say is that a golden does not
+have to span them: **lavapipe is bit-identical to ITSELF**, measured at zero
+differing pixels across two runs at tolerance zero, so a lavapipe golden
+compared only on lavapipe is an exact instrument rather than a fuzzy one.
+
+`lavapipe/` below is that comparison, and this file stays as the M4 and M4.5
+evidence the two briefs cite.
 
 Getting it at all needed `mesa-vulkan-drivers` in the Tier-2 image. The image
 already carried `libvulkan1`, which is only the loader: with no ICD installed,
@@ -101,3 +106,44 @@ readable: with an orbit in it, nobody can say which variable moved the shadow.
 `ClockTime` there is a function of the tick count, so `--frames=N` selects the
 hour and the host's exit screenshot is that hour's frame. That is why one frame
 needs one run and why no new flag was added to get it.
+
+## `lavapipe/` — the nightly real-image suite (S7.6)
+
+Both `docs/architecture.md` §9 and `docs/roadmap.md` promise this by name: "a
+small real-image golden suite (lavapipe on Linux, WARP/D3D12 on Windows) runs
+nightly, non-blocking". Neither had it until now — what existed was the single
+recorded PNG above.
+
+Two scenes, compared **exactly**: tolerance 0, zero pixels allowed to differ.
+
+| Golden | Scene | Frames | Why this one |
+|---|---|---|---|
+| `meshes.png` | `examples/02-meshes` | 30 | The whole pass list at once — shadow map, sky, forward PBR, the blended pass, tonemap — and four materials that have to read as the metals and dielectrics they are |
+| `specular.png` | `tests/screenshots/specular` | 120 | The INSTANCED path, and it is here for D043: that path shipped drawing **nothing at all** while every gate it had was satisfied. The draw count fell from 15,250 to 22, the command stream matched its capture, and the frame got eight times faster — because the geometry was being transformed off-screen. A command stream and a counter can both be right about a frame that is empty |
+
+**Exact, and that is the point.** The tolerance-2 gate above exists because two
+GPUs round the last bit of a unorm conversion differently. Comparing a software
+rasterizer against itself has nothing for a tolerance to absorb except a real
+change, so there is none — and a single moved pixel is a finding rather than
+noise. Break-verified by rendering the same scene one frame short, which differs
+in 196,196 pixels.
+
+**Non-blocking, and it has to be.** A Mesa upgrade moves every pixel of both,
+and that is not a defect in this repository. Nothing registers these tests
+unless asked: `LUAUG_LAVAPIPE_GOLDENS` is OFF, so a normal `ctest` never sees
+them and a normal gate cannot go red on them.
+
+```
+scripts/localgate.ps1 -Only lavapipe            # compare
+scripts/localgate.ps1 -Only lavapipe -Record    # re-record, after a Mesa move
+```
+
+The nightly job runs the same `scripts/gates/lavapipe-goldens.sh` and uploads
+the images it produced whether or not they matched — a mismatch is exactly the
+case somebody needs the pictures for, and the driver script writes a
+`.diff.png` beside each output showing which pixels moved.
+
+Recorded on `llvmpipe (LLVM 20.1.2, 256 bits)`, Mesa 25.2.8, in the Tier-2
+container. The gate prints the driver it found before it compares, so a run
+against a different one says so rather than producing a wall of differing pixels
+with no explanation.

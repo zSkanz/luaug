@@ -59,6 +59,21 @@ cmake_dependent_option(LUAUG_LUAU_COMPILER
 # no reason to pay for it.
 option(LUAUG_ASSETC_ASSIMP "Build assimp into assetc for exotic mesh formats" ON)
 
+# **The real-image golden suite both architecture.md §9 and roadmap promise**,
+# and it is OFF because they both say "non-blocking" (S7.6).
+#
+# These compare pixels against images recorded on Mesa's software rasterizer.
+# That is a legitimate exact comparison -- lavapipe is bit-identical to itself,
+# measured at zero differing pixels across two runs -- and it is legitimate on
+# NOTHING else: a discrete GPU rasterizes edges by different rules, which is the
+# whole reason `screenshot_gate` carries the `gpu-golden` label.
+#
+# So the tests do not exist unless something asks for them. A Mesa upgrade in
+# the Tier-2 image will move every pixel of every one of these, and that must
+# not be able to redden the gate somebody runs before a push. Asked for by the
+# nightly job and by `scripts/localgate.ps1 -Only lavapipe`.
+option(LUAUG_LAVAPIPE_GOLDENS "Register the lavapipe real-image golden tests (non-blocking)" OFF)
+
 option(LUAUG_RHI_SDLGPU "Build the SDL3 GPU render backend (the v1 default)" ON)
 option(LUAUG_RHI_NULL "Build the no-op render backend" ON)
 option(LUAUG_RHI_CAPTURE "Build the command-stream recording render backend" ON)

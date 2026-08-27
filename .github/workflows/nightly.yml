@@ -132,6 +132,97 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
+  # The real-image golden suite, on Mesa's software rasterizer (S7.6).
+  #
+  # **Both `docs/architecture.md` §9 and `docs/roadmap.md` promise this job by
+  # name** -- "a small real-image golden suite (lavapipe on Linux, WARP/D3D12 on
+  # Windows) runs nightly, non-blocking" -- and neither had it. What existed was
+  # a single recorded PNG that nothing compared, with a README saying why: a
+  # golden asked to span a discrete GPU and a software rasterizer has to widen
+  # its tolerance until it can no longer see a real change.
+  #
+  # These span neither. lavapipe renders a scene to the same bytes twice, so
+  # the comparison is EXACT -- tolerance 0, zero pixels allowed -- and a single
+  # changed pixel is a real change. That is a far sharper instrument than the
+  # tolerance-2 gate on the dev machine, and it is why this is worth having even
+  # though it cannot block.
+  #
+  # **Non-blocking, and it has to be.** A Mesa upgrade on `ubuntu-latest` will
+  # move every pixel of every one of these, and that is not a defect in this
+  # repository. `continue-on-error` says so, and the images are uploaded so a
+  # difference can be looked at rather than guessed about.
+  #
+  # It is also the only gate anywhere that would catch D043: the instanced path
+  # shipped drawing NOTHING while every gate it had was satisfied -- the draw
+  # count fell, the command stream matched its capture, the frame got faster,
+  # because the geometry was being transformed off-screen. A command stream and
+  # a counter can both be right about a frame that is empty.
+  # ---------------------------------------------------------------------------
+  lavapipe-goldens:
+    name: Real-image goldens on lavapipe (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set out-of-tree build root (R14)
+        shell: bash
+        run: echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+
+      # The same list ci.yml installs, plus the two this job exists for:
+      # `mesa-vulkan-drivers` is the ICD -- the runner carries the Vulkan LOADER
+      # and no driver, and without one `SDL_CreateGPUDevice` reports "No
+      # supported SDL_GPU backend found" and every pixel test skips -- and
+      # `vulkan-tools` for `vulkaninfo`, which the gate prints so a run against
+      # an unexpected driver says so rather than producing a wall of differing
+      # pixels with no explanation.
+      - name: Install build, SDL video and software-Vulkan dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends             ninja-build             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev             libxi-dev libxss-dev libxtst-dev libxkbcommon-dev             libthai-dev libfribidi-dev             libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev             libdbus-1-dev libibus-1.0-dev libudev-dev             libwayland-dev wayland-protocols libdecor-0-dev             mesa-vulkan-drivers vulkan-tools
+
+      # The same script `scripts/localgate.ps1 -Only lavapipe` runs, which is
+      # the point: when the two diverge, "it passes locally" stops meaning
+      # anything.
+      - name: Compare the goldens
+        shell: bash
+        run: bash scripts/gates/lavapipe-goldens.sh
+
+      # **Whether it passed or not.** A mismatch is the case somebody needs the
+      # pictures for, and `run_screenshot_gate.cmake` writes a `.diff.png`
+      # beside each output showing which pixels moved.
+      - name: The images this run produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavapipe-goldens
+          path: |
+            ${{ runner.temp }}/luaug-build/linux-clang-dev/engine/app/lavapipe-*.png
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Real-image goldens (lavapipe)"
+            echo
+            echo "\`examples/02-meshes\` and the instanced specular scene, compared EXACTLY"
+            echo "against images recorded on Mesa's software rasterizer -- tolerance 0, zero"
+            echo "pixels allowed to differ. lavapipe is bit-identical to itself, so there is"
+            echo "nothing for a tolerance to absorb except a real change."
+            echo
+            echo "Non-blocking: a Mesa upgrade on the runner moves every pixel of both, and"
+            echo "that is not a defect here. Re-record with"
+            echo "\`scripts/localgate.ps1 -Only lavapipe -Record\` when it is."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
   # Android NDK cross-compile (roadmap: "Early Android portability check").
   #
   # Compile-only, and there is no device anywhere in this project -- the point is

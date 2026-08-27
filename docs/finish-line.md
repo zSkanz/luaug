@@ -596,7 +596,39 @@ that sends the next session to the wrong place.
       **Its first full green run is still owed** — it reached 1,170 of 1,214
       objects and stopped on another session's mid-edit file. It becomes
       blocking once it has been green once, which the job says out loud.
-- [ ] **S7.6** The nightly real-image golden job that two documents promise.
+- [x] **S7.6** Built, and sharper than the gate it sits beside. `architecture.md`
+      §9 and `roadmap.md` both promise "a small real-image golden suite
+      (lavapipe on Linux, WARP/D3D12 on Windows) runs nightly, non-blocking",
+      and neither had it: what existed was one recorded PNG,
+      `meshes-lavapipe.png`, whose own README said nothing compared it and that
+      promoting it to a comparison was a later milestone's decision, which was
+      never taken.
+
+      **The reason it was never taken turns out not to apply.** The argument was
+      that a golden spanning a discrete GPU and a software rasterizer has to
+      widen its tolerance until it can no longer see a real change — true, and
+      it is why `screenshot_gate` carries `gpu-golden`. But a lavapipe golden
+      compared only on lavapipe spans nothing: measured first, the same scene
+      renders to the same bytes twice, **zero differing pixels at tolerance
+      zero**. So these compare EXACTLY, where the dev-machine gate must allow 2
+      per channel — a sharper instrument, not a weaker one.
+
+      Two scenes. `examples/02-meshes` carries the whole pass list at once —
+      shadow map, sky, forward PBR, the blended pass, tonemap — and the
+      instanced specular scene is there for D043, which is the case nothing else
+      can catch: that path shipped drawing **nothing at all** while its draw
+      count fell, its command stream matched its capture and its frame got eight
+      times faster, because the geometry was being transformed off-screen.
+
+      Non-blocking as promised, and structurally so: `LUAUG_LAVAPIPE_GOLDENS` is
+      OFF, so the tests do not exist unless asked for — a Mesa upgrade moves
+      every pixel of both and must not be able to redden a pre-push gate. The
+      nightly job runs the same `scripts/gates/lavapipe-goldens.sh` that
+      `scripts/localgate.ps1 -Only lavapipe` does, prints the driver it found
+      before comparing, and uploads the images whether or not they matched.
+      `-Record` re-records, as a flag and never as something a comparison run
+      can do on its own. Break-verified by rendering one frame short: 196,196
+      differing pixels.
 - [x] **S7.7** Examples that no gate boots — fixed, and the count was FOUR
       rather than five: `01-instances` was already driven by
       `tests/determinism/example01` and `04-obby` by `tests/replay/obby`, both
