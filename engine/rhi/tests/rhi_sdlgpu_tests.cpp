@@ -18,6 +18,14 @@ namespace {
 // runner has no GPU" trains people to ignore red builds.
 //
 // What is NOT skipped is a device that exists and then misbehaves.
+//
+// **The message carries `LUAUG_TEST_SKIP` and that is load-bearing** (S7.10).
+// These three cases return before asserting anything when there is no device,
+// and CTest counted that as a pass -- so "the SDL3 GPU backend is tested" was
+// true of a machine with a GPU and of no other, and nothing said which kind of
+// machine had just run. They are registered a second time as `rhi_sdlgpu`, on
+// their own, with a skip pattern matching that token: with only these cases in
+// the entry, "did not run" and "skipped" become the same statement.
 struct GpuFixture
 {
     GpuFixture()
@@ -28,7 +36,7 @@ struct GpuFixture
         luaug::core::EngineError error;
         device = createSdlGpuDevice({.backend = BackendId::SdlGpu, .debug = true}, &error);
         if (device == nullptr)
-            MESSAGE("no GPU device on this machine, skipping: " << error.detail);
+            MESSAGE("LUAUG_TEST_SKIP: no GPU device on this machine: " << error.detail);
     }
 
     ~GpuFixture()
@@ -44,6 +52,8 @@ struct GpuFixture
 };
 
 } // namespace
+
+TEST_SUITE_BEGIN("sdlgpu");
 
 TEST_CASE("a real device reports itself and a usable shader format")
 {
@@ -154,3 +164,5 @@ TEST_CASE("resources round-trip through the device")
 
     device.destroy(sampler);
 }
+
+TEST_SUITE_END();

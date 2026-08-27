@@ -23,6 +23,9 @@
 //
 // Exit codes: 0 ok, 1 failed, 2 usage.
 
+#include <luaug/iconpatch/ico.h>
+
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -36,6 +39,10 @@
 #endif
 
 namespace {
+
+using luaug::iconpatch::buildGroup;
+using luaug::iconpatch::IconEntry;
+using luaug::iconpatch::parseIcon;
 
 constexpr int kExitOk = 0;
 constexpr int kExitFailed = 1;
@@ -63,67 +70,6 @@ void usage()
     return static_cast<bool>(file.read(reinterpret_cast<char*>(out.data()), size));
 }
 
-// One entry of an `.ico` file's directory. The on-disk layout, which differs
-// from the one a PE resource uses by exactly four bytes: a file entry ends with
-// a 32-bit OFFSET into the file, and a group entry ends with a 16-bit ID naming
-// another resource. That difference is the whole of the conversion below, and
-// getting it wrong produces an executable with an icon-shaped hole in it.
-struct IconEntry
-{
-    unsigned char width = 0;
-    unsigned char height = 0;
-    unsigned char colors = 0;
-    unsigned char reserved = 0;
-    unsigned short planes = 0;
-    unsigned short bitCount = 0;
-    unsigned int bytes = 0;
-    unsigned int offset = 0;
-};
-
-[[nodiscard]] unsigned short readU16(const std::vector<unsigned char>& data, std::size_t at)
-{
-    return static_cast<unsigned short>(data[at] | (data[at + 1] << 8));
-}
-
-[[nodiscard]] unsigned int readU32(const std::vector<unsigned char>& data, std::size_t at)
-{
-    return static_cast<unsigned int>(data[at]) | (static_cast<unsigned int>(data[at + 1]) << 8) |
-           (static_cast<unsigned int>(data[at + 2]) << 16) | (static_cast<unsigned int>(data[at + 3]) << 24);
-}
-
-// Parses an `.ico`. Empty on anything that is not one -- a truncated file, a
-// cursor, a PNG somebody renamed -- because a build step that half-applied an
-// icon is worse than one that refused.
-[[nodiscard]] std::vector<IconEntry> parseIcon(const std::vector<unsigned char>& data)
-{
-    if (data.size() < 6 || readU16(data, 0) != 0 || readU16(data, 2) != 1)
-        return {};
-
-    const unsigned short count = readU16(data, 4);
-    if (count == 0 || data.size() < 6u + static_cast<std::size_t>(count) * 16u)
-        return {};
-
-    std::vector<IconEntry> entries;
-    entries.reserve(count);
-    for (unsigned short index = 0; index < count; ++index) {
-        const std::size_t at = 6u + static_cast<std::size_t>(index) * 16u;
-        IconEntry entry;
-        entry.width = data[at + 0];
-        entry.height = data[at + 1];
-        entry.colors = data[at + 2];
-        entry.reserved = data[at + 3];
-        entry.planes = readU16(data, at + 4);
-        entry.bitCount = readU16(data, at + 6);
-        entry.bytes = readU32(data, at + 8);
-        entry.offset = readU32(data, at + 12);
-
-        if (entry.bytes == 0 || static_cast<std::size_t>(entry.offset) + entry.bytes > data.size())
-            return {};
-        entries.push_back(entry);
-    }
-    return entries;
-}
-
 #if defined(_WIN32)
 
 [[nodiscard]] std::wstring widen(const std::string& text)
@@ -134,37 +80,6 @@ struct IconEntry
     std::wstring wide(static_cast<std::size_t>(size - 1), L'\0');
     ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wide.data(), size);
     return wide;
-}
-
-// The group directory a PE carries: the same header the file has, followed by
-// 14-byte entries that name resource ids instead of file offsets.
-[[nodiscard]] std::vector<unsigned char> buildGroup(const std::vector<IconEntry>& entries, unsigned short firstId)
-{
-    std::vector<unsigned char> group(6u + entries.size() * 14u, 0);
-    group[2] = 1; // type: icon
-    group[4] = static_cast<unsigned char>(entries.size() & 0xFF);
-    group[5] = static_cast<unsigned char>((entries.size() >> 8) & 0xFF);
-
-    for (std::size_t index = 0; index < entries.size(); ++index) {
-        const IconEntry& entry = entries[index];
-        unsigned char* out = group.data() + 6u + index * 14u;
-        out[0] = entry.width;
-        out[1] = entry.height;
-        out[2] = entry.colors;
-        out[3] = entry.reserved;
-        out[4] = static_cast<unsigned char>(entry.planes & 0xFF);
-        out[5] = static_cast<unsigned char>((entry.planes >> 8) & 0xFF);
-        out[6] = static_cast<unsigned char>(entry.bitCount & 0xFF);
-        out[7] = static_cast<unsigned char>((entry.bitCount >> 8) & 0xFF);
-        out[8] = static_cast<unsigned char>(entry.bytes & 0xFF);
-        out[9] = static_cast<unsigned char>((entry.bytes >> 8) & 0xFF);
-        out[10] = static_cast<unsigned char>((entry.bytes >> 16) & 0xFF);
-        out[11] = static_cast<unsigned char>((entry.bytes >> 24) & 0xFF);
-        const unsigned short id = static_cast<unsigned short>(firstId + index);
-        out[12] = static_cast<unsigned char>(id & 0xFF);
-        out[13] = static_cast<unsigned char>((id >> 8) & 0xFF);
-    }
-    return group;
 }
 
 // The icon this executable's group resource points at, largest first. Used by

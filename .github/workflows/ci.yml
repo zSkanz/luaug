@@ -420,7 +420,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
 
       - name: Configure, build and test (Linux)
         if: runner.os == 'Linux'
@@ -462,7 +462,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
 
       # The M3 gate wants two things green "on both tiers" that ctest cannot
       # give: `luaug test`, which is the CLI's own path to the same suite, and

@@ -100,3 +100,20 @@ luaug_add_module_tests(rhi
     MODULES ${luaug_rhi_test_modules}
     SOURCES ${luaug_rhi_test_sources}
 )
+
+# **The SDL_GPU cases, registered again on their own so a skip is visible**
+# (S7.10). Inside the `rhi` suite they cannot be: the API and null-backend cases
+# really do run everywhere, so the entry is green and honest and the three that
+# needed a device and did not find one are invisible inside it. With only those
+# three in an entry, "did not run" and "the test skipped" are the same
+# statement, and `SKIP_REGULAR_EXPRESSION` turns the message the fixture already
+# prints into a CTest skip.
+#
+# The same shape as `editor_shell` in `engine/app/CMakeLists.txt`, and for the
+# same reason: CTest counts a skip as a pass.
+if(LUAUG_BUILD_TESTS AND LUAUG_RHI_SDLGPU)
+    add_test(NAME rhi_sdlgpu COMMAND luaug_rhi_tests --test-suite=sdlgpu)
+    set_tests_properties(rhi_sdlgpu PROPERTIES
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 120)
+endif()

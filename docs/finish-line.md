@@ -652,8 +652,45 @@ that sends the next session to the wrong place.
       device block, which would leave a case that passes having drawn nothing.
       So the drawing is counted and `CHECK(shellFrames >= 4)` asserts it — the
       claim stated as an assertion instead of as a comment.
-- [ ] **S7.10** `tools/iconpatch`, the exotic importer, the SDL3 GPU backend and
-      the forward renderer.
+- [x] **S7.10** Four named, and checking each rather than believing the list
+      found two genuinely uncovered and two already covered.
+
+      **`tools/iconpatch` had nothing at all.** It is what puts a game's own
+      icon into its packaged executable, and its own header says why that
+      matters: nothing fails when an icon is wrong — the program runs, the window
+      opens, and it wears the wrong face. The part where a mistake is silent is
+      not the Win32 call, it is the directory arithmetic, and its own comment
+      calls the failure "an executable with an icon-shaped hole in it". That is
+      a parser, so it is a library now — `luaug_iconpatch_ico`, built on **every**
+      platform even though the tool is Windows-only, so the Tier-2 gate reads it
+      too. Nine cases: the 256-pixel entry stored as zero that every naive
+      reader gets wrong; a CURSOR, which is the same shape with a hotspot where
+      an icon has planes and a bit count; truncation in the directory and in the
+      payload, both refused whole rather than half-read; an offset that would
+      wrap a 32-bit sum; and the four bytes the whole tool turns on — a file
+      entry's 32-bit offset becoming a group entry's 16-bit id, with a byte
+      count that must survive as 32 bits or every icon over 64 KiB breaks and
+      only the 256-square one shows it. Break-verified by removing the type
+      check.
+
+      **The SDL3 GPU backend was tested on a machine with a GPU and on no
+      other.** Its three cases return before asserting when there is no device,
+      and inside the `rhi` entry that is a pass — the API and null-backend cases
+      really did run, so the entry was green and honest and the three that found
+      no device were invisible in it. They are a `TEST_SUITE` now, registered
+      again as `rhi_sdlgpu` with `SKIP_REGULAR_EXPRESSION`, which is the
+      `editor_shell` shape from S7.9. It passes on both tiers — Tier-2 has
+      lavapipe — and CI names it in the list that is allowed to skip.
+
+      **The other two were already covered and the list was stale.** The exotic
+      importer has an OBJ round-trip in `compiler_tests.cpp`, and
+      `LUAUG_ASSETC_ASSIMP` defaults ON so it runs rather than compiling out.
+      The forward renderer has five capture gates — clear, meshes, skinned and
+      the UI at two resolutions — which assert the exact RHI command stream it
+      emits, need no GPU, and run on both tiers. That is a stronger test of a
+      renderer than a unit test would be, and `architecture.md` §9 already says
+      so: the capture gate and not the image comparison is the blocking render
+      gate.
 - [x] **S7.11** The harness was never committed and there is no trace of it left,
       so what is committed instead is the coverage it existed for — and the
       right place turned out not to be the input module at all. `input_tests`
