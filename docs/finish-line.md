@@ -152,7 +152,17 @@ that sends the next session to the wrong place.
 - [x] **S1.4** Sweep the scratch: `tempdiag.txt`,
       `examples/05-streaming/content/match.scene.json` and the misspelled
       `schenes/`.
-- [ ] **S1.5** Full `scripts/localgate.ps1`, six stages, green.
+- [x] **S1.5** Green, and it is nine stages now rather than six. The seven that
+      run by default — docs, luau, format, windows, linux, shipping, and the two
+      opt-in placeholders — pass end to end, with 57 tests on Windows and 56 on
+      Linux, 1,168 conformance cases on each tier and the packaging test.
+
+      The three opt-in stages are green too, each run on its own: `asan`
+      (**199.7 s, the first fully clean AddressSanitizer + UndefinedBehaviour
+      run this repository has had** — S7.5 recorded that as still owed),
+      `winprofiles` (the three profiles a Windows release ships, on MSVC —
+      S7.4), and `lavapipe` (three real-image goldens compared exactly on Mesa's
+      software rasterizer — S7.6).
 - [x] **S1.6** Push. 164 commits and three tags exist on one machine.
 - [~] **S1.7** Create the five missing milestone tags. `milestone/e2` and
       `milestone/e3` created and pushed 2026-08-26 -- both were recorded
@@ -615,9 +625,14 @@ that sends the next session to the wrong place.
       both through the same script. Two blockers found and fixed, neither in
       our code — the image had no sanitizer runtime, and UBSan's `vptr` check
       aborted the shader compiler on a SPIRV-Cross downcast at build time.
-      **Its first full green run is still owed** — it reached 1,170 of 1,214
-      objects and stopped on another session's mid-edit file. It becomes
-      blocking once it has been green once, which the job says out loud.
+      **Its first full green run has now happened**: 199.7 s, the whole ctest
+      suite plus the 1,168 conformance cases and the hot-reload gate, clean
+      under both sanitizers (2026-08-27, recorded under S1.5). The earlier
+      attempt reached 1,170 of 1,214 objects and stopped on another session's
+      mid-edit file, which was never a finding about this engine. The nightly
+      job's note says it becomes blocking once it has been green once — and it
+      now has been, locally; making the CI job blocking waits on Actions running
+      at all (see **Blocked**).
 - [x] **S7.6** Built, and sharper than the gate it sits beside. `architecture.md`
       §9 and `roadmap.md` both promise "a small real-image golden suite
       (lavapipe on Linux, WARP/D3D12 on Windows) runs nightly, non-blocking",
@@ -879,7 +894,29 @@ that sends the next session to the wrong place.
       was added; `localgate.ps1`'s comment and its error message both still
       said two. A stage that names fewer profiles than it builds sends somebody
       looking in two places when the fault is in a third.
-- [ ] **S8.4** A checked-in golden nothing reads.
+- [x] **S8.4** `tests/screenshots/ui-1280x720.png` — checked in at M6 as the gate
+      record's evidence, read by no test since, and therefore never re-recorded.
+      By the time anybody looked it differed from the renderer by **1,585
+      pixels**.
+
+      **Worth reading rather than deleting**, and D026 is the reason: `upload`
+      records a buffer's SIZE and not its contents, so the two capture goldens
+      of this same scene are structurally blind to the QUADS. They prove the
+      scissors, the viewport and the draw count; `luaug_ui_tests` proves the
+      rectangles exactly; only pixels can say the layout put anything where it
+      belongs. This is the third leg and it was lying on the floor.
+
+      Re-recorded after checking what had drifted rather than assuming: the
+      difference is confined **entirely to the glyphs** — every panel, the badge,
+      the clipped strip and the overhang are pixel-identical — so it is font
+      drift since M6 and not a layout regression. Registered as
+      `screenshot_gate_ui`, `gpu-golden` for the reason the other two carry it:
+      the frame is mostly text and glyph rasterization is the first thing to
+      differ between GPUs.
+
+      And a lavapipe twin, `lavapipe_golden_ui`, which is where an exact
+      comparison earns most of all — a tolerance wide enough to survive two
+      rasterizers is wide enough to hide a character drawn in the wrong place.
 - [ ] **S8.5** D131's residual, D047, D044, D003's rotational half.
 - [x] **S8.8** `perf-baselines.md` states the wrong `churn10k` budget and
       misdescribes where thresholds are enforced — corrected. `churn10k`'s
