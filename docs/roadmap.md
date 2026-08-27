@@ -1292,14 +1292,28 @@ and the ecosystem work.
      called at the start and the end, never inside the tick: a tick is 60 Hz and a
      database is not.
    - **Absent by default, and that is stronger than disabled.** A solo game
-     compiles without `engine/net` and pays nothing — no transport, no
-     serialisation, no code path. That is the pattern this engine already has for
+     compiles without the replication engine and pays nothing — no serialisation,
+     no diff, no code path. That is the pattern this engine already has for
      a whole module being gone: "null is a real state and not an error", as the
      animation host and the physics mirror both say. With the module present but
      playing alone, the service exists and tells the truth — authority true,
      topology solo, one player — so **one script runs solo and networked without
      a configuration branch**. A game does not ask "am I networked", it asks "do
      I decide this".
+
+     **This sentence said `engine/net` until 2026-08-27 and was false of it.**
+     A reconnaissance pass before phase 4 opened found that
+     `add_subdirectory(engine/net)` is unconditional, that `net_api` is a hard
+     dependency of both `luaug_script` and `luaug_app`, that `ServiceState`
+     holds a `unique_ptr<net::AsyncClient>` **by value in a public header**, and
+     that `dev_control.cpp` uses `net::WebSocketClient` for the ADR 0035 control
+     connection — five places the build breaks if the module goes. What IS true
+     of `engine/net`, and was the half worth keeping: `AsyncClient` is
+     constructed lazily on the first `@std/net.request`, so a solo game spawns
+     no thread and opens no socket. It pays link size, not runtime. The
+     optionality this paragraph promises belongs to the **replication engine**,
+     which is a new module and can be compiled out, and that is what it now
+     says.
    - **`NetworkService` is the optional, familiar surface**, and it earns its
      place by owning what `@std/net` cannot: players, authority, topology and
      replication. A socket has no notion of a player. **`@std/net` is parallel,
