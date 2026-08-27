@@ -36,6 +36,7 @@ luaug_add_module(app
         src/pointer_ownership.cpp
         src/chunk_overlay.cpp
         src/reference_grid.cpp
+        src/brush_overlay.cpp
         src/skeleton_overlay.cpp
         src/editor.cpp
         src/content_tree.cpp
@@ -212,6 +213,7 @@ luaug_add_module_tests(app
         tests/launcher_tests.cpp
         tests/picking_tests.cpp
         tests/reference_grid_tests.cpp
+        tests/brush_overlay_tests.cpp
         tests/skeleton_overlay_tests.cpp
         tests/editor_tests.cpp
         tests/content_tree_tests.cpp

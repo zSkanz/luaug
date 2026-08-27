@@ -183,6 +183,23 @@ FieldSample TerrainField::sample(i32 x, i32 y, i32 z) const noexcept
     const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
     const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
     const u32 index = localZ * TileEdge + localX;
+    if (tile->material[index] == 0) {
+        // **Material zero means there is no ground in this column** (D153), and
+        // without this rule creating a tile creates a plane.
+        //
+        // A tile is 32 by 32 columns and is written one column at a time, so the
+        // moment the first column of one is filled the other 1023 exist with a
+        // height of zero and a material of zero. Reading that as a surface put a
+        // flat plane at y = 0 across a thousand columns nobody touched -- and
+        // made the first column written into a tile behave differently from
+        // every column after it, which is how this was found.
+        //
+        // Zero is the right sentinel rather than a NaN or a separate mask:
+        // material zero already means "nothing" to every other verb here --
+        // `fillBall` erases with it and `paintBall` refuses it -- so the encoding
+        // gains no new state, only a rule it was already implying.
+        return FieldSample{DistanceRange * m_settings.voxelSize, 0};
+    }
     const float height = tile->height[index];
     return FieldSample{static_cast<float>(y) * m_settings.voxelSize - height, tile->material[index]};
 }

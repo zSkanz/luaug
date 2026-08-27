@@ -550,3 +550,136 @@ TEST_CASE("a hill dug into keeps its cheap columns and bricks only the cave")
     CHECK(field.sample(0, -2, 0).distance > 0.0f);
     CHECK(field.sample(0, -20, 0).distance <= 0.0f);
 }
+
+TEST_CASE("painting changes what ground is made of and never where it is")
+{
+    // Past the floor, so the ground is height-encoded -- the case a paint brush
+    // must leave height-encoded.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+    REQUIRE(field.brickCount() == 0);
+
+    const std::optional<float> before = heightAt(field, 0.0, 0.0);
+    REQUIRE(before.has_value());
+    const core::usize tilesBefore = field.tileCount();
+
+    const EditReport report = paintBall(field, core::DVec3{0.0, static_cast<double>(*before), 0.0}, 3.0, 3);
+    CHECK(report.touched > 0);
+
+    // The surface did not move, and nothing was promoted.
+    const std::optional<float> after = heightAt(field, 0.0, 0.0);
+    REQUIRE(after.has_value());
+    CHECK(static_cast<double>(*after) == doctest::Approx(static_cast<double>(*before)));
+    CHECK(field.brickCount() == 0);
+    CHECK(field.tileCount() == tilesBefore);
+    CHECK(report.promoted == 0);
+
+    // And the material really changed under the brush while staying `1` outside
+    // it -- a paint that repainted the whole tile would pass every check above.
+    CHECK(field.sample(0, -40, 0).material == 3);
+    CHECK(field.sample(14, -40, 0).material == 1);
+}
+
+TEST_CASE("painting reaches a bricked column without creating a brick")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+    // A cave, which is what puts voxels under the middle.
+    fillBall(field, core::DVec3{0.0, -3.0, 0.0}, 3.0, 0);
+    const core::usize bricksBefore = field.brickCount();
+    REQUIRE(bricksBefore > 0);
+
+    const EditReport report = paintBall(field, core::DVec3{0.0, -3.0, 0.0}, 5.0, 4);
+    CHECK(report.touched > 0);
+    // **No brick was created**, which is the claim: painting is not a sculpt in
+    // disguise and must not change the encoding of anything.
+    CHECK(field.brickCount() == bricksBefore);
+    // Solid ground under the cave, within the brush: painted. (Lattice indices,
+    // so -14 is seven metres down at half-metre voxels -- a metre below the
+    // cave's floor and four metres from the brush's centre.)
+    CHECK(field.sample(0, -14, 0).distance <= 0.0f);
+    CHECK(field.sample(0, -14, 0).material == 4);
+
+    // **The air inside the cave keeps whatever it had**, and that is the design
+    // rather than an oversight: carving stores `max(existing, insideness)` and
+    // leaves the material alone, because the material of a point with no ground
+    // in it is not a question. What matters is that the paint did not reach it.
+    CHECK(field.sample(0, -6, 0).distance > 0.0f);
+    CHECK(field.sample(0, -6, 0).material != 4);
+}
+
+TEST_CASE("painting refuses material zero rather than erasing")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+    const core::u64 digestBefore = field.digest();
+
+    const EditReport report = paintBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, 0);
+    CHECK(report.touched == 0);
+    // Byte-identical: not "mostly unchanged", unchanged.
+    CHECK(field.digest() == digestBefore);
+}
+
+TEST_CASE("painting out of reach of the surface touches nothing")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+    const core::u64 digestBefore = field.digest();
+
+    // Twenty metres above the ground, radius one.
+    const EditReport report = paintBall(field, core::DVec3{0.0, 20.0, 0.0}, 1.0, 5);
+    CHECK(report.touched == 0);
+    CHECK(field.digest() == digestBefore);
+}
+
+TEST_CASE("every column of a block carries its material, not just the first of a tile")
+{
+    // **D153, and it was two defects wearing one symptom.**
+    //
+    // A tile is 32 by 32 columns and is written one column at a time. The first
+    // column filled into a fresh tile came out with material 1 and every column
+    // after it with material 0 -- so a placed block was one square metre of
+    // ground and a thousand square metres of nothing wearing the same height.
+    //
+    // Cause one: a sample exactly ON the brush's flat top has `inside == 0`, and
+    // the add branch tested `> 0`, so it fell through and kept what was already
+    // there. Cause two: what was already there, for an unwritten column of a
+    // tile that now exists, was a height of zero and a material of zero -- read
+    // as a real surface rather than as no ground.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+
+    // Every column across the block, in both tiles it spans.
+    for (core::i32 x = -15; x <= 15; ++x) {
+        CAPTURE(x);
+        CHECK(field.sample(x, -40, 0).material == 1);
+        CHECK(field.sample(x, -40, 0).distance <= 0.0f);
+    }
+
+    // **And the top of the block is where the block's top is.** This is the half
+    // of D153 the material assertions above cannot see: with a strict `>` the
+    // face's own sample is not the brush's, the crossing is found a voxel lower,
+    // and every flat-topped block comes out four tenths of a metre short. A
+    // quarter-voxel tolerance, because that is what an exactly-representable
+    // surface can promise and half a voxel would let the defect back through.
+    const std::optional<float> top = heightAt(field, 0.0, 0.0);
+    REQUIRE(top.has_value());
+    CHECK(std::abs(*top) < kVoxel * 0.25f);
+}
+
+TEST_CASE("creating a tile does not create a plane")
+{
+    // The other half of D153: filling one corner of a tile must not put ground
+    // under the other thousand columns of it. A block 16 metres across lives in
+    // a tile 16 metres across at half-metre voxels, so the columns just outside
+    // it share the tile with it.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{4.0, -20.0, 4.0}, core::Vec3{4.0f, 40.0f, 4.0f}, 1);
+    REQUIRE(field.tileCount() > 0);
+
+    // Inside the block there is ground.
+    CHECK(heightAt(field, 4.0, 4.0).has_value());
+    // Twelve metres away, in the same tile, there is not.
+    CHECK_FALSE(heightAt(field, 14.0, 14.0).has_value());
+    CHECK(field.sample(28, -40, 28).distance > 0.0f);
+}

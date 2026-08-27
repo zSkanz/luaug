@@ -283,6 +283,19 @@ EditReport fillBall(TerrainField& field, core::DVec3 center, double radius, core
 // The same, as an axis-aligned box. `size` is the full extent, never a half.
 EditReport fillBlock(TerrainField& field, core::DVec3 center, core::Vec3 size, core::u8 material);
 
+// Changes what the ground is MADE OF without changing where it is.
+//
+// **The whole point is that it edits no distance.** A paint brush that nudged
+// the field would make every recolour a sculpt, and the two are different
+// gestures a person makes for different reasons -- so this writes material where
+// there is already ground and nowhere else. It creates no brick and promotes no
+// column, so painting a height-encoded hill leaves it height-encoded.
+//
+// `material` of zero is refused rather than treated as erase, because zero means
+// erase to `fillBall` and picking the first entry of a material list must not
+// delete a hillside.
+EditReport paintBall(TerrainField& field, core::DVec3 center, double radius, core::u8 material);
+
 // The height of the ground at this column, in metres, or nothing where there is
 // no ground. **Answers about the height layer and says nothing about caves**,
 // which is the honest shape of the question: a column with a cave in it has no

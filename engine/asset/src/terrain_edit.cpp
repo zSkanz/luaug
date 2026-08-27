@@ -107,7 +107,16 @@ struct BlockShape
 
     // Adding: the union of ground. A point inside the brush is ground, at the
     // depth the brush says, and keeps whichever material is nearer the surface.
-    if (inside > 0.0f) {
+    //
+    // **`>=`, and the equal case is the one that mattered** (D153). A sample
+    // exactly ON the brush's face has `inside == 0`, and with a strict `>` it
+    // fell through to `return existing` -- so the surface sample of a flat-topped
+    // block kept the material of whatever was there before, which for a fresh
+    // column is nothing. The height layer reads its material from exactly that
+    // sample, so every block placed with a flat top wrote material zero. The
+    // boundary belongs to the brush, which is the same convention `distance <= 0`
+    // already states everywhere else.
+    if (inside >= 0.0f) {
         return FieldSample{std::min(existing.distance, -inside), material};
     }
     return existing;
@@ -178,6 +187,13 @@ struct ColumnVerdict
         // height it had rather than being given one.
         verdict.singleValued = true;
         verdict.height = previousSolid ? static_cast<float>(highY + 1) * voxel : static_cast<float>(lowY) * voxel;
+        if (!previousSolid) {
+            // **All air is stated, not implied** (D153). Material zero is what
+            // the height layer reads as "no ground in this column", so a column
+            // carved away entirely has to say zero rather than keep the material
+            // of the ground that used to be there.
+            verdict.material = 0;
+        }
     }
     return verdict;
 }
@@ -389,6 +405,110 @@ EditReport fillBlock(TerrainField& field, DVec3 center, Vec3 size, u8 material)
     return applyBrush(field, bounds, blockDepth, &block, material);
 }
 
+EditReport paintBall(TerrainField& field, DVec3 center, double radius, u8 material)
+{
+    EditReport report;
+    const float voxel = field.settings().voxelSize;
+    if (!(radius > 0.0) || !(voxel > 0.0f) || material == 0) {
+        // **Material zero is refused rather than treated as erase.** In `fillBall`
+        // zero means remove, and a paint brush that removed ground when somebody
+        // picked the first entry of a material list would be the worst possible
+        // reading of one shared convention.
+        return report;
+    }
+
+    const auto radiusSquared = radius * radius;
+    const auto inBall = [center, radiusSquared](double x, double y, double z) {
+        const double dx = x - center.x;
+        const double dy = y - center.y;
+        const double dz = z - center.z;
+        return dx * dx + dy * dy + dz * dz <= radiusSquared;
+    };
+
+    const auto wide = static_cast<double>(voxel);
+    const auto lowIndex = [wide](double metres) { return static_cast<i32>(std::floor(metres / wide)); };
+    const auto highIndex = [wide](double metres) { return static_cast<i32>(std::ceil(metres / wide)); };
+
+    const i32 minX = lowIndex(center.x - radius);
+    const i32 maxX = highIndex(center.x + radius);
+    const i32 minZ = lowIndex(center.z - radius);
+    const i32 maxZ = highIndex(center.z + radius);
+    const i32 minY = lowIndex(center.y - radius);
+    const i32 maxY = highIndex(center.y + radius);
+
+    for (i32 z = minZ; z <= maxZ; ++z) {
+        for (i32 x = minX; x <= maxX; ++x) {
+            if (field.isBricked(x, z)) {
+                // **Only bricks that already exist**, and only voxels that are
+                // already solid. Painting must never promote a column or create
+                // a brick: it changes what the ground is made of, not where the
+                // ground is, and the one is exactly as visible as the other.
+                for (i32 y = minY; y <= maxY; ++y) {
+                    const BrickKey key{floorDiv(x, static_cast<i32>(BrickEdge)),
+                                       floorDiv(y, static_cast<i32>(BrickEdge)),
+                                       floorDiv(z, static_cast<i32>(BrickEdge))};
+                    const Brick* existing = field.findBrick(key);
+                    if (existing == nullptr) {
+                        continue;
+                    }
+                    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(BrickEdge)));
+                    const auto localY = static_cast<u32>(floorMod(y, static_cast<i32>(BrickEdge)));
+                    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(BrickEdge)));
+                    const u32 index = (localY * BrickEdge + localZ) * BrickEdge + localX;
+                    if (existing->material[index] == material) {
+                        continue;
+                    }
+                    if (dequantiseDistance(existing->sd[index], voxel) > 0.0f) {
+                        continue;
+                    }
+                    if (!inBall(static_cast<double>(x) * wide, static_cast<double>(y) * wide,
+                                static_cast<double>(z) * wide)) {
+                        continue;
+                    }
+
+                    std::vector<u8> distances(BrickVolume, 0);
+                    std::vector<u8> materials(BrickVolume, 0);
+                    std::copy(std::begin(existing->sd), std::end(existing->sd), distances.begin());
+                    std::copy(std::begin(existing->material), std::end(existing->material), materials.begin());
+                    materials[index] = material;
+                    field.setBrick(key, distances, materials);
+                    ++report.touched;
+                }
+                continue;
+            }
+
+            // The height layer holds one material per column -- the surface's --
+            // so the question is whether the ball reaches THAT point rather than
+            // any point of the column.
+            const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+            const HeightTile* tile = field.findTile(key);
+            if (tile == nullptr) {
+                continue;
+            }
+            const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+            const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
+            const u32 index = localZ * TileEdge + localX;
+            if (tile->material[index] == material || tile->material[index] == 0) {
+                continue;
+            }
+            if (!inBall(static_cast<double>(x) * wide, static_cast<double>(tile->height[index]),
+                        static_cast<double>(z) * wide)) {
+                continue;
+            }
+
+            std::vector<float> heights(TileArea, 0.0f);
+            std::vector<u8> materials(TileArea, 0);
+            std::copy(std::begin(tile->height), std::end(tile->height), heights.begin());
+            std::copy(std::begin(tile->material), std::end(tile->material), materials.begin());
+            materials[index] = material;
+            field.setTile(key, heights, materials);
+            ++report.touched;
+        }
+    }
+
+    return report;
+}
+
 std::optional<float> heightAt(const TerrainField& field, double x, double z)
 {
     const auto voxel = static_cast<double>(field.settings().voxelSize);
@@ -404,7 +524,14 @@ std::optional<float> heightAt(const TerrainField& field, double x, double z)
     }
     const auto localX = static_cast<u32>(floorMod(latticeX, static_cast<i32>(TileEdge)));
     const auto localZ = static_cast<u32>(floorMod(latticeZ, static_cast<i32>(TileEdge)));
-    return tile->height[localZ * TileEdge + localX];
+    const u32 index = localZ * TileEdge + localX;
+    if (tile->material[index] == 0) {
+        // Material zero is the height layer's "no ground here", and this has to
+        // agree with `sample` or a column would have a height nothing can stand
+        // on (D153).
+        return std::nullopt;
+    }
+    return tile->height[index];
 }
 
 u32 compact(TerrainField& field)
