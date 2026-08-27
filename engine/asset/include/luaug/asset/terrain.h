@@ -229,4 +229,36 @@ private:
 [[nodiscard]] core::u8 quantiseDistance(float metres, float voxelSize) noexcept;
 [[nodiscard]] float dequantiseDistance(core::u8 quantised, float voxelSize) noexcept;
 
+// --- Raycasting the field directly -------------------------------------------
+
+// Where a ray met the ground.
+struct TerrainHit
+{
+    // World-space, f64 because a ray is cast from a camera that may be a
+    // kilometre from the origin and f32 stops being exact there (ADR 0014).
+    core::DVec3 position;
+    // The field's gradient at the hit, which is the surface normal.
+    core::Vec3 normal{0.0f, 1.0f, 0.0f};
+    // How far along the ray, in metres.
+    double distance = 0.0;
+    core::u8 material = 0;
+};
+
+// **Casts a ray at the field itself, with no physics involved**, and that is the
+// point rather than an optimisation.
+//
+// `PhysicsSync::mirror` is called from exactly one site, gated on the world
+// being paused AND the collision wireframe being on -- so an editor sitting in
+// edit mode with that view closed holds no bodies at all, and a brush that
+// asked physics where the ground was would find nothing. `pickNearest` cannot
+// stand in either: it answers with an instance and a distance, and it tests
+// every part as its bounding box.
+//
+// Marched voxel by voxel along the ray and then refined by bisection between the
+// last two samples, so the answer is on the surface rather than at the lattice
+// point before it. `maxDistance` bounds the march: a ray fired at the sky must
+// terminate, and it must do so in a number of steps a caller can predict.
+[[nodiscard]] std::optional<TerrainHit> raycastField(const TerrainField& field, core::DVec3 origin,
+                                                     core::Vec3 direction, double maxDistance);
+
 } // namespace luaug::asset

@@ -255,3 +255,80 @@ TEST_CASE("removing a brick gives the column back to the height layer")
     // The height layer answers again, and says what it always said.
     CHECK(static_cast<double>(field.sample(2, 14, 2).distance) == doctest::Approx(3.0));
 }
+
+// --- The raycast (F1 B4) ----------------------------------------------------
+
+TEST_CASE("a ray fired down at the ground hits it, at the height the ground is")
+{
+    // **No physics involved, and that is the point rather than an
+    // optimisation.** `PhysicsSync::mirror` runs only when the world is paused
+    // AND the collision wireframe is on, so an editor sitting in edit mode with
+    // that view closed holds no bodies at all -- and a brush asking physics
+    // where the ground was would find nothing to hit.
+    const TerrainField field = flatField(4.0f);
+
+    const auto hit = raycastField(field, core::DVec3{0.5, 20.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 100.0);
+    REQUIRE(hit.has_value());
+    CHECK(hit->position.y == doctest::Approx(4.0).epsilon(0.01));
+    CHECK(hit->distance == doctest::Approx(16.0).epsilon(0.01));
+    // Facing up, because the field's gradient does -- the same normal the mesher
+    // gives that surface, so a decal placed here sits flush with the triangle.
+    CHECK(static_cast<double>(hit->normal.y) > 0.9);
+}
+
+TEST_CASE("a ray fired at the sky misses rather than marching for ever")
+{
+    const TerrainField field = flatField(4.0f);
+    CHECK_FALSE(raycastField(field, core::DVec3{0.5, 20.0, 0.5}, core::Vec3{0.0f, 1.0f, 0.0f}, 100.0).has_value());
+
+    // And so does one that runs out of budget before it arrives.
+    CHECK_FALSE(raycastField(field, core::DVec3{0.5, 200.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 10.0).has_value());
+}
+
+TEST_CASE("a ray that starts underground hits at once rather than refusing")
+{
+    // The case that produces this is a brush dragged into a hillside, or a
+    // camera inside terrain. Both want the surface they are already past.
+    const TerrainField field = flatField(4.0f);
+    const auto hit = raycastField(field, core::DVec3{0.5, 1.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 100.0);
+    REQUIRE(hit.has_value());
+    CHECK(hit->distance == doctest::Approx(0.0));
+}
+
+TEST_CASE("a degenerate ray is refused rather than dividing by zero")
+{
+    const TerrainField field = flatField(4.0f);
+    CHECK_FALSE(raycastField(field, core::DVec3{0.0, 20.0, 0.0}, core::Vec3{0.0f, 0.0f, 0.0f}, 100.0).has_value());
+    CHECK_FALSE(raycastField(field, core::DVec3{0.0, 20.0, 0.0}, core::Vec3{0.0f, -1.0f, 0.0f}, 0.0).has_value());
+}
+
+TEST_CASE("a ray finds a cave's roof before its floor")
+{
+    // The property that makes the representation worth its cost: a ray entering
+    // from above meets the top of the cavity first, which a height field could
+    // not express at all.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(TileArea, 20.0f);
+    const std::vector<core::u8> tileMaterials(TileArea, core::u8{1});
+    field.setTile(TileKey{0, 0}, heights, tileMaterials);
+
+    // Air in the middle of the brick, solid around it.
+    std::vector<core::u8> distances(BrickVolume);
+    const std::vector<core::u8> brickMaterials(BrickVolume, core::u8{9});
+    for (core::u32 y = 0; y < BrickEdge; ++y) {
+        for (core::u32 z = 0; z < BrickEdge; ++z) {
+            for (core::u32 x = 0; x < BrickEdge; ++x) {
+                const bool hollow = y >= 4 && y < 12;
+                distances[(y * BrickEdge + z) * BrickEdge + x] = quantiseDistance(hollow ? 1.0f : -1.0f, 0.5f);
+            }
+        }
+    }
+    field.setBrick(BrickKey{0, 0, 0}, distances, brickMaterials);
+
+    // Fired upward from inside the hollow: it should meet the roof at y = 12
+    // lattice, which is 6 metres.
+    const auto roof = raycastField(field, core::DVec3{4.0, 4.0, 4.0}, core::Vec3{0.0f, 1.0f, 0.0f}, 20.0);
+    REQUIRE(roof.has_value());
+    CHECK(roof->position.y == doctest::Approx(6.0).epsilon(0.2));
+    CHECK(roof->material == 9);
+}
