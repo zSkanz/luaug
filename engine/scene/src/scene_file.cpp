@@ -1,3 +1,5 @@
+#include <luaug/asset/terrain.h>
+#include <luaug/core/base64.h>
 #include <luaug/core/i18n.h>
 #include <luaug/core/json.h>
 #include <luaug/core/json_writer.h>
@@ -498,6 +500,26 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
         out.endArray();
     }
 
+    // **The ground, because a sculpted world is somebody's afternoon.**
+    //
+    // Terrain is the one piece of world state that is not a property: a field is
+    // tiles and bricks rather than a number, so nothing in the property loop
+    // above can reach it, and for one commit a save wrote every instance in the
+    // scene and none of the ground.
+    //
+    // Its own key beside `attributes` and `tags` rather than a side-car file,
+    // and the reason is the contract: `writeScene` returns a string and a scene
+    // is one text file, which the editor, the packager, `readScene` and every
+    // round-trip test all depend on. Base64 over a run-coded encoding keeps that
+    // true at a size the runs make reasonable (`asset::encodeTerrain` argues the
+    // coder). A field with nothing in it writes nothing.
+    if (const TerrainComponent* terrain = world.terrains().find(id); terrain != nullptr) {
+        if (terrain->field.tileCount() > 0 || terrain->field.brickCount() > 0) {
+            out.field("terrain", core::base64Encode(asset::encodeTerrain(terrain->field)));
+            ++report.properties;
+        }
+    }
+
     if (world.firstChild(id).valid()) {
         out.key("children");
         out.beginArray();
@@ -726,6 +748,32 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
     if (const JsonValue tags = json["tags"]; tags.type() == core::JsonType::Array) {
         for (core::usize index = 0; index < tags.size(); ++index)
             (void)world.addTag(id, world.atoms().intern(tags.at(index).asString()));
+    }
+
+    // The ground. Counted as one property either way, so a load that could not
+    // read it says so in the same report a dropped reference would.
+    if (const JsonValue terrain = json["terrain"]; terrain.type() == core::JsonType::String) {
+        TerrainComponent* component = world.terrains().find(id);
+        if (component != nullptr) {
+            const std::optional<std::vector<core::u8>> bytes = core::base64Decode(terrain.asString());
+            std::optional<asset::TerrainField> field = bytes.has_value() ? asset::decodeTerrain(*bytes) : std::nullopt;
+            if (field.has_value()) {
+                component->field = std::move(*field);
+                // **The settings ride with the field**, so `MinHeight` and
+                // `MaxHeight` are whatever the ground was actually sculpted
+                // under rather than whatever the properties happened to say.
+                // They cannot be widened after a collider is built (ADR 0066),
+                // and a reserved range that disagreed with the ground in it
+                // would clamp every later edit to the wrong band.
+                component->minHeight = component->field.settings().minHeight;
+                component->maxHeight = component->field.settings().maxHeight;
+                component->fieldRevision += 1;
+                ++report.properties;
+            }
+            else {
+                ++report.droppedReferences;
+            }
+        }
     }
 }
 

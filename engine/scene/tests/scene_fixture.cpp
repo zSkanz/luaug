@@ -308,6 +308,14 @@ Hierarchy::Hierarchy()
     partDesc.properties = m_partProperties;
     partClass = classes.registerClass(partDesc);
 
+    ClassDescriptor terrainDesc;
+    terrainDesc.name = atoms.intern("Terrain");
+    terrainDesc.super = instanceClass;
+    terrainDesc.defaultName = atoms.intern("Terrain");
+    terrainDesc.attachComponents = [](World& world, core::InstanceId id) { world.terrains().add(id, {}); };
+    terrainDesc.detachComponents = [](World& world, core::InstanceId id) { world.terrains().remove(id); };
+    terrainClass = classes.registerClass(terrainDesc);
+
     // Registered so the streaming glue's `MeshPart` path is exercised rather
     // than skipped. It carries no properties of its own here: what the glue
     // writes is the mesh URN, and the component is what holds that.

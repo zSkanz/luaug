@@ -13,6 +13,8 @@
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 
+#include <luaug/asset/terrain.h>
+
 #include <algorithm>
 #include <doctest/doctest.h>
 #include <optional>
@@ -1056,4 +1058,95 @@ TEST_CASE("the query and the save agree about what an override is")
     const core::u32 listed = static_cast<core::u32>(scene::stampOverrides(fixture.world, placed.root, library).size() +
                                                     scene::stampOverrides(fixture.world, placed.child, library).size());
     CHECK(listed == wrote.overrides);
+}
+
+// --- F1: the ground is part of the scene ------------------------------------
+
+namespace {
+
+// A sculpted world: ground that reaches the floor, which is height tiles, and a
+// cave through it, which is voxel bricks. Both encodings, because the format has
+// to carry both and a fixture with only one would pass while half of it was
+// broken.
+core::InstanceId terrainUnder(Fixture& fixture, core::InstanceId parent)
+{
+    const core::InstanceId id = fixture.world.create(fixture.schema.terrainClass);
+    fixture.world.setName(id, fixture.atom("Terrain"));
+    (void)fixture.world.setParent(id, parent);
+
+    scene::TerrainComponent* component = fixture.world.terrains().find(id);
+    REQUIRE(component != nullptr);
+    component->field =
+        asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    asset::fillBlock(component->field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{48.0f, 40.0f, 48.0f}, 1);
+    asset::fillBall(component->field, core::DVec3{0.0, -3.0, 0.0}, 4.0, 0);
+    component->minHeight = -32.0f;
+    component->maxHeight = 32.0f;
+    return id;
+}
+
+} // namespace
+
+TEST_CASE("a sculpted world survives a save and a load")
+{
+    // **The defect this exists for**: for one commit the editor could sculpt and
+    // the save wrote every instance in the world and none of the ground. A
+    // sculpted world is somebody's afternoon.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId ground = terrainUnder(fixture, workspace);
+    (void)partUnder(fixture, workspace, "Tower", {10.0, 0.0, -5.0});
+
+    const scene::TerrainComponent* before = fixture.world.terrains().find(ground);
+    REQUIRE(before != nullptr);
+    REQUIRE(before->field.tileCount() > 0);
+    REQUIRE(before->field.brickCount() > 0);
+    const core::u64 digest = before->field.digest();
+
+    const std::string text = scene::writeScene(fixture.world);
+
+    Fixture reloaded;
+    const core::InstanceId target = makeWorkspace(reloaded);
+    REQUIRE_FALSE(scene::readScene(reloaded.world, text).has_value());
+
+    core::InstanceId loaded;
+    for (core::InstanceId child = reloaded.world.firstChild(target); child.valid();
+         child = reloaded.world.nextSibling(child)) {
+        if (reloaded.world.terrains().find(child) != nullptr)
+            loaded = child;
+    }
+    REQUIRE(loaded.valid());
+
+    const scene::TerrainComponent* after = reloaded.world.terrains().find(loaded);
+    REQUIRE(after != nullptr);
+    CHECK(after->field.digest() == digest);
+    CHECK(after->field.tileCount() == before->field.tileCount());
+    CHECK(after->field.brickCount() == before->field.brickCount());
+
+    // **The reserved range rides with the field**, because a height field's
+    // precision is spread across it when a collider is built and cannot be
+    // widened afterwards (ADR 0066). A load that kept the property's value and
+    // the ground's range apart would clamp every later edit to the wrong band.
+    CHECK(after->minHeight == before->minHeight);
+    CHECK(after->maxHeight == before->maxHeight);
+    CHECK(after->field.settings().voxelSize == before->field.settings().voxelSize);
+
+    // And writing it again is the same bytes, which is what keeps a scene file
+    // diffable.
+    CHECK(scene::writeScene(reloaded.world) == text);
+}
+
+TEST_CASE("a terrain with nothing in it writes nothing")
+{
+    // An empty field is not a fact about the world worth a kilobyte of base64 --
+    // and every existing scene in this repository has no terrain in it, so this
+    // is also what stops them all moving.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId id = fixture.world.create(fixture.schema.terrainClass);
+    fixture.world.setName(id, fixture.atom("Terrain"));
+    (void)fixture.world.setParent(id, workspace);
+
+    const std::string text = scene::writeScene(fixture.world);
+    CHECK(text.find("\"terrain\"") == std::string::npos);
 }

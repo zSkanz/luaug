@@ -5,6 +5,7 @@
 luaug_add_module(core
     LAYER 0
     SOURCES
+        src/base64.cpp
         src/content_hash.cpp
         src/i18n.cpp
         src/json.cpp
@@ -25,6 +26,7 @@ luaug_add_module(core
 
 luaug_add_module_tests(core
     SOURCES
+        tests/base64_tests.cpp
         tests/content_hash_tests.cpp
         tests/text_key_tests.cpp
         tests/i18n_tests.cpp

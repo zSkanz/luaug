@@ -44,6 +44,10 @@ struct Hierarchy
     ClassId basePartClass = InvalidClass;
     ClassId partClass = InvalidClass;
     ClassId meshPartClass = InvalidClass;
+    // Registered so a scene round trip can carry ground. Terrain is the one
+    // piece of world state that is not a property, so nothing else in this
+    // fixture reaches the code that writes it.
+    ClassId terrainClass = InvalidClass;
     // `Attachment` and `Bone` share one component, so the fixture registers one
     // class and the bone half is a `JointName` written into it -- which is what
     // the real hierarchy does too.
