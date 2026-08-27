@@ -141,14 +141,24 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 
 ## Now / Next
 
-- **The campaign in [`docs/finish-line.md`](docs/finish-line.md) is what "next"
-  means.** The owner left on 2026-08-26 having asked for one thing -- finish
-  everything the audit found, take every repository-level decision on their
-  behalf, and do not stop to ask -- and that file is the mission, the stage
-  list, and the record of what was decided in their absence. **The next action,
-  as a sentence:** open it, find the first unticked box, and continue. This
-  ledger records what that costs; it is no longer where the whole of the plan
-  lives.
+- **The campaign in [`docs/finish-line.md`](docs/finish-line.md) is finished,
+  and what is left is the owner's.** They left on 2026-08-26 having asked for
+  one thing — finish everything the audit found, take every repository-level
+  decision on their behalf, and do not stop to ask. **Eighty-seven of its
+  eighty-eight rows are closed.** The one that is not is S1.7, and it is not
+  work: `milestone/e5`, `e7` and `e8` wait on a person signing those milestones
+  off, and S1.7 now names exactly what each is waiting for rather than leaving
+  it as "review".
+
+  **The next action, as a sentence:** read S8.7, which is the handback and lists
+  the four things that need the owner, in order — sign off three milestones,
+  cut `v1.1.0`, fix the billing so Actions runs again, and make the repository
+  public.
+- **`v1.1.0` is prepared but not tagged.** The tree declares it, the changelog
+  carries the editor phase, and `lute tools/repo/package.luau` writes
+  `LuauG-1.1.0-win64` whose binary says `LuauG 1.1.0 (editor)`. The tag and the
+  release page are deliberately not done here: both are outward-facing, and CI
+  publishes no release job in any case.
 - **The work is published, and that is new.** 164 commits reached `origin` on
   2026-08-26. `origin/main` had not moved since E1's sign-off on 2026-08-22, so
   seven milestones of post-v1 work existed on one machine with no backup and
@@ -216,8 +226,12 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   ([`docs/finish-line.md`](docs/finish-line.md), decision 1). It also decides
   the item below: a public repository does not spend Actions quota. **The
   v1.0.0 release is published**, with `LuauG-Open-World-v1.0.0-win64.zip`
-  attached, and reaches nobody until this is answered; the second archive
-  ADR 0054 makes possible -- the editor itself -- is the campaign's S8.6.
+  attached, and reaches nobody until this is answered. The second archive
+  ADR 0054 makes possible -- the editor itself -- is **prepared and not tagged**
+  (S8.6): the tree declares 1.1.0, the changelog carries the editor phase, and
+  `lute tools/repo/package.luau` writes `LuauG-1.1.0-win64` whose binary says
+  `LuauG 1.1.0 (editor)`. `git tag v1.1.0 && git push --tags` and attaching the
+  archive are the owner's, beside this.
 - **Actions is blocked on billing, and only the account holder can clear it.**
   GitHub's own annotation is quoted under State above. Until it is cleared there
   is no Tier-3 at all, so every tag from M6 onward carries a Tier-1 and a Tier-2
@@ -259,43 +273,52 @@ Entries for the planning session, for M0 through M4, and for sessions 11 and 19
 through 26 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there each time this file passed its ~300-line cap (§11). What was worth
-carrying out of session 19 is under E3 above, and session 26's -- the campaign
-opening, and what a `git push` found -- went there on 2026-08-27 to make room
-for this one.
+carrying out of session 19 is under E3 above. Session 26's -- the campaign
+opening, and what a `git push` found -- and session 27's -- S7 closed, and what
+a gate reports when it did not run -- both went there on 2026-08-27, each to
+make room for the next.
 
-- **2026-08-27 (session 27, Claude Opus): S7 closed, and what a gate reports
-  when it did not run.** Twelve boxes of
-  [`docs/finish-line.md`](docs/finish-line.md) went from 27 unticked to 14;
-  every item of S7 is closed.
+- **Session 28 — the campaign closes, 2026-08-27.** Twenty-seven rows left at
+  the start, one at the end, and it is not work: S1.7's three tags wait on a
+  person signing three milestones off.
 
-  **Did:** `inertcheck` stopped sharing one verdict between components that
-  share a field name, which found `GuiObject.Rotation` stored and drawn by
-  nothing for the whole of v1 and `InputBinding.Image` genuinely unread;
-  `Rotation` now draws, descendants included, as an affine on the quad. The
-  editor shell runs on both tiers rather than one -- the Tier-2 image had a
-  Vulkan device through lavapipe and no screen at all -- and crashed the moment
-  it could (D147). `assert-no-skips.sh` makes a skipped test a failure on every
-  tier and in CI, not just on the Windows stage. The three profiles a Windows
-  release ships are built by a gate on MSVC. The icon file is parsed and
-  asserted, and its parser is a library so Tier-2 reads it too. The real-image
-  golden suite two documents promised exists, compared EXACTLY on lavapipe.
-  macOS runs the tests it was already building and discarding. An exhausted IO
-  pool says so. And the sanitizers had their first fully clean run: 199.7 s.
+  **E9 closed**, and step 14 — the cut-over, the only irreversible step —
+  found that the plan had named ONE loose feed where there were three.
+  `MeshLoader::sync`'s branch was the known one. `syncSkeletons` was a second,
+  parsing the source on the SIM thread and unable to resolve a fragment at all,
+  so a ragdoll built from one piece of a split model found no rig. And
+  `syncTextures` was a third nobody had counted, because it had no compiled
+  branch AT ALL: it read the raw PNG beside a `.ktx2` the compiler had already
+  written, every frame, for every editor session since step 12 landed. "BC7 and
+  mips reach editor content" was in the plan as a delivered consequence and was
+  false. [ADR 0065](docs/decisions/0065-a-loose-gltf-is-not-a-runtime-format.md).
 
-  **Learned, and it is the session's theme:** *a gate that reports green is not
-  the same as a gate that ran.* Six CI gates had reported green on every push
-  without executing; the one test that enters the editor shell had never run on
-  Linux and said nothing; three SDL_GPU cases returned before asserting when
-  there was no device; a UI golden checked in at M6 was read by nothing and had
-  drifted 1,585 pixels; a test that SET a field counted as a reader of it. None
-  of these was a failing test. Every one of them was a passing one.
+  **Verified from the only side that proves it**: compile a project, delete
+  every source file, require that the mesh and the map still load. A test
+  asserting "the mesh loaded" would have passed on the old build too — the
+  loose reader loaded meshes perfectly well, which was the problem with it.
 
-  **Learned, from GitHub rather than from the code:** Actions is not merely out
-  of quota, it is refusing to start any job at all -- *"recent account payments
-  have failed or your spending limit needs to be increased"* -- so a red run
-  means the account and not the commit. Three closed items therefore wrote
-  CI-side code that has never executed, and the ledger's **Blocked** section
-  says which.
+  **`v1.1.0` prepared, and cutting it found D148.** The world hash reaches class
+  state through the generated accessors, and that walk reached
+  `DataModel.EngineVersion`: the version bump broke every determinism trace at
+  tick ZERO with nothing about any world having changed. The file already argued
+  against exactly this twenty lines above, about `ClassId`. **The churn is not
+  the defect; what it hides is** — a release expected to move every trace is a
+  release in which a real R10 regression looks exactly like the expected
+  movement, and re-recording was the obvious response that would have masked
+  one. Fixed with `HostFact` in the IDL, break-verified at version 9.9.9.
 
-  **Next:** the first unticked box of
-  [`docs/finish-line.md`](docs/finish-line.md), which is S5.6.
+  **Two half-built rows finished**, and the first was wrong about itself: S5.12
+  recorded that the F3 overlay had the render counters and the editor's panel
+  did not. Neither did, for nine milestones, in a function both shells call.
+  S5.18 gave the Explorer its drop bands, and the landing arithmetic earned its
+  test twice — `moveChild` warns that a downward drag lands one place short,
+  and the first version of the test asserted two cases backwards.
+
+  **Also re-measured**: both soak ceilings. 192 MiB against a 25 MiB peak was
+  not a backstop. `openworld_soak` turned up a stale record rather than a
+  cheaper program, claiming 169 MiB where the peak is 47, because the 169
+  predates ADR 0053.
+
+  **Next:** [`docs/finish-line.md`](docs/finish-line.md) S8.7, which is the
+  handback and is addressed to the owner rather than to a session.

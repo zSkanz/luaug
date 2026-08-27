@@ -252,7 +252,7 @@ Filled 2026-08-24, before human review.
 | Completion answers from the TREE | **Green.** Twelve more cases: a path through the world, the whole chain walked from `game`, `script.Parent`, a name inside `WaitForChild("`, `GetService("` offering only services, a colon offering no children, one row per name over four instances, and a plain string offering nothing. |
 | A save writes a file and disturbs nothing | **Green, by a person and by a picture.** The editor after Ctrl+S is pixel-identical to the editor before it: same caret, same selection, same tabs, same tree. Verified by driving the real window twice and comparing. |
 | A person writes a script in it | **Partly, and honestly.** The pictures below are the editor open on a real project with a script in a tab, coloured, with a breakpoint armed and the Debug panel showing it. **What is not pictured is a stop**: the debugger's behaviour rests on the eight headless cases, and a photograph of it stopped with the locals showing needs somebody to press play. |
-| `scripts/localgate.ps1` green on every stage | *(filled below)* |
+| `scripts/localgate.ps1` green on every stage | **Green, 2026-08-27, and the row said *(filled below)* and was never filled below.** Nine stages now rather than the five this brief was written against: docs 21.2 s · luau 16.9 s · format 10.2 s · windows 84.6 s (57 tests) · linux 102.2 s (56 tests) · shipping 59.6 s, plus `asan`, `winprofiles` and `lavapipe` on request. macOS is Tier-3 and unverified for the reason the ledger records: Actions is dark on a payment failure and has executed no steps since 2026-08-21. |
 
 ### The pictures
 

@@ -165,10 +165,34 @@ that sends the next session to the wrong place.
       software rasterizer — S7.6).
 - [x] **S1.6** Push. 164 commits and three tags exist on one machine.
 - [~] **S1.7** Create the five missing milestone tags. `milestone/e2` and
-      `milestone/e3` created and pushed 2026-08-26 -- both were recorded
-      COMPLETE and signed off. `e5`, `e7` and `e8` wait on S2's sign-off
-      pass, because a tag for a milestone still awaiting review would be
-      a durable record of something that has not happened.
+      `milestone/e3` created and pushed 2026-08-26 — both were recorded
+      COMPLETE and signed off. **`e5`, `e7` and `e8` are the owner's**, because
+      a tag for a milestone still awaiting review would be a durable record of
+      something that has not happened, and what each is waiting for is a person
+      rather than a gate.
+
+      **Narrowed to exactly that, 2026-08-27**, which is the part this row could
+      do. Each brief's Gate Record was re-read against the tree and the rows
+      that were stale rather than open were closed:
+
+      - **E7 — nothing but the sign-off.** Every row of its record is green,
+        the four pictures included, and they were verified again here: Title
+        Case panels, square frames everywhere, the accent as an overline rather
+        than a fill, and every word in Inter. One incidental confirmation: the
+        Stats panel in `editor-dark.png` shows frame time, backend and drawable
+        size and NOTHING about the frame's work, which is independently what
+        S5.12 found and fixed. The picture predates that fix and the theme it is
+        evidence for has not moved.
+      - **E5 — one row, and it is a person at a window.** The chunk-state
+        screenshot that had sat PENDING since the milestone closed is closed:
+        S4.8 moved the overlay into the world through `DebugDraw`, which made it
+        capturable, and `tests/screenshots/chunkgrid` is the differential.
+      - **E8 — one row, and it is a photograph.** Its `localgate` row said
+        *(filled below)* and was never filled below; it is filled now, with this
+        session's own nine-stage run. What remains is a picture of the debugger
+        STOPPED, which the eight headless cases cannot stand in for, and which
+        needs the Win32 input harness E8's findings describe — and that harness
+        is not in this tree.
 
 ### S2 — The record says what is true
 
@@ -1517,7 +1541,63 @@ that sends the next session to the wrong place.
       owner's, for the same reason S8.7 is — and neither would do anything
       today regardless, because Actions is dark on a payment failure and CI
       publishes no release job in any case.
-- [ ] **S8.7** Hand back to the owner with one act left: make it public.
+- [x] **S8.7** Hand back. **Everything on this list is done except what needs
+      you**, and what needs you is four things, in this order.
+
+      **1. Look at three milestones and sign them off, or don't.** E5, E7 and E8
+      are BUILT and awaiting review; S1.7 above narrowed each to exactly what it
+      is waiting for, and none of it is a gate. E7 is waiting on nothing but the
+      act — every row green, the four pictures in `docs/images/e7/` taken off
+      the running window. E5 is a person at a window playing a streamed world.
+      E8 is a photograph of the debugger STOPPED, which needs the Win32 input
+      harness its own findings describe and which is not in this tree. If you
+      sign them, `milestone/e5`, `milestone/e7` and `milestone/e8` are the tags
+      that go with them, and S1.7 closes.
+
+      **2. Cut the release.** `git tag v1.1.0 && git push --tags`, then attach
+      the archive. The tree declares 1.1.0, the changelog carries the entry, and
+      `lute tools/repo/package.luau` writes `LuauG-1.1.0-win64` with a binary
+      inside that says so. Nothing is automated: CI publishes no release job, by
+      the design that was already there.
+
+      **3. Fix the billing, then look at CI.** This is the operational fact that
+      matters most and it is not a repository problem. **GitHub Actions is dark
+      — not throttled, dark.** No job has started since 2026-08-21, on any
+      push, because the account has a payment failure: a red run means the
+      account, not the commit. Everything here was gated locally on nine stages,
+      Windows and Linux both, and **macOS has been unverified for six days.**
+      Three pieces of CI-side work written during this campaign have therefore
+      never executed anywhere, and they are named in S7 rather than assumed
+      good.
+
+      **4. Make the repository public**, which you reserved and which is the last
+      act. Everything else was sequenced so it would be.
+
+      ---
+
+      **What was done, as a number and as a shape.** Eighty-four of this list's
+      eighty-eight rows closed, three left, and the three are the ones above.
+      Every repository-level decision you would have taken is in the table near
+      the top of this file, each with what would reverse it.
+
+      **What is worth knowing before you read the diff.** The campaign's own
+      lesson, said twice and both times expensively: *a gate that reports green
+      is not the same as a gate that ran*, and *a complete design with no
+      implementation reads as built*. Both were found rather than assumed.
+      `inertcheck` turned up `GuiObject.Rotation` drawn by nothing for the whole
+      of v1. The thumbnail cache had a full contract and not one definition. The
+      editor-shell test had been entered on one machine of two. `syncTextures`
+      read the raw PNG sitting beside a `.ktx2` the compiler had already written.
+      The Stats panel reported nothing about a frame's cost in either shell while
+      the ledger recorded that one of them had it. And cutting the version turned
+      up D148 — the world hash included the engine version, so every release
+      would have moved every determinism trace, and re-recording them would have
+      masked any R10 regression shipped in the same release.
+
+      **One thing was left alone on purpose**, and it is still there:
+      `examples/10-open-world/content/stamps/charactertesting.stamp.json`. It is
+      yours, made by hand while you were specifying E3. It is not agent output
+      and it was not cleanup to do.
 
 ---
 

@@ -230,8 +230,10 @@ thing is built because the milestone's whole content IS the interfaces.
 
 ## Gate Record
 
-**BUILT, awaiting review, 2026-08-24.** Every item below has a result except the
-last two, which are marked as what they are: a person looking, and a migration
+**BUILT, awaiting review.** Filled 2026-08-24; the chunk-state screenshot row
+closed 2026-08-27, so **one row is left and it is a person at a window.** Every
+other item below has a result. The rows marked as what they are: a person
+looking, and a migration
 the human has said they will ask for separately.
 
 Closing run, `scripts/localgate.ps1`:
@@ -249,7 +251,7 @@ scene instead. It is the last of the generator-path examples and it moves with
 
 | Claim | Answer |
 |---|---|
-| A world built by hand in the editor streams | **Built.** `examples/06-scene` is four hundred parts over six cells with no generator anywhere in the project, and the partition happens on the way to the first frame. **The screenshot of the chunk-state overlay is PENDING** — the shell cannot render headlessly. |
+| A world built by hand in the editor streams | **Built, and the screenshot row is closed** (finish-line S4.8, 2026-08-27). `examples/06-scene` is four hundred parts over six cells with no generator anywhere in the project, and the partition happens on the way to the first frame. The overlay was an ImGui panel, which is why this sat PENDING from the day the milestone closed; `drawChunkGrid` puts the grid in the WORLD through `DebugDraw` instead — one cell outline per chunk coloured by state, a post at one corner, each focus's two rings. Better for a person, because streaming is a question about space, and capturable, because `--headless --screenshot` reaches the ordinary renderer. `tests/screenshots/chunkgrid` is the differential. |
 | The default changes nothing | **Pass, and provable rather than argued.** `examples/10-open-world`'s authored scene has one streamable candidate and a `Weld` pins it, so it produces zero cells and its residual is byte-identical to the original. `partition_tests.cpp`: "a scene with nothing streamable partitions to itself, byte for byte". |
 | The partitioner never holds the world | **Pass, by measurement.** "the partitioner never holds the world" partitions two worlds an order of magnitude apart and requires the SAME peak, not merely a small one — which is what caught the real defect: `World::destroy` defers its generation bump to `retireDestroyed`, and a partitioner has no drain. |
 | An atomic model crosses a boundary and arrives whole | **Pass.** "an atomic model crosses a boundary and is filed under one cell" and, on the other side of the format, "an atomic model arrives whole and leaves with none left behind". |
