@@ -12,6 +12,7 @@
 #include "luaug/physics/physics.h"
 #include "luaug/physics/types.h"
 
+#include <chrono>
 #include <cmath>
 #include <doctest/doctest.h>
 #include <vector>
@@ -353,4 +354,105 @@ TEST_CASE("an in-place edit refuses every rectangle Jolt would assert on")
     REQUIRE(probe.valid());
     fixture.run(240);
     CHECK(fixture.physics->bodyState(fixture.world, probe).transform.position.y == doctest::Approx(0.5).epsilon(0.1));
+}
+
+// --- F1 step A3: what a terrain collider costs ------------------------------
+//
+// **Nothing in this repository measured a shape BUILD before this.** `physics1k`
+// and `churn10k` move and re-target bodies without ever reshaping one, so every
+// cost figure under ADR 0066 -- including the one the whole hybrid rests on,
+// that `SetHeights` is much cheaper than a rebuild -- was a guess.
+//
+// Skipped by default and run on demand, the shape `asset`'s import bench already
+// uses: a number that varies with the machine must not gate anything, and a
+// measurement nobody can reproduce on their own hardware is not a measurement.
+//
+//     luaug_physics_tests --test-case="what a terrain collider costs" --no-skip
+TEST_CASE("what a terrain collider costs" * doctest::skip())
+{
+    Fixture fixture;
+
+    const auto ms = [](auto from, auto to) {
+        return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(to - from).count();
+    };
+
+    // A 64 m cell at roughly half a metre, which is F1's working resolution.
+    // 128 is a power of two, which Jolt documents as the cheapest, and 127
+    // intervals over 64 m is 0.504 m.
+    for (const u32 samples : {u32{128}, u32{256}}) {
+        std::vector<float> heights(static_cast<core::usize>(samples) * samples);
+        for (core::usize at = 0; at < heights.size(); ++at) {
+            const auto x = static_cast<float>(at % samples);
+            const auto z = static_cast<float>(at / samples);
+            heights[at] = 8.0f * std::sin(x * 0.05f) * std::cos(z * 0.04f);
+        }
+
+        BodyDesc desc;
+        desc.shape.type = ShapeType::HeightField;
+        desc.shape.size = core::Vec3{64.0f, 1.0f, 64.0f};
+        desc.shape.heights = heights;
+        desc.shape.heightSampleCount = samples;
+        desc.shape.heightMin = -64.0f;
+        desc.shape.heightMax = 64.0f;
+        desc.motion = MotionType::Static;
+
+        const auto beforeCreate = std::chrono::steady_clock::now();
+        const BodyHandle field = fixture.physics->createBody(fixture.world, desc);
+        const auto afterCreate = std::chrono::steady_clock::now();
+        REQUIRE(field.valid());
+
+        // **The brush case**: an 8 m stroke is 16 samples at this resolution,
+        // grown to the block alignment `updateHeightField` requires.
+        const std::vector<float> patch(16 * 16, 3.0f);
+        const auto beforeEdit = std::chrono::steady_clock::now();
+        for (int i = 0; i < 100; ++i) {
+            REQUIRE(fixture.physics->updateHeightField(fixture.world, field, 16, 16, 16, 16, patch));
+        }
+        const auto afterEdit = std::chrono::steady_clock::now();
+
+        // **What it replaces.** The same visible change through the only other
+        // route there is: a full description, destroyed and recreated.
+        const auto beforeRebuild = std::chrono::steady_clock::now();
+        for (int i = 0; i < 10; ++i) {
+            REQUIRE(fixture.physics->updateBody(fixture.world, field, desc));
+        }
+        const auto afterRebuild = std::chrono::steady_clock::now();
+
+        MESSAGE("heightfield " << samples << "^2  create=" << ms(beforeCreate, afterCreate)
+                               << " ms  setHeights(16^2)=" << (ms(beforeEdit, afterEdit) / 100.0)
+                               << " ms  rebuild=" << (ms(beforeRebuild, afterRebuild) / 10.0) << " ms");
+    }
+
+    // A triangle mesh of comparable density, which is what a bricked cell costs.
+    for (const u32 grid : {u32{64}, u32{128}}) {
+        std::vector<core::Vec3> points;
+        points.reserve(static_cast<core::usize>(grid) * grid);
+        for (u32 z = 0; z < grid; ++z) {
+            for (u32 x = 0; x < grid; ++x) {
+                points.push_back(core::Vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)});
+            }
+        }
+        std::vector<u32> indices;
+        indices.reserve(static_cast<core::usize>(grid - 1) * (grid - 1) * 6);
+        for (u32 z = 0; z + 1 < grid; ++z) {
+            for (u32 x = 0; x + 1 < grid; ++x) {
+                const u32 a = z * grid + x;
+                indices.insert(indices.end(), {a, a + grid, a + 1, a + 1, a + grid, a + grid + 1});
+            }
+        }
+
+        BodyDesc desc;
+        desc.shape.type = ShapeType::TriangleMesh;
+        desc.shape.points = points;
+        desc.shape.indices = indices;
+        desc.motion = MotionType::Static;
+
+        const auto before = std::chrono::steady_clock::now();
+        const BodyHandle mesh = fixture.physics->createBody(fixture.world, desc);
+        const auto after = std::chrono::steady_clock::now();
+        REQUIRE(mesh.valid());
+
+        MESSAGE("trianglemesh " << grid << "^2 grid, " << (indices.size() / 3)
+                                << " triangles  create=" << ms(before, after) << " ms");
+    }
 }

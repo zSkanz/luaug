@@ -730,3 +730,48 @@ way gravity is: changing it means re-recording every trace. That is also why the
 solver does not run on the engine job pool, which sizes itself from the machine —
 a trace recorded here would stop being reproducible on a machine with a different
 core count, which is the one property a committed trace cannot lose.
+
+## Terrain colliders (F1 A3, ADR 0066)
+
+Measured 2026-08-27 on the reference machine, by
+`luaug_physics_tests --test-case="what a terrain collider costs" --no-skip`. The
+case is skipped by default: a number that varies with the machine must not gate
+anything, and a measurement nobody can reproduce on their own hardware is not a
+measurement.
+
+**Nothing in this repository measured a shape BUILD before this.** `physics1k`
+and `churn10k` move and re-target bodies without ever reshaping one, so every
+cost figure under ADR 0066 — including the one the whole hybrid rests on — was a
+guess until now.
+
+| shape | operation | 128² samples | 256² samples |
+|---|---|---|---|
+| height field | create | 0.516 ms | 1.829 ms |
+| height field | **`SetHeights`, 16² rectangle** | **0.0078 ms** | **0.0081 ms** |
+| height field | rebuild through `updateBody` | 0.457 ms | 1.760 ms |
+
+**`SetHeights` is 58× cheaper than a rebuild at 128² and 217× at 256², and the
+ratio grows because the two scale differently.** An in-place edit is O(the
+rectangle edited) — 0.0078 ms against 0.0081 ms while the field quadrupled — and
+a rebuild is O(the field). That is ADR 0066's central claim, and it is the
+difference between a brush that drags at any framerate and one that gets slower
+as the world gets more detailed.
+
+| shape | triangles | create |
+|---|---|---|
+| triangle mesh | 7,938 | 2.74 ms |
+| triangle mesh | 32,258 | 12.11 ms |
+
+**The triangle-mesh number is the one that changes a design decision.** A cell
+that gives up on the height encoding and converts to voxel bricks costs about
+twelve milliseconds to collide — most of a frame at 60 Hz — so **a bricked cell
+cannot have its collider rebuilt synchronously during a drag**, while a
+height-encoded one costs eight microseconds and can. The gap across that boundary
+is roughly 1,500×.
+
+Two consequences, both for F1 rather than for this file. The give-up width that
+decides which side of that gap a cell lands on has to be a tunable rather than a
+constant, which the A5 slope survey concluded independently. And a bricked cell's
+collider needs a budgeted, off-frame rebuild path that a height-encoded one does
+not — so "the failure mode is the baseline" is true of correctness and not of
+cost.

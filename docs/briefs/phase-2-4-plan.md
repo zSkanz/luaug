@@ -480,6 +480,29 @@ The third was mine and not the engine's: a test quad wound so its normal pointed
 down. A `MeshShape` is one-sided, so the slab was there, facing away, and the
 cube fell through the floor it should have landed on.
 
+### A3 — what a terrain collider costs, measured (2026-08-27)
+
+Full numbers in `docs/perf-baselines.md`. **ADR 0066's central claim survives
+with room to spare, and a second number changes a design decision.**
+
+`SetHeights` on a 16² rectangle costs **0.0078 ms** against a rebuild's
+**0.457 ms** at 128² samples — 58× — and the gap widens to 217× at 256², because
+the two scale differently: an in-place edit is O(the rectangle) and a rebuild is
+O(the field). That is the difference between a brush that drags at any framerate
+and one that gets slower as the world gets more detailed.
+
+**A triangle mesh costs 12.1 ms for 32,258 triangles**, which is most of a frame.
+So a cell that gives up on the height encoding and converts to bricks **cannot
+have its collider rebuilt synchronously during a drag**, while a height-encoded
+one costs eight microseconds and can. The gap across that boundary is about
+1,500×, and it lands exactly on the give-up width A5 already concluded must be
+tunable.
+
+The consequence for Part C: **"the failure mode is the baseline" is true of
+correctness and false of cost.** A bricked cell needs a budgeted, off-frame
+collider rebuild that a height-encoded cell does not, and that path is now part
+of the milestone rather than a detail of it.
+
 ## Risks entering F1
 
 1. **The slope precondition cascades.** Measured at A5 before anything depends
