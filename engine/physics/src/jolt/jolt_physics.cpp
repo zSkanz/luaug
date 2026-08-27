@@ -866,8 +866,26 @@ public:
         }
 
         const BodyState previous = bodyState(handle);
-        forgetPairs(packHandle(handle));
 
+        // **The pairs are deliberately KEPT** (D151). This called `forgetPairs`,
+        // copied from `destroyBody` below, and it was wrong here for the exact
+        // reason that makes it right there: a destroyed body's pair "can never
+        // appear again", so dropping it is the only way the diff stops referring
+        // to something gone. A body being RESHAPED persists -- the record and
+        // the handle are the same, only `record->id` changes -- so its pairs are
+        // still about a body that exists.
+        //
+        // Dropping them made `Began`/`Ended` lie in one direction only: the
+        // contact vanished from the previous set, reappeared in the next, and
+        // was announced as new, with no `Ended` to pair it. A script writing
+        // `part.Size` on something a character was standing on got a `Touched`
+        // for a contact that never broke, and a script pairing `Touched` with
+        // `TouchEnded` leaked a count every time.
+        //
+        // Keeping them costs nothing and is self-correcting: a reshape that
+        // genuinely ends a contact leaves the pair in the previous set and
+        // absent from the next, which is exactly the `Ended` the diff exists to
+        // emit.
         JPH::BodyInterface& bodies = m_system.GetBodyInterface();
         bodies.RemoveBody(record->id);
         bodies.DestroyBody(record->id);

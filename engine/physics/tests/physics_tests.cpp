@@ -1163,3 +1163,75 @@ TEST_CASE("two worlds in one process keep their own origins")
     CHECK(first.physics->bodyState(first.world, a).transform.position.x == doctest::Approx(3.0));
     CHECK(second.physics->bodyState(second.world, b).transform.position.x == doctest::Approx(3.0));
 }
+
+TEST_CASE("reshaping a body a cube is resting on does not re-announce the contact")
+{
+    // **Found while designing terrain sculpting** (F1), where dragging a brush
+    // reshapes the ground somebody is standing on many times a second -- but
+    // nothing here is about terrain. It is about `updateBody`, which is what a
+    // script does by writing `part.Size`.
+    //
+    // `updateBody` is `RemoveBody` + `DestroyBody` + `CreateAndAddBody`, and it
+    // calls `forgetPairs` first. That erases every contact pair naming the body
+    // from `m_previousPairs`, and `Began`/`Ended` are a DIFF against that list
+    // -- so a contact that never physically broke would be absent from the
+    // previous set, present in the next, and reported as new, with no `Ended`
+    // to pair it. `forgetPairs` is CORRECT for `destroyBody`, and its own
+    // comment says why: "the pair can never appear again". `updateBody`
+    // recreates the body, so it can.
+    //
+    // **The body must still be AWAKE when the reshape lands, and getting that
+    // wrong is how the first version of this case passed while testing
+    // nothing.** A sleeping body produces no contact callbacks, so a settled
+    // cube reports zero events whatever `updateBody` did to the pair list --
+    // `began == 0` meant "nothing was observed", not "nothing was
+    // re-announced". Jolt's sleep timer is half a second, so this reshapes on
+    // the tick the contact is made rather than after letting it settle.
+    Fixture fixture;
+    const BodyHandle floor = fixture.physics->createBody(fixture.world, floorDesc());
+    REQUIRE(floor.valid());
+    const BodyHandle cube = fixture.physics->createBody(fixture.world, cubeDesc({0.0, 2.0, 0.0}, 2));
+    REQUIRE(cube.valid());
+
+    const auto drain = [&](int& began, int& ended) {
+        for (const ContactEvent& event : fixture.physics->drainContacts(fixture.world)) {
+            if (event.phase == ContactPhase::Began) {
+                ++began;
+            }
+            else {
+                ++ended;
+            }
+        }
+    };
+
+    // Step until the contact is announced, and no further.
+    int began = 0;
+    int ended = 0;
+    for (int i = 0; i < 240 && began == 0; ++i) {
+        fixture.physics->step(fixture.world, kFixedDt);
+        drain(began, ended);
+    }
+    REQUIRE(began == 1);
+    REQUIRE(ended == 0);
+    // Awake, which is what makes everything below observable.
+    REQUIRE(fixture.physics->bodyState(fixture.world, cube).active);
+
+    // **The floor is reshaped without moving out from under the cube.** Wider
+    // and no thinner, same position, so the cube is resting on it before and
+    // after and the contact never physically breaks.
+    BodyDesc wider = floorDesc();
+    wider.shape.size = core::Vec3{120.0f, 2.0f, 120.0f};
+    REQUIRE(fixture.physics->updateBody(fixture.world, floor, wider));
+
+    began = 0;
+    ended = 0;
+    for (int i = 0; i < 30; ++i) {
+        fixture.physics->step(fixture.world, kFixedDt);
+        drain(began, ended);
+    }
+
+    // Nothing began, because nothing started touching. Nothing ended, because
+    // nothing stopped.
+    CHECK(began == 0);
+    CHECK(ended == 0);
+}
