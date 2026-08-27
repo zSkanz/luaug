@@ -1,11 +1,22 @@
 // A blocking HTTP/1.1 client (ADR 0012, api-design.md §7 `@std/net.request`).
 //
 // **Plain `http://` only, and that is a v1 limitation rather than an oversight.**
-// TLS needs a TLS library; this repository vendors none, and R5 forbids adding
-// one without a human-approved ADR. So an `https://` URL is REFUSED with a named
-// error rather than silently downgraded to plaintext -- a downgrade would send a
-// caller's credentials in the clear on a line of code that looks secure, which is
-// the worst of the three available behaviours.
+// TLS needs a TLS library; this repository vendors none. So an `https://` URL is
+// REFUSED with a named error rather than silently downgraded to plaintext -- a
+// downgrade would send a caller's credentials in the clear on a line of code
+// that looks secure, which is the worst of the three available behaviours.
+//
+// **ADR 0063 says what happens when it IS built**, which this comment used to
+// leave open by naming only the obstacle: TLS comes from the PLATFORM -- WinHTTP
+// or Schannel, `NSURLSession`, the system OpenSSL -- and not from a vendored
+// library. A TLS stack is a maintenance obligation rather than a dependency, it
+// is the one where a published CVE obliges a release on somebody else's
+// schedule, and the platform's is already patched and already has the trust
+// roots. The cost is that THIS client is what gets rewritten: on Windows and
+// macOS the TLS and the HTTP are one API, so the honest version is a seam with
+// three implementations and the socket code below goes. Worth knowing before
+// somebody starts by adding a library, which is the obvious move and not the
+// recommended one.
 //
 // The practical consequence, stated where a caller reads it: `net.request` in v1
 // reaches a backend on localhost or on a LAN, which is the shape ADR 0012 says

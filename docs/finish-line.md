@@ -636,7 +636,42 @@ that sends the next session to the wrong place.
       all of them decisions — refuse while recording, record the source as an
       operation, or say plainly that a console session is not replayable. Taking
       one without the console being asked for would be inventing requirements.
-- [ ] **S6.5** TLS — needs an approved decision record before it needs code.
+- [x] **S6.5** The record exists and it decides the shape rather than deferring
+      it again. **ADR 0063.**
+
+      `https://` is refused with a named error, which is the right one of the
+      three available behaviours — a silent downgrade would put a caller's
+      credentials in the clear on a line that reads as secure — and three
+      documents already said so. What was missing was the OTHER side. The
+      client's header said "R5 forbids adding [a TLS library] without a
+      human-approved ADR", which is true and is not a plan: it names an obstacle
+      without saying what the answer looks like if somebody clears it, so the
+      next person starts from nothing and does the obvious thing.
+
+      **The obvious thing is the wrong one, and that is the decision.** When TLS
+      is built it comes from the PLATFORM — WinHTTP or Schannel,
+      `NSURLSession`, the system OpenSSL — and not from a vendored library. A
+      TLS stack is a **maintenance obligation** rather than a dependency: it is
+      the one where a published CVE obliges a release on somebody else's
+      schedule, and this project has no process for that and no reason to
+      acquire one. Shipping a pinned BoringSSL means shipping a version that
+      will be out of date in a binary a player runs, and it gives no trust roots
+      — so somebody then curates a CA bundle, or reads the system store per
+      platform anyway, which is most of the work of just using the system stack.
+
+      **What it costs is stated because it is not free**: on Windows and macOS
+      the TLS and the HTTP are one API, so `engine/net/http.h` — a hand-rolled
+      HTTP/1.1 client over sockets — is what gets rewritten, into a seam with
+      three implementations. The choice is "rewrite the client", not "add a
+      library", and that is worth knowing before somebody starts by adding a
+      library. The vendored route's costs are listed beside it so the comparison
+      is available rather than reconstructed, and **vendoring stays a human
+      decision** — the platform route needs no new dependency and therefore no
+      approval under R5, which is what makes this one takeable here.
+
+      `https://` stays refused for v1. R15 closes the scope, ADR 0012 makes
+      `@std/net` primitives-only, and the documented shape — a backend on
+      localhost or a LAN — does not need it.
 - [ ] **S6.6** KTX2 HDR; glTF topologies; the second UV set half-importer.
 - [x] **S6.7** A text caret — built. `TextInput`'s doc has promised "typed
       text, backspace and a caret" since the class existed, and the caret was
