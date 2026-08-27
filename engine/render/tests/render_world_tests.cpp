@@ -1,5 +1,6 @@
 #include "luaug/core/types.h"
 #include "luaug/render/render_world.h"
+#include "luaug/render/terrain_loader.h"
 #include "luaug/render/transform_history.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/components.h"
@@ -1248,4 +1249,107 @@ TEST_CASE("a taken texture is loaded again, because the library is what says it 
 
     textures.set(urn, rhi::TextureHandle{6});
     CHECK(textures.find(urn).id == 6u);
+}
+
+// --- Terrain (F1 Part D, ADR 0067) ------------------------------------------
+
+TEST_CASE("a world with no terrain extracts exactly what it did before")
+{
+    // The claim every step of F1 has to keep, asserted at the render seam: the
+    // terrain loop is a third walk over a pool that is empty in every project
+    // that never touches it.
+    Fixture fixture;
+    const core::InstanceId root = fixture.world.create(fixture.folderClass);
+    (void)fixture.part(root);
+
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
+
+    CHECK(snapshot.parts.size() == 1);
+    CHECK(snapshot.draws.empty());
+}
+
+TEST_CASE("a terrain tile draws once its mesh is in the library")
+{
+    // A workspace with a camera, because that is what a draw needs: `extract`
+    // builds its frustum from `Workspace.CurrentCamera` and a world with no
+    // camera renders nothing rather than inventing one.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId root = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(root);
+
+    const core::InstanceId terrain = fixture.world.create(fixture.folderClass);
+    scene::TerrainComponent component;
+    component.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(asset::TileArea, 2.0f);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    component.field.setTile(asset::TileKey{0, 0}, heights, materials);
+    component.fieldRevision = 1;
+    fixture.world.terrains().add(terrain, component);
+    REQUIRE(fixture.world.setParent(terrain, root) == std::nullopt);
+
+    // **Nothing yet**, because the geometry has not been built. Skipped rather
+    // than substituted: a tile whose mesh is a frame behind is ground that is
+    // not there for a frame, and a placeholder for it is a hole nobody notices.
+    render::RenderWorld before;
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, before);
+    CHECK(before.draws.empty());
+
+    // The loader files it under the URN both halves agree on.
+    render::MeshLibrary library;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{1, 1};
+    entry.bounds = core::AABB{core::Vec3{-8.0f, -2.0f, -18.0f}, core::Vec3{8.0f, 2.0f, -2.0f}};
+    entry.sectionCount = 1;
+    entry.sectionMaterial.assign(1, 0u);
+    entry.materials.push_back(render::RenderMaterial{});
+    library.set(fixture.atoms.intern(render::terrainTileUrn(terrain, asset::TileKey{0, 0})), std::move(entry));
+
+    render::RenderWorld after;
+    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, after);
+
+    REQUIRE(after.draws.size() == 1);
+    CHECK(after.draws[0].mesh.index == 1);
+    // **Opaque and unskinned**, which terrain always is: there is no
+    // `Transparency` on ground and no rig under it.
+    CHECK_FALSE(after.draws[0].transparent);
+    CHECK(after.draws[0].boneCount == 0);
+    CHECK(after.draws[0].alpha == 1.0f);
+    // And it produced no `parts` entry, which is the whole reason terrain is not
+    // made of `MeshPart`s: no phantom body, no Explorer row, no snapshot cost.
+    CHECK(after.parts.empty());
+}
+
+TEST_CASE("terrain outside the root is not in the world")
+{
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId root = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(root);
+    const core::InstanceId elsewhere = fixture.world.create(fixture.folderClass);
+
+    const core::InstanceId terrain = fixture.world.create(fixture.folderClass);
+    scene::TerrainComponent component;
+    component.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(asset::TileArea, 2.0f);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    component.field.setTile(asset::TileKey{0, 0}, heights, materials);
+    fixture.world.terrains().add(terrain, component);
+    REQUIRE(fixture.world.setParent(terrain, elsewhere) == std::nullopt);
+
+    render::MeshLibrary library;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{1, 1};
+    entry.sectionCount = 1;
+    entry.sectionMaterial.assign(1, 0u);
+    entry.materials.push_back(render::RenderMaterial{});
+    library.set(fixture.atoms.intern(render::terrainTileUrn(terrain, asset::TileKey{0, 0})), std::move(entry));
+
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
+
+    // Whatever is parented under the root is in the world and whatever is not,
+    // is not -- and terrain is not an exception to that.
+    CHECK(snapshot.draws.empty());
 }

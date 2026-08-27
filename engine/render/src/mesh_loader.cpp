@@ -761,6 +761,27 @@ core::u32 MeshLoader::forget(rhi::IDevice& device, std::span<const core::NameAto
         if (!urn.valid())
             continue;
 
+        // **The blacklist is cleared too, and leaving it was a defect that
+        // defeated the whole point of this function.**
+        //
+        // `failed_` remembers a URN that would not load so it costs one attempt
+        // rather than one per frame for ever -- and it was cleared nowhere but
+        // `destroy`. So an asset that failed to import once was blacklisted for
+        // the life of the loader: somebody fixed the file, the watcher called
+        // this to drop the stale entry, `sync` found the URN still blacklisted
+        // and skipped it, and the fix did not appear until the editor was
+        // restarted. Which is precisely what ADR 0062's "a changed asset
+        // reloads itself" promises does not happen.
+        //
+        // Forgetting a URN means forgetting everything about it, the refusal
+        // included: the next `sync` is entitled to try again, because the reason
+        // it failed may be the thing that just changed.
+        if (const auto at = std::lower_bound(failed_.begin(), failed_.end(), urn,
+                                             [](core::NameAtom a, core::NameAtom b) { return a.id < b.id; });
+            at != failed_.end() && at->id == urn.id) {
+            failed_.erase(at);
+        }
+
         // The texture, whose handle this owns the lifetime of once it is out of
         // the library. Destroyed here rather than left: a dev session that
         // reloads one 4K map fifty times would otherwise hold fifty of them.

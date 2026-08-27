@@ -497,3 +497,66 @@ TEST_CASE("meshes arrive one frame at a time, or all at once, and it is a decisi
         cache.destroy(*fixture.device);
     }
 }
+
+TEST_CASE("forgetting a mesh forgets that it failed, so a fixed file loads")
+{
+    // **The defect this pins defeated `forget`'s whole purpose.** `failed_`
+    // remembers a URN that would not load so it costs one attempt rather than
+    // one per frame for ever -- and it was cleared nowhere but `destroy`. So an
+    // asset that failed once was blacklisted for the life of the loader:
+    // somebody fixed the file, the watcher called `forget`, `sync` found the URN
+    // still blacklisted and skipped it, and the fix did not appear until the
+    // editor was restarted. ADR 0062 promises exactly that does not happen.
+    Fixture fixture;
+    const scene::ClassId meshPartClass = fixture.classes.registerClass({
+        .name = fixture.atoms.intern("MeshPart"),
+        .defaultName = fixture.atoms.intern("MeshPart"),
+    });
+    const scene::ClassId workspaceClass = fixture.classes.registerClass({
+        .name = fixture.atoms.intern("Workspace"),
+        .defaultName = fixture.atoms.intern("Workspace"),
+    });
+
+    std::error_code ec;
+    const std::filesystem::path root = std::filesystem::temp_directory_path(ec) / "luaug-forget-failed" / "import";
+    std::filesystem::remove_all(root, ec);
+    const CompiledFixtures compiled = compileFixtures(root);
+    if (compiled.urns.empty()) {
+        MESSAGE("LUAUG_TEST_SKIP: this build stages no glTF fixtures to compile");
+        return;
+    }
+
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    const core::InstanceId workspace = world.create(workspaceClass);
+    const core::InstanceId part = world.create(meshPartClass);
+    world.parts().add(part, scene::PartComponent{});
+    scene::MeshPartComponent mesh;
+    mesh.meshContent = world.atoms().intern(compiled.urns.front());
+    world.meshParts().add(part, mesh);
+    (void)world.setParent(part, workspace);
+
+    render::MeshCache cache;
+    render::MeshLibrary library;
+    render::TextureLibrary textures;
+    render::MeshLoader loader;
+
+    // **First, with no mounts at all**, so the URN cannot resolve and is
+    // blacklisted -- which is the state a broken file leaves behind.
+    CHECK(loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library) == 0u);
+    CHECK(library.find(mesh.meshContent) == nullptr);
+
+    // The mount arrives, which is the file being fixed. Without forgetting the
+    // refusal this still loads nothing, for ever.
+    asset::ContentMounts mounts;
+    REQUIRE_FALSE(mounts.mountObjects(compiled.objects, compiled.index).has_value());
+    loader.setContentMounts(&mounts);
+
+    const std::array<core::NameAtom, 1> forgotten{mesh.meshContent};
+    (void)loader.forget(*fixture.device, forgotten, textures, library, cache);
+
+    CHECK(loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library) == 1u);
+    CHECK(library.find(mesh.meshContent) != nullptr);
+
+    loader.destroy(*fixture.device);
+    cache.destroy(*fixture.device);
+}

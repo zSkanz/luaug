@@ -27,6 +27,7 @@ luaug_add_module(render
         src/settings.cpp
         src/transform_history.cpp
         src/mesh_loader.cpp
+        src/terrain_loader.cpp
         src/scene_types.cpp
         src/shadow.cpp
         src/ui_renderer.cpp

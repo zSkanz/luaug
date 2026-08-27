@@ -2,6 +2,7 @@
 
 #include "luaug/render/lighting.h"
 #include "luaug/render/shader_types.h"
+#include "luaug/render/terrain_loader.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
@@ -675,6 +676,93 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .boneCount = boneCount,
                 .outlined = isOutlined(id),
             });
+        }
+    });
+
+    // --- Terrain (F1, ADR 0067) ---------------------------------------------
+    //
+    // **Terrain is not made of `MeshPart`s**, and the reason is mechanical:
+    // `attachPartComponents` adds a `RigidBodyComponent` to every `BasePart`
+    // with no condition and `applyScene` has no skip, so a few hundred generated
+    // terrain parts would be a few hundred phantom bodies in the broadphase, a
+    // few hundred more instances in every snapshot, and a few hundred rows in
+    // the Explorer. `TerrainLoader` files the meshes under a URN of their own
+    // and this emits their draws directly.
+    //
+    // **No LOD chain.** `MeshLodRange` picks a level per draw from projected
+    // error, and two neighbouring tiles picking different levels on different
+    // frames is a crack that appears and disappears. For terrain the level is a
+    // residency decision, baked into what was meshed.
+    world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
+        if (!inWorld(world, id, root))
+            return;
+
+        for (const asset::TileKey key : terrain.field.tileKeys()) {
+            const core::NameAtom urn = world.atoms().lookup(terrainTileUrn(id, key));
+            if (!urn.valid())
+                continue;
+            const MeshLibrary::Entry* entry = meshes.find(urn);
+            // Skipped rather than substituted, exactly as a missing mesh is: a
+            // tile whose geometry has not been built yet is ground that is not
+            // there for a frame, and drawing a placeholder for it would be a
+            // hole nobody notices.
+            if (entry == nullptr || !entry->mesh.valid())
+                continue;
+
+            // **The mesher works in the field's own space, which IS world
+            // space**, so the only transform a tile needs is the floating-origin
+            // rebase every other draw gets. There is no per-tile placement to
+            // get wrong.
+            const Mat4 transform = core::toRenderMatrix(core::CFrameD{}, origin);
+            const AABB worldBounds = core::transformed(transform, entry->bounds);
+            const bool visible = core::intersects(out.camera.frustum, worldBounds);
+
+            for (u32 section = 0; section < entry->sectionCount; ++section) {
+                u32 localMaterial = 0;
+                if (section < entry->sectionMaterial.size())
+                    localMaterial = entry->sectionMaterial[section];
+
+                // Deduplicated across the frame by (urn, local index) so the
+                // sort key groups draws that share a bind set. A linear scan,
+                // because an unordered container's iteration order must not
+                // reach observable output (R10).
+                u32 materialSlot = 0;
+                bool found = false;
+                for (usize at = 0; at < resolved.size(); ++at) {
+                    if (resolved[at].content == urn && resolved[at].local == localMaterial &&
+                        !resolved[at].material.valid()) {
+                        materialSlot = static_cast<u32>(at);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    materialSlot = static_cast<u32>(out.materials.size());
+                    out.materials.push_back(localMaterial < entry->materials.size() ? entry->materials[localMaterial]
+                                                                                    : RenderMaterial{});
+                    resolved.push_back(ResolvedMaterial{urn, localMaterial, materialSlot, core::InstanceId{},
+                                                        Color3{1.0f, 1.0f, 1.0f}});
+                }
+
+                const Vec3 centre = core::center(worldBounds);
+                const f32 depth = core::length(centre);
+                out.draws.push_back(DrawItem{
+                    .sortKey = drawSortKey(kOpaquePass, kStaticPipeline, materialSlot,
+                                           drawGeometryKey(entry->mesh.index, section), depth),
+                    .transform = transform,
+                    .mesh = entry->mesh,
+                    .section = section,
+                    .material = materialSlot,
+                    .alpha = 1.0f,
+                    .transparent = false,
+                    .boundsCenter = centre,
+                    .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
+                    .inCameraFrustum = visible,
+                    .firstBone = 0,
+                    .boneCount = 0,
+                    .outlined = isOutlined(id),
+                });
+            }
         }
     });
 
