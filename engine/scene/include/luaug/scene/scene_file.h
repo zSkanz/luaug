@@ -2,6 +2,7 @@
 
 #include <luaug/core/error.h>
 #include <luaug/core/id.h>
+#include <luaug/core/name_atom.h>
 
 #include <functional>
 #include <memory>
@@ -9,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 // A world, written down.
 //
@@ -225,5 +227,31 @@ readScene(World& world, std::string_view json, SceneIoReport* report = nullptr, 
 // instance of that stamp any more, which is the rule the writer already applies.
 [[nodiscard]] core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, std::string_view before,
                                 std::string_view after, SceneIoReport* report = nullptr);
+
+// One instance's overrides: the properties of `id` that differ from the stamp it
+// was placed from, in declaration order.
+//
+// **The same question the save asks, asked out loud** (S5.6). ADR 0049 was
+// reversed to inheritance-with-overrides -- an instance inherits from its stamp,
+// a change to one instance stays local, a change to the stamp reaches every
+// instance that has not overridden that property -- and the SAVE has understood
+// that since ADR 0051. Nothing else could: a person editing a placed lamp post
+// could not see which of its properties were its own and which came from the
+// file, so there was nothing to revert and nothing to push back up.
+//
+// `id` need not be the stamped instance itself. Anything inside a placed stamp
+// answers, measured against the corresponding instance in the stamp's own tree,
+// which is found by walking the same child indices from each root.
+//
+// **Empty is three answers at once and deliberately not told apart**: `id` is
+// not inside a placed stamp, the stamp cannot be read, or nothing differs. A
+// caller draws a mark for a non-empty set and nothing otherwise, and none of the
+// three is a mark.
+//
+// Structural changes are not overrides and never appear here: a child added or
+// removed inside an instance makes it a different shape from the file, which the
+// save writes in full and counts, and which this reports as no overrides at all
+// rather than as every property being one.
+[[nodiscard]] std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId id, StampLibrary& stamps);
 
 } // namespace luaug::scene

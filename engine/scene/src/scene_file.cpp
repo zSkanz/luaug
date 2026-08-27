@@ -292,6 +292,57 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
 // placed instance would turn a mark and a placement into a claim about an edit
 // nobody made. Anything else is written as a full scene path, which the loader
 // has resolved through its deferred pass since the format existed.
+// Whether one property of one instance differs from the same property of the
+// instance it was stamped from.
+//
+// **One definition, asked by two callers** (S5.6). The save writes what differs;
+// the Properties panel MARKS what differs, and offers to revert or apply it. If
+// those two answered the question separately they would disagree the first time
+// either was touched, and the panel would offer to revert something the save had
+// already decided was not an override -- which reads as the editor lying about
+// what it is holding.
+[[nodiscard]] bool differsFromReference(const World& live, const PropertyDesc& property, std::string_view name,
+                                        const World& reference, core::InstanceId refId, core::InstanceId stampRoot,
+                                        core::InstanceId referenceRoot, const Value& mine)
+{
+    // The same property on the reference, found by NAME because the two worlds
+    // share their registries but not their ids.
+    const core::NameAtom referenceAtom = reference.atoms().lookup(name);
+    const PropertyDesc* referenceProperty =
+        referenceAtom.valid() ? reference.classes().findProperty(reference.classOf(refId), referenceAtom) : nullptr;
+    std::optional<Value> theirs;
+    if (referenceProperty != nullptr && referenceProperty->get != nullptr)
+        theirs = referenceProperty->get(reference, refId);
+
+    // **`get_if`, and the descriptor's declared type is not enough to justify
+    // `get`.** A getter answers `Value{}` -- Nil -- for an instance whose
+    // component is not there, which every accessor in the tree does and which is
+    // not an error; `std::get` on that throws `bad_variant_access`, and an
+    // exception raised here is not caught anywhere between this and `main`. It
+    // terminated the editor on save, in a project a person was in the middle of
+    // building (D140). Ask what the value HOLDS, never what the schema says it
+    // should.
+    if (property.type == ValueType::Instance) {
+        const core::InstanceId* liveHeld = std::get_if<core::InstanceId>(&mine);
+        const core::InstanceId* refHeld = theirs.has_value() ? std::get_if<core::InstanceId>(&*theirs) : nullptr;
+        const core::InstanceId liveTarget = liveHeld != nullptr ? *liveHeld : core::InstanceId{};
+        const core::InstanceId refTarget = refHeld != nullptr ? *refHeld : core::InstanceId{};
+        if (!liveTarget.valid() && !refTarget.valid())
+            return false;
+        // Ids are not comparable; paths under each subtree's own root are. Equal
+        // paths mean the stamp's own reference untouched, which is not an
+        // override -- recording one per placed instance would turn a mark and a
+        // placement into a claim about an edit nobody made (D142).
+        const std::optional<std::string> livePath = pathUnder(live, stampRoot, liveTarget);
+        const std::optional<std::string> refPath = pathUnder(reference, referenceRoot, refTarget);
+        if (livePath.has_value() && refPath.has_value() && *livePath == *refPath)
+            return false;
+        return true;
+    }
+
+    return !theirs.has_value() || !(*theirs == mine);
+}
+
 void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, core::InstanceId liveId,
                       const World& reference, core::InstanceId refId, core::InstanceId stampRoot,
                       core::InstanceId referenceRoot, const std::unordered_map<core::u32, std::string>& paths,
@@ -313,40 +364,8 @@ void collectOverrides(JsonWriter& out, bool& anyOverride, const World& live, cor
             if (!mine.has_value())
                 continue;
 
-            // The same property on the reference, found by NAME because the two
-            // worlds share their registries but not their ids.
-            const core::NameAtom referenceAtom = reference.atoms().lookup(name);
-            const PropertyDesc* referenceProperty =
-                referenceAtom.valid() ? reference.classes().findProperty(reference.classOf(refId), referenceAtom)
-                                      : nullptr;
-            std::optional<Value> theirs;
-            if (referenceProperty != nullptr && referenceProperty->get != nullptr)
-                theirs = referenceProperty->get(reference, refId);
-            // **`get_if`, and the descriptor's declared type is not enough to
-            // justify `get`.** A getter answers `Value{}` -- Nil -- for an
-            // instance whose component is not there, which every accessor in
-            // the tree does and which is not an error; `std::get` on that
-            // throws `bad_variant_access`, and an exception raised here is not
-            // caught anywhere between this and `main`. It terminated the editor
-            // on save, in a project a person was in the middle of building.
-            // Ask what the value HOLDS, never what the schema says it should.
-            if (property.type == ValueType::Instance) {
-                const core::InstanceId* liveHeld = std::get_if<core::InstanceId>(&*mine);
-                const core::InstanceId* refHeld =
-                    theirs.has_value() ? std::get_if<core::InstanceId>(&*theirs) : nullptr;
-                const core::InstanceId liveTarget = liveHeld != nullptr ? *liveHeld : core::InstanceId{};
-                const core::InstanceId refTarget = refHeld != nullptr ? *refHeld : core::InstanceId{};
-                if (!liveTarget.valid() && !refTarget.valid())
-                    continue;
-                const std::optional<std::string> livePath = pathUnder(live, stampRoot, liveTarget);
-                const std::optional<std::string> refPath = pathUnder(reference, referenceRoot, refTarget);
-                if (livePath.has_value() && refPath.has_value() && *livePath == *refPath)
-                    continue;
-            }
-            else if (theirs.has_value() && *theirs == *mine) {
+            if (!differsFromReference(live, property, name, reference, refId, stampRoot, referenceRoot, *mine))
                 continue;
-            }
-
             if (!anyHere) {
                 if (!anyOverride) {
                     out.key("overrides");
@@ -1203,6 +1222,84 @@ core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, s
     }
 
     return refreshed;
+}
+
+std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId id, StampLibrary& stamps)
+{
+    if (!world.alive(id))
+        return {};
+
+    // **Up to the nearest stamped ancestor, including `id` itself.** A person
+    // selects the part inside the lamp post as readily as the lamp post, and
+    // both questions are the same one measured from the same root.
+    core::InstanceId stampRoot = id;
+    core::NameAtom mark{};
+    while (stampRoot.valid()) {
+        mark = world.stampOf(stampRoot);
+        if (mark.valid())
+            break;
+        stampRoot = world.parentOf(stampRoot);
+    }
+    if (!stampRoot.valid() || !mark.valid())
+        return {};
+
+    const StampLibrary::Entry* entry = stamps.reference(std::string(world.atoms().text(mark)));
+    if (entry == nullptr || entry->world == nullptr || !entry->root.valid())
+        return {};
+
+    // The child indices from the stamp root down to `id`, then the same walk
+    // from the reference's root. Indices rather than names, because two siblings
+    // may share a name and the save pairs them positionally too.
+    std::vector<core::u32> descent;
+    for (core::InstanceId step = id; step != stampRoot; step = world.parentOf(step)) {
+        const core::InstanceId parent = world.parentOf(step);
+        if (!parent.valid())
+            return {};
+        core::u32 index = 0;
+        core::InstanceId child = world.firstChild(parent);
+        while (child.valid() && child != step) {
+            child = world.nextSibling(child);
+            ++index;
+        }
+        if (!child.valid())
+            return {};
+        descent.push_back(index);
+    }
+
+    const World& reference = *entry->world;
+    core::InstanceId refId = entry->root;
+    for (auto step = descent.rbegin(); step != descent.rend(); ++step) {
+        core::InstanceId child = reference.firstChild(refId);
+        for (core::u32 skipped = 0; skipped < *step && child.valid(); ++skipped)
+            child = reference.nextSibling(child);
+        if (!child.valid())
+            return {};
+        refId = child;
+    }
+
+    // A different class is a different instance, not an instance with every
+    // property overridden.
+    if (world.classOf(id) != reference.classOf(refId))
+        return {};
+
+    std::vector<core::NameAtom> overridden;
+    const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    for (const ClassDescriptor* current = descriptor; current != nullptr;
+         current = world.classes().find(current->super)) {
+        for (const PropertyDesc& property : current->properties) {
+            if (property.get == nullptr || property.set == nullptr || property.readOnly)
+                continue;
+            const std::string_view name = world.atoms().text(property.name);
+            if (isStructuralProperty(name))
+                continue;
+            const std::optional<Value> mine = property.get(world, id);
+            if (!mine.has_value())
+                continue;
+            if (differsFromReference(world, property, name, reference, refId, stampRoot, entry->root, *mine))
+                overridden.push_back(property.name);
+        }
+    }
+    return overridden;
 }
 
 } // namespace luaug::scene

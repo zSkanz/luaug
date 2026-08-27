@@ -13,6 +13,7 @@
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <optional>
 #include <string>
@@ -887,4 +888,172 @@ TEST_CASE("an untouched reference inside a placed stamp is not an override")
     CHECK(wrote.stamped == 1);
     CHECK(wrote.overrides == 0);
     CHECK(text.find("overrides") == std::string::npos);
+}
+
+// --- Which properties a placed stamp has of its own (S5.6) -------------------
+//
+// The SAVE has understood overrides since ADR 0051: an instance inherits from
+// its stamp, a change to one instance stays local, a change to the stamp reaches
+// every instance that has not overridden that property. Nothing could ASK the
+// same question, so a person editing a placed lamp post could not see which of
+// its properties were its own and which came from the file -- and therefore had
+// nothing to revert and nothing to push back up.
+//
+// `stampOverrides` is that question, and it shares its comparison with the
+// writer rather than restating it: two definitions of "differs" would disagree
+// the first time either was touched, and the panel would offer to revert
+// something the save had already decided was not an override.
+
+namespace {
+
+// A placed stamp of one part with one child, and the text to read it back from.
+struct PlacedStamp
+{
+    core::InstanceId root;
+    core::InstanceId child;
+    std::string text;
+};
+
+[[nodiscard]] PlacedStamp placeStamp(Fixture& fixture, core::InstanceId parent)
+{
+    PlacedStamp placed;
+    placed.root = partUnder(fixture, parent, "Post", {1.0, 2.0, 3.0});
+    placed.child = partUnder(fixture, placed.root, "Lamp", {0.0, 4.0, 0.0});
+    placed.text = scene::writeStamp(fixture.world, placed.root);
+    fixture.world.setStamp(placed.root, fixture.atom("lamppost"));
+    return placed;
+}
+
+[[nodiscard]] bool holds(const std::vector<core::NameAtom>& names, core::NameAtom wanted)
+{
+    return std::find(names.begin(), names.end(), wanted) != names.end();
+}
+
+} // namespace
+
+TEST_CASE("a placed stamp nobody touched has no overrides at all")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+
+    const auto source = [&placed](std::string_view) -> std::optional<std::string> { return placed.text; };
+    scene::StampLibrary library(fixture.world, source);
+
+    // **The case the whole thing rests on.** If a freshly placed instance
+    // reported overrides, every stamp in a world would come up marked and the
+    // mark would mean nothing.
+    CHECK(scene::stampOverrides(fixture.world, placed.root, library).empty());
+    CHECK(scene::stampOverrides(fixture.world, placed.child, library).empty());
+}
+
+TEST_CASE("the property somebody changed is the property reported, and only it")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+
+    (void)fixture.world.setProperty(placed.root, fixture.schema.transparencyProperty, scene::Value{0.5f});
+
+    const auto source = [&placed](std::string_view) -> std::optional<std::string> { return placed.text; };
+    scene::StampLibrary library(fixture.world, source);
+
+    const std::vector<core::NameAtom> overrides = scene::stampOverrides(fixture.world, placed.root, library);
+    CHECK(holds(overrides, fixture.schema.transparencyProperty));
+    // Not `Size`, not `CFrame`. A panel that marked every property would be as
+    // useless as one that marked none.
+    CHECK_FALSE(holds(overrides, fixture.schema.sizeProperty));
+    CHECK_FALSE(holds(overrides, fixture.schema.cframeProperty));
+    CHECK(overrides.size() == 1);
+}
+
+TEST_CASE("an instance INSIDE a placed stamp answers for itself")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+
+    // A person selects the lamp as readily as the post it hangs on, and the
+    // question is the same one measured from the same root.
+    (void)fixture.world.setProperty(placed.child, fixture.schema.sizeProperty,
+                                    scene::Value{core::Vec3{9.0f, 9.0f, 9.0f}});
+
+    const auto source = [&placed](std::string_view) -> std::optional<std::string> { return placed.text; };
+    scene::StampLibrary library(fixture.world, source);
+
+    CHECK(holds(scene::stampOverrides(fixture.world, placed.child, library), fixture.schema.sizeProperty));
+    // And the ROOT is untouched, which is what makes the mark per-instance
+    // rather than per-stamp.
+    CHECK(scene::stampOverrides(fixture.world, placed.root, library).empty());
+}
+
+TEST_CASE("an instance that is not in a stamp reports nothing rather than everything")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId loose = partUnder(fixture, workspace, "Loose", {});
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+
+    const auto source = [&placed](std::string_view) -> std::optional<std::string> { return placed.text; };
+    scene::StampLibrary library(fixture.world, source);
+
+    // Nothing to measure against is not "every property differs".
+    CHECK(scene::stampOverrides(fixture.world, loose, library).empty());
+}
+
+TEST_CASE("a stamp the source cannot read reports nothing rather than guessing")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+    (void)fixture.world.setProperty(placed.root, fixture.schema.transparencyProperty, scene::Value{0.5f});
+
+    const auto missing = [](std::string_view) -> std::optional<std::string> { return std::nullopt; };
+    scene::StampLibrary library(fixture.world, missing);
+
+    // A deleted stamp file must not make every property look overridden, which
+    // is what a panel would draw if this answered by comparing against nothing.
+    CHECK(scene::stampOverrides(fixture.world, placed.root, library).empty());
+}
+
+TEST_CASE("a structural change reports no overrides, which is what the save does too")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+
+    // A child added inside an instance makes it a different shape from the file.
+    // The save writes such an instance IN FULL and drops its mark; reporting
+    // every property as an override instead would offer a revert that cannot be
+    // honoured.
+    (void)partUnder(fixture, placed.root, "Extra", {});
+
+    const auto source = [&placed](std::string_view) -> std::optional<std::string> { return placed.text; };
+    scene::StampLibrary library(fixture.world, source);
+
+    CHECK(scene::stampOverrides(fixture.world, placed.root, library).empty());
+}
+
+TEST_CASE("the query and the save agree about what an override is")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const PlacedStamp placed = placeStamp(fixture, workspace);
+
+    (void)fixture.world.setProperty(placed.root, fixture.schema.transparencyProperty, scene::Value{0.25f});
+    (void)fixture.world.setProperty(placed.child, fixture.schema.sizeProperty,
+                                    scene::Value{core::Vec3{1.0f, 1.0f, 1.0f}});
+
+    const auto source = [&placed](std::string_view) -> std::optional<std::string> { return placed.text; };
+    scene::StampLibrary library(fixture.world, source);
+
+    SceneIoReport wrote;
+    (void)scene::writeScene(fixture.world, &wrote, &library);
+
+    // **One definition, two callers.** The save counts overrides as it writes
+    // them; the query lists them. A drift between the two is a panel offering to
+    // revert something the file does not record, and this is what would catch it.
+    const core::u32 listed = static_cast<core::u32>(scene::stampOverrides(fixture.world, placed.root, library).size() +
+                                                    scene::stampOverrides(fixture.world, placed.child, library).size());
+    CHECK(listed == wrote.overrides);
 }
