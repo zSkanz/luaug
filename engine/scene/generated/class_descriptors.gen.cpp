@@ -1065,7 +1065,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 5> terrainMethods;
+    static std::array<MethodDesc, 6> terrainMethods;
     terrainMethods = {{
         MethodDesc{
             .name = atoms.intern("FillBall"),
@@ -1078,6 +1078,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "The same, as an axis-aligned box. Returns how many cells it changed.",
+        },
+        MethodDesc{
+            .name = atoms.intern("PaintBall"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Changes what the ground is MADE OF, without changing where it is. Returns how many cells it changed.\012\012**It edits no distance at all**, which is the whole difference between this and `FillBall`. It writes material where there is already ground and nowhere else, creates no voxel brick and promotes no column -- so painting a hillside leaves the hillside exactly as cheap as it was.\012\012A `material` of zero is refused rather than treated as erase. Zero means erase to `FillBall`, and picking the first entry of a material list must not delete the ground you were about to paint.",
         },
         MethodDesc{
             .name = atoms.intern("HeightAt"),

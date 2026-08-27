@@ -1,3 +1,4 @@
+#include <luaug/app/brush_overlay.h>
 #include <luaug/app/editor.h>
 #include <luaug/core/json.h>
 #include <luaug/core/json_writer.h>
@@ -379,6 +380,31 @@ namespace {
 // everything. An unknown word falls back rather than failing: a project written
 // by a newer build should still open here, minus what this one cannot say --
 // which is the rule the scene format already follows.
+// The tool's name in the preferences file, and back. Unknown reads as `Select`,
+// which is the tool that cannot lose work: a file written by a newer editor
+// naming a tool this one does not have should open in the safe one.
+[[nodiscard]] std::string_view toolName(Editor::Tool tool) noexcept
+{
+    switch (tool) {
+    case Editor::Tool::Sculpt:
+        return "sculpt";
+    case Editor::Tool::Paint:
+        return "paint";
+    case Editor::Tool::Select:
+        break;
+    }
+    return "select";
+}
+
+[[nodiscard]] Editor::Tool toolFrom(std::string_view name) noexcept
+{
+    if (name == "sculpt")
+        return Editor::Tool::Sculpt;
+    if (name == "paint")
+        return Editor::Tool::Paint;
+    return Editor::Tool::Select;
+}
+
 [[nodiscard]] std::string_view gizmoModeName(GizmoMode mode) noexcept
 {
     switch (mode) {
@@ -479,6 +505,16 @@ void Editor::rememberState(const std::filesystem::path& stateDirectory) const
     for (const f32 step : m_snapStep)
         writer.value(static_cast<core::f64>(step));
     writer.endArray();
+    // The word again, for the third time and the same argument: `"tool": 1`
+    // names nothing and `sculpt` is what the toolbar itself says.
+    writer.field("tool", toolName(m_tool));
+    writer.key("brush");
+    writer.beginObject();
+    writer.field("radius", static_cast<core::f64>(m_brush.radius));
+    writer.field("spacing", static_cast<core::f64>(m_brush.spacing));
+    writer.field("material", static_cast<core::f64>(m_brush.material));
+    writer.field("erase", m_brush.erase);
+    writer.endObject();
     writer.endObject();
 
     writer.key("panels");
@@ -554,6 +590,20 @@ void Editor::recallState(const std::filesystem::path& stateDirectory)
                 const auto step = static_cast<f32>(steps.at(index).asNumber());
                 m_snapStep[index] = step > 0.0f ? step : m_snapStep[index];
             }
+        }
+        m_tool = toolFrom(tools["tool"].asString());
+        if (const core::JsonValue brush = tools["brush"]; brush.type() == core::JsonType::Object) {
+            // **Through the setters, so a hand-edited file cannot make a brush
+            // the UI could not have made.** A radius of zero stamps nothing and
+            // a material of zero would erase the world on the first click.
+            if (const core::JsonValue radius = brush["radius"]; radius.type() == core::JsonType::Number)
+                setBrushRadius(static_cast<f32>(radius.asNumber()));
+            if (const core::JsonValue spacing = brush["spacing"]; spacing.type() == core::JsonType::Number)
+                setBrushSpacing(static_cast<f32>(spacing.asNumber()));
+            if (const core::JsonValue material = brush["material"]; material.type() == core::JsonType::Number)
+                setBrushMaterial(static_cast<core::u8>(std::clamp(material.asNumber(), 0.0, 255.0)));
+            if (const core::JsonValue erase = brush["erase"]; erase.type() == core::JsonType::Boolean)
+                m_brush.erase = erase.asBool();
         }
     }
 
@@ -2738,6 +2788,199 @@ void Editor::setPointer(core::Vec2 pixelInViewport, bool pressed, bool down) noe
     m_pointer = pixelInViewport;
     m_pointerPressed = pressed;
     m_pointerDown = down;
+}
+
+// --- The brush (F1) ----------------------------------------------------------
+
+void Editor::setTool(Tool tool) noexcept
+{
+    // Refused mid-stroke, exactly as `setGizmoMode` is refused mid-drag.
+    if (m_stroke.has_value())
+        return;
+    m_tool = tool;
+    m_preferencesDirty = true;
+}
+
+void Editor::setBrushRadius(f32 metres) noexcept
+{
+    // A radius of zero stamps nothing and a huge one would ask for a million
+    // voxel writes in a frame, so both ends are clamped rather than refused --
+    // a slider that stops is better than one that does nothing at its end.
+    m_brush.radius = std::clamp(metres, 0.25f, 64.0f);
+    m_preferencesDirty = true;
+}
+
+void Editor::setBrushSpacing(f32 fraction) noexcept
+{
+    // Below about a tenth the stamps overlap so heavily that a drag costs
+    // hundreds of edits and looks identical; above one they stop overlapping at
+    // all and a stroke becomes a dotted line.
+    m_brush.spacing = std::clamp(fraction, 0.1f, 1.0f);
+    m_preferencesDirty = true;
+}
+
+void Editor::setBrushMaterial(core::u8 material) noexcept
+{
+    // **Never zero.** Zero means erase to `fillBall`, and a material picker
+    // whose first entry deleted the hillside would be the worst possible
+    // reading of one shared convention -- erasing is the `erase` flag.
+    m_brush.material = material == 0 ? 1 : material;
+    m_preferencesDirty = true;
+}
+
+namespace {
+
+// The terrain a click can reach: the one under the root the viewport is
+// drawing.
+//
+// A walk of the root's children rather than the first entry of the pool,
+// because a stamp stage has a world of its own and its terrain is not the
+// host's -- and because a pool's first entry is an allocation order, which is
+// not a fact anybody clicking on the ground has in mind.
+[[nodiscard]] core::InstanceId terrainUnder(const scene::World& world, core::InstanceId root)
+{
+    if (!root.valid())
+        return {};
+    for (core::InstanceId child = world.firstChild(root); child.valid(); child = world.nextSibling(child)) {
+        if (world.terrains().find(child) != nullptr)
+            return child;
+    }
+    return {};
+}
+
+} // namespace
+
+bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector)
+{
+    // **The aim is cleared first, every frame.** It is what the ring is drawn
+    // from, and a stale one would leave a brush hanging in the air over a tool
+    // that is no longer the brush.
+    m_brushAim.reset();
+
+    // **Looked for every frame, before the tool is even consulted.** The toolbar
+    // shows the brush only when there is ground to use it on, and it is drawn
+    // from this -- so the answer has to be current whichever tool is selected.
+    const core::InstanceId terrainId = terrainUnder(world, root);
+    scene::TerrainComponent* terrain = terrainId.valid() ? world.terrains().find(terrainId) : nullptr;
+    m_hasTerrain = terrain != nullptr;
+
+    if (m_tool == Tool::Select) {
+        m_stroke.reset();
+        return false;
+    }
+
+    if (terrain == nullptr) {
+        m_stroke.reset();
+        // **A tool with nothing to act on does not eat the click.** Somebody who
+        // left the brush selected and clicked a part meant to select the part,
+        // and a world with no terrain in it cannot have meant anything else.
+        return false;
+    }
+
+    // **Against the frozen field while a stroke is running**, against the live
+    // one while merely hovering -- so the ring follows the ground as it is, and
+    // the stamps go where the stroke was aimed when it began. `Stroke::aimField`
+    // says at length why.
+    const PickRay ray = rayThrough(m_pointer);
+    const asset::TerrainField& aimAt = m_stroke.has_value() ? m_stroke->aimField : terrain->field;
+    m_brushAim = asset::raycastField(aimAt, ray.origin, ray.direction, BrushReach);
+
+    // The button came up, or the stroke ran out of ground under it.
+    if (m_stroke.has_value() && !m_pointerDown) {
+        // **An editor says what it did.** The manipulator has no equivalent
+        // because a drag's result is on screen; a stroke's is a number of edits
+        // nobody can count by looking, and it is the cheapest evidence that the
+        // brush did what the drag asked rather than one stamp or a thousand.
+        m_lastStrokeStamps = m_stroke->stamps;
+        m_stroke.reset();
+        // The release belongs to the brush: without this the same click that
+        // finished a stroke falls through and selects whatever is under it.
+        m_pending.reset();
+        return true;
+    }
+
+    if (!m_brushAim.has_value()) {
+        // Over the sky. A stroke already running keeps running -- a drag that
+        // crosses a gap in the ground is one stroke, not two -- but it stamps
+        // nothing this frame.
+        if (m_stroke.has_value())
+            return true;
+        return false;
+    }
+
+    if (!m_stroke.has_value()) {
+        if (!m_pointerPressed)
+            // Hovering. The ring is drawn from `m_brushAim`, and the pointer is
+            // still the manipulator's and the pick's.
+            return false;
+
+        // **One undo step for the whole stroke**, recorded before the first
+        // stamp writes anything. A terrain snapshot is a vector of shared
+        // pointers to tiles nobody is about to change, so this costs a copy of
+        // the index and not a copy of the ground (ADR 0067).
+        Stroke stroke;
+        stroke.terrain = terrainId;
+        stroke.gesture = inspector.beginGesture();
+        stroke.last = m_brushAim->position;
+        stroke.aimField = terrain->field;
+        m_history.record(world, m_tool == Tool::Paint ? "Paint Terrain" : (m_brush.erase ? "Dig" : "Sculpt"),
+                         stroke.gesture);
+        m_stroke = stroke;
+
+        applyBrushAt(*terrain, m_brushAim->position);
+        m_stroke->stamps += 1;
+        m_pending.reset();
+        return true;
+    }
+
+    // **A drag in progress, walked in metres.** Every stamp between the last one
+    // and where the pointer is now, so the stroke is a function of where the
+    // pointer went rather than of how many frames it took to get there.
+    //
+    // `m_stroke->last` is the last STAMP, not last frame's pointer, and it only
+    // moves when a stamp happens -- which is what makes a slow drag at 120 Hz
+    // and a fast one at 30 leave the same ground rather than merely similar
+    // ground. Advancing it every frame was the defect: at a high framerate every
+    // step was shorter than one stamp, so the whole drag stamped once.
+    const auto radius = static_cast<double>(m_brush.radius);
+    const auto spacing = static_cast<double>(m_brush.spacing);
+    if (!strokeAdvanced(m_stroke->last, m_brushAim->position, radius, spacing)) {
+        m_pending.reset();
+        return true;
+    }
+
+    // **The first entry IS the last stamp**, because the walk starts at `from`
+    // -- so it is skipped rather than re-applied, and the anchor moves to the
+    // last entry rather than to the pointer. The pointer is ahead of the last
+    // stamp by the fraction of a step not yet walked, and that fraction is
+    // carried into the next frame rather than dropped.
+    const std::vector<core::DVec3> stamps = strokeStamps(m_stroke->last, m_brushAim->position, radius, spacing);
+    for (core::usize at = 1; at < stamps.size(); ++at) {
+        applyBrushAt(*terrain, stamps[at]);
+        m_stroke->stamps += 1;
+    }
+    if (!stamps.empty())
+        m_stroke->last = stamps.back();
+
+    // The gesture is still the same one, so the undo step above is still the
+    // step this belongs to; nothing more to record.
+    m_pending.reset();
+    return true;
+}
+
+void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 at)
+{
+    const auto radius = static_cast<double>(m_brush.radius);
+    if (m_tool == Tool::Paint) {
+        asset::paintBall(terrain.field, at, radius, m_brush.material);
+    }
+    else {
+        asset::fillBall(terrain.field, at, radius, m_brush.erase ? core::u8{0} : m_brush.material);
+    }
+    // **Bumped here and nowhere else**, so the renderer and the physics mirror
+    // both learn about a stamp through the one path they already read.
+    terrain.fieldRevision += 1;
+    m_sceneDirty = true;
 }
 
 bool Editor::driveGizmo(scene::World& world, Inspector& inspector)

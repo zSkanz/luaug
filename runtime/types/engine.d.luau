@@ -895,6 +895,14 @@ declare extern type Terrain extends Instance with
     function FillBall(self, center: vector, radius: number, material: number): number
     --- The same, as an axis-aligned box. Returns how many cells it changed.
     function FillBlock(self, center: vector, size: vector, material: number): number
+    --- Changes what the ground is MADE OF, without changing where it is. Returns how many cells it
+    --- changed. **It edits no distance at all**, which is the whole difference between this and
+    --- `FillBall`. It writes material where there is already ground and nowhere else, creates no voxel
+    --- brick and promotes no column -- so painting a hillside leaves the hillside exactly as cheap as
+    --- it was. A `material` of zero is refused rather than treated as erase. Zero means erase to
+    --- `FillBall`, and picking the first entry of a material list must not delete the ground you were
+    --- about to paint.
+    function PaintBall(self, center: vector, radius: number, material: number): number
     --- The height of the ground at this column, in metres. **It answers about the height layer and says
     --- nothing about caves**, which is the honest shape of the question: a column with a cave in it has
     --- no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first

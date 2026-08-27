@@ -1174,6 +1174,25 @@ local Classes: { Schema.Class } = {
                 Doc = "The same, as an axis-aligned box. Returns how many cells it changed.",
             },
             {
+                Name = "PaintBall",
+                Parameters = {
+                    { Name = "center", Type = "vector" },
+                    { Name = "radius", Type = "number" },
+                    { Name = "material", Type = "number" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Changes what the ground is MADE OF, without changing where it is. Returns how "
+                    .. "many cells it changed.\n\n"
+                    .. "**It edits no distance at all**, which is the whole difference between this and "
+                    .. "`FillBall`. It writes material where there is already ground and nowhere else, "
+                    .. "creates no voxel brick and promotes no column -- so painting a hillside leaves "
+                    .. "the hillside exactly as cheap as it was.\n\n"
+                    .. "A `material` of zero is refused rather than treated as erase. Zero means erase "
+                    .. "to `FillBall`, and picking the first entry of a material list must not delete "
+                    .. "the ground you were about to paint.",
+            },
+            {
                 Name = "HeightAt",
                 Parameters = {
                     { Name = "x", Type = "number" },

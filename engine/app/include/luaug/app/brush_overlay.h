@@ -37,7 +37,29 @@ namespace luaug::app {
 // **`from` equal to `to` is one stamp, not none.** That is the first frame of
 // every drag and also a click, and a brush that did nothing until the pointer
 // moved would feel broken in exactly the case somebody tries first.
+//
+// **The walk starts at `from` and the remainder is left at the `to` end**, so a
+// caller continuing a stroke resumes from the last stamp exactly and the
+// unwalked fraction is carried by the pointer into the next frame. Stamping `to`
+// instead would put that fraction at the `from` end where a continuing caller
+// drops it, and the loss accumulates -- see the source for the numbers.
 [[nodiscard]] std::vector<core::DVec3> strokeStamps(core::DVec3 from, core::DVec3 to, double radius, double spacing);
+
+// Whether the pointer has travelled far enough since the last stamp to deserve
+// another one.
+//
+// **This is the other half of "a drag is not a rubber stamp", and without it
+// `strokeStamps` alone is not enough.** `strokeStamps` always stamps `to`, which
+// is right for a click and for the end of a segment; called every frame with the
+// pointer's current position it would stamp once per frame again, and the ground
+// left behind would depend on the framerate after all. So a stroke advances only
+// in whole steps: below one, the frame stamps nothing and the stroke's anchor
+// stays where it was, accumulating the movement until it is worth a stamp.
+//
+// The visible cost is that the newest stamp can lag the pointer by up to one
+// step -- a quarter of a brush width at the default spacing, which is inside the
+// brush that is already there. The ring is what follows the pointer exactly.
+[[nodiscard]] bool strokeAdvanced(core::DVec3 from, core::DVec3 to, double radius, double spacing);
 
 // The maximum number of stamps one call may produce.
 //

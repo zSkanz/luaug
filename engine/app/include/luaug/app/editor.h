@@ -3,6 +3,7 @@
 #include <luaug/app/content_tree.h>
 #include <luaug/app/inspector.h>
 #include <luaug/app/picking.h>
+#include <luaug/asset/terrain.h>
 #include <luaug/core/id.h>
 #include <luaug/core/math.h>
 #include <luaug/platform/window.h>
@@ -1621,6 +1622,87 @@ public:
     // and however slowly it is made -- and so dragging three parts moves each by
     // the same delta rather than stacking them on the one the gizmo sits on.
 
+    // --- What a click in the viewport is FOR (F1) -----------------------------
+    //
+    // **Not a fourth `GizmoMode`**, and the reason is worth stating because the
+    // fourth mode is the obvious shape and it is wrong twice over. Mechanically:
+    // `snapStep` indexes `f32 m_snapStep[3]` by the raw enum with no bounds
+    // check, so a fourth value reads past the array. Conceptually: the three
+    // gizmo modes are three ways to transform a SELECTION, and a brush has no
+    // selection -- it acts on the ground under the pointer, which is a different
+    // question from "what does dragging this handle do".
+    //
+    // A tool is what a click MEANS. `Select` is the editor as it has always
+    // been: the manipulator gets the pointer, then a pick. `Sculpt` and `Paint`
+    // put a brush in front of both.
+    enum class Tool : core::u8
+    {
+        Select,
+        Sculpt,
+        Paint,
+    };
+    [[nodiscard]] Tool tool() const noexcept { return m_tool; }
+    // Refused mid-stroke, for the reason `setGizmoMode` is refused mid-drag:
+    // changing what a gesture means half way through it is not something a
+    // person can have meant.
+    void setTool(Tool tool) noexcept;
+
+    // What the brush is, and every field of it is persisted.
+    //
+    // **`spacing` is a fraction of the radius, not a strength.** A signed
+    // distance field is filled or it is not -- there is no half-full voxel to
+    // scale -- so the honest continuous knob is how densely a drag stamps, and
+    // calling it strength would name a thing this brush does not have.
+    struct Brush
+    {
+        // Metres.
+        f32 radius = 4.0f;
+        // Stamps every `spacing * radius` metres along a stroke.
+        f32 spacing = 0.25f;
+        // What ground is made of. Never zero: erasing is `erase`, not material
+        // zero, because a material picker whose first entry deleted the world
+        // would be the worst possible reading of one shared convention.
+        core::u8 material = 1;
+        // Sculpt only. Paint never removes ground.
+        bool erase = false;
+    };
+    [[nodiscard]] const Brush& brush() const noexcept { return m_brush; }
+    void setBrushRadius(f32 metres) noexcept;
+    void setBrushSpacing(f32 fraction) noexcept;
+    void setBrushMaterial(core::u8 material) noexcept;
+    void setBrushErase(bool erase) noexcept
+    {
+        m_brush.erase = erase;
+        m_preferencesDirty = true;
+    }
+
+    // Where the brush is aiming, in world space, or nothing when it is over sky
+    // -- for the ring the viewport draws. Cast against the FIELD rather than
+    // against physics, because an editor in edit mode holds no bodies at all
+    // (`asset::raycastField` says why at length).
+    [[nodiscard]] std::optional<asset::TerrainHit> brushAim() const noexcept { return m_brushAim; }
+
+    // Whether the world the viewport is drawing has terrain in it, as of the
+    // last `driveSculpt`. The toolbar shows the brush only when it does, because
+    // a tool with nothing to act on is furniture.
+    [[nodiscard]] bool hasTerrain() const noexcept { return m_hasTerrain; }
+    [[nodiscard]] bool sculpting() const noexcept { return m_stroke.has_value(); }
+    // How many stamps the last finished stroke laid down. Zero before the first
+    // one. For the status line, and for the test that a drag cut into forty
+    // frames edits the ground the same number of times as the same drag cut
+    // into four.
+    [[nodiscard]] core::u32 lastStrokeStamps() const noexcept { return m_lastStrokeStamps; }
+
+    // Runs the brush for this frame, before the manipulator and before the pick.
+    //
+    // Returns true when the pointer belongs to the brush, which is what stops a
+    // sculpt click ALSO re-selecting whatever is behind the ground it just dug.
+    //
+    // `root` is the world root the viewport is DRAWING, for the same reason
+    // `resolvePick` takes one: the terrain a click can reach is the terrain on
+    // screen.
+    bool driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector);
+
     [[nodiscard]] GizmoMode gizmoMode() const noexcept { return m_gizmoMode; }
     // Refused mid-drag: changing what a drag means half way through it is not
     // something a person can have meant.
@@ -1899,6 +1981,53 @@ private:
     std::optional<PickRequest> m_pending;
     core::InstanceId m_drilled;
     RunState m_run = RunState::Editing;
+    // **A stroke in progress**, which is one undo step however many frames and
+    // however many stamps it turns into.
+    struct Stroke
+    {
+        core::InstanceId terrain;
+
+        // **The ground as it was when the stroke started**, and the ray is cast
+        // against this rather than against the live field for as long as the
+        // button is held.
+        //
+        // Without it a brush aimed at the surface it is CHANGING burrows: each
+        // stamp lowers the ground, so the next frame's ray lands lower, so the
+        // next stamp is lower again -- and holding the button still over one
+        // spot digs to the floor. Measured, before this: a drag that should have
+        // laid twenty-one stamps laid three hundred and thirty-seven, and cut a
+        // trench fifteen metres deeper than the same drag at a lower framerate.
+        //
+        // It also makes the stroke a pure function of where the pointer went,
+        // which is what lets a test assert that two framerates leave the same
+        // ground rather than merely similar ground.
+        //
+        // The copy is a vector of shared pointers to tiles nobody is about to
+        // change, not a copy of the ground (ADR 0067) -- which is the one reason
+        // freezing it is affordable at all.
+        asset::TerrainField aimField;
+        // Where the last stamp of the previous frame landed, so this frame's
+        // stamps are walked from there rather than from the frame before.
+        core::DVec3 last;
+        core::u64 gesture = 0;
+        core::u32 stamps = 0;
+    };
+
+    // How far a brush can reach, in metres. A ray fired at the horizon has to
+    // terminate, and this is also the honest limit of "click the ground": past
+    // a few hundred metres a pixel covers more ground than the brush does.
+    static constexpr double BrushReach = 512.0;
+
+    // One stamp, through whichever verb the tool names.
+    void applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 at);
+
+    Tool m_tool = Tool::Select;
+    bool m_hasTerrain = false;
+    core::u32 m_lastStrokeStamps = 0;
+    Brush m_brush;
+    std::optional<asset::TerrainHit> m_brushAim;
+    std::optional<Stroke> m_stroke;
+
     GizmoMode m_gizmoMode = GizmoMode::Translate;
     bool m_gizmoLocal = false;
     GizmoOrigin m_gizmoOrigin = GizmoOrigin::Pivot;

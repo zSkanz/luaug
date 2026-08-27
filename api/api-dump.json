@@ -2105,6 +2105,25 @@
           ],
           "Returns": ["number"],
           "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "PaintBall",
+          "Parameters": [
+            {
+              "Name": "center",
+              "Type": "vector"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            },
+            {
+              "Name": "material",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
         }
       ],
       "Events": []

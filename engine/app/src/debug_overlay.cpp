@@ -3559,6 +3559,82 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
                                       : "the last thing clicked -- click for the middle of the selection");
     }
 
+    // --- The brush (F1) -------------------------------------------------
+    //
+    // **Words rather than icons, and that is a decision rather than a
+    // shortcut.** The eighty-seven icons in this editor are drawn art, and a
+    // generated stand-in beside them would read as a missing asset. The same
+    // toolbar already spells `local`/`world` and `pivot`/`centre` out, so a word
+    // here is the established form and not an exception.
+    //
+    // **Shown only when the world has terrain in it.** A brush with nothing to
+    // act on is furniture, and this toolbar has room for exactly the controls
+    // that do something.
+    if (editor.hasTerrain()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+
+        const auto toolChip = [&](Editor::Tool tool, const char* word, const char* tip) {
+            ImGui::SameLine();
+            const bool on = editor.tool() == tool;
+            if (on)
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(word))
+                editor.setTool(tool);
+            if (on)
+                ImGui::PopStyleColor();
+            ImGui::SetItemTooltip("%s", tip);
+        };
+        toolChip(Editor::Tool::Select, "pick", "click to select  (Q)");
+        toolChip(Editor::Tool::Sculpt, "dig", "add and remove ground  (T)");
+        toolChip(Editor::Tool::Paint, "paint", "change what ground is made of, without moving it  (Y)");
+
+        if (editor.tool() != Editor::Tool::Select) {
+            // The brush's own numbers, inline rather than behind a right-click,
+            // because a radius is something somebody changes between every two
+            // strokes -- unlike a snap step, which is set up once.
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(110.0f);
+            f32 radius = editor.brush().radius;
+            if (ImGui::DragFloat("##brush-radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "%.2f m"))
+                editor.setBrushRadius(radius);
+            ImGui::SetItemTooltip("how wide the brush is");
+
+            if (editor.tool() == Editor::Tool::Sculpt) {
+                ImGui::SameLine();
+                const bool erasing = editor.brush().erase;
+                if (ImGui::Button(erasing ? "remove" : "add"))
+                    editor.setBrushErase(!erasing);
+                ImGui::SetItemTooltip(erasing ? "digging ground away -- click to add it instead"
+                                              : "adding ground -- click to dig it away instead");
+            }
+
+            // The material, hidden while erasing because erasing has none.
+            if (editor.tool() == Editor::Tool::Paint || !editor.brush().erase) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(90.0f);
+                int material = static_cast<int>(editor.brush().material);
+                if (ImGui::DragInt("##brush-material", &material, 0.2f, 1, 255, "mat %d"))
+                    editor.setBrushMaterial(static_cast<core::u8>(std::clamp(material, 1, 255)));
+                ImGui::SetItemTooltip("which material the brush lays down");
+            }
+
+            // Spacing, behind a right-click on the radius, because it is the
+            // one number here that is set up rather than adjusted.
+            if (ImGui::BeginPopupContextItem("brush-spacing")) {
+                ImGui::TextDisabled("stamp spacing");
+                ImGui::Separator();
+                ImGui::SetNextItemWidth(160.0f);
+                f32 spacing = editor.brush().spacing;
+                if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "%.2f x radius"))
+                    editor.setBrushSpacing(spacing);
+                ImGui::TextDisabled("how far a drag travels between stamps,");
+                ImGui::TextDisabled("as a fraction of the brush's width");
+                ImGui::EndPopup();
+            }
+        }
+    }
+
     ImGui::SameLine();
     {
         const bool snapping = editor.snapping();
@@ -5807,6 +5883,20 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             editor->setGizmoMode(GizmoMode::Rotate);
         if (ImGui::IsKeyPressed(ImGuiKey_R, false))
             editor->setGizmoMode(GizmoMode::Scale);
+
+        // **Q, T, Y for the tools**, on the same row and beside the manipulators
+        // for the same reason: they are the keys the hand is already over. Only
+        // where there is terrain, so a world without it cannot be put into a
+        // tool whose toolbar button is not on screen -- a mode you cannot see
+        // and cannot leave is the worst kind of state.
+        if (editor->hasTerrain()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+                editor->setTool(Editor::Tool::Select);
+            if (ImGui::IsKeyPressed(ImGuiKey_T, false))
+                editor->setTool(Editor::Tool::Sculpt);
+            if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
+                editor->setTool(Editor::Tool::Paint);
+        }
 
         // **F frames the selection**, which is the one camera shortcut every
         // editor in this shape shares -- Studio, Unity, Unreal and Blender all

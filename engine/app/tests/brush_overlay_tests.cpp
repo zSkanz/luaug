@@ -48,27 +48,33 @@ TEST_CASE("a stroke is walked at a fixed spacing in world space, not once a fram
     const double spacing = 0.25;
     const std::vector<core::DVec3> stamps = strokeStamps({0.0, 0.0, 0.0}, {10.0, 0.0, 0.0}, radius, spacing);
 
-    // Ten metres at half a metre a stamp.
+    // Ten metres at half a metre a stamp, from zero to ten inclusive.
     REQUIRE(stamps.size() == 21);
+    CHECK(stamps.front().x == doctest::Approx(0.0));
+    CHECK(stamps.back().x == doctest::Approx(10.0));
     for (core::usize at = 1; at < stamps.size(); ++at) {
         CHECK(distanceBetween(stamps[at - 1], stamps[at]) == doctest::Approx(radius * spacing).epsilon(0.001));
     }
 }
 
-TEST_CASE("the last stamp is where the pointer is")
+TEST_CASE("the first stamp is where the stroke was, and the remainder is left")
 {
-    // **Walked from the far end backwards for exactly this.** Stepping forward
-    // from the start leaves the last stamp short of the pointer by up to one
-    // step, and the place a person is looking at is the place the brush has to
-    // have acted on.
+    // **The detail the whole thing turns on**, and the obvious alternative is
+    // wrong. Walking backwards from `to` guarantees the pointer's own position
+    // is stamped -- which reads as right -- but it puts the fractional part of
+    // the distance at the `from` end, where a caller continuing the stroke from
+    // `to` silently drops it. Over a drag it accumulates, and a stroke cut into
+    // forty frames lays a third more stamps than the same stroke cut into four.
     //
-    // Seven metres does not divide by the half-metre step, which is the case
-    // that catches it.
+    // Seven point three metres does not divide by the half-metre step, which is
+    // the case that catches it.
     const std::vector<core::DVec3> stamps = strokeStamps({0.0, 0.0, 0.0}, {7.3, 0.0, 0.0}, 2.0, 0.25);
-    REQUIRE_FALSE(stamps.empty());
-    CHECK(stamps.back().x == doctest::Approx(7.3));
-    // And the first is at or after the start rather than before it.
-    CHECK(stamps.front().x >= 0.0);
+    REQUIRE(stamps.size() == 15);
+    CHECK(stamps.front().x == doctest::Approx(0.0));
+    // Fourteen half-metre steps is seven metres; the last three tenths are not
+    // walked, and the pointer carries them into the next frame.
+    CHECK(stamps.back().x == doctest::Approx(7.0));
+    CHECK(stamps.back().x < 7.3);
 }
 
 TEST_CASE("a pointer that jumped a kilometre costs a comparison, not a hundred thousand edits")
@@ -81,6 +87,21 @@ TEST_CASE("a pointer that jumped a kilometre costs a comparison, not a hundred t
     CHECK(stamps.front().x == 0.0);
     CHECK(stamps.back().x == 1000.0);
     CHECK(stamps.size() <= MaxStrokeStamps);
+}
+
+TEST_CASE("a stroke that has not advanced a whole step is not walked")
+{
+    // The gate the editor holds a stroke behind. Below one step the frame stamps
+    // nothing and the anchor stays put, accumulating until the movement is worth
+    // a stamp -- which is what stops a high framerate stamping more often than a
+    // low one.
+    CHECK_FALSE(strokeAdvanced({0.0, 0.0, 0.0}, {0.49, 0.0, 0.0}, 2.0, 0.25));
+    CHECK(strokeAdvanced({0.0, 0.0, 0.0}, {0.51, 0.0, 0.0}, 2.0, 0.25));
+    // Exactly one step advances: the stamp lands on the pointer.
+    CHECK(strokeAdvanced({0.0, 0.0, 0.0}, {0.5, 0.0, 0.0}, 2.0, 0.25));
+    // A spacing that cannot advance never advances.
+    CHECK_FALSE(strokeAdvanced({0.0, 0.0, 0.0}, {100.0, 0.0, 0.0}, 2.0, 0.0));
+    CHECK_FALSE(strokeAdvanced({0.0, 0.0, 0.0}, {100.0, 0.0, 0.0}, 0.0, 0.25));
 }
 
 TEST_CASE("a spacing that cannot advance is one stamp rather than an unbounded loop")

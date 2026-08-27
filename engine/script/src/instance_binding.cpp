@@ -1052,6 +1052,30 @@ int methodTerrainHeightAt(lua_State* L)
     return 1;
 }
 
+int methodTerrainPaintBall(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const auto radius = static_cast<double>(luaL_checknumber(L, 3));
+    const auto material = static_cast<core::u8>(luaL_checkinteger(L, 4));
+
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+
+    const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
+    const asset::EditReport report = asset::paintBall(terrain->field, wide, radius, material);
+    // **Only when something changed.** Painting a hillside the colour it already
+    // is has to leave the revision alone, or a script calling it in a loop would
+    // rebuild every collider in range every tick.
+    if (report.touched > 0)
+        terrain->fieldRevision += 1;
+    lua_pushinteger(L, static_cast<int>(report.touched));
+    return 1;
+}
+
 int methodTerrainClear(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
@@ -1108,6 +1132,7 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"Ragdoll", "Build", methodRagdollBuild},
     {"Terrain", "FillBall", methodTerrainFillBall},
     {"Terrain", "FillBlock", methodTerrainFillBlock},
+    {"Terrain", "PaintBall", methodTerrainPaintBall},
     {"Terrain", "HeightAt", methodTerrainHeightAt},
     {"Terrain", "Clear", methodTerrainClear},
     {"Terrain", "Compact", methodTerrainCompact},

@@ -2,7 +2,6 @@
 
 #include "luaug/render/debug_draw.h"
 
-#include <algorithm>
 #include <cmath>
 
 namespace luaug::app {
@@ -77,17 +76,42 @@ std::vector<DVec3> strokeStamps(DVec3 from, DVec3 to, double radius, double spac
         return stamps;
     }
 
-    // **From the far end backwards, so `to` is always stamped.** Walking forward
-    // from `from` leaves the last stamp short of the pointer by up to one step,
-    // and the place a person is looking at is the place the brush has to have
-    // acted on.
+    // **Forward from `from` in whole steps, and the remainder is left at the
+    // `to` end.** This is the detail the whole thing turns on, and the other way
+    // round was wrong.
+    //
+    // Walking backwards from `to` guarantees the pointer's own position is
+    // stamped, which reads as the obviously right thing -- but it puts the
+    // fractional part of the distance at the `from` end, and a caller that then
+    // continues the stroke from `to` has silently thrown that fraction away.
+    // Over a drag it accumulates: measured, a stroke cut into forty frames laid
+    // twenty-nine stamps where the same stroke cut into four laid twenty-one.
+    //
+    // Forward, the last stamp is a lattice point of the stroke, the caller
+    // continues from it exactly, and the leftover distance is simply not walked
+    // yet -- it is carried into the next frame by the pointer having moved. The
+    // cost is that the newest stamp can sit up to one step behind the pointer,
+    // which at the default spacing is a quarter of a brush width and inside the
+    // brush that is already there. The ring is what follows the pointer exactly.
     for (usize at = 0; at <= count; ++at) {
-        const double along = distance - static_cast<double>(at) * step;
-        const double t = along / distance;
+        const double t = (static_cast<double>(at) * step) / distance;
         stamps.push_back(DVec3{from.x + dx * t, from.y + dy * t, from.z + dz * t});
     }
-    std::reverse(stamps.begin(), stamps.end());
     return stamps;
+}
+
+bool strokeAdvanced(DVec3 from, DVec3 to, double radius, double spacing)
+{
+    const double step = radius * spacing;
+    if (!(step > 0.0)) {
+        // A stroke that cannot advance never advances, which is the same answer
+        // `strokeStamps` gives the same input.
+        return false;
+    }
+    const double dx = to.x - from.x;
+    const double dy = to.y - from.y;
+    const double dz = to.z - from.z;
+    return dx * dx + dy * dy + dz * dz >= step * step;
 }
 
 void drawBrushRing(Vec3 centre, Vec3 normal, float radius, render::DebugDraw& debug)

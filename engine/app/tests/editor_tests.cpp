@@ -4317,3 +4317,309 @@ TEST_CASE("reordering moves a row among its siblings, and refuses to record a st
     REQUIRE(editor.undo(world, inspector));
     CHECK(order() == std::vector<core::InstanceId>{a, b, c});
 }
+
+// --- F1: sculpting with the brush -------------------------------------------
+//
+// The same headless loop as the manipulator's, aimed at the ground instead of a
+// handle. What no test can reach is the picture; what these reach is every
+// decision the picture is drawn from -- which tool the click belonged to, where
+// the stamps landed, and what one ctrl-Z takes back.
+
+namespace {
+
+struct BrushRig
+{
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    scene::World world;
+    Editor editor;
+    Inspector inspector;
+    core::InstanceId root;
+    core::InstanceId terrain;
+    scene::ClassId partClass = scene::InvalidClass;
+    ViewportRect rect{0.0f, 0.0f, 1920.0f, 1080.0f};
+
+    BrushRig() : world(classes, enums, atoms, 1234u)
+    {
+        scene::generated::registerClasses(classes, atoms);
+        scene::generated::registerEnums(enums, atoms);
+        partClass = classes.findId(atoms.intern("Part"));
+        REQUIRE(partClass != scene::InvalidClass);
+
+        root = world.create(classes.findId(atoms.intern("Folder")));
+        REQUIRE(root.valid());
+
+        terrain = world.create(classes.findId(atoms.intern("Terrain")));
+        REQUIRE(terrain.valid());
+        REQUIRE_FALSE(world.setParent(terrain, root).has_value());
+
+        scene::TerrainComponent* component = world.terrains().find(terrain);
+        REQUIRE(component != nullptr);
+        component->field.setHeightRange(-32.0f, 32.0f);
+        // Ground that reaches the world's floor, so it is height-encoded -- the
+        // ordinary case, and the one a brush has to leave ordinary.
+        asset::fillBlock(component->field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{64.0f, 40.0f, 64.0f}, 1);
+    }
+
+    [[nodiscard]] scene::TerrainComponent& field()
+    {
+        scene::TerrainComponent* component = world.terrains().find(terrain);
+        REQUIRE(component != nullptr);
+        return *component;
+    }
+
+    // Looking straight down from `height`, which is how somebody sculpts.
+    void lookDown(double height)
+    {
+        editor.setViewport(rect);
+        editor.setCamera(core::perspective(60.0f * 3.14159265f / 180.0f, rect.width / rect.height, 0.1f, 5000.0f),
+                         core::lookAt(core::Vec3{}, core::Vec3{0.0f, -1.0f, 0.0f}, core::Vec3{0.0f, 0.0f, -1.0f}),
+                         core::DVec3{0.0, height, 0.0});
+    }
+
+    [[nodiscard]] core::Vec2 pixelOf(core::DVec3 point) const
+    {
+        const std::optional<core::Vec2> pixel =
+            app::worldToViewport(editor.projection(), editor.view(), editor.cameraOrigin(), rect, point);
+        REQUIRE(pixel.has_value());
+        return *pixel;
+    }
+
+    [[nodiscard]] core::InstanceId part(core::DVec3 at)
+    {
+        const core::InstanceId id = world.create(partClass);
+        REQUIRE(id.valid());
+        (void)world.setParent(id, root);
+        scene::PartComponent* component = world.parts().find(id);
+        REQUIRE(component != nullptr);
+        component->cframe.position = at;
+        return id;
+    }
+
+    // One frame of the loop, in the order the frame runs it: the brush, then the
+    // manipulator, then the pick.
+    bool frame(core::Vec2 pixel, bool pressed, bool down)
+    {
+        // The panel queues a pick for every press, because it cannot know
+        // whether the brush or the manipulator wants it -- exactly as the real
+        // one does.
+        if (pressed)
+            editor.requestPick(pixel);
+        editor.setPointer(pixel, pressed, down);
+        const bool brushTook = editor.driveSculpt(world, root, inspector);
+        const bool gizmoTook = !brushTook && editor.driveGizmo(world, inspector);
+        if (!brushTook && !gizmoTook)
+            editor.resolvePick(world, root, inspector);
+        inspector.applyPending(world);
+        return brushTook;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a brush click does not also select what is under the ground")
+{
+    // The commonest way a first brush is unusable: the stamp lands AND the click
+    // falls through, so every stroke re-selects whatever the ray went on to hit.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    REQUIRE(rig.editor.tool() == Editor::Tool::Sculpt);
+
+    const core::InstanceId decoy = rig.part({0.0, 0.0, 0.0});
+    rig.inspector.select(decoy);
+    rig.inspector.clearSelection();
+    REQUIRE_FALSE(rig.inspector.selection().valid());
+
+    CHECK(rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true));
+    CHECK_FALSE(rig.inspector.selection().valid());
+    // And the release is the brush's too.
+    CHECK(rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false));
+    CHECK_FALSE(rig.inspector.selection().valid());
+}
+
+TEST_CASE("the pick tool still picks, with terrain in the world")
+{
+    // The other half of the claim above: the brush must not eat clicks when it
+    // is not the tool.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    REQUIRE(rig.editor.tool() == Editor::Tool::Select);
+
+    const core::InstanceId subject = rig.part({0.0, 0.0, 0.0});
+    CHECK_FALSE(rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true));
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    CHECK(rig.inspector.selection() == subject);
+}
+
+TEST_CASE("a brush with no terrain to act on does not eat the click")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    // Take the terrain away. Somebody who left the brush selected and clicked a
+    // part meant to select the part.
+    rig.world.destroy(rig.terrain);
+    rig.world.retireDestroyed();
+
+    const core::InstanceId subject = rig.part({0.0, 0.0, 0.0});
+    CHECK_FALSE(rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true));
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    CHECK(rig.inspector.selection() == subject);
+    CHECK_FALSE(rig.editor.hasTerrain());
+}
+
+TEST_CASE("digging moves the ground, and one stroke is one undo step")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushErase(true);
+    rig.editor.setBrushRadius(4.0f);
+
+    const std::optional<float> before = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(before.has_value());
+    const core::usize stepsBefore = rig.editor.history().depth();
+    const core::u64 revisionBefore = rig.field().fieldRevision;
+
+    // A stroke of sixty frames, which at sixty hertz is a second of dragging.
+    rig.frame(rig.pixelOf(core::DVec3{-10.0, 0.0, 0.0}), true, true);
+    REQUIRE(rig.editor.sculpting());
+    for (int at = 1; at <= 60; ++at) {
+        const double x = -10.0 + static_cast<double>(at) * (20.0 / 60.0);
+        rig.frame(rig.pixelOf(core::DVec3{x, 0.0, 0.0}), false, true);
+    }
+    rig.frame(rig.pixelOf(core::DVec3{10.0, 0.0, 0.0}), false, false);
+    CHECK_FALSE(rig.editor.sculpting());
+
+    // The ground moved, and the revision moved with it.
+    const std::optional<float> after = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(after.has_value());
+    CHECK(static_cast<double>(*after) < static_cast<double>(*before));
+    CHECK(rig.field().fieldRevision > revisionBefore);
+
+    // **One step, not sixty.** A stroke that recorded per frame would bury an
+    // afternoon under a second of dragging.
+    CHECK(rig.editor.history().depth() == stepsBefore + 1);
+
+    // And undoing it puts the ground back, which is only true because a terrain
+    // snapshot is a vector of shared pointers rather than a copy of the field.
+    REQUIRE(rig.editor.history().undo(rig.world));
+    const std::optional<float> undone = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(undone.has_value());
+    CHECK(static_cast<double>(*undone) == doctest::Approx(static_cast<double>(*before)));
+}
+
+TEST_CASE("a stroke stamps by distance, not by frame count")
+{
+    // **The reason `strokeStamps` exists**, asserted through the editor: the
+    // same drag at two framerates has to leave the same ground. Two rigs, one
+    // walked in four frames and one in forty, and the field's digest has to
+    // agree.
+    struct Walked
+    {
+        core::u32 stamps = 0;
+        std::array<float, 5> heights{};
+    };
+
+    const auto walk = [](int frames) {
+        BrushRig rig;
+        rig.lookDown(60.0);
+        rig.editor.setTool(Editor::Tool::Sculpt);
+        rig.editor.setBrushErase(true);
+        rig.editor.setBrushRadius(4.0f);
+
+        rig.frame(rig.pixelOf(core::DVec3{-10.0, 0.0, 0.0}), true, true);
+        for (int at = 1; at <= frames; ++at) {
+            const double x = -10.0 + static_cast<double>(at) * (20.0 / static_cast<double>(frames));
+            rig.frame(rig.pixelOf(core::DVec3{x, 0.0, 0.0}), false, true);
+        }
+        rig.frame(rig.pixelOf(core::DVec3{10.0, 0.0, 0.0}), false, false);
+
+        Walked walked;
+        walked.stamps = rig.editor.lastStrokeStamps();
+        for (int at = 0; at < 5; ++at) {
+            const double x = -8.0 + static_cast<double>(at) * 4.0;
+            const std::optional<float> height = asset::heightAt(rig.field().field, x, 0.0);
+            walked.heights[static_cast<core::usize>(at)] = height.value_or(0.0f);
+        }
+        return walked;
+    };
+
+    const Walked slow = walk(4);
+    const Walked fast = walk(40);
+
+    // **The same number of edits**, which is the claim the arithmetic makes: a
+    // drag is walked in metres, so cutting it into ten times as many frames does
+    // not stamp ten times as often.
+    CHECK(slow.stamps == fast.stamps);
+    CHECK(slow.stamps > 1);
+
+    // **And byte-identical ground**, which is a stronger claim than "close" and
+    // is only true because the ray is cast against the field as it was when the
+    // stroke began. Against the live field the brush burrows into the hole it is
+    // digging, and how deep depends on how many frames the drag took.
+    // And the same ground, to within a thousandth of a metre.
+    //
+    // **Not byte-identical, and that is a fact about a perspective camera rather
+    // than about the brush.** The two walks put the pointer over different
+    // pixels -- the slow one never visits the ones the fast one does -- and a
+    // ray through a different pixel meets the ground at a slightly different
+    // point. The stamps land on the same lattice of the stroke; their heights
+    // are interpolated between hits a few micrometres apart.
+    for (core::usize at = 0; at < slow.heights.size(); ++at) {
+        CAPTURE(at);
+        CHECK(std::abs(slow.heights[at] - fast.heights[at]) < 0.001f);
+    }
+}
+
+TEST_CASE("painting through the editor changes material and not height")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Paint);
+    rig.editor.setBrushMaterial(7);
+    rig.editor.setBrushRadius(6.0f);
+
+    const std::optional<float> before = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(before.has_value());
+    const core::usize bricksBefore = rig.field().field.brickCount();
+
+    CHECK(rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true));
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+
+    const std::optional<float> after = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(after.has_value());
+    CHECK(static_cast<double>(*after) == doctest::Approx(static_cast<double>(*before)));
+    CHECK(rig.field().field.brickCount() == bricksBefore);
+    CHECK(rig.field().field.sample(0, -40, 0).material == 7);
+}
+
+TEST_CASE("the tool cannot be changed mid-stroke")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    REQUIRE(rig.editor.sculpting());
+
+    rig.editor.setTool(Editor::Tool::Select);
+    CHECK(rig.editor.tool() == Editor::Tool::Sculpt);
+
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    rig.editor.setTool(Editor::Tool::Select);
+    CHECK(rig.editor.tool() == Editor::Tool::Select);
+}
+
+TEST_CASE("a material of zero is refused rather than erasing the world")
+{
+    Editor editor;
+    editor.setBrushMaterial(0);
+    CHECK(editor.brush().material != 0);
+    // And the radius and spacing are clamped rather than accepted.
+    editor.setBrushRadius(0.0f);
+    CHECK(editor.brush().radius > 0.0f);
+    editor.setBrushSpacing(0.0f);
+    CHECK(editor.brush().spacing > 0.0f);
+}

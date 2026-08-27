@@ -11,6 +11,7 @@
 // libstdc++, which is a different version with a different transitive graph.
 // A header a translation unit uses is a header it includes.
 #include "luaug/app/backends.h"
+#include "luaug/app/brush_overlay.h"
 #include "luaug/app/chunk_overlay.h"
 #include "luaug/app/content_import.h"
 #include "luaug/app/debug_overlay.h"
@@ -2045,14 +2046,25 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // selected now" beats four that remember to say.
             editor.syncMaterialPreview(inspector);
 
-            const bool gizmoTook = editor.driveGizmo(authored(), inspector);
+            // **The brush gets the pointer before the manipulator does**, and
+            // before the pick. A tool is what a click MEANS, so while a brush is
+            // selected a click on the ground is a stamp -- not a stamp AND a
+            // selection change, which is what leaving the pick to run would make
+            // it. `driveSculpt` returns false whenever it did not act, so
+            // `Select` and a world with no terrain both cost one comparison.
+            const bool brushTook = editor.driveSculpt(
+                authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(), inspector);
+            if (brushTook)
+                editor.touch();
+
+            const bool gizmoTook = !brushTook && editor.driveGizmo(authored(), inspector);
             // A drag moves parts without ever producing a command, so the one
             // place that knows it happened is here.
             if (gizmoTook)
                 editor.touch();
 
             const core::InstanceId wasSelected = inspector.selection();
-            if (!gizmoTook)
+            if (!gizmoTook && !brushTook)
                 // The root the VIEWPORT is drawing, so a click can only land
                 // on something that is on screen -- the stage's workspace while
                 // a stamp is open, the host's otherwise.
@@ -3076,6 +3088,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (const std::optional<GizmoFrame> gizmo = editor.gizmoFrame(host->world(), inspector);
                     gizmo.has_value()) {
                     submitGizmo(*gizmo, editor.gizmoMode(), editor.gizmoHandle(), snapshot.camera.origin, debugDraw);
+                }
+                // **The aiming ring, in the rebased space like everything else
+                // here.** Half a millimetre of f32 error at four kilometres
+                // would land on the one thing in the frame being placed
+                // precisely, which is why the overlay's header says to submit
+                // after the rebase rather than with the world-space draws.
+                if (const std::optional<asset::TerrainHit> aim = editor.brushAim(); aim.has_value()) {
+                    const core::DVec3 origin = snapshot.camera.origin;
+                    const core::Vec3 centre{static_cast<f32>(aim->position.x - origin.x),
+                                            static_cast<f32>(aim->position.y - origin.y),
+                                            static_cast<f32>(aim->position.z - origin.z)};
+                    drawBrushRing(centre, aim->normal, editor.brush().radius, debugDraw);
                 }
             }
 
