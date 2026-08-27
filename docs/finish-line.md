@@ -527,7 +527,29 @@ that sends the next session to the wrong place.
 
 ### S7 — The gates prove what they claim
 
-- [ ] **S7.1** macOS runs tests.
+- [x] **S7.1** macOS runs the suite. It was **already building every test
+      binary** — the dev profile has `LUAUG_BUILD_TESTS` ON and
+      `CMakePresets.json` has carried a `macos-clang-dev` test preset all along
+      — and then throwing the result away. So the compile was already paid for,
+      at the 10× multiplier, and the marginal cost of running them is the test
+      runtime rather than another build. That makes this the cheapest coverage
+      available anywhere in `ci.yml`.
+
+      **Non-blocking until it has been green once**, which is exactly the shape
+      S7.5 used for the sanitizers and for the same reason: this is the first
+      execution of any test in this repository on macOS, nothing on the
+      developer's machine predicts what a different libc++ and a Metal SDL_GPU
+      backend do, and a red `main` on a platform nobody can reproduce locally
+      teaches people to ignore red. The job's own summary says so, and the
+      `continue-on-error` comes off in the commit that reports the first clean
+      run.
+
+      `-LE gpu-golden` as every other tier does, and the skip assertion from
+      S7.2 runs here too with the same expected list — a macOS runner has no
+      Vulkan and may have no window server session, so those are expected, and
+      anything else skipping is the regression the check is for. The job's
+      timeout rationale is corrected with it: 168 s was the compile-only wall
+      time, and the comment claiming 7× headroom now says ~230 s and 5×.
 - [x] **S7.2** Six, not two, and the Linux stage was as blind as CI. CTest
       counts a skip as a pass, so `editor_seam`, `editor_shell` and the four
       differentials have reported green on every push without executing —

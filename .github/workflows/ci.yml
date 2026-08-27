@@ -648,8 +648,11 @@ jobs:
     if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     # Was 45, which at 10x is 450 charged minutes for a job whose observed wall
-    # time is 168 s. This is the largest single tail risk in the file; 20 still
-    # leaves 7x headroom.
+    # time was 168 s compile-only. This is the largest single tail risk in the
+    # file. It runs the suite now (S7.1), which on the other tiers is about a
+    # minute of ctest on a build that already happened -- so call it ~230 s and
+    # 20 minutes still leaves 5x headroom. Raising it is a decision about
+    # charged minutes, not a formality.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -681,12 +684,71 @@ jobs:
       # Nor is there a DXC cache step: LUAUG_SHADER_TOOLCHAIN defaults OFF on
       # Apple platforms (cmake/luaug_options.cmake) because Microsoft publishes
       # no macOS DirectXShaderCompiler, so this configure fetches nothing.
-      - name: Configure and build (compile only)
+      - name: Configure and build
         shell: bash
         run: |
           set -euo pipefail
           cmake --preset macos-clang-dev
           cmake --build --preset macos-clang-dev
+
+      # **This job built every test binary and ran none of them** (S7.1). The
+      # dev profile has `LUAUG_BUILD_TESTS` ON and `CMakePresets.json` has
+      # carried a `macos-clang-dev` TEST preset all along, so the compile was
+      # already paid for -- at 10x -- and the result thrown away. Running them is
+      # the cheapest coverage available anywhere in this file: the marginal cost
+      # is the test runtime, not another build.
+      #
+      # **Non-blocking until it has been green once**, which is the shape S7.5
+      # used for the sanitizers and for the same reason: this is the first time
+      # any test in this repository has executed on macOS, nothing on the
+      # developer's machine can predict what a different libc++ and a Metal
+      # SDL_GPU backend will do, and turning `main` red on a platform nobody can
+      # reproduce locally teaches people to ignore red. The step below says so
+      # in the summary rather than hiding it, and the `continue-on-error` comes
+      # off in the commit that reports the first clean run.
+      #
+      # `-LE gpu-golden` for the reason every other tier excludes them: a pixel
+      # golden is tied to the GPU that recorded it, and this is not it.
+      - name: Test (non-blocking until green once)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          ctest --preset macos-clang-dev -LE gpu-golden --no-tests=error 2>&1 | tee ctest.log
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      # Skips are named here too. A macOS runner has no Vulkan and may have no
+      # window server session, so the device and display tests are expected to
+      # skip -- and anything ELSE skipping is the regression this check exists
+      # for. It reports rather than fails while the step above is non-blocking.
+      - name: No test skipped that was not expected to (macOS)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ ! -f ctest.log ]; then
+            echo "no ctest log; the test step did not get that far"
+            exit 0
+          fi
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## macOS (Tier 3)"
+            echo
+            echo "The C++ suite now RUNS here; until this change the job built every test"
+            echo "binary and ran none of them."
+            echo
+            echo "**The test step is non-blocking until it has been green once.** This is the"
+            echo "first execution of any test in this repository on macOS, and a red \`main\` on"
+            echo "a platform nobody can reproduce locally teaches people to ignore red. The"
+            echo "\`continue-on-error\` comes off in the commit that reports the first clean run."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   # Luau-side static gates: strict analysis under the new solver (R2), StyLua
