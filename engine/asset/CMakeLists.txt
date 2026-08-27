@@ -14,6 +14,7 @@ luaug_add_module(asset
     SOURCES
         src/chunk.cpp
         src/content.cpp
+        src/terrain.cpp
         src/image.cpp
         src/gltf.cpp
         src/mesh_format.cpp
@@ -31,6 +32,12 @@ luaug_add_module(asset
 # are not our warnings-as-errors bar; both implementations are compiled exactly
 # once, in src/image.cpp.
 target_include_directories(luaug_asset SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/stb")
+
+# xxhash, for the per-object digests a terrain tile and brick carry (ADR 0067).
+# Header-only through `XXH_INLINE_ALL`, PRIVATE for the same reason `scene` takes
+# it that way: nothing above needs the header, because a digest crosses the seam
+# as a `u64`.
+target_include_directories(luaug_asset SYSTEM PRIVATE "${LUAUG_THIRD_PARTY_DIR}/xxhash")
 
 # fastgltf and meshoptimizer are PRIVATE, and that is the point of this module:
 # no fastgltf type appears in `luaug/asset/*.h`, so `render` and `scene` link an
@@ -50,6 +57,7 @@ luaug_add_module_tests(asset
     SOURCES
         tests/chunk_tests.cpp
         tests/content_tests.cpp
+        tests/terrain_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp
         tests/mesh_format_tests.cpp
