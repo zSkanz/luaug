@@ -24,9 +24,25 @@ enum class Phase : u8
 
     PreRender,
 
-    // The parallel windows exist in the enum from day one even though v1 runs
-    // `ConnectParallel` handlers serially on the game VM, so that the
-    // thread-safety checker has something real to name (architecture.md §3).
+    // **The parallel windows are reserved and NOTHING runs in them** (S6.3).
+    //
+    // They sit where architecture.md §3 puts the seams -- B after the PreRender
+    // drain, A after the PreSimulation drain -- and the tick fires neither.
+    // There is no `ConnectParallel` to connect to (`datatypes.api.luau` calls
+    // it "a reserved name, absent in v1") and no thread-safety checker: the
+    // `ThreadSafety` annotations reach `ClassRegistry` and the api-dump and are
+    // read by nothing.
+    //
+    // That is a deliberate reservation and not an oversight, and the earlier
+    // version of this comment overstated it -- it said the windows existed "so
+    // that the thread-safety checker has something real to name", which named a
+    // thing that has never been built. What they are actually for is the ORDER:
+    // the seams are where a later milestone would run actor handlers, and
+    // fixing their position now means a phase added between them later cannot
+    // silently move one.
+    //
+    // `phase_tests.cpp` holds the positions, so the reservation is a fact the
+    // build checks rather than a sentence somebody has to believe.
     ParallelWindowB,
 
     PreAnimation,

@@ -71,3 +71,36 @@ TEST_CASE("declaration order is frame order")
     CHECK(Phase::TaskResume < Phase::Heartbeat);
     CHECK(Phase::Heartbeat < Phase::Count);
 }
+
+// --- The reserved windows, and where they sit (S6.3) -------------------------
+//
+// **Nothing runs in either.** There is no `ConnectParallel` to connect to and
+// no thread-safety checker; what they reserve is the ORDER, so that a phase
+// added later cannot silently move a seam a future milestone will need.
+//
+// Held here rather than described in a comment because a comment is what the
+// old one was, and it claimed both mechanisms already worked.
+
+TEST_CASE("the parallel windows sit at the seams architecture.md names")
+{
+    // Window B after the PreRender drain, window A after the PreSimulation
+    // drain. The arithmetic is the point: a phase inserted between `PreRender`
+    // and `ParallelWindowB` moves the seam, and this is what notices.
+    CHECK(static_cast<u8>(Phase::ParallelWindowB) == static_cast<u8>(Phase::PreRender) + 1);
+    CHECK(static_cast<u8>(Phase::ParallelWindowA) == static_cast<u8>(Phase::PreSimulation) + 1);
+}
+
+TEST_CASE("the tick's order is the one the frame pipeline documents")
+{
+    // The whole sequence, in one place, so a reordering has to change a test
+    // that says what the order is FOR rather than a number nobody reads.
+    CHECK(static_cast<u8>(Phase::FrameStart) < static_cast<u8>(Phase::PreRender));
+    CHECK(static_cast<u8>(Phase::PreRender) < static_cast<u8>(Phase::PreAnimation));
+    CHECK(static_cast<u8>(Phase::PreAnimation) < static_cast<u8>(Phase::PreSimulation));
+    CHECK(static_cast<u8>(Phase::PreSimulation) < static_cast<u8>(Phase::PostSimulation));
+    // `task.wait` and `task.delay` resume between PostSimulation and Heartbeat,
+    // on the SimClock -- which is what makes a wait deterministic.
+    CHECK(static_cast<u8>(Phase::PostSimulation) < static_cast<u8>(Phase::TaskResume));
+    CHECK(static_cast<u8>(Phase::TaskResume) < static_cast<u8>(Phase::Heartbeat));
+    CHECK(static_cast<u8>(Phase::Heartbeat) < static_cast<u8>(Phase::Count));
+}

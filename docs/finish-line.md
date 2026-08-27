@@ -570,7 +570,35 @@ that sends the next session to the wrong place.
       "CollisionFidelity Box is honoured exactly" was asserting the defect
       because it used the same wrong number. Five cases now pin each fidelity
       to the shape it asks for.
-- [ ] **S6.3** The parallel scheduler phases that nothing runs in.
+- [x] **S6.3** Nothing runs in them, and **two documents said otherwise in the
+      present tense.** `ParallelWindowA` and `ParallelWindowB` sit in the `Phase`
+      enum at the seams `architecture.md` §3 names. The tick fires neither.
+
+      §3 claimed "v1 executes `ConnectParallel` handlers serially inside those
+      windows on the game VM — but the thread-safety checker (§4) **already
+      enforces** Unsafe/ReadParallel/LocalSafe/Safe as if they were parallel".
+      Both halves are false. There is no `ConnectParallel` —
+      `datatypes.api.luau` calls it "a reserved name, absent in v1" — and there
+      is no checker: the `ThreadSafety` annotations reach `ClassRegistry` and
+      the api-dump and are read by nothing anywhere. `phase.h` said the same
+      thing more briefly, that the windows exist "so that the thread-safety
+      checker has something real to name", which names a thing never built.
+
+      **Building either is out of scope and that is not what was wrong.** R15
+      closes v1 to parallel scripting, and `services.api.luau` is already honest
+      about the annotations — "nothing observes these yet", with the
+      forward-compatibility argument for annotating conservatively anyway. What
+      was wrong is that two other documents described the mechanism as working.
+
+      So the record says what is true, and what the windows ARE is stated
+      instead: a reserved **order**. The seams are where a later milestone would
+      run actor handlers, and fixing their position now means a phase added
+      between them cannot silently move one. `phase_tests.cpp` holds those
+      positions with arithmetic — window B is PreRender plus one, window A is
+      PreSimulation plus one — plus the whole tick order, so a reordering has
+      to change a test that says what the order is FOR rather than a number
+      nobody reads. A comment was what the old claim was, and it was wrong for
+      two milestones.
 - [ ] **S6.4** The dev protocol's two reserved verbs.
 - [ ] **S6.5** TLS — needs an approved decision record before it needs code.
 - [ ] **S6.6** KTX2 HDR; glTF topologies; the second UV set half-importer.

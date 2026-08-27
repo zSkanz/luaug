@@ -517,11 +517,21 @@ sim tick with fixed dt. `task.wait()` resumes on the SimClock (deterministic);
 shape Roblox retrofitted; LuauG starts there.
 
 **Parallel (actor) windows:** window A (after the PreSimulation drain) and
-window B (after the PreRender drain) exist in the `Phase` enum and the
-scheduler from day one. v1 executes `ConnectParallel` handlers serially inside
-those windows on the game VM — but the thread-safety checker (§4) already
-enforces Unsafe/ReadParallel/LocalSafe/Safe as if they were parallel, so code
-written today survives real actor VMs later.
+window B (after the PreRender drain) exist in the `Phase` enum. **Nothing runs
+in either, and this paragraph used to say otherwise** (S6.3) — it claimed v1
+executed `ConnectParallel` handlers serially inside them and that the
+thread-safety checker "already enforces" the annotations. Neither is true:
+`ConnectParallel` is a reserved name absent in v1 (`datatypes.api.luau` says
+so), the tick fires neither window, and the `ThreadSafety` annotations reach
+`ClassRegistry` and the api-dump and are read by nothing.
+
+What the windows ARE is a reserved ORDER. The seams are where a later milestone
+would run actor handlers, and fixing their position now means a phase added
+between them cannot silently move one. `engine/core/tests/phase_tests.cpp` holds
+those positions, so the reservation is checked rather than asserted in prose.
+The annotations are forward-compatible in the direction that matters: widening
+`Unsafe` to `ReadParallel` later is a compatible change and the reverse is not,
+which is why `services.api.luau` annotates conservatively today.
 
 **GC step budgeting:** after task-resume phases,
 `ScriptRuntime::gcStep(budget)` runs `LUA_GCSTEP` with a step size derived
