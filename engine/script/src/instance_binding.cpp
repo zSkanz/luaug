@@ -1002,6 +1002,7 @@ int methodTerrainFillBall(lua_State* L)
     // and MSVC does not, so leaving it implicit is a Linux-only build break.
     const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
     const asset::EditReport report = asset::fillBall(terrain->field, wide, radius, material);
+    terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
     return 1;
 }
@@ -1021,6 +1022,7 @@ int methodTerrainFillBlock(lua_State* L)
 
     const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
     const asset::EditReport report = asset::fillBlock(terrain->field, wide, size, material);
+    terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
     return 1;
 }
@@ -1055,6 +1057,7 @@ int methodTerrainClear(lua_State* L)
     const core::InstanceId id = liveInstance(L, 1);
     if (scene::TerrainComponent* terrain = world(L).terrains().find(id); terrain != nullptr) {
         terrain->field = asset::TerrainField(terrain->field.settings());
+        terrain->fieldRevision += 1;
     }
     return 0;
 }
@@ -1068,6 +1071,8 @@ int methodTerrainCompact(lua_State* L)
         return 1;
     }
     const core::u32 converted = asset::compact(terrain->field);
+    if (converted > 0)
+        terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(converted));
     return 1;
 }

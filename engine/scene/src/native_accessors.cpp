@@ -318,6 +318,7 @@ bool setTerrainVoxelSize(World& world, core::InstanceId id, const Value& value)
     asset::FieldSettings settings = terrain->field.settings();
     settings.voxelSize = static_cast<f32>(*size);
     terrain->field = asset::TerrainField(settings);
+    terrain->fieldRevision += 1;
     return true;
 }
 

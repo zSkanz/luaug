@@ -521,9 +521,144 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
     character.moveDirection = core::Vec3{0.0f, 0.0f, 0.0f};
 }
 
+// --- Terrain colliders (ADR 0066, ADR 0067) ----------------------------------
+//
+// **One static `HeightField` body per height tile.** A tile is 32x32 columns,
+// which is exactly the grid `HeightFieldShape` wants -- 32 samples over a block
+// size of 2 is sixteen blocks a side -- and it is also the unit the field itself
+// stores and clones, so a tile's collider and a tile's data are invalidated
+// together by construction.
+//
+// **What a bricked column costs is named rather than half-built.** A cave's
+// surface needs a `TriangleMesh` body, which A3 measured at 12 ms for 32,000
+// triangles -- most of a frame -- so it needs a budgeted, off-frame rebuild that
+// this does not have yet. Until it does, a cave is visible and not collidable,
+// and that is stated here rather than discovered by walking into one.
+void PhysicsSync::applyTerrain()
+{
+    for (auto& collider : m_terrainColliders)
+        collider.seen = false;
+
+    // **A count, never a clock.** How many colliders get rebuilt in a tick is
+    // part of the operation sequence, so it cannot depend on how fast the
+    // machine was: streaming's wall-clock exemption says "nothing measured
+    // reaches the world hash", and a collider is the world hash.
+    u32 rebuilt = 0;
+
+    m_scene.terrains().forEach([&](core::InstanceId id, TerrainComponent& terrain) {
+        if (!inWorld(id))
+            return;
+
+        const f32 voxel = terrain.field.settings().voxelSize;
+        const auto edge = static_cast<f32>(asset::TileEdge);
+
+        // Sorted, because `tileKeys()` answers sorted -- and this walk decides
+        // the order bodies are created in, which decides the ids the backend
+        // hands out (R10).
+        for (const asset::TileKey key : terrain.field.tileKeys()) {
+            const asset::HeightTile* tile = terrain.field.findTile(key);
+            if (tile == nullptr)
+                continue;
+
+            const auto at = std::lower_bound(
+                m_terrainColliders.begin(), m_terrainColliders.end(), key,
+                [](const TerrainCollider& entry, const asset::TileKey& probe) { return entry.key < probe; });
+
+            const bool exists = at != m_terrainColliders.end() && at->key == key && at->terrain == id;
+            if (exists && at->revision == terrain.fieldRevision) {
+                at->seen = true;
+                continue;
+            }
+            if (rebuilt >= TerrainRebuildsPerTick) {
+                // Over budget: leave it as it was and come back next tick. Marked
+                // seen so it is not retired for being stale, which would destroy
+                // a collider somebody is standing on in order to rebuild it.
+                if (exists)
+                    at->seen = true;
+                continue;
+            }
+
+            // A tile's own samples, laid out the way `HeightFieldShape` reads
+            // them: row-major, `sampleCount` on a side.
+            std::vector<f32> heights(asset::TileArea);
+            for (usize sample = 0; sample < asset::TileArea; ++sample)
+                heights[sample] = tile->height[sample];
+
+            physics::BodyDesc desc;
+            desc.shape.type = physics::ShapeType::HeightField;
+            desc.shape.size = core::Vec3{edge * voxel, 1.0f, edge * voxel};
+            desc.shape.heights = heights;
+            desc.shape.heightSampleCount = asset::TileEdge;
+            // **The reservation, and it is why a terrain has Min/MaxHeight at
+            // all**: the collider's precision is spread across this range when
+            // the shape is built and cannot be widened afterwards, so digging
+            // past it does not deepen the world.
+            desc.shape.heightMin = terrain.minHeight;
+            desc.shape.heightMax = terrain.maxHeight;
+            desc.shape.geometryRevision = terrain.fieldRevision;
+            desc.motion = physics::MotionType::Static;
+
+            // A tile covers lattice columns `key * TileEdge` upward, and the
+            // shape centres itself on its footprint -- so the body sits at the
+            // tile's middle.
+            const f32 originX = (static_cast<f32>(key.x) * edge + edge * 0.5f) * voxel;
+            const f32 originZ = (static_cast<f32>(key.z) * edge + edge * 0.5f) * voxel;
+            desc.transform.position = core::DVec3{static_cast<f64>(originX), 0.0, static_cast<f64>(originZ)};
+
+            if (exists) {
+                // **`updateHeightField` where the grid is the same shape**, which
+                // is the whole reason a height field is its own kind: A3 measured
+                // it 58 times cheaper than a rebuild at this size, and it keeps
+                // the body, its id and its contacts.
+                const bool edited =
+                    m_backend.updateHeightField(m_world, at->body, 0, 0, asset::TileEdge, asset::TileEdge, heights);
+                if (!edited) {
+                    // A grid that could not be edited in place is rebuilt, which
+                    // is correct and slower rather than a refusal.
+                    m_backend.destroyBody(m_world, at->body);
+                    at->body = m_backend.createBody(m_world, desc);
+                }
+                at->revision = terrain.fieldRevision;
+                at->seen = true;
+                rebuilt += 1;
+                continue;
+            }
+
+            const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
+            if (!handle.valid())
+                continue;
+            m_terrainColliders.insert(at, TerrainCollider{id, key, handle, terrain.fieldRevision, true});
+            rebuilt += 1;
+        }
+    });
+
+    retireUnseenTerrain();
+}
+
+void PhysicsSync::retireUnseenTerrain()
+{
+    // A tile the field no longer holds -- cleared, or its terrain destroyed --
+    // takes its collider with it. Walked back to front so an erase cannot move
+    // an entry this loop has not reached.
+    for (usize at = m_terrainColliders.size(); at > 0; --at) {
+        TerrainCollider& collider = m_terrainColliders[at - 1];
+        if (collider.seen)
+            continue;
+        if (collider.body.valid())
+            m_backend.destroyBody(m_world, collider.body);
+        m_terrainColliders.erase(m_terrainColliders.begin() + static_cast<std::ptrdiff_t>(at - 1));
+    }
+}
+
 void PhysicsSync::applyScene()
 {
     syncCollisionGroups();
+
+    // **Terrain first, and the order is load-bearing.** Body slots are assigned
+    // in creation order, so an interleave that depended on which pool happened
+    // to be walked first would make the ids a fact about the walk rather than
+    // about the world (R10).
+    applyTerrain();
 
     // Cleared every tick: a part reparented between two ticks must not be
     // answered from the previous one's memo.

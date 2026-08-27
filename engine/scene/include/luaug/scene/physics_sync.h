@@ -23,6 +23,7 @@
 // the accumulator (R10).
 #pragma once
 
+#include "luaug/asset/terrain.h"
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
 #include "luaug/physics/physics.h"
@@ -358,6 +359,37 @@ private:
     // The generation in the record is what makes a stale slot detectable: a
     // slot reused by a different instance has a different generation, and a
     // record whose generation does not match is not that instance's.
+    // **Terrain's colliders, which are not per-instance and so cannot be
+    // `BodyRecord`s** (ADR 0066, ADR 0067). One `Terrain` produces one static
+    // body per height tile plus one per bricked region, and every one of them
+    // outlives the tick that made it.
+    //
+    // Keyed by tile and kept SORTED, never in a hash map (R10): this decides the
+    // order bodies are created in, and therefore the order the backend assigns
+    // its own ids in.
+    struct TerrainCollider
+    {
+        core::InstanceId terrain;
+        asset::TileKey key;
+        physics::BodyHandle body;
+        // Which version of the field this was built from. A tile whose revision
+        // still matches is a tile whose collider is current, which is what stops
+        // every tick rebuilding every collider.
+        core::u64 revision = 0;
+        bool seen = false;
+    };
+    std::vector<TerrainCollider> m_terrainColliders;
+
+    // **A count, never a millisecond budget.** Streaming's wall-clock exemption
+    // says "nothing measured reaches the world hash", and that explicitly does
+    // not extend to a collider -- a collider IS part of the world, so how many
+    // get rebuilt in a tick has to be a fact about the operation sequence rather
+    // than about how fast the machine was that day.
+    static constexpr core::u32 TerrainRebuildsPerTick = 4;
+
+    void applyTerrain();
+    void retireUnseenTerrain();
+
     std::vector<BodyRecord> m_bodies;
     // Characters are few and are not on this path, so a map stays a map.
     std::unordered_map<u64, CharacterRecord> m_characters;

@@ -465,6 +465,12 @@ struct TerrainComponent
 {
     asset::TerrainField field;
 
+    // **Bumped on every write to `field`**, and read by `PhysicsSync` to decide
+    // whether a tile's collider is still current -- the same trick
+    // `ShapeDesc::pointsRevision` uses, and for the same reason: comparing the
+    // contents would mean keeping a copy of them.
+    core::u64 fieldRevision = 0;
+
     // How wide one streamed cell is, in metres. Not settable from a script: it
     // is the streaming grid's own spacing, and a terrain that disagreed with it
     // would load and unload on different boundaries from everything else.

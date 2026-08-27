@@ -1834,3 +1834,114 @@ TEST_CASE("a mesh whose points have not arrived falls back to the box, whatever 
     mirror.step();
     CHECK(shapeOfLast(mirror) == physics::ShapeType::Box);
 }
+
+// --- Terrain colliders (F1 C4, ADR 0066 and 0067) ---------------------------
+
+namespace {
+
+// A `Terrain` in the mirror's world, with one tile of flat ground.
+[[nodiscard]] core::InstanceId terrainWith(Mirror& mirror, float height)
+{
+    const core::InstanceId id = mirror.fixture.folder("Terrain");
+    TerrainComponent terrain;
+    terrain.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(asset::TileArea, height);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    terrain.field.setTile(asset::TileKey{0, 0}, heights, materials);
+    terrain.fieldRevision = 1;
+    mirror.fixture.world.terrains().add(id, terrain);
+    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
+    return id;
+}
+
+} // namespace
+
+TEST_CASE("a terrain's tiles become static height-field colliders")
+{
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    mirror.step();
+
+    // One tile, one body. **`Static` however it was asked for**: ADR 0066's rule
+    // is enforced by the backend, and asking for anything else would be a
+    // one-gram body carrying a kilometre of ground.
+    REQUIRE(mirror.backend.created.size() == 1);
+    const physics::BodyDesc& desc = mirror.backend.created.front().desc;
+    CHECK(desc.shape.type == physics::ShapeType::HeightField);
+    CHECK(desc.motion == physics::MotionType::Static);
+    CHECK(desc.shape.heightSampleCount == asset::TileEdge);
+
+    // **The reservation is handed over**, which is what makes the terrain
+    // diggable later: a height field's precision is spread across this range at
+    // build time and cannot be widened afterwards.
+    CHECK(desc.shape.heightMin < 0.0f);
+    CHECK(desc.shape.heightMax > 0.0f);
+
+    // And a second tick with nothing changed builds nothing new.
+    mirror.step();
+    CHECK(mirror.backend.created.size() == 1);
+
+    (void)terrain;
+}
+
+TEST_CASE("a sculpted tile is edited in place rather than rebuilt")
+{
+    // **The reason a height field is its own kind** (ADR 0066). A3 measured
+    // `SetHeights` 58 times cheaper than a rebuild at this size, and it keeps the
+    // body, its id and its contacts -- so a character standing on ground being
+    // dragged is not handed a new body under its feet every frame.
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+    REQUIRE(mirror.backend.heightEdits.empty());
+
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    const std::vector<float> raised(asset::TileArea, 5.0f);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    component->field.setTile(asset::TileKey{0, 0}, raised, materials);
+    component->fieldRevision += 1;
+
+    mirror.step();
+
+    // Edited, not recreated.
+    CHECK(mirror.backend.created.size() == 1);
+    REQUIRE(mirror.backend.heightEdits.size() == 1);
+    CHECK(mirror.backend.heightEdits.front().sizeX == asset::TileEdge);
+    CHECK(mirror.backend.heightEdits.front().sizeZ == asset::TileEdge);
+}
+
+TEST_CASE("a terrain that is cleared takes its colliders with it")
+{
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 1);
+
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    component->field = asset::TerrainField(component->field.settings());
+    component->fieldRevision += 1;
+
+    const core::usize destroyedBefore = mirror.backend.destroyed.size();
+    mirror.step();
+
+    // The tile is gone, so its collider is -- a collider for ground that is not
+    // there is a wall somebody walks into.
+    CHECK(mirror.backend.destroyed.size() > destroyedBefore);
+}
+
+TEST_CASE("a world with no terrain mirrors exactly as it did before")
+{
+    // The claim every step of F1 has to keep: a project that never touches
+    // terrain pays nothing and behaves identically.
+    Mirror mirror;
+    const core::InstanceId part = mirror.part("Block", {0.0, 4.0, 0.0});
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 1);
+    CHECK(mirror.backend.created.front().desc.shape.type == physics::ShapeType::Box);
+    CHECK(mirror.backend.heightEdits.empty());
+    (void)part;
+}
