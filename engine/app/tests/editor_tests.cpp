@@ -4793,3 +4793,60 @@ TEST_CASE("terrain is created in the workspace and not beside the services")
     CHECK(rig.editor.generateGround(rig.world, rig.root, rig.inspector, 32.0f, 0.0f, 1));
     CHECK(rig.world.parentOf(rig.editor.terrainIn(rig.world, rig.root)) == rig.workspace);
 }
+
+TEST_CASE("a moved terrain is dug where it now is")
+{
+    // **A terrain is an instance and it can be moved**, which the owner asked
+    // for and which the field knows nothing about: the origin is applied by the
+    // consumers rather than baked into every tile, so moving a sculpted world is
+    // one number instead of a rewrite.
+    //
+    // The brush is the consumer most easily got wrong, because it goes both
+    // ways: the ray is cast in the field's space and the hit is answered in the
+    // world's. A stamp that forgot one of the two halves would dig at twice the
+    // offset, or at none of it.
+    BrushRig rig;
+    rig.lookDown(60.0);
+
+    scene::TerrainComponent& component = rig.field();
+    component.origin = core::DVec3{20.0, 0.0, 0.0};
+    component.fieldRevision += 1;
+
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Subtract);
+    rig.editor.setBrushRadius(4.0f);
+
+    // The ground is now under x = 20, so that is where the pointer aims.
+    rig.frame(rig.pixelOf(core::DVec3{20.0, 0.0, 0.0}), true, true);
+    REQUIRE(rig.editor.sculpting());
+    rig.frame(rig.pixelOf(core::DVec3{20.0, 0.0, 0.0}), false, false);
+
+    // The hole is at the field's own x = 0, because that is where world x = 20
+    // lands once the origin is taken off.
+    const std::optional<float> dug = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(dug.has_value());
+    CHECK(*dug < 0.0f);
+
+    // And the ground twenty metres away in the FIELD is untouched, which is what
+    // catches a stamp that applied the offset twice.
+    const std::optional<float> untouched = asset::heightAt(rig.field().field, 20.0, 0.0);
+    REQUIRE(untouched.has_value());
+    CHECK(*untouched == doctest::Approx(0.0).epsilon(0.05));
+}
+
+TEST_CASE("the aiming ring follows a moved terrain")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.field().origin = core::DVec3{0.0, 8.0, 0.0};
+
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setPointer(rig.pixelOf(core::DVec3{0.0, 8.0, 0.0}), false, false);
+    (void)rig.editor.driveSculpt(rig.world, rig.workspace, rig.inspector);
+
+    const std::optional<asset::TerrainHit> aim = rig.editor.brushAim();
+    REQUIRE(aim.has_value());
+    // Eight metres up, because that is where the ground now is -- and the hit is
+    // answered in world space rather than in the field's.
+    CHECK(aim->position.y == doctest::Approx(8.0).epsilon(0.1));
+}

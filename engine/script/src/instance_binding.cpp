@@ -1000,7 +1000,11 @@ int methodTerrainFillBall(lua_State* L)
     // A `Vector3` from a script is `f32` and a brush takes a world position,
     // which is `f64` (R9). Widened explicitly: Clang diagnoses the implicit form
     // and MSVC does not, so leaving it implicit is a Linux-only build break.
-    const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
+    // Into the field's own space: a terrain can be moved, and the offset is
+    // applied by its consumers rather than baked into every tile.
+    const core::DVec3 wide{static_cast<double>(center.x) - terrain->origin.x,
+                           static_cast<double>(center.y) - terrain->origin.y,
+                           static_cast<double>(center.z) - terrain->origin.z};
     const asset::EditReport report = asset::fillBall(terrain->field, wide, radius, material);
     terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
@@ -1020,7 +1024,10 @@ int methodTerrainFillBlock(lua_State* L)
         return 1;
     }
 
-    const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
+    // The field's own space; see `FillBall` above.
+    const core::DVec3 wide{static_cast<double>(center.x) - terrain->origin.x,
+                           static_cast<double>(center.y) - terrain->origin.y,
+                           static_cast<double>(center.z) - terrain->origin.z};
     const asset::EditReport report = asset::fillBlock(terrain->field, wide, size, material);
     terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
@@ -1043,12 +1050,14 @@ int methodTerrainHeightAt(lua_State* L)
     // height and "there is nothing here" is not a height at all, so a script
     // that placed a tree wherever this answered would otherwise plant a forest
     // at sea level across every unsculpted cell.
-    const std::optional<float> height = asset::heightAt(terrain->field, x, z);
+    // Asked in the field's own space and answered in the world's, so a moved
+    // terrain answers about where it now is.
+    const std::optional<float> height = asset::heightAt(terrain->field, x - terrain->origin.x, z - terrain->origin.z);
     if (!height.has_value()) {
         lua_pushnil(L);
         return 1;
     }
-    lua_pushnumber(L, static_cast<double>(*height));
+    lua_pushnumber(L, static_cast<double>(*height) + terrain->origin.y);
     return 1;
 }
 
@@ -1065,7 +1074,10 @@ int methodTerrainPaintBall(lua_State* L)
         return 1;
     }
 
-    const core::DVec3 wide{static_cast<double>(center.x), static_cast<double>(center.y), static_cast<double>(center.z)};
+    // The field's own space; see `FillBall` above.
+    const core::DVec3 wide{static_cast<double>(center.x) - terrain->origin.x,
+                           static_cast<double>(center.y) - terrain->origin.y,
+                           static_cast<double>(center.z) - terrain->origin.z};
     const asset::EditReport report = asset::paintBall(terrain->field, wide, radius, material);
     // **Only when something changed.** Painting a hillside the colour it already
     // is has to leave the revision alone, or a script calling it in a loop would

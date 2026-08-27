@@ -1007,7 +1007,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(weldDesc);
 
     // --- Terrain ---
-    static std::array<PropertyDesc, 5> terrainProperties;
+    static std::array<PropertyDesc, 6> terrainProperties;
     terrainProperties = {{
         PropertyDesc{
             .name = atoms.intern("VoxelSize"),
@@ -1030,6 +1030,17 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTerrainCellSize,
             .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Position"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where this terrain's own origin sits in the world, in metres.\012\012**A terrain is an instance and it can be moved.** Every sample, every collider and every brush stroke is offset by this rather than baked into the field, so moving a sculpted world is one number rather than a rewrite of every tile.\012\012**It translates and does not turn, and that is the encoding rather than an omission.** The cheap half of the field is a height layer, and `H(x, z)` has no meaning under a rotation; the collider is a height field, which is axis-aligned too. There is no `CFrame` here because a rotation this could not keep would be worse than not offering one.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getTerrainPosition,
+            .set = native::setTerrainPosition,
         },
         PropertyDesc{
             .name = atoms.intern("MinHeight"),

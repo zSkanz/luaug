@@ -603,7 +603,13 @@ void PhysicsSync::applyTerrain()
             // tile's middle.
             const f32 originX = (static_cast<f32>(key.x) * edge + edge * 0.5f) * voxel;
             const f32 originZ = (static_cast<f32>(key.z) * edge + edge * 0.5f) * voxel;
-            desc.transform.position = core::DVec3{static_cast<f64>(originX), 0.0, static_cast<f64>(originZ)};
+            // **Offset by the terrain's own origin**, which is what makes a
+            // terrain a thing you can move. The field is untouched -- baking the
+            // offset into every tile would make dragging a world a rewrite of
+            // every one of them -- so the consumers apply it, and this is the
+            // physics one.
+            desc.transform.position = core::DVec3{static_cast<f64>(originX) + terrain.origin.x, terrain.origin.y,
+                                                  static_cast<f64>(originZ) + terrain.origin.z};
 
             if (exists) {
                 // **`updateHeightField` where the grid is the same shape**, which

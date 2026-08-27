@@ -465,6 +465,26 @@ struct TerrainComponent
 {
     asset::TerrainField field;
 
+    // **Where the field's own origin sits in the world.**
+    //
+    // A terrain is an instance and an instance can be moved, which is what the
+    // owner asked for and is the right answer: two terrains in one world, an
+    // island placed beside another, ground shifted after the fact.
+    //
+    // **A position and not a `CFrame`, and that is a limit of the encoding
+    // rather than an omission.** The cheap half of the field is a height layer,
+    // and a height function is axis-aligned by definition -- `H(x, z)` has no
+    // meaning under a rotation. The collider is a `HeightFieldShape`, which Jolt
+    // also builds axis-aligned. So a terrain translates and does not turn, and
+    // saying so is better than offering a `CFrame` whose rotation is silently
+    // dropped.
+    //
+    // f64 because it is a world coordinate (R9), and every consumer -- the
+    // mesher's draw transform, the tile colliders, the brush's raycast, the
+    // script's `HeightAt` -- offsets by it rather than baking it into the field.
+    // Baking would make moving a terrain a rewrite of every tile.
+    core::DVec3 origin;
+
     // **Bumped on every write to `field`**, and read by `PhysicsSync` to decide
     // whether a tile's collider is still current -- the same trick
     // `ShapeDesc::pointsRevision` uses, and for the same reason: comparing the

@@ -709,11 +709,17 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             if (entry == nullptr || !entry->mesh.valid())
                 continue;
 
-            // **The mesher works in the field's own space, which IS world
-            // space**, so the only transform a tile needs is the floating-origin
-            // rebase every other draw gets. There is no per-tile placement to
-            // get wrong.
-            const Mat4 transform = core::toRenderMatrix(core::CFrameD{}, origin);
+            // **The mesher works in the field's own space**, so a tile's only
+            // placement is the terrain's own origin -- plus the floating-origin
+            // rebase every other draw gets. There is no PER-TILE placement to
+            // get wrong: they all share one.
+            //
+            // The origin is applied here rather than baked into the tiles,
+            // because baking would make moving a terrain a rewrite of every one
+            // of them rather than one number.
+            core::CFrameD placement;
+            placement.position = terrain.origin;
+            const Mat4 transform = core::toRenderMatrix(placement, origin);
             const AABB worldBounds = core::transformed(transform, entry->bounds);
             const bool visible = core::intersects(out.camera.frustum, worldBounds);
 

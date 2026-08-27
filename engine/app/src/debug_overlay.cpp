@@ -5926,6 +5926,10 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // arrangement. This is the node Properties is actually in, this launch.
     ImGuiID rightColumn = 0;
 
+    // What was selected last frame, so "the selection changed to a terrain" is a
+    // transition rather than a state -- see the panel below.
+    static core::InstanceId lastSelection;
+
     if (panels.properties) {
         if (ImGui::Begin("Properties", &panels.properties)) {
             rightColumn = ImGui::GetWindowDockID();
@@ -5960,6 +5964,23 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     //
     // `drawTerrainPanel` above argues the shape. What is here is the plumbing:
     // where it docks the first time, and the three pointers it needs.
+    // **Selecting the terrain opens its tools.** The editors this one is measured
+    // against all do some version of this -- clicking the thing brings up what
+    // edits it -- and it is the difference between a panel somebody has to know
+    // about and one that introduces itself.
+    //
+    // Only on the frame the selection CHANGES to it, so closing the panel while
+    // the terrain is still selected leaves it closed. A panel that reopened
+    // every frame would be one nobody could dismiss.
+    if (editor != nullptr && world != nullptr && inspector != nullptr) {
+        const core::InstanceId chosen = inspector->selection();
+        if (chosen != lastSelection) {
+            lastSelection = chosen;
+            if (chosen.valid() && world->terrains().find(chosen) != nullptr)
+                panels.terrain = true;
+        }
+    }
+
     if (panels.terrain) {
         // `FirstUseEver`, so this decides only where a panel with no remembered
         // place goes. Somebody who has moved it keeps it where they put it, and

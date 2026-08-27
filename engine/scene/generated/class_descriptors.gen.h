@@ -217,6 +217,8 @@ void detachWeldComponents(World& world, core::InstanceId id);
 Value getTerrainVoxelSize(const World& world, core::InstanceId id);
 bool setTerrainVoxelSize(World& world, core::InstanceId id, const Value& value);
 Value getTerrainCellSize(const World& world, core::InstanceId id);
+Value getTerrainPosition(const World& world, core::InstanceId id);
+bool setTerrainPosition(World& world, core::InstanceId id, const Value& value);
 Value getTerrainMinHeight(const World& world, core::InstanceId id);
 bool setTerrainMinHeight(World& world, core::InstanceId id, const Value& value);
 Value getTerrainMaxHeight(const World& world, core::InstanceId id);

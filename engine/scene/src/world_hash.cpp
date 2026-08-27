@@ -289,6 +289,12 @@ u64 World::worldHash() const
             hasher.number(static_cast<f64>(terrain->field.settings().voxelSize));
             hasher.number(static_cast<f64>(terrain->minHeight));
             hasher.number(static_cast<f64>(terrain->maxHeight));
+            // Where the field sits, which is world state: the same tiles at two
+            // origins are two different worlds, and everything that stands on
+            // them ends up somewhere else.
+            hasher.number(terrain->origin.x);
+            hasher.number(terrain->origin.y);
+            hasher.number(terrain->origin.z);
             for (const asset::TileKey key : terrain->field.tileKeys()) {
                 hasher.pod(key.x);
                 hasher.pod(key.z);

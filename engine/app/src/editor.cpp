@@ -2942,7 +2942,19 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     // says at length why.
     const PickRay ray = rayThrough(m_pointer);
     const asset::TerrainField& aimAt = m_stroke.has_value() ? m_stroke->aimField : terrain->field;
-    m_brushAim = asset::raycastField(aimAt, ray.origin, ray.direction, BrushReach);
+    // **Cast in the FIELD's space and answered in the world's.** A terrain can
+    // be moved, and the field knows nothing about that -- the origin is applied
+    // by its consumers rather than baked into every tile. So the ray goes in
+    // with the origin subtracted and the hit comes back with it added, which is
+    // the only place in the brush that has to know a terrain has a position.
+    const core::DVec3 localOrigin{ray.origin.x - terrain->origin.x, ray.origin.y - terrain->origin.y,
+                                  ray.origin.z - terrain->origin.z};
+    m_brushAim = asset::raycastField(aimAt, localOrigin, ray.direction, BrushReach);
+    if (m_brushAim.has_value()) {
+        m_brushAim->position.x += terrain->origin.x;
+        m_brushAim->position.y += terrain->origin.y;
+        m_brushAim->position.z += terrain->origin.z;
+    }
 
     // The button came up, or the stroke ran out of ground under it.
     if (m_stroke.has_value() && !m_pointerDown) {
@@ -3030,8 +3042,11 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     return true;
 }
 
-void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 at)
+void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
 {
+    // Back into the field's own space, for the reason the raycast above goes the
+    // other way: the field has no idea where it sits.
+    const core::DVec3 at{worldAt.x - terrain.origin.x, worldAt.y - terrain.origin.y, worldAt.z - terrain.origin.z};
     const auto radius = static_cast<double>(m_brush.radius);
     const bool box = m_brush.shape == BrushShape::Box;
     // A box the brush's width, so the two shapes cover the same ground and
@@ -3063,8 +3078,11 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 at)
             asset::smoothBall(terrain.field, at, radius, m_brush.strength);
             break;
         case BrushOp::Flatten:
-            asset::flattenBall(terrain.field, at, radius,
-                               m_stroke.has_value() ? m_stroke->plane : static_cast<f32>(at.y), m_brush.strength);
+            asset::flattenBall(
+                terrain.field, at, radius,
+                static_cast<f32>((m_stroke.has_value() ? static_cast<double>(m_stroke->plane) : worldAt.y) -
+                                 terrain.origin.y),
+                m_brush.strength);
             break;
         }
     }

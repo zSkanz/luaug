@@ -878,6 +878,14 @@ declare extern type Terrain extends Instance with
     --- yet.** The collider mirror and the streaming half of F1 are what will, and until one of them
     --- does this is a number that describes an intention rather than a behaviour.
     read CellSize: number
+    --- Where this terrain's own origin sits in the world, in metres. **A terrain is an instance and it
+    --- can be moved.** Every sample, every collider and every brush stroke is offset by this rather
+    --- than baked into the field, so moving a sculpted world is one number rather than a rewrite of
+    --- every tile. **It translates and does not turn, and that is the encoding rather than an
+    --- omission.** The cheap half of the field is a height layer, and `H(x, z)` has no meaning under a
+    --- rotation; the collider is a height field, which is axis-aligned too. There is no `CFrame` here
+    --- because a rotation this could not keep would be worse than not offering one.
+    Position: vector
     --- The lowest this terrain may ever be dug to, in metres. **Decided once and reserved, rather than
     --- measured as you go.** A collider's height precision is spread across this range when the cell is
     --- built and cannot be widened afterwards, so digging past it does not deepen the world -- it

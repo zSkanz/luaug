@@ -328,6 +328,41 @@ Value getTerrainCellSize(const World& world, core::InstanceId id)
     return terrain == nullptr ? Value{} : Value{static_cast<f64>(terrain->cellSize)};
 }
 
+Value getTerrainPosition(const World& world, core::InstanceId id)
+{
+    const TerrainComponent* terrain = world.terrains().find(id);
+    if (terrain == nullptr)
+        return Value{};
+    // A script sees a `vector`, which is three f32 (R9). The engine keeps f64
+    // because it is a world coordinate, and the narrowing happens here -- at the
+    // seam -- rather than in the storage.
+    return Value{core::Vec3{static_cast<f32>(terrain->origin.x), static_cast<f32>(terrain->origin.y),
+                            static_cast<f32>(terrain->origin.z)}};
+}
+
+bool setTerrainPosition(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* position = std::get_if<core::Vec3>(&value);
+    TerrainComponent* terrain = world.terrains().find(id);
+    if (position == nullptr || terrain == nullptr)
+        return false;
+    if (!finite(position->x) || !finite(position->y) || !finite(position->z))
+        return false;
+
+    const core::DVec3 moved{static_cast<f64>(position->x), static_cast<f64>(position->y),
+                            static_cast<f64>(position->z)};
+    if (moved.x == terrain->origin.x && moved.y == terrain->origin.y && moved.z == terrain->origin.z)
+        return true;
+
+    terrain->origin = moved;
+    // **The revision moves because everything downstream is keyed on it**: the
+    // tile meshes are placed by this, and so are the colliders. The FIELD did
+    // not change, which is why this is a revision bump rather than a rebuild --
+    // the offset is applied by the consumers rather than baked into the tiles.
+    terrain->fieldRevision += 1;
+    return true;
+}
+
 Value getTerrainMinHeight(const World& world, core::InstanceId id)
 {
     const TerrainComponent* terrain = world.terrains().find(id);

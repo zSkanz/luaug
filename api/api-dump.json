@@ -2035,6 +2035,11 @@
           "Default": "-256"
         },
         {
+          "Name": "Position",
+          "Type": "vector",
+          "Default": "vector.zero"
+        },
+        {
           "Name": "VoxelSize",
           "Type": "number",
           "Default": "0.5"

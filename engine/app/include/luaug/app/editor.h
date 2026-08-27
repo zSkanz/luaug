@@ -2116,8 +2116,9 @@ private:
     // a few hundred metres a pixel covers more ground than the brush does.
     static constexpr double BrushReach = 512.0;
 
-    // One stamp, through whichever verb the tool names.
-    void applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 at);
+    // One stamp, in WORLD space. Converted to the field's own inside, because a
+    // terrain can be moved and the field does not know it.
+    void applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt);
 
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;

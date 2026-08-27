@@ -1123,6 +1123,20 @@ local Classes: { Schema.Class } = {
                     .. "that describes an intention rather than a behaviour.",
             },
             {
+                Name = "Position",
+                Type = "vector",
+                Default = "vector.zero",
+                Doc = "Where this terrain's own origin sits in the world, in metres.\n\n"
+                    .. "**A terrain is an instance and it can be moved.** Every sample, every collider "
+                    .. "and every brush stroke is offset by this rather than baked into the field, so "
+                    .. "moving a sculpted world is one number rather than a rewrite of every tile.\n\n"
+                    .. "**It translates and does not turn, and that is the encoding rather than an "
+                    .. "omission.** The cheap half of the field is a height layer, and `H(x, z)` has no "
+                    .. "meaning under a rotation; the collider is a height field, which is axis-aligned "
+                    .. "too. There is no `CFrame` here because a rotation this could not keep would be "
+                    .. "worse than not offering one.",
+            },
+            {
                 Name = "MinHeight",
                 Type = "number",
                 Default = "-256",
