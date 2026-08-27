@@ -710,7 +710,47 @@ that sends the next session to the wrong place.
       English — so nothing got worse and the named ones got right. Nine cases,
       checked at the counts where each rule turns over rather than at 1 and 2,
       which is where a hand-written rule is always right.
-- [ ] **S6.10** Jolt on a real job pool.
+- [x] **S6.10** Done, and **the open question it carried is answered by running
+      it.** ADR 0064.
+
+      Jolt has stepped on `JobSystemSingleThreaded` since M5. The roadmap said
+      why and said what would change it: "single-threaded first; Jolt's job
+      system wired to the engine job system when M7 lands it — note the seam",
+      and it named the risk out loud: "whether recorded hashes survive that is a
+      question". M7 landed and nobody asked.
+
+      Same machine, same build, `win-msvc-dev`:
+
+      | Bench | single-threaded | four threads |
+      |---|---|---|
+      | `physics1k` step | 1.760 ms | **0.651 ms** |
+      | `churn10k` step | 3.725 ms | **1.853 ms** |
+      | `churn10k` worst tick | 174.17 ms | **40.03 ms** |
+      | `ragdoll10` step | 0.264 ms | **0.131 ms** |
+
+      **The hashes survived.** `tests/determinism/churn` — ten thousand ticks,
+      and the one whose parts Jolt actually simulates — reproduced its
+      committed hash `d3dd9b68722aa0fa` on both tiers, unchanged. Nothing was
+      re-recorded. So ADR 0025's level-B guarantee is intact with the solver
+      threaded, which is the thing the M5 note was worried about.
+
+      **It is Jolt's own pool and NOT the engine job system**, which is where
+      this departs from the roadmap's wording, and the reason is the guarantee
+      rather than convenience: `jobs::init()` sizes itself from
+      `hardware_concurrency`, and Jolt's determinism is per thread COUNT — so
+      solving on the engine pool would make a trace recorded here unreproducible
+      on a machine with a different core count, and the same platform's
+      committed trace would stop being a fact about the platform. A fixed-size
+      sub-pool of the engine's is the same four threads with more code between
+      them.
+
+      `kPhysicsThreads` is a named constant with that sentence beside it,
+      because it is part of the world hash the way gravity is: change it and
+      every trace has to be re-recorded. The worst-tick number is the one worth
+      reading twice — 174 ms to 40 ms is the difference between a visible
+      stall and a dropped frame. The A/B is in `perf-baselines.md` rather than
+      only the new number, because the delta is the fact and it would be
+      unrecoverable from a table of absolutes.
 - [ ] **S6.11** The four outstanding items of the rendering reference decision.
 - [x] **S6.12** All three instruments, and the decision record that states the
       price. **ADR 0061.**

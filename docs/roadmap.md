@@ -629,7 +629,13 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   determinism gate becomes *blocking* here while Jolt is single-threaded, but
   M7 wires it to the job system: whether recorded hashes survive that is a
   question for the grounding pass that vendors Jolt (§9, `UNCONFIRMED.md`),
-  answered before the gate hardens rather than after it breaks.
+  answered before the gate hardens rather than after it breaks. **Answered
+  2026-08-27 by running it** (S6.10, ADR 0064): the hashes survive unchanged --
+  `churn` reproduced its committed hash on both tiers with the solver on four
+  threads -- and the step is roughly two and a half times faster, with
+  `churn10k`'s worst tick falling from 174 ms to 40 ms. It is Jolt's own pool at
+  a FIXED count rather than the engine job system, because that pool sizes itself
+  from the machine and Jolt's determinism is per thread count.
 - **`Weld` and `WeldConstraint`, added to M5 by human decision on 2026-08-20.**
   They arrive here rather than at M6 because the milestone is running ahead and
   because nothing else in v1 can keep one part on another: `CharacterBody` is the

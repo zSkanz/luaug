@@ -104,3 +104,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0061](0061-a-child-is-not-a-member-and-the-refusal-says-so.md) | A child is not a member, and the refusal says so in three places |
 | [0062](0062-a-changed-asset-reloads-itself-and-eval-stays-reserved.md) | A changed asset reloads itself, and `eval` stays reserved |
 | [0063](0063-https-stays-refused-and-tls-comes-from-the-platform.md) | `https://` stays refused, and when TLS arrives it comes from the platform |
+| [0064](0064-jolt-solves-on-a-fixed-thread-pool.md) | Jolt solves on a fixed thread pool, and the count is part of the hash |

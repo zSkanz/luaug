@@ -694,3 +694,39 @@ the walk allocated nothing per node and the panel was never visibly slow, so a
 frame time would have shown a regression only on a world large enough to make it
 one. The cost was linear in a world an editor is expected to open, and now it is
 not.
+
+## Jolt on a fixed thread pool (S6.10, ADR 0064)
+
+The M5 roadmap said "single-threaded first; Jolt's job system wired to the engine
+job system when M7 lands it", and asked whether the recorded hashes would survive
+it. M7 landed and the question was never asked. It is the kind that is answered
+by running it.
+
+Same machine, same build, `win-msvc-dev`, `--bench-repeats=1`. **The A/B rather
+than only the new number**, because the interesting fact is the delta and it
+would be unrecoverable from a table of absolutes:
+
+| Bench | Measure | `JobSystemSingleThreaded` | `JobSystemThreadPool`, 4 threads |
+|---|---|---|---|
+| `physics1k` | mean sim tick | 2.013 ms | **0.904 ms** |
+| `physics1k` | physics step | 1.760 ms | **0.651 ms** |
+| `physics1k` | worst sim tick | 4.563 ms | **1.871 ms** |
+| `churn10k` | mean sim tick | 7.107 ms | **5.224 ms** |
+| `churn10k` | physics step | 3.725 ms | **1.853 ms** |
+| `churn10k` | worst sim tick | 174.17 ms | **40.03 ms** |
+| `ragdoll10` | physics step | 0.264 ms | **0.131 ms** |
+
+**The worst tick is the number worth reading twice.** `churn10k`'s fell from 174
+ms to 40 ms, which is the difference between a visible stall and a dropped frame.
+
+**And the hashes survived**, which was the open question. `tests/determinism/churn`
+— ten thousand ticks, and the one whose parts Jolt actually simulates —
+reproduced its committed hash `d3dd9b68722aa0fa` on Tier 1 and Tier 2, unchanged.
+No trace was re-recorded for this change.
+
+**The thread count is part of the hash.** Jolt is deterministic across runs
+provided the count is the same, so `kPhysicsThreads` is a physics constant in the
+way gravity is: changing it means re-recording every trace. That is also why the
+solver does not run on the engine job pool, which sizes itself from the machine —
+a trace recorded here would stop being reproducible on a machine with a different
+core count, which is the one property a committed trace cannot lose.

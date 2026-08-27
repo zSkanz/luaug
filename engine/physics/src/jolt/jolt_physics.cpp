@@ -21,7 +21,7 @@
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Core/Factory.h>
-#include <Jolt/Core/JobSystemSingleThreaded.h>
+#include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -682,6 +682,28 @@ private:
     return bodyBudget(desc) * 2;
 }
 
+// **How many threads Jolt solves on, and why it is a constant** (S6.10).
+//
+// Jolt is deterministic across runs provided the thread count is the same, so
+// this number is part of the world hash in the way a physics constant is: change
+// it and every recorded trace in `tests/determinism` has to be re-recorded.
+// Deriving it from the machine -- `hardware_concurrency`, or the engine job
+// pool's worker count -- would make the SAME platform's trace differ between two
+// machines, which is the one thing a committed trace cannot survive.
+//
+// Four rather than one, measured on `win-msvc-dev` at 1,000 and 10,000 bodies:
+//
+//   physics1k step   1.76 ms -> 0.65 ms
+//   churn10k  step   3.73 ms -> 1.85 ms
+//   churn10k  worst  174 ms  -> 40 ms
+//
+// Four rather than eight because the gain is in the solver's own parallelism and
+// the tail flattens, and because a fixed count that oversubscribes a small
+// machine costs more than the threads it adds. It is a number this project can
+// revisit with a measurement and a trace re-record, which is what makes it a
+// constant with a name rather than a literal at the call site.
+inline constexpr int kPhysicsThreads = 4;
+
 [[nodiscard]] JPH::uint tempBytes(const WorldDesc& desc) noexcept
 {
     return 8u * 1024u * 1024u + contactBudget(desc) * 64u + contactBudget(desc) * 512u;
@@ -691,7 +713,8 @@ class JoltWorld
 {
 public:
     explicit JoltWorld(const WorldDesc& desc)
-        : m_pairFilter(m_matrix), m_temp(tempBytes(desc)), m_jobs(JPH::cMaxPhysicsJobs), m_gravity(desc.gravity),
+        : m_pairFilter(m_matrix), m_temp(tempBytes(desc)),
+          m_jobs(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, kPhysicsThreads), m_gravity(desc.gravity),
           m_contactBudget(contactBudget(desc))
     {
         m_system.Init(bodyBudget(desc), 0, contactBudget(desc), contactBudget(desc), m_broadPhaseLayers,
@@ -2150,7 +2173,14 @@ private:
     ObjectVsBroadPhaseFilter m_objectVsBroadPhase;
     ObjectPairFilter m_pairFilter;
     JPH::TempAllocatorImpl m_temp;
-    JPH::JobSystemSingleThreaded m_jobs;
+    // **Jolt's own pool, not the engine's** (S6.10, ADR 0064). The engine job
+    // pool sizes itself from the machine, and Jolt's determinism is per thread
+    // COUNT -- so running the solver on it would make a trace recorded here
+    // unreproducible on a machine with a different core count, which is the one
+    // property `tests/determinism` exists to hold. A fixed sub-pool of the
+    // engine's would be the same threads with more code between them and the
+    // same fixed number.
+    JPH::JobSystemThreadPool m_jobs;
     core::DVec3 m_origin;
     JPH::PhysicsSystem m_system;
     ContactRecorder m_contacts;
