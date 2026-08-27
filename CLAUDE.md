@@ -43,11 +43,17 @@ using it means accepting that a Clang-only diagnostic reaches `main` instead of
 you.
 
 Roughly 90 seconds warm for the full six stages, 27 tests on Windows and 26 on
-Linux. The same run costs ~68 charged minutes on GitHub, and this repository is
-**private**, so Actions minutes carry platform multipliers (Linux 1×, Windows
-2×, macOS 10×) against a quota that has been close to exhausted — about 30 of
-those minutes are macOS alone. CI is there to prove `main` is green after a push
-and to build macOS — it is not where you find out whether your change compiles.
+Linux. The same run costs ~68 wall-clock minutes on GitHub. **The repository went
+public on 2026-08-27**, so standard GitHub-hosted runners are now free and the
+platform multipliers (Linux 1×, Windows 2×, macOS 10×) that this paragraph used
+to plan around no longer bill anything — CI had been dark for a billing block
+until then, every job dying in 8 to 12 seconds with zero steps recorded.
+
+**None of that changes what CI is for.** It is there to prove `main` is green
+after a push and to build macOS — it is not where you find out whether your
+change compiles. Free minutes are not a reason to push a build you have not run:
+a red `main` is a red `main` whoever paid for it, and the round trip is twenty
+minutes against ninety seconds.
 
 The gate logic lives in `scripts/gates/*.sh`, and `ci.yml` runs the same files.
 If you add a check, add it there, not in the workflow.

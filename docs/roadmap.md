@@ -1244,6 +1244,39 @@ and the ecosystem work.
      is one `HeightFieldShape` and a voxel volume is not — so a per-chunk
      collider and its rebuild cost become part of the milestone rather than a
      line in it.
+
+     **Built, 2026-08-27 (F1 Parts A–G).** The answer turned out to be *both*
+     rather than either, and that is ADR 0067: one signed-distance field under
+     two encodings — dense height tiles of 32×32 and sparse voxel bricks of
+     16³ — with a single mesher over the pair, and a per-column promotion rule
+     that asks the resulting field one question rather than predicting from the
+     brush's shape. `sd(p) = p.y − H(x,z)` makes the seam between them an
+     equality: a marching edge between a sample below the surface and one above
+     lands *on* the height, which is the height grid's own vertex. A hillside
+     therefore costs what a height map costs, a cave costs voxels, and nothing
+     above the field needs to know which branch answered.
+
+     What shipped: the field and its editing verbs; marching-tetrahedra meshing
+     with winding derived from the gradient rather than a table; a raycast
+     against the field itself, trilinearly interpolated so it agrees with the
+     mesher; `HeightField` and `TriangleMesh` at the physics seam (ADR 0066),
+     one collider per tile, rebuilt on a fixed count per tick rather than a
+     clock; `Terrain` with `FillBall`, `FillBlock`, `PaintBall`, `HeightAt`,
+     `Clear` and `Compact`, reached as `workspace.Terrain`; a sculpting brush in
+     the editor with its own tool mode, undo per stroke and an aiming ring; and
+     the field saved with the scene, run-coded and versioned.
+
+     **Two design defects the tests found and the docs should keep**: a brush
+     that aims at the surface it is changing *burrows* — every stamp lowers the
+     ground, so the next ray lands lower — which is why the ray is cast against
+     the field as it was when the stroke began; and a stroke walked backwards
+     from the pointer loses its fractional remainder every frame, which makes
+     the ground a function of the framerate. Both were measured, not argued.
+
+     Still open, and honestly so: terrain does not stream yet (Part E), cave
+     *surfaces* have no collision — only the height layer does, because a
+     `TriangleMesh` rebuild is 12 ms for 32k triangles and needs an off-frame
+     budget — and `MeshUsage::Dynamic`'s ring-buffer hazard (A4) is unaddressed.
    - **`SurfaceGui` and billboards** — the UI tree rendered in world space: a
      screen on a wall, a name over a head, a health bar that follows a body. The
      tree, the layout and the `ui2d` pass all exist since M6; what does not is

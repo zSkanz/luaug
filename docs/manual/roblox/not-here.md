@@ -23,7 +23,6 @@ The shape of the replacement is one HTTP client and your own server. See
 |---|---|
 | Particles | **Planned**, next phase. The most visible gap here: no fire, smoke, sparks, dust or impact, and no way to fake it. |
 | Decals | **Planned**, next phase — and as a projected thing in the world rather than a face of a part, so a bullet hole is expressible. |
-| Terrain | **Planned**, next phase. The open question is authoring. |
 | World-space UI and billboards | **Planned**, next phase. The UI tree exists; putting its output somewhere other than the screen does not. |
 | Rich text | **Not scheduled.** A label renders its codepoints left to right; complex scripts are not shaped. |
 | Skyboxes and custom environments | **Not present.** The sky is analytic, from `Lighting`, and it is also the reflection environment — right outdoors and wrong in a cave. |
