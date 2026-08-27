@@ -927,10 +927,28 @@ that sends the next session to the wrong place.
 - **Nothing is blocked on the owner.** The one act reserved for them -- making the
   repository public -- is sequenced last and blocks nothing before it.
 - **GitHub Actions has been dark since 2026-08-22**, every run completing in about
-  four seconds having executed zero steps, which is the quota signature. So CI
-  cannot confirm anything until the repository is public. Local gates are the
-  instrument until then, and macOS -- Tier 3, unbuildable here -- has no
-  instrument at all in the meantime.
+  four seconds having executed zero steps. The annotation names it exactly:
+  *"The job was not started because recent account payments have failed or your
+  spending limit needs to be increased."* Not one job starts -- including
+  `changes`, which does nothing but read a path filter -- so a red run means the
+  account, not the commit.
+
+  Two ways out and both are the owner's: raise the spending limit, or make the
+  repository public, which is the last act on this list anyway and takes Actions
+  off the metered quota entirely. Nothing here can do either.
+
+  Local gates are the instrument until then, and they are a good one -- seven
+  stages, both tiers, the sanitizers and the lavapipe goldens. **macOS is the
+  hole**: Tier 3, unbuildable here, and no instrument at all in the meantime.
+
+  **Three items closed in S7 wrote CI-side code that has therefore never
+  executed**: the skip assertion (S7.2) on the Windows and Linux jobs, the macOS
+  test step (S7.1), and the nightly lavapipe job (S7.6). Each was reasoned
+  against a real ctest log and the shared parts -- `assert-no-skips.sh`,
+  `lavapipe-goldens.sh` -- are exercised locally, break-verified, on every run.
+  The workflow YAML around them is not, and the first push after Actions comes
+  back is where that gets found out. The macOS step is `continue-on-error` for
+  its own stated reason, which happens to also cover this one.
 
 ## What went wrong with delegating, and the rule it produced
 
