@@ -47,9 +47,18 @@ struct DevCommand
         Sample,
         Ping,
         Shutdown,
-        // A type this build does not implement -- `asset-changed` and `eval`
-        // are reserved by the protocol -- or one it does not recognise at all.
-        // Answered rather than ignored.
+        // **A content file changed on disk** (S6.4). Reserved by the protocol
+        // since M3 and unimplemented until now for a reason that has since
+        // expired: the brief deferred it because "no asset pipeline exists
+        // before M4/M7", and both shipped.
+        //
+        // `paths` carries what changed, project-relative, as the watcher's own
+        // rescan reports them -- the same shape `reload` uses, because it is the
+        // same watcher answering a different question.
+        AssetChanged,
+        // A type this build does not implement -- `eval` is reserved by the
+        // protocol -- or one it does not recognise at all. Answered rather than
+        // ignored.
         Unsupported,
     };
 

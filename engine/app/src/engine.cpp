@@ -2214,6 +2214,48 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 case DevCommand::Kind::Shutdown:
                     quit = true;
                     break;
+                case DevCommand::Kind::AssetChanged: {
+                    // **What changed on disk is forgotten, and the next frame
+                    // reads it again** (S6.4). Reserved by the protocol since
+                    // M3 and deferred then because "no asset pipeline exists
+                    // before M4/M7"; both shipped, so the reason expired and
+                    // this is what it was waiting for.
+                    //
+                    // The whole implementation is a forget, because the loaders
+                    // already load everything MISSING -- there is no second
+                    // path to write and no state machine to get wrong. It works
+                    // on LOOSE content, which is what a `luaug dev` session
+                    // runs: a loose URN resolves to a path and the mount keeps
+                    // no bytes (D039), so the next load opens the file as it
+                    // stands. A packed or compiled URN reloads the same bytes,
+                    // which is correct -- those are artifacts, and changing one
+                    // means recompiling it.
+                    std::vector<core::NameAtom> urns;
+                    urns.reserve(command.paths.size());
+                    for (const std::string& path : command.paths) {
+                        // The watcher reports project-relative paths under
+                        // `content/`; a URN is `asset://` plus the rest. Anything
+                        // outside that folder is not content and is skipped
+                        // rather than guessed at.
+                        constexpr std::string_view kContent = "content/";
+                        std::string relative = path;
+                        std::replace(relative.begin(), relative.end(), '\\', '/');
+                        const std::size_t at = relative.rfind(kContent);
+                        if (at == std::string::npos)
+                            continue;
+                        relative.erase(0, at + kContent.size());
+                        urns.push_back(host->world().atoms().intern("asset://" + relative));
+                    }
+
+                    const core::u32 dropped =
+                        urns.empty() ? 0u : meshLoader.forget(*device, urns, textureLibrary, meshLibrary, meshCache);
+                    const core::I18nArg args[] = {{"count", static_cast<core::i64>(dropped)}};
+                    core::log(core::LogLevel::Info, LUAUG_TR("engine.dev.info.assets_reloaded"), args);
+                    replyOk("asset-changed", command.id, [dropped](core::JsonWriter& writer) {
+                        writer.field("reloaded", static_cast<core::i64>(dropped));
+                    });
+                    break;
+                }
                 case DevCommand::Kind::Unsupported:
                     // Answered rather than ignored: `asset-changed` and `eval`
                     // are reserved by the protocol and a caller that gets

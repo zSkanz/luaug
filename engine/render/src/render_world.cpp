@@ -159,6 +159,19 @@ void TextureLibrary::clear() noexcept
     entries_.clear();
 }
 
+rhi::TextureHandle TextureLibrary::take(core::NameAtom content) noexcept
+{
+    const auto position =
+        std::lower_bound(entries_.begin(), entries_.end(), content,
+                         [](const Slot& slot, core::NameAtom wanted) noexcept { return slot.content.id < wanted.id; });
+    if (position == entries_.end() || position->content != content)
+        return rhi::TextureHandle{};
+
+    const rhi::TextureHandle held = position->texture;
+    entries_.erase(position);
+    return held;
+}
+
 rhi::TextureHandle TextureLibrary::find(core::NameAtom content) const noexcept
 {
     const auto position =

@@ -28,6 +28,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace luaug::scene {
@@ -98,6 +99,26 @@ public:
     // forever; a shipped game's textures arrive compiled and named by hash.
     core::u32 syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
                            TextureLibrary& library);
+
+    // **Forgets what a URN loaded, so the next sync reads it again** (S6.4).
+    //
+    // This is the whole of asset hot-reload, and it is that small for one
+    // reason: the loaders already load everything MISSING. `syncTextures` reads
+    // every map it cannot find and `syncPrimitives` does the same for meshes,
+    // so making an entry missing is the reload -- there is no second path to
+    // write and no state machine to get wrong.
+    //
+    // **It works because loose content is not cached.** `ContentMounts::resolve`
+    // answers a loose URN with a PATH and reads nothing (D039 took the read out
+    // of it), so the next load opens the file as it stands on disk. A URN served
+    // from a pack or from the editor's object store resolves to bytes the mount
+    // keeps, and forgetting it reloads the same bytes -- which is correct: those
+    // are compiled artifacts, and changing one means recompiling it.
+    //
+    // Returns how many entries it actually dropped, so a caller can say "3
+    // reloaded" rather than "a message arrived".
+    core::u32 forget(rhi::IDevice& device, std::span<const core::NameAtom> urns, TextureLibrary& textures,
+                     MeshLibrary& meshes, MeshCache& cache);
 
     // **Whether a texture may be read and decoded off the frame.**
     //

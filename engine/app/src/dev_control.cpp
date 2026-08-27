@@ -31,6 +31,8 @@ constexpr core::u32 kPollMs = 20;
         return DevCommand::Kind::Ping;
     if (type == "shutdown")
         return DevCommand::Kind::Shutdown;
+    if (type == "asset-changed")
+        return DevCommand::Kind::AssetChanged;
     return DevCommand::Kind::Unsupported;
 }
 

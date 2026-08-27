@@ -102,3 +102,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0059](0059-enabled-is-about-resumption-and-nothing-else.md) | `Enabled` is about resumption, and nothing else |
 | [0060](0060-a-material-is-an-instance-and-a-stamp-is-how-one-is-shared.md) | A material is an instance, a stamp is how one is shared, and a trace moves when the hash's inputs do |
 | [0061](0061-a-child-is-not-a-member-and-the-refusal-says-so.md) | A child is not a member, and the refusal says so in three places |
+| [0062](0062-a-changed-asset-reloads-itself-and-eval-stays-reserved.md) | A changed asset reloads itself, and `eval` stays reserved |

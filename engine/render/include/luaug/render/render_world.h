@@ -360,6 +360,15 @@ public:
     void set(core::NameAtom content, rhi::TextureHandle texture);
     void clear() noexcept;
 
+    // Removes one entry and HANDS BACK what it held, so the caller can destroy
+    // it (S6.4). An invalid handle for a URN that was not loaded.
+    //
+    // **Returned rather than destroyed here**, because this class has no device
+    // and should not acquire one: it is a map from a name to a handle, and a
+    // map that owns GPU lifetime is a second place to look when a texture
+    // outlives its frame. The loader knows the device and destroys it there.
+    [[nodiscard]] rhi::TextureHandle take(core::NameAtom content) noexcept;
+
     // An invalid handle for a URN nothing has loaded, which is the ordinary
     // state of a map whose file has not been read yet. A surface in that state
     // draws untextured rather than not at all: one that vanished while its

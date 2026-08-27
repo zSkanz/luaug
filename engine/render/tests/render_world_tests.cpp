@@ -1179,3 +1179,73 @@ TEST_CASE("a MeshPart's material replaces the block its file described")
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.5f));
     }
 }
+
+// --- Forgetting one URN, which is the whole of asset hot-reload (S6.4) -------
+//
+// `asset-changed` was reserved by the dev protocol at M3 and deferred because
+// "no asset pipeline exists before M4/M7". Both shipped, so the reason expired.
+//
+// The implementation is a removal, because the loaders already load everything
+// MISSING: `syncTextures` reads every map it cannot find, so making an entry
+// missing IS the reload. What these hold down is that the removal is exact --
+// one URN, not its neighbours -- and that the handle comes back so the caller
+// can destroy it rather than leaking one texture per save.
+
+TEST_CASE("taking a texture removes exactly that one and hands its handle back")
+{
+    render::TextureLibrary textures;
+    core::AtomTable atoms;
+    const core::NameAtom first = atoms.intern("asset://textures/brick.png");
+    const core::NameAtom second = atoms.intern("asset://textures/wood.png");
+
+    textures.set(first, rhi::TextureHandle{11});
+    textures.set(second, rhi::TextureHandle{12});
+    REQUIRE(textures.size() == 2);
+
+    // The handle comes BACK rather than being destroyed in here: this class has
+    // no device, and a map that owned GPU lifetime would be a second place to
+    // look when a texture outlives its frame.
+    const rhi::TextureHandle taken = textures.take(first);
+    CHECK(taken.id == 11u);
+    CHECK(textures.size() == 1);
+    CHECK_FALSE(textures.find(first).valid());
+
+    // The neighbour is untouched, which is what makes this a reload of one file
+    // rather than of the project.
+    CHECK(textures.find(second).id == 12u);
+}
+
+TEST_CASE("taking a URN nothing loaded is not an error")
+{
+    render::TextureLibrary textures;
+    core::AtomTable atoms;
+
+    // The ordinary case on a change to a file nothing has drawn yet. A watcher
+    // reports every save, and most of them are for content no frame has asked
+    // for -- so this has to be a no-op rather than a diagnostic.
+    CHECK_FALSE(textures.take(atoms.intern("asset://textures/never.png")).valid());
+    CHECK(textures.size() == 0);
+
+    textures.set(atoms.intern("asset://a.png"), rhi::TextureHandle{3});
+    CHECK_FALSE(textures.take(atoms.intern("asset://b.png")).valid());
+    CHECK(textures.size() == 1);
+}
+
+TEST_CASE("a taken texture is loaded again, because the library is what says it is missing")
+{
+    render::TextureLibrary textures;
+    core::AtomTable atoms;
+    const core::NameAtom urn = atoms.intern("asset://textures/brick.png");
+
+    textures.set(urn, rhi::TextureHandle{5});
+    CHECK(textures.find(urn).valid());
+
+    (void)textures.take(urn);
+    // **This is the reload.** `syncTextures` loads every map it cannot find, so
+    // an absent entry is a request to read the file again -- there is no second
+    // path and no state machine.
+    CHECK_FALSE(textures.find(urn).valid());
+
+    textures.set(urn, rhi::TextureHandle{6});
+    CHECK(textures.find(urn).id == 6u);
+}

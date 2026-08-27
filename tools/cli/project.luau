@@ -357,6 +357,56 @@ end
 --- hash, sorted by path. This is what a save is compared against: `fs.watch`
 --- says only that *something* under a directory changed (U-58), so the watcher
 --- rescans and diffs rather than trusting the event.
+--- Every directory under `content/`, for the watcher.
+---
+--- **Separate from `sourceDirectories` because the two answer different
+--- questions** (S6.4): a `.luau` under `src/` is a script and reloads the world,
+--- and a `.png` under `content/` is an asset and reloads itself. Sending one
+--- verb for both would make every texture save restart the game.
+local function contentDirectories(root: string): { string }
+    local found: { string } = {}
+    local start = joined(root, "content")
+    if not fs.exists(start) then
+        return found
+    end
+
+    local pending: { string } = { start }
+    while #pending > 0 do
+        local dir = table.remove(pending) :: string
+        table.insert(found, dir)
+        for _, entry in fs.listDirectory(dir) do
+            if entry.type == "dir" then
+                table.insert(pending, joined(dir, entry.name))
+            end
+        end
+    end
+    return found
+end
+
+--- What is under `content/`, keyed by path, valued by size and modification
+--- time rather than by contents.
+---
+--- **Not the bytes, which is the difference from `sourceSnapshot`.** A project's
+--- scripts are kilobytes and comparing them directly cannot collide; its content
+--- is megabytes of texture and mesh, and reading all of it on every filesystem
+--- event to find out whether anything changed would cost more than the reload
+--- it is deciding about.
+local function contentSnapshot(root: string): { [string]: string }
+    local snapshot: { [string]: string } = {}
+    for _, dir in contentDirectories(root) do
+        for _, entry in fs.listDirectory(dir) do
+            if entry.type == "file" then
+                local file = joined(dir, entry.name)
+                local ok, meta = pcall(fs.metadata, file)
+                if ok and meta ~= nil then
+                    snapshot[file] = `{meta.size}:{meta.modified:toNanoseconds()}`
+                end
+            end
+        end
+    end
+    return snapshot
+end
+
 local function sourceSnapshot(root: string): { [string]: string }
     local snapshot: { [string]: string } = {}
     for _, dir in sourceDirectories(root) do
@@ -408,6 +458,8 @@ return {
     executableName = executableName,
     sourceDirectories = sourceDirectories,
     sourceSnapshot = sourceSnapshot,
+    contentDirectories = contentDirectories,
+    contentSnapshot = contentSnapshot,
     changedFiles = changedFiles,
     joined = joined,
 }

@@ -599,7 +599,43 @@ that sends the next session to the wrong place.
       to change a test that says what the order is FOR rather than a number
       nobody reads. A comment was what the old claim was, and it was wrong for
       two milestones.
-- [ ] **S6.4** The dev protocol's two reserved verbs.
+- [x] **S6.4** One built, one still reserved with the reason written down.
+      **ADR 0062**, and the split is the finding: the M3 brief gave two reasons
+      and they were not the same kind of reason.
+
+      `asset-changed` was deferred because "no asset pipeline exists before
+      M4/M7". **Both shipped, so that reason expired** — and a reserved verb
+      whose stated blocker no longer exists is one nobody revisits, because the
+      note explaining it still reads as current.
+
+      **The implementation is a removal**, and it is that small because the
+      loaders already load everything MISSING: `syncTextures` reads every map it
+      cannot find, so making an entry missing IS the reload. `MeshLoader::forget`
+      takes the texture out, destroys its handle, removes the mesh and releases
+      its buffers. It works because loose content is not cached —
+      `ContentMounts::resolve` answers a loose URN with a PATH and reads nothing
+      (D039 took the read out of it), so the next load opens the current file. A
+      packed or compiled URN reloads the same bytes, which is correct: those are
+      artifacts, and changing one means recompiling it.
+
+      The watcher answers a **different verb for content than for source**,
+      which is what makes it worth having: a `.luau` under `src/` reloads the
+      world and a `.png` under `content/` reloads itself, where one verb for
+      both would restart the game every time somebody saved a texture. Content
+      is snapshotted by size and modification time rather than by contents,
+      because reading megabytes on every filesystem event to decide whether to
+      reload would cost more than the reload.
+
+      `eval` stays reserved, and the record says what it is waiting for —
+      including the half the brief did not name. R4 is the stated one: it is a
+      second door into the VM, and the first thing anybody wants from a console
+      is to reach what a script cannot. **R10 is the harder one.** The world hash
+      is a pure function of the operation sequence; an `eval` that mutates the
+      world inserts operations the recording does not contain, so a replay of a
+      session somebody typed into cannot reproduce it, silently. Three ways out,
+      all of them decisions — refuse while recording, record the source as an
+      operation, or say plainly that a console session is not replayable. Taking
+      one without the console being asked for would be inventing requirements.
 - [ ] **S6.5** TLS — needs an approved decision record before it needs code.
 - [ ] **S6.6** KTX2 HDR; glTF topologies; the second UV set half-importer.
 - [x] **S6.7** A text caret — built. `TextInput`'s doc has promised "typed

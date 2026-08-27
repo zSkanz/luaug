@@ -719,4 +719,41 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
     return loaded;
 }
 
+core::u32 MeshLoader::forget(rhi::IDevice& device, std::span<const core::NameAtom> urns, TextureLibrary& textures,
+                             MeshLibrary& meshes, MeshCache& cache)
+{
+    core::u32 dropped = 0;
+    for (const core::NameAtom urn : urns) {
+        if (!urn.valid())
+            continue;
+
+        // The texture, whose handle this owns the lifetime of once it is out of
+        // the library. Destroyed here rather than left: a dev session that
+        // reloads one 4K map fifty times would otherwise hold fifty of them.
+        if (const rhi::TextureHandle held = textures.take(urn); held.valid()) {
+            device.destroy(held);
+            ++dropped;
+        }
+
+        // The mesh, and its GPU buffers with it. `MeshLibrary::remove` drops the
+        // entry; the cache is what holds the vertex and index buffers, so a
+        // remove without this leaks the expensive half.
+        if (const MeshLibrary::Entry* entry = meshes.find(urn); entry != nullptr) {
+            const MeshHandle handle = entry->mesh;
+            meshes.remove(urn);
+            if (handle.valid())
+                cache.release(device, handle);
+            ++dropped;
+        }
+
+        // **Anything in flight for this URN is left alone**, deliberately. A
+        // deferred read that lands after the forget writes the OLD bytes into a
+        // fresh entry, which the next forget would drop again -- so the worst
+        // case is one stale frame, and the alternative is cancelling work from
+        // the middle of a pipeline whose whole design is that nothing holds a
+        // pointer into it (D131's neighbourhood).
+    }
+    return dropped;
+}
+
 } // namespace luaug::render

@@ -210,6 +210,7 @@
   "engine.dev.info.attached": "Attached to the dev server at {url}; saved files will reload this world.",
   "engine.dev.err.bad_url": "--dev-control needs ws://host:port/path; got {url}.",
   "engine.dev.warn.bad_message": "Ignored a dev-server message: {detail}.",
+  "engine.dev.info.assets_reloaded": "Reloaded {count} asset(s) after a change on disk.",
   "engine.dev.err.not_implemented": "The dev-server command {of} is reserved by the protocol and is not implemented yet.",
   "engine.reload.err.script_failed": "Reload refused: {count} entry script(s) would not compile. The previous world is still running.",
   "engine.reload.err.no_scripts": "Reload refused: no entry scripts were found under {path}. The previous world is still running.",

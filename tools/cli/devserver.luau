@@ -181,11 +181,27 @@ local function start(options: Options): Handle
     -- Declared before the watcher task so it can reach the connection, and
     -- defined after the handle exists.
     local sendReload: ({ string }) -> ()
+    local sendAssetChanged: ({ string }) -> ()
 
     local snapshot = project.sourceSnapshot(options.root)
+    -- **Content is snapshotted separately and answers a different verb** (S6.4).
+    -- A `.luau` under `src/` is a script and reloads the world; a `.png` under
+    -- `content/` is an asset and reloads itself. One verb for both would restart
+    -- the game every time somebody saved a texture, which is the opposite of
+    -- what a hot reload is for.
+    local content = project.contentSnapshot(options.root)
     local dirty = false
     local watched: { fsRaw.WatchHandle } = {}
     local running = true
+
+    for _, dir in project.contentDirectories(options.root) do
+        table.insert(
+            watched,
+            fsRaw.watch(dir, function(_filename, _event)
+                dirty = true
+            end)
+        )
+    end
 
     for _, dir in project.sourceDirectories(options.root) do
         table.insert(
@@ -210,6 +226,16 @@ local function start(options: Options): Handle
             local fresh = project.sourceSnapshot(options.root)
             local changed = project.changedFiles(snapshot, fresh)
             snapshot = fresh
+
+            -- Asked in the same rescan, because one filesystem event does not
+            -- say which half of the project it came from.
+            local freshContent = project.contentSnapshot(options.root)
+            local changedContent = project.changedFiles(content, freshContent)
+            content = freshContent
+            if #changedContent > 0 then
+                sendAssetChanged(changedContent)
+            end
+
             if #changed == 0 then
                 -- An editor touched a file without changing it, or wrote a
                 -- temporary beside it. Nothing to reload.
@@ -255,6 +281,22 @@ local function start(options: Options): Handle
             return
         end
         socket:send(json.serialize(json.object({ type = "reload", id = nextId, paths = changed :: any })))
+    end
+
+    --- Tells the engine which content files moved, so it can forget what they
+    --- loaded (S6.4).
+    ---
+    --- **Not a reload**, which is the whole distinction: the world keeps
+    --- running, its instances keep their ids and their state, and the next
+    --- frame reads the changed file off disk. A texture somebody re-exported
+    --- appears without a restart.
+    function sendAssetChanged(changed: { string })
+        nextId += 1
+        local socket = engineSocket
+        if socket == nil then
+            return
+        end
+        socket:send(json.serialize(json.object({ type = "asset-changed", id = nextId, paths = changed :: any })))
     end
 
     function handle.close(_self: Handle)
