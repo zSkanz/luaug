@@ -2955,6 +2955,30 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         m_brushAim->position.y += terrain->origin.y;
         m_brushAim->position.z += terrain->origin.z;
     }
+    else if (m_brushPlaneLock) {
+        // **The plane, when the ray met no ground.** Without this a brush over
+        // an empty field stamps nothing anywhere, which is a tool that does not
+        // work rather than a tool with an edge case.
+        //
+        // Held at the stroke's own height while one is running, so extending a
+        // hillside past its edge continues it instead of dropping to the
+        // origin; at the terrain's origin otherwise.
+        const double planeY = m_stroke.has_value() ? static_cast<double>(m_stroke->plane) : terrain->origin.y;
+        // A ray parallel to the plane meets it nowhere, and one pointing away
+        // meets it behind the camera. Both are "no aim" rather than a hit at a
+        // negative distance.
+        if (std::abs(static_cast<double>(ray.direction.y)) > 1e-6) {
+            const double along = (planeY - ray.origin.y) / static_cast<double>(ray.direction.y);
+            if (along > 0.0 && along <= BrushReach) {
+                asset::TerrainHit hit;
+                hit.position = core::DVec3{ray.origin.x + static_cast<double>(ray.direction.x) * along, planeY,
+                                           ray.origin.z + static_cast<double>(ray.direction.z) * along};
+                hit.normal = core::Vec3{0.0f, 1.0f, 0.0f};
+                hit.distance = along;
+                m_brushAim = hit;
+            }
+        }
+    }
 
     // The button came up, or the stroke ran out of ground under it.
     if (m_stroke.has_value() && !m_pointerDown) {

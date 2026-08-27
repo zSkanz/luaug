@@ -1769,6 +1769,26 @@ public:
     // rather than guess about.
     [[nodiscard]] core::InstanceId workspaceUnder(const scene::World& world, core::InstanceId root) const;
 
+    // **Where a stroke aims when the ray meets no ground.**
+    //
+    // Every volumetric terrain grows this, and for the reason the research
+    // found: an empty field is a field a ray misses, so a brush over one stamps
+    // nothing anywhere and the tool reads as broken. It is the same failure the
+    // panel fixed one layer up -- a tool that cannot be reached is not a tool --
+    // and it is why the engines with sparse storage all offer a plane to aim at.
+    //
+    // The plane is horizontal at the terrain's own origin, or at the height the
+    // stroke last hit ground, so extending a hillside past its edge continues it
+    // rather than dropping to zero. A heightmap engine never needs this because
+    // its plane is the allocation; ours is a fallback for the case theirs cannot
+    // have.
+    [[nodiscard]] bool brushPlaneLock() const noexcept { return m_brushPlaneLock; }
+    void setBrushPlaneLock(bool locked) noexcept
+    {
+        m_brushPlaneLock = locked;
+        m_preferencesDirty = true;
+    }
+
     // Where the brush is aiming, in world space, or nothing when it is over sky
     // -- for the ring the viewport draws. Cast against the FIELD rather than
     // against physics, because an editor in edit mode holds no bodies at all
@@ -2122,6 +2142,7 @@ private:
 
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;
+    bool m_brushPlaneLock = true;
     core::u32 m_lastStrokeStamps = 0;
     Brush m_brush;
     std::optional<asset::TerrainHit> m_brushAim;

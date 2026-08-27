@@ -4850,3 +4850,74 @@ TEST_CASE("the aiming ring follows a moved terrain")
     // answered in world space rather than in the field's.
     CHECK(aim->position.y == doctest::Approx(8.0).epsilon(0.1));
 }
+
+TEST_CASE("a brush over an empty field still stamps, on the plane")
+{
+    // **The defect the survey named and the owner lived.** Every engine with
+    // sparse terrain storage hands you an empty volume on create, a ray misses
+    // an empty volume, and a brush that aims by raycast then stamps nothing
+    // anywhere -- so the tool reads as broken rather than as empty. The two
+    // reference engines with this representation both grew a plane to aim at;
+    // this is ours.
+    BrushRig rig;
+    rig.lookDown(60.0);
+
+    // Empty the field, which is what `Instance.new("Terrain")` produces.
+    rig.field().field = asset::TerrainField(rig.field().field.settings());
+    rig.field().fieldRevision += 1;
+    REQUIRE(rig.field().field.tileCount() == 0);
+
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Add);
+    rig.editor.setBrushRadius(4.0f);
+    REQUIRE(rig.editor.brushPlaneLock());
+
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    REQUIRE(rig.editor.sculpting());
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+
+    // Ground exists where the plane was.
+    CHECK(rig.field().field.tileCount() > 0);
+}
+
+TEST_CASE("the plane can be turned off, and then an empty field takes no stroke")
+{
+    // The other half of the claim: it is a fallback a person can decline, not a
+    // behaviour that hides an empty field from them.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.field().field = asset::TerrainField(rig.field().field.settings());
+    rig.editor.setBrushPlaneLock(false);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    CHECK_FALSE(rig.editor.brushAim().has_value());
+    CHECK(rig.field().field.tileCount() == 0);
+}
+
+TEST_CASE("the plane follows the stroke rather than the origin")
+{
+    // Extending a hillside past its edge continues it, instead of dropping to
+    // the terrain's origin and leaving a step.
+    BrushRig rig;
+    rig.lookDown(60.0);
+
+    // Ground only on one side, so a stroke can run off it.
+    rig.field().field = asset::TerrainField(rig.field().field.settings());
+    asset::fillFlat(rig.field().field, core::DVec3{-20.0, 0.0, 0.0}, 24.0f, 6.0f, 1);
+    rig.field().fieldRevision += 1;
+
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Add);
+    rig.editor.setBrushRadius(3.0f);
+
+    // Start on the ground at six metres up, then drag off its edge.
+    rig.frame(rig.pixelOf(core::DVec3{-20.0, 6.0, 0.0}), true, true);
+    REQUIRE(rig.editor.sculpting());
+    rig.frame(rig.pixelOf(core::DVec3{20.0, 6.0, 0.0}), false, true);
+
+    const std::optional<asset::TerrainHit> aim = rig.editor.brushAim();
+    REQUIRE(aim.has_value());
+    // Six metres up, not zero: the plane is the stroke's own height.
+    CHECK(aim->position.y == doctest::Approx(6.0).epsilon(0.15));
+}

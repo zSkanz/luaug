@@ -5650,9 +5650,6 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
     if (ImGui::CollapsingHeader("Create", terrain == nullptr ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
         if (terrain == nullptr) {
             ImGui::TextWrapped("This world has no terrain yet.");
-            if (ImGui::Button("Create Terrain", ImVec2(-FLT_MIN, 0.0f)))
-                editor.createTerrain(world, root, inspector);
-            ImGui::SetItemTooltip("adds a Terrain under the workspace. Nothing is sculpted yet");
         }
         else {
             ImGui::TextDisabled("%zu cell(s)", terrain->field.tileCount() + terrain->field.brickCount());
@@ -5664,7 +5661,17 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         // needs to start sculpting, and it is the case that proves the
         // cheap encoding works -- ground that reaches the floor is a
         // height function and costs no voxels.
-        static f32 groundSize = 128.0f;
+        // **256 m, which is 512 columns square at the default voxel.**
+        //
+        // Matched to the reference engines on SAMPLE COUNT rather than on
+        // metres: they ship grids of about 512 squared and spread them over five
+        // hundred to a thousand metres only because their brushes are one to two
+        // metres coarse. Copying their metres at half-metre voxels would be a
+        // world four to sixteen times denser than any of them ship.
+        //
+        // It is also four whole 64 m streaming cells on a side, so the default
+        // exercises the streaming grid rather than a special case.
+        static f32 groundSize = 256.0f;
         static f32 groundHeight = 0.0f;
         ImGui::SetNextItemWidth(120.0f);
         ImGui::DragFloat("size", &groundSize, 1.0f, 8.0f, 2048.0f, "%.0f m");
@@ -5675,13 +5682,38 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
             ImGui::TextDisabled("made of %.*s -- pick another under Paint", static_cast<int>(fill->name.size()),
                                 fill->name.data());
         }
-        if (ImGui::Button("Flat Ground", ImVec2(-FLT_MIN, 0.0f))) {
+
+        // **The derived numbers, live**, which is what a landscape creation
+        // panel shows and what stops somebody typing 2048 and wondering why the
+        // editor stalled. A size field with no cost readout is one that only
+        // reports its mistake afterwards.
+        {
+            const f32 voxel = terrain != nullptr ? terrain->field.settings().voxelSize : 0.5f;
+            const auto columns = static_cast<int>(groundSize / std::max(voxel, 0.01f));
+            const auto side = static_cast<long long>(columns / 32 + 1);
+            const auto kilobytes = side * side * static_cast<long long>(sizeof(asset::HeightTile)) / 1024;
+            ImGui::TextDisabled("%d x %d columns  |  %lld tiles  |  %lld KB", columns, columns, side * side, kilobytes);
+        }
+
+        // **One button, because it is one intention.**
+        //
+        // It used to be two -- Create Terrain and then Flat Ground -- and the
+        // first was strictly worse than the second: it produced an instance with
+        // an EMPTY field, which a ray misses, so every terrain tool then did
+        // nothing at all. Every heightmap engine hands you a plane on create
+        // because the plane IS its allocation; the two engines with sparse
+        // storage both grew a workaround for handing you nothing, and this is
+        // ours -- adopted rather than rediscovered.
+        if (ImGui::Button(terrain == nullptr ? "Create Terrain" : "Flat Ground", ImVec2(-FLT_MIN, 0.0f))) {
             // **The palette's selection, not a second one.** The first
             // version had a material here that no widget showed and nothing
             // could change, which is a control that lies by being absent --
             // one palette, one choice.
             editor.generateGround(world, root, inspector, groundSize, groundHeight, editor.brush().material);
         }
+        ImGui::SetItemTooltip(terrain == nullptr
+                                  ? "adds a Terrain under the workspace with flat ground, ready to sculpt"
+                                  : "lays flat ground over this square, on top of whatever is there");
 
         if (terrain != nullptr) {
             if (ImGui::Button("Clear", ImVec2(-FLT_MIN, 0.0f)))
