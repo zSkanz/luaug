@@ -57,6 +57,12 @@ void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view 
 [[nodiscard]] luaug::core::f32 consoleLogHeight(luaug::core::f32 available, luaug::core::f32 reservedBelow,
                                                 luaug::core::f32 minimum) noexcept;
 
+// A count with thousands separators, for the Stats readout's triangle number.
+[[nodiscard]] std::string formatCount(luaug::core::u32 value);
+
+// Where a row dropped against another row lands, as a sibling index.
+[[nodiscard]] luaug::core::u32 dropLanding(luaug::core::u32 from, luaug::core::u32 target, bool below) noexcept;
+
 } // namespace luaug::app
 
 namespace {
@@ -674,4 +680,78 @@ TEST_CASE("the console's log takes the room the panel has, less the line below i
     CHECK(static_cast<double>(luaug::app::consoleLogHeight(40.0f, repl, floorHeight)) == doctest::Approx(160.0));
     CHECK(static_cast<double>(luaug::app::consoleLogHeight(0.0f, repl, floorHeight)) == doctest::Approx(160.0));
     CHECK(static_cast<double>(luaug::app::consoleLogHeight(-120.0f, repl, floorHeight)) == doctest::Approx(160.0));
+}
+
+TEST_CASE("a count is grouped in threes, from the right")
+{
+    // **The Stats readout's triangle number** (S5.12), which routinely has seven
+    // digits: `1483920` is unreadable at a glance in a way `1,483,920` is not.
+    //
+    // The grouping loop walks BACKWARDS from the end and inserts, so the two
+    // ways to get it wrong are both about the boundary: a leading separator on a
+    // count whose digits are an exact multiple of three, and an off-by-one that
+    // groups from the left. Both are asserted rather than assumed.
+    CHECK(luaug::app::formatCount(0) == "0");
+    CHECK(luaug::app::formatCount(7) == "7");
+    CHECK(luaug::app::formatCount(999) == "999");
+
+    // The exact-multiple boundary, where a naive loop emits ",000".
+    CHECK(luaug::app::formatCount(1000) == "1,000");
+    CHECK(luaug::app::formatCount(999999) == "999,999");
+    CHECK(luaug::app::formatCount(1000000) == "1,000,000");
+
+    // From the RIGHT: a leading group is short, and grouping from the left would
+    // put the separator one digit over.
+    CHECK(luaug::app::formatCount(1483920) == "1,483,920");
+    CHECK(luaug::app::formatCount(12345) == "12,345");
+
+    // And the top of the range this counts in, so a scene that really does draw
+    // four billion triangles still reads as a number.
+    CHECK(luaug::app::formatCount(4294967295u) == "4,294,967,295");
+}
+
+TEST_CASE("a row dropped between two rows lands where the pointer said")
+{
+    // **The Explorer's reorder gesture** (S5.18), and the one part of it
+    // arithmetic can get wrong. `World::moveChild` takes the place the child
+    // will OCCUPY, and its own doc warns that reading it as "before whatever
+    // stands there now" lands a downward drag one place short every time.
+    //
+    // The subtlety is that the dragged row comes OUT of the list first, so
+    // everything after it shifts down by one before the insertion happens.
+    using luaug::app::dropLanding;
+
+    // A list of five: A B C D E, indices 0..4.
+
+    // Dragging A (0) DOWN, dropped below C (2). Removing A first makes the list
+    // B C D E, where C stands at 1 -- so the place after C is 2, which is C's
+    // ORIGINAL index. Adding one here is the mistake, and it is the one that
+    // looks right: "after the row at 2" reads like 3 until you remember that
+    // the drag already took a row out from above it.
+    CHECK(dropLanding(0, 2, true) == 2);
+
+    // Dragging E (4) UP, dropped above C (2). Nothing below the drag moved, so
+    // C is still at 2 and the place before it is 2.
+    CHECK(dropLanding(4, 2, false) == 2);
+
+    // Dragging A (0) DOWN, dropped ABOVE C (2). Removing A shifts C to 1, and
+    // the place before C is 1.
+    CHECK(dropLanding(0, 2, false) == 1);
+
+    // Dragging E (4) UP, dropped BELOW C (2). Nothing above C moved, so C is
+    // still at 2 and the place after it is 3. Same gesture as the first case,
+    // opposite answer -- which is the whole reason this is a function with a
+    // test rather than three lines inlined in a drop handler.
+    CHECK(dropLanding(4, 2, true) == 3);
+
+    // **The two edges.** Dropping above the first row is index zero whichever
+    // way the drag came from, and the underflow guard is what keeps it there.
+    CHECK(dropLanding(3, 0, false) == 0);
+    CHECK(dropLanding(0, 0, false) == 0);
+
+    // Dropping against the row you are already dragging is a no-op wherever the
+    // pointer was, which `Editor::reorder` then reports as "already there"
+    // rather than recording an undo step for (D134).
+    CHECK(dropLanding(2, 2, true) == 2);
+    CHECK(dropLanding(2, 2, false) == 2);
 }

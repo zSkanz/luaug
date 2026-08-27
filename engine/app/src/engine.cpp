@@ -1690,10 +1690,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // has been rewritten underneath it.
                 if (editorCommands.deleteSelection || editorCommands.duplicateSelection ||
                     editorCommands.groupSelection || editorCommands.ungroupSelection ||
-                    editorCommands.reparentTo.valid()) {
+                    editorCommands.reparentTo.valid() || editorCommands.reorderChild.valid()) {
                     const std::vector<core::InstanceId> acting(inspector.selectionSet().begin(),
                                                                inspector.selectionSet().end());
-                    if (editorCommands.reparentTo.valid()) {
+                    if (editorCommands.reorderChild.valid()) {
+                        // **Before the reparent, and they are exclusive by
+                        // construction**: a drop sets one or the other, decided
+                        // by where in the row's height the pointer was. Ordered
+                        // rather than left to chance so that a future command
+                        // that set both would move the instance once and
+                        // predictably rather than twice.
+                        (void)editor.reorder(authored(), editorCommands.reorderChild, editorCommands.reorderIndex,
+                                             inspector);
+                    }
+                    else if (editorCommands.reparentTo.valid()) {
                         (void)editor.reparent(authored(), acting, editorCommands.reparentTo, authoredRoot(), inspector);
                     }
                     if (editorCommands.deleteSelection) {
@@ -3197,6 +3207,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // pointer set at boot would name the previous one.
                     overlay->setSkeleton(host->animation());
                 }
+                // **What the frame cost, handed over before it is drawn**
+                // (S5.12). The Stats readout showed frame time, backend and
+                // drawable size and nothing about the work -- in BOTH shells,
+                // despite the ledger recording that the F3 one had it. Counted
+                // by the renderer where it can be (`drawCalls`), and by the
+                // extraction walk where only that knows (`visibleObjects`, the
+                // coarse-LOD draws and the triangles at the level chosen).
+                overlay->setRenderCounters({
+                    .drawCalls = frameDrawCalls,
+                    .visibleObjects = frameVisibleObjects,
+                    .instancedDraws = frameInstancedDraws,
+                    .lodDraws = frameLodDraws,
+                    .triangles = static_cast<core::u32>(frameTriangles),
+                });
                 overlay->render(*cmd, options.editor && present.valid() ? present : target, frame);
             }
         }

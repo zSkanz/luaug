@@ -511,10 +511,29 @@ that sends the next session to the wrong place.
       open a tab, because opening one reads the world. Eight cases, and one of
       them caught a real defect while being written: a digit cap that
       TRUNCATED turned an absurd run into a plausible line number.
-- [~] **S5.12** The Stats panel shows what is already measured — **streaming
-      is in**, beside the frame and memory readouts it already had. What is
-      left is the render-side counters, which the F3 overlay shows and the
-      editor's panel does not.
+- [x] **S5.12** The Stats panel shows what is already measured. Streaming went
+      in earlier; the render counters are in now — **and this row was wrong
+      about where they already were.** It said the F3 overlay showed them and
+      the editor's panel did not. Neither did. `drawStats` drew frame time, the
+      backend and the drawable size, and both shells call it, so nine
+      milestones of engine reported nothing about what a frame cost in either.
+
+      **Both shells fixed by one change**, because both draw through that
+      function. Two pairs rather than five loose numbers, since each pair is a
+      question neither half answers alone: draws against objects says whether
+      the instanced path did anything this frame (they were the same number
+      until M7.5 gave the renderer a way to draw a run at once), and coarse-LOD
+      draws against triangles says whether the selector is selecting — a
+      scene full of distant meshes reporting zero is the shape a counter nobody
+      looks at hides.
+
+      The counters are passed in rather than read off `DebugService`. Those
+      numbers reach a SCRIPT through `ServiceState`, which the overlay has no
+      access to and should not: `services()` is deliberately file-local to the
+      module that owns it. The frame loop has both and handing them over is one
+      call. `formatCount` is separated out and tested, because a triangle count
+      routinely has seven digits and the grouping loop has two ways to be wrong
+      at the boundary.
 - [x] **S5.13** Snap step editable; a reference grid drawn — both built.
       `setSnapStep` had existed since the manipulator did and nothing could
       call it, so every scene in this editor was built on a quarter of a metre
@@ -622,10 +641,33 @@ that sends the next session to the wrong place.
       a scale drag — and a handle that moves while you hold it is one that does
       not track the pointer. Four cases, persisted with the other tool
       preferences.
-- [~] **S5.18** Sibling reordering. **The `World` verb is built** — a move
-      that changes nothing reports `Unchanged`, the duplicate-name chain is
-      rebuilt around it, and the world hash follows. The Explorer's
-      drag-between-rows half is what is left.
+- [x] **S5.18** Sibling reordering — the Explorer's half is built, so a scene's
+      child order is something somebody chooses rather than whatever the order
+      of creation happened to be. That order is what the serializer writes and
+      what the world hash walks, so it was never cosmetic.
+
+      **Bands, not a gap between rows.** Where in a row's HEIGHT the pointer
+      sits decides which of two moves a drop is: the middle is the reparent
+      this tree has always done, and the top and bottom quarters are a reorder.
+      An interleaved zero-height drop item would have to be clipped in step with
+      the row clipper, and a gap thin enough not to disturb the layout is a gap
+      too thin to hit. A quarter at each end is where Unity, Unreal and Godot
+      all land.
+
+      **The arithmetic is the part that can be wrong, so it is a function with a
+      test.** `moveChild` takes the place the child will OCCUPY, and its own doc
+      warns that reading it as "before whatever stands there now" lands a
+      downward drag one place short every time — because the drag removes the
+      row first and everything after it shifts down by one. The same gesture
+      against the same row gives opposite answers depending on which direction
+      the drag came from, and **the first version of the test asserted two of
+      those backwards**, which is exactly why it is not three lines inlined in a
+      drop handler.
+
+      `Editor::reorder` decides before recording, the rule `reparent` already
+      states: a drop that lands where the row already was is the commonest way
+      to end a drag by accident, and a step that undoes nothing eats a press of
+      ctrl-Z and clears the redo stack on its way past (D134).
 - [x] **S5.19** Written, and the command two documents already named now exists.
 
       `.vscode/settings.json` has always aliased `@luaug/` to

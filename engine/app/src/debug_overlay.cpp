@@ -131,6 +131,51 @@ void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view 
 // pixels or none, and ImGui reads a non-positive child height as "fill the
 // rest, less this much" -- so an unclamped subtraction would make the log grow
 // as the room for it shrank.
+// **Where a row dropped against another row lands**, as an index into the
+// parent's child list -- the place it will OCCUPY, which is what
+// `World::moveChild` takes.
+//
+// `from` is where the dragged row stands now, `target` where the row it was
+// dropped against stands, and `below` says which edge the pointer was nearest.
+//
+// **The whole subtlety is that the dragged row comes out of the list first.**
+// `moveChild` removes and re-inserts, so every sibling after `from` shifts down
+// by one before the insertion happens -- which means the naive answers are wrong
+// in exactly one direction each:
+//
+//   dragging DOWN and dropping below a row: the row's own index is already the
+//   place after it, because the drag's removal pulled it up by one.
+//
+//   dragging UP and dropping above a row: the row's index is one too far,
+//   because nothing below the drag moved.
+//
+// Read as "before whatever stands at `target` now" instead, and a downward drag
+// lands one place short every time. `moveChild`'s own doc says so; this is the
+// caller that would have got it wrong.
+[[nodiscard]] core::u32 dropLanding(core::u32 from, core::u32 target, bool below) noexcept
+{
+    if (below)
+        return from > target ? target + 1 : target;
+    return from < target ? (target > 0 ? target - 1 : 0) : target;
+}
+
+// A count with thousands separators, because a triangle count is the one number
+// on this panel that routinely has seven digits and `1483920` is unreadable at a
+// glance in a way `1,483,920` is not.
+//
+// Grouped by hand rather than through a locale: `std::locale` on a number this
+// panel draws every frame would be a per-frame allocation and a dependency on
+// what the machine is set to, and this panel is English (R1).
+[[nodiscard]] std::string formatCount(core::u32 value)
+{
+    std::string digits = std::to_string(value);
+    for (core::usize at = digits.size(); at > 3;) {
+        at -= 3;
+        digits.insert(at, 1, ',');
+    }
+    return digits;
+}
+
 [[nodiscard]] f32 consoleLogHeight(f32 available, f32 reservedBelow, f32 minimum) noexcept
 {
     const f32 height = available - reservedBelow;
@@ -277,7 +322,7 @@ struct FrameTimeMeter
 FrameTimeMeter g_frameTime;
 
 // Three facts the host already knows, plus the sampled frame time above.
-void drawStats(const Frame& frame)
+void drawStats(const Frame& frame, const RenderCounters& counters)
 {
     g_frameTime.accumulate(frame.renderDt);
 
@@ -296,6 +341,26 @@ void drawStats(const Frame& frame)
 
     const platform::WindowSize size = platform::windowPixelSize(*g_window);
     ImGui::Text("drawable %d x %d", size.width, size.height);
+
+    // **What the frame actually cost the GPU**, which neither shell showed for
+    // nine milestones. Both draw through here, so the person authoring a world
+    // and the person playing it see the same numbers -- and it is the author who
+    // needs them, because a scene that costs four thousand draw calls is a
+    // scene somebody built that way.
+    //
+    // Two pairs rather than five loose numbers, because each pair is a QUESTION
+    // and neither half answers it alone:
+    //
+    //   draws vs objects -- one call can cover a run of objects since M7.5, so
+    //   these being equal means the instanced path did nothing this frame, and
+    //   the gap between them is what it saved.
+    //
+    //   lod vs triangles -- a scene of distant meshes reporting zero coarse
+    //   draws is a selector that is not selecting, which is exactly the shape a
+    //   counter nobody looks at hides.
+    ImGui::Text("draws %u (%u instanced) for %u object%s", counters.drawCalls, counters.instancedDraws,
+                counters.visibleObjects, counters.visibleObjects == 1u ? "" : "s");
+    ImGui::Text("lod draws %u, %s triangles", counters.lodDraws, formatCount(counters.triangles).c_str());
 }
 
 // Which panel the editor is drawing on, from the panel's own background.
@@ -1284,8 +1349,77 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // places it under this row. Anywhere authorable takes one.
                 const ImGuiPayload* peek = ImGui::GetDragDropPayload();
                 const bool fromTree = peek != nullptr && peek->IsDataType(kInstanceDragPayload);
-                if (fromTree && Editor::canReparent(world, inspector.selectionSet(), row.id, root) &&
-                    ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr) {
+
+                // **Where in the row's HEIGHT the pointer is decides which of
+                // two moves this is** (S5.18). The middle is a reparent, which
+                // is what this tree has always done; the top and bottom bands
+                // are a reorder among siblings, which `World::moveChild` has
+                // been able to do since the verb was written and nothing could
+                // ask for.
+                //
+                // Bands rather than a separate item between rows, for two
+                // reasons. The clipper draws only the rows a person can see, so
+                // an interleaved zero-height item would have to be clipped in
+                // step with them; and a gap thin enough not to disturb the
+                // layout is a gap too thin to hit. A quarter of the row at each
+                // end is what Unity, Unreal and Godot all land on, and it leaves
+                // half the row still meaning "into this".
+                const ImVec2 rowMin = ImGui::GetItemRectMin();
+                const ImVec2 rowMax = ImGui::GetItemRectMax();
+                const float dropHeight = rowMax.y - rowMin.y;
+                const float band = dropHeight * 0.25f;
+                const float pointerY = ImGui::GetMousePos().y;
+                const bool above = fromTree && dropHeight > 0.0f && pointerY < rowMin.y + band;
+                const bool below = fromTree && dropHeight > 0.0f && pointerY > rowMax.y - band;
+
+                if (above || below) {
+                    // **The place it will OCCUPY**, which is what `moveChild`
+                    // takes -- reading it as "before whatever stands here now"
+                    // lands a downward drag one place short, every time. The
+                    // engine-side verb's own comment says so; this is the caller
+                    // that would have got it wrong.
+                    //
+                    // Computed at the DROP rather than carried on every row: the
+                    // walk is O(the parent's children) and a drag hovers many
+                    // rows on its way to one.
+                    if (ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr) {
+                        const core::InstanceId dropped = inspector.selectionCount() == 1
+                                                             ? inspector.selectionSet().front()
+                                                             : static_cast<const InstanceDrag*>(peek->Data)->id;
+                        const core::InstanceId parent = world.parentOf(row.id);
+                        if (dropped.valid() && parent.valid() && world.parentOf(dropped) == parent &&
+                            dropped != row.id) {
+                            core::u32 target = 0;
+                            core::u32 from = 0;
+                            core::u32 seen = 0;
+                            for (core::InstanceId sibling = world.firstChild(parent); sibling.valid();
+                                 sibling = world.nextSibling(sibling)) {
+                                if (sibling == row.id)
+                                    target = seen;
+                                if (sibling == dropped)
+                                    from = seen;
+                                ++seen;
+                            }
+                            // Dropping BELOW a row means the place after it --
+                            // unless the dragged row is currently above that
+                            // row, in which case removing it first shifts
+                            // everything down by one and the place after is the
+                            // target's own index.
+                            commands->reorderChild = dropped;
+                            commands->reorderIndex = dropLanding(from, target, below);
+                        }
+                    }
+
+                    // The line a person aims at. Drawn on the FOREGROUND list
+                    // because a drag is over the whole window and a line on this
+                    // window's own list would be under the next row's
+                    // background.
+                    const float y = below ? rowMax.y : rowMin.y;
+                    ImGui::GetForegroundDrawList()->AddLine(ImVec2(rowMin.x, y), ImVec2(rowMax.x, y),
+                                                            ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+                }
+                else if (fromTree && Editor::canReparent(world, inspector.selectionSet(), row.id, root) &&
+                         ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr) {
                     commands->reparentTo = row.id;
                 }
 
@@ -5449,7 +5583,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
                      ScriptEditor* scripts, ScriptEditorCommands& scriptCommands, DebugView& debug,
-                     audio::AudioSystem* audio, const StreamingHost* streaming, bool furniture)
+                     audio::AudioSystem* audio, const StreamingHost* streaming, bool furniture,
+                     const RenderCounters& counters)
 {
     // **First, before a single window is submitted.** A code pane that owns the
     // active id makes every other item in the frame unhoverable, so this is
@@ -5593,7 +5728,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (panels.stats) {
         if (ImGui::Begin("Stats", &panels.stats)) {
-            drawStats(frame);
+            drawStats(frame, counters);
             if (runtime != nullptr)
                 drawMemory(*runtime);
 
@@ -6336,13 +6471,13 @@ void drawLauncher(LauncherView* view)
 }
 
 void drawShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
-               script::ScriptRuntime* runtime, const StreamingHost* streaming)
+               script::ScriptRuntime* runtime, const StreamingHost* streaming, const RenderCounters& counters)
 {
     ImGui::SetNextWindowBgAlpha(0.85f);
     ImGui::SetNextWindowSize(ImVec2(420.0f, 520.0f), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("LuauG")) {
-        drawStats(frame);
+        drawStats(frame, counters);
 
         // A host with no world is a normal state -- `--version`, the render
         // gates, a test with no scene -- and it gets the stats panel it has
@@ -6599,9 +6734,10 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
         drawLauncher(launcher_);
     else if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
-                        panels_, dialogs_, icons_, scripts_, scriptCommands_, debugView_, audio_, streaming_, visible_);
+                        panels_, dialogs_, icons_, scripts_, scriptCommands_, debugView_, audio_, streaming_, visible_,
+                        counters_);
     else
-        drawShell(frame, world_, root_, inspector_, runtime_, streaming_);
+        drawShell(frame, world_, root_, inspector_, runtime_, streaming_, counters_);
     ImGui::Render();
 
     ImDrawData* drawData = ImGui::GetDrawData();

@@ -63,6 +63,31 @@ namespace luaug::app {
 // a second copy of them under a different name would be two things to keep in
 // step. What differs is the furniture -- one floating window against a
 // dockspace with a viewport in it -- and whether a layout is remembered.
+// What the renderer did with the frame the overlay is about to draw over.
+//
+// **Counted by the renderer, never derived from the draw list**, which is the
+// distinction M7.5 made expensive to get wrong: instancing means one call can
+// cover a run of objects, so `visibleObjects` and `drawCalls` stopped being the
+// same number and no walk of the snapshot can tell you which is which.
+//
+// Passed in rather than read off `DebugService`: those numbers reach a SCRIPT
+// through `ServiceState`, which the overlay has no access to and should not --
+// `services()` is deliberately file-local to the module that owns it. The frame
+// loop has both, and handing them over is one call.
+struct RenderCounters
+{
+    core::u32 drawCalls = 0;
+    // Objects the camera could see. Larger than `drawCalls` in a frame the
+    // instanced path did something in, equal to it in one where it did not.
+    core::u32 visibleObjects = 0;
+    core::u32 instancedDraws = 0;
+    // Draws that took a level of detail COARSER than zero. Zero here in a scene
+    // full of distant meshes means the selector is not selecting.
+    core::u32 lodDraws = 0;
+    // Triangles in the draws that were issued, at the level actually chosen.
+    core::u32 triangles = 0;
+};
+
 enum class Shell
 {
     // F3 over a running game. One window, nothing persisted.
@@ -263,6 +288,15 @@ public:
     // is a map of every cell's state and that is a vector the host already owns.
     void setStreamingTarget(const StreamingHost* streaming) noexcept { streaming_ = streaming; }
 
+    // What the renderer did with the last frame, for the Stats readout.
+    //
+    // **Set every frame, and both shells get it.** The F3 overlay and the
+    // editor's Stats panel draw through one function, so a counter added here
+    // appears in both -- which is the point: the person AUTHORING a world is the
+    // one who needs to know a scene costs four thousand draw calls, and until
+    // now neither shell said so.
+    void setRenderCounters(const RenderCounters& counters) noexcept { counters_ = counters; }
+
     // The mixer, so a `Content` naming a sound can be AUDITIONED from the
     // properties grid without running the world. Null -- the default -- draws
     // no speaker on those rows, which is what a shell with no audio wants.
@@ -324,6 +358,7 @@ private:
     [[maybe_unused]] bool layoutBuilt_ = false;
     [[maybe_unused]] EditorCommands commands_;
     const StreamingHost* streaming_ = nullptr;
+    RenderCounters counters_{};
     [[maybe_unused]] EditorPanels panels_;
     [[maybe_unused]] EditorDialogs dialogs_;
     [[maybe_unused]] Editor* editor_ = nullptr;

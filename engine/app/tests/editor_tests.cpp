@@ -4262,3 +4262,58 @@ TEST_CASE("applying is refused on an instance that is not part of a stamp")
     CHECK_FALSE(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, loose, fixture.transparency));
     CHECK(fixture.rig.editor.status().failed);
 }
+
+TEST_CASE("reordering moves a row among its siblings, and refuses to record a step that does nothing")
+{
+    // **S5.18's other half.** `World::moveChild` has been able to do this since
+    // the verb was written and the Explorer had nothing to call it with, so a
+    // scene's child order was whatever the order of creation had been -- and
+    // that order is what the serializer writes and the world hash walks.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId a = fixture.widget(world, "A");
+    const core::InstanceId b = fixture.widget(world, "B");
+    const core::InstanceId c = fixture.widget(world, "C");
+    REQUIRE_FALSE(world.setParent(a, root).has_value());
+    REQUIRE_FALSE(world.setParent(b, root).has_value());
+    REQUIRE_FALSE(world.setParent(c, root).has_value());
+
+    const auto order = [&]() {
+        std::vector<core::InstanceId> ids;
+        for (core::InstanceId child = world.firstChild(root); child.valid(); child = world.nextSibling(child))
+            ids.push_back(child);
+        return ids;
+    };
+    REQUIRE(order() == std::vector<core::InstanceId>{a, b, c});
+
+    // C to the front. The index is the place it will OCCUPY.
+    REQUIRE(editor.reorder(world, c, 0, inspector));
+    CHECK(order() == std::vector<core::InstanceId>{c, a, b});
+
+    // **A move that changes nothing records no step**, which is D134: a step
+    // that undoes nothing eats a press of ctrl-Z and clears the redo stack with
+    // it. Dropping a row back where it started is the commonest way to end a
+    // drag by accident, so this is not a corner.
+    const bool undoBefore = editor.history().canUndo();
+    CHECK_FALSE(editor.reorder(world, c, 0, inspector));
+    CHECK(editor.history().canUndo() == undoBefore);
+    CHECK(order() == std::vector<core::InstanceId>{c, a, b});
+
+    // Past the end is refused rather than clamped, because the index comes from
+    // where somebody let go of a row and a clamp would put it somewhere else
+    // and report success.
+    CHECK_FALSE(editor.reorder(world, c, 3, inspector));
+    CHECK(order() == std::vector<core::InstanceId>{c, a, b});
+
+    // An instance with no parent has no siblings to sit among.
+    const core::InstanceId orphan = fixture.widget(world, "Orphan");
+    CHECK_FALSE(editor.reorder(world, orphan, 0, inspector));
+
+    // And undo puts the order back.
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(order() == std::vector<core::InstanceId>{a, b, c});
+}

@@ -485,6 +485,21 @@ struct EditorCommands
     // Move the selection under this. Set by a drop in the Explorer.
     core::InstanceId reparentTo;
 
+    // **Move ONE instance to a place among its siblings** (S5.18). Set by a drop
+    // in the top or bottom band of an Explorer row, where a drop in the middle
+    // sets `reparentTo` instead.
+    //
+    // Singular where the reparent is plural, and that is the honest shape rather
+    // than a shortcut: `moveChild` takes one index, and four instances dropped
+    // between two rows have no single answer for what order they land in. The
+    // drag already narrows to one -- a reorder gesture starts on the row under
+    // the pointer -- so the alternative is inventing an order nobody asked for.
+    core::InstanceId reorderChild;
+    // The place it will OCCUPY, counting from zero, which is what `moveChild`
+    // takes. Read as "before whatever stands here now" and a downward drag lands
+    // one place short, every time.
+    core::u32 reorderIndex = 0;
+
     // **Colour a folder**, from either panel. `colorTarget` names one in the
     // world and `colorContentPath` names one on disk -- one or the other, never
     // both, because they are stored in different places for the reason
@@ -594,8 +609,9 @@ struct EditorCommands
     [[nodiscard]] bool mutatesWorld() const noexcept
     {
         return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || groupSelection ||
-               ungroupSelection || reparentTo.valid() || renameInstance.valid() || paste || pasteInto || cutSelection ||
-               !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo || redo || newScene;
+               ungroupSelection || reparentTo.valid() || reorderChild.valid() || renameInstance.valid() || paste ||
+               pasteInto || cutSelection || !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo ||
+               redo || newScene;
     }
 
     [[nodiscard]] bool any() const noexcept
@@ -604,7 +620,7 @@ struct EditorCommands
                undo || redo || colorAsked || copySelection || cutSelection || paste || pasteInto ||
                stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
-               duplicateSelection || groupSelection || ungroupSelection || reparentTo.valid() ||
+               duplicateSelection || groupSelection || ungroupSelection || reparentTo.valid() || reorderChild.valid() ||
                renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
                !deleteContent.empty() || !duplicateContent.empty() || newStampClass != scene::InvalidClass ||
                !renameContent.empty() || !assignStampPath.empty() || importAssets || importParent.valid() ||
@@ -1324,6 +1340,18 @@ public:
 
     bool reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
                   core::InstanceId root, Inspector& inspector);
+
+    // **Moves `child` to `index` among its siblings**, as one undo step (S5.18).
+    //
+    // The Explorer's other half of a drag: a drop in the MIDDLE of a row is a
+    // reparent, and a drop in its top or bottom band is this. `World::moveChild`
+    // has existed since the verb was built and had nothing to call it, which is
+    // why a scene's child order was whatever the order of creation had been.
+    //
+    // Records nothing when the move changes nothing, for the reason D134 gives:
+    // a step that undoes nothing eats a press of ctrl-Z, and recording one
+    // clears the redo stack with it.
+    bool reorder(scene::World& world, core::InstanceId child, core::u32 index, Inspector& inspector);
 
     // Delete and duplicate over a whole selection, as ONE undo step each --
     // because somebody who deleted four things did one thing, and four steps is

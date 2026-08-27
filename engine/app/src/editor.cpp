@@ -1876,6 +1876,56 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
     return true;
 }
 
+bool Editor::reorder(scene::World& world, core::InstanceId child, core::u32 index, Inspector& inspector)
+{
+    const core::InstanceId parent = world.parentOf(child);
+    if (!parent.valid())
+        return false;
+
+    // **Decided before anything is recorded**, the same rule `reparent` above
+    // states: a drag that moves nothing must leave no undo step behind, because
+    // a step that undoes nothing eats a press of ctrl-Z and clears the redo
+    // stack on its way past (D134). `moveChild` would answer `Unchanged` and
+    // there is no way to un-record afterwards, so the question is asked first.
+    //
+    // One walk answers both halves of it -- where the child stands now, and how
+    // many places there are to stand -- and it is the same walk `moveChild`
+    // makes, on a gesture nobody performs in a loop.
+    core::u32 at = 0;
+    core::u32 count = 0;
+    bool found = false;
+    for (core::InstanceId sibling = world.firstChild(parent); sibling.valid(); sibling = world.nextSibling(sibling)) {
+        if (sibling == child) {
+            at = count;
+            found = true;
+        }
+        ++count;
+    }
+    if (!found)
+        return false;
+
+    if (index >= count) {
+        m_status = EditorStatus{"cannot move there", true};
+        return false;
+    }
+    if (index == at) {
+        // Not an error. Dropping a row back where it started is a person
+        // changing their mind, and a red status line for it would be the tool
+        // scolding somebody for a gesture it invited.
+        m_status = EditorStatus{"already there", false};
+        return false;
+    }
+
+    m_history.record(world, "Reorder");
+    if (world.moveChild(parent, child, index) != scene::World::MoveResult::Moved)
+        return false;
+
+    m_sceneDirty = true;
+    inspector.reveal(child);
+    m_status = EditorStatus{"reordered", false};
+    return true;
+}
+
 bool Editor::deleteInstances(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
                              Inspector& inspector)
 {
