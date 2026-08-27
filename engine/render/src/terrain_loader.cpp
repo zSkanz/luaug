@@ -1,6 +1,7 @@
 #include "luaug/render/terrain_loader.h"
 
 #include "luaug/asset/terrain_mesher.h"
+#include "luaug/asset/terrain_palette.h"
 #include "luaug/core/log.h"
 
 #include <algorithm>
@@ -130,13 +131,36 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
             entry.mesh = handle;
             entry.bounds = meshed.mesh.bounds;
             entry.sectionCount = static_cast<u32>(meshed.mesh.submeshes.size());
-            entry.sectionMaterial.assign(entry.sectionCount, 0u);
-            // One material for now, and it is the default block. **A per-material
-            // split is what terrain wants eventually and it is not what makes the
-            // surface correct**, so it is named as absent rather than half-built:
-            // the mesher already carries a material per voxel and nothing yet
-            // turns those into sections.
-            entry.materials.push_back(RenderMaterial{});
+            // **One material per section, coloured from the palette**, which is
+            // what makes a painted hillside look painted rather than uniformly
+            // grey. The mesher buckets its triangles by material and hands over
+            // `sectionMaterials` parallel to `submeshes`; this turns each id into
+            // a colour and points the section at it.
+            //
+            // A colour and not a texture, deliberately and for now: a terrain
+            // texture set is per-material albedo, normal and roughness plus the
+            // triplanar blend the mesher's UVs are already laid out for, and
+            // that is a texture pipeline rather than a colour lookup. Shipping
+            // the colour first means painting is visible today and the textures
+            // land later without moving anything here.
+            entry.sectionMaterial.resize(entry.sectionCount);
+            entry.materials.reserve(entry.sectionCount);
+            for (u32 section = 0; section < entry.sectionCount; ++section) {
+                const core::u8 materialId =
+                    section < meshed.sectionMaterials.size() ? meshed.sectionMaterials[section] : 0;
+                const core::Vec3 tint = asset::terrainColorOf(materialId);
+                RenderMaterial material;
+                material.uniforms.baseColor[0] = tint.x;
+                material.uniforms.baseColor[1] = tint.y;
+                material.uniforms.baseColor[2] = tint.z;
+                material.uniforms.baseColor[3] = 1.0f;
+                // x metallic, y roughness. Ground is rough and not metal, and
+                // the defaults are the other way round.
+                material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
+                material.uniforms.metallicRoughnessNormalCutoff[1] = 0.92f;
+                entry.sectionMaterial[section] = section;
+                entry.materials.push_back(material);
+            }
             // **`positions` is left empty deliberately.** It exists for whoever
             // needs a collision hull off a `MeshPart`, and terrain's collider
             // comes from the field through `PhysicsSync` rather than from this --

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace luaug::asset {
@@ -403,6 +404,158 @@ EditReport fillBlock(TerrainField& field, DVec3 center, Vec3 size, u8 material)
         Vec3{static_cast<float>(center.x) + block.half.x, static_cast<float>(center.y) + block.half.y,
              static_cast<float>(center.z) + block.half.z}};
     return applyBrush(field, bounds, blockDepth, &block, material);
+}
+
+namespace {
+
+// The columns a ball covers, with the height each currently has.
+//
+// **Height-layer columns only.** A bricked column has no single height, and a
+// smoother that invented one would pull a cave's roof down onto its floor.
+struct Column2D
+{
+    i32 x = 0;
+    i32 z = 0;
+    float height = 0.0f;
+    u8 material = 0;
+};
+
+[[nodiscard]] std::vector<Column2D> heightColumnsIn(const TerrainField& field, DVec3 center, double radius)
+{
+    std::vector<Column2D> columns;
+    const auto voxel = static_cast<double>(field.settings().voxelSize);
+    if (!(radius > 0.0) || !(voxel > 0.0)) {
+        return columns;
+    }
+
+    const auto low = [voxel](double metres) { return static_cast<i32>(std::floor(metres / voxel)); };
+    const auto high = [voxel](double metres) { return static_cast<i32>(std::ceil(metres / voxel)); };
+    const double radiusSquared = radius * radius;
+
+    for (i32 z = low(center.z - radius); z <= high(center.z + radius); ++z) {
+        for (i32 x = low(center.x - radius); x <= high(center.x + radius); ++x) {
+            const double dx = static_cast<double>(x) * voxel - center.x;
+            const double dz = static_cast<double>(z) * voxel - center.z;
+            if (dx * dx + dz * dz > radiusSquared) {
+                continue;
+            }
+            if (field.isBricked(x, z)) {
+                continue;
+            }
+            const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+            const HeightTile* tile = field.findTile(key);
+            if (tile == nullptr) {
+                continue;
+            }
+            const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+            const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
+            const u32 index = localZ * TileEdge + localX;
+            if (tile->material[index] == 0) {
+                // No ground in this column. Material zero says so (D153), and a
+                // smoother that averaged it in would pull a cliff edge down into
+                // the empty space beside it.
+                continue;
+            }
+            columns.push_back(Column2D{x, z, tile->height[index], tile->material[index]});
+        }
+    }
+    return columns;
+}
+
+// What a column's height is now, or nothing where there is no ground. Used by
+// the smoother to average NEIGHBOURS, which may lie outside the brush.
+[[nodiscard]] std::optional<float> heightOfColumn(const TerrainField& field, i32 x, i32 z)
+{
+    if (field.isBricked(x, z)) {
+        return std::nullopt;
+    }
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    const HeightTile* tile = field.findTile(key);
+    if (tile == nullptr) {
+        return std::nullopt;
+    }
+    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
+    const u32 index = localZ * TileEdge + localX;
+    if (tile->material[index] == 0) {
+        return std::nullopt;
+    }
+    return tile->height[index];
+}
+
+} // namespace
+
+EditReport smoothBall(TerrainField& field, DVec3 center, double radius, float strength)
+{
+    EditReport report;
+    const float amount = std::clamp(strength, 0.0f, 1.0f);
+    if (!(amount > 0.0f)) {
+        return report;
+    }
+
+    const std::vector<Column2D> columns = heightColumnsIn(field, center, radius);
+    if (columns.empty()) {
+        return report;
+    }
+
+    // **Every column is read before any is written**, which is what makes this a
+    // blur rather than a smear: writing as it goes would feed each column's new
+    // height into its neighbour's average, and the result would depend on the
+    // order the columns were visited (R10) as well as looking wrong.
+    std::vector<float> targets;
+    targets.reserve(columns.size());
+
+    for (const Column2D& column : columns) {
+        float sum = column.height;
+        int count = 1;
+        for (i32 dz = -1; dz <= 1; ++dz) {
+            for (i32 dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                if (const std::optional<float> neighbour = heightOfColumn(field, column.x + dx, column.z + dz);
+                    neighbour.has_value()) {
+                    sum += *neighbour;
+                    ++count;
+                }
+            }
+        }
+        targets.push_back(sum / static_cast<float>(count));
+    }
+
+    for (usize at = 0; at < columns.size(); ++at) {
+        const Column2D& column = columns[at];
+        const float moved = column.height + (targets[at] - column.height) * amount;
+        if (moved == column.height) {
+            continue;
+        }
+        writeHeight(field, column.x, column.z, moved, column.material);
+        report.touched += 1;
+    }
+    return report;
+}
+
+EditReport flattenBall(TerrainField& field, DVec3 center, double radius, float height, float strength)
+{
+    EditReport report;
+    const float amount = std::clamp(strength, 0.0f, 1.0f);
+    if (!(amount > 0.0f)) {
+        return report;
+    }
+
+    const float floorHeight = field.settings().minHeight;
+    const float ceilingHeight = field.settings().maxHeight;
+    const float target = std::clamp(height, floorHeight, ceilingHeight);
+
+    for (const Column2D& column : heightColumnsIn(field, center, radius)) {
+        const float moved = column.height + (target - column.height) * amount;
+        if (moved == column.height) {
+            continue;
+        }
+        writeHeight(field, column.x, column.z, moved, column.material);
+        report.touched += 1;
+    }
+    return report;
 }
 
 EditReport paintBall(TerrainField& field, DVec3 center, double radius, u8 material)

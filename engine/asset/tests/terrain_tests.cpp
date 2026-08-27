@@ -5,6 +5,8 @@
 // number; a mesher built on it produces terrain that is subtly in the wrong
 // place, and no assertion anywhere fires.
 #include "luaug/asset/terrain.h"
+#include "luaug/asset/terrain_mesher.h"
+#include "luaug/asset/terrain_palette.h"
 
 #include <algorithm>
 #include <cmath>
@@ -682,4 +684,161 @@ TEST_CASE("creating a tile does not create a plane")
     // Twelve metres away, in the same tile, there is not.
     CHECK_FALSE(heightAt(field, 14.0, 14.0).has_value());
     CHECK(field.sample(28, -40, 28).distance > 0.0f);
+}
+
+// --- Smooth and Flatten (F1, the panel's two other tools) --------------------
+
+TEST_CASE("smoothing pulls a spike towards its neighbours")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
+
+    // A tower one column wide, which is the shape a blur has the most to say
+    // about.
+    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{0.5f, 8.0f, 0.5f}, 1);
+    const std::optional<float> spike = heightAt(field, 0.0, 0.0);
+    REQUIRE(spike.has_value());
+    REQUIRE(*spike > 4.0f);
+
+    const EditReport report = smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.5f);
+    CHECK(report.touched > 0);
+
+    const std::optional<float> after = heightAt(field, 0.0, 0.0);
+    REQUIRE(after.has_value());
+    // Lower than it was and still above the ground around it: a blur moves a
+    // column part of the way, and one that flattened the spike in a single pass
+    // would be a tool with no feel.
+    CHECK(*after < *spike);
+    CHECK(*after > 0.0f);
+}
+
+TEST_CASE("smoothing at zero strength changes nothing")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
+    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{0.5f, 8.0f, 0.5f}, 1);
+    const core::u64 before = field.digest();
+
+    CHECK(smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.0f).touched == 0);
+    CHECK(field.digest() == before);
+}
+
+TEST_CASE("smoothing is a blur and not a smear")
+{
+    // **Every column is read before any is written.** Writing as it goes would
+    // feed each column's new height into its neighbour's average, so the result
+    // would depend on the order the columns were visited -- which is a fact
+    // about a loop rather than about the world (R10).
+    //
+    // Asserted by symmetry: a spike smoothed in a field is symmetric about its
+    // own column, and a smear is not.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
+    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{0.5f, 8.0f, 0.5f}, 1);
+    smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.6f);
+
+    for (double at = 0.5; at <= 2.5; at += 0.5) {
+        const std::optional<float> left = heightAt(field, -at, 0.0);
+        const std::optional<float> right = heightAt(field, at, 0.0);
+        CAPTURE(at);
+        REQUIRE(left.has_value());
+        REQUIRE(right.has_value());
+        CHECK(*left == doctest::Approx(static_cast<double>(*right)).epsilon(0.001));
+    }
+}
+
+TEST_CASE("flattening levels towards the height it is given")
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
+    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{4.0f, 8.0f, 4.0f}, 1);
+
+    const std::optional<float> raised = heightAt(field, 0.0, 0.0);
+    REQUIRE(raised.has_value());
+    REQUIRE(*raised > 2.0f);
+
+    // **The target is given rather than sampled**, which is what makes it a tool
+    // a person can aim: an editor passes the height the stroke started at, so
+    // dragging across a hillside levels it to where you first clicked instead of
+    // chasing its own result downhill.
+    for (int pass = 0; pass < 12; ++pass) {
+        flattenBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.0f, 0.5f);
+    }
+
+    const std::optional<float> levelled = heightAt(field, 0.0, 0.0);
+    REQUIRE(levelled.has_value());
+    CHECK(std::abs(*levelled) < 0.2f);
+}
+
+TEST_CASE("smoothing leaves bricked columns alone")
+{
+    // A column with a cave in it has no single height, and a smoother that
+    // invented one would pull the roof down onto the floor.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
+    fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 3.0, 0);
+    REQUIRE(field.brickCount() > 0);
+
+    const core::usize bricksBefore = field.brickCount();
+    smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 1.0f);
+    // No brick created, none destroyed: smoothing does not change the encoding.
+    CHECK(field.brickCount() == bricksBefore);
+    // And the cave is still a cave.
+    CHECK(field.sample(0, -8, 0).distance > 0.0f);
+}
+
+TEST_CASE("the palette names every material it can draw, and never zero")
+{
+    // Zero means "no ground" everywhere in this system, so a palette entry for
+    // it would be a swatch that deletes the world when clicked.
+    CHECK(terrainMaterial(0) == nullptr);
+    CHECK_FALSE(terrainPalette().empty());
+    for (const TerrainMaterial& entry : terrainPalette()) {
+        CAPTURE(entry.id);
+        CHECK(entry.id != 0);
+        CHECK_FALSE(entry.name.empty());
+        CHECK(terrainMaterial(entry.id) != nullptr);
+    }
+
+    // An id this build does not know still draws as something rather than as
+    // black, so a world authored against a bigger palette is visibly missing an
+    // entry instead of invisibly wrong.
+    const core::Vec3 unknown = terrainColorOf(200);
+    CHECK((unknown.x + unknown.y + unknown.z) > 0.0f);
+}
+
+TEST_CASE("the mesher gives each material its own section")
+{
+    // **What makes painting visible.** The field has carried a material per
+    // voxel since it existed; until the mesher bucketed by it, every terrain
+    // drew as one grey surface and the paint tool changed nothing on screen.
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{-8.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
+    fillBlock(field, core::DVec3{8.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 2);
+
+    MeshRegion region;
+    region.minX = -40;
+    region.minY = -8;
+    region.minZ = -20;
+    region.cellsX = 80;
+    region.cellsY = 16;
+    region.cellsZ = 40;
+    const TerrainMesh meshed = meshField(field, region);
+
+    REQUIRE_FALSE(meshed.mesh.indices.empty());
+    CHECK(meshed.mesh.submeshes.size() == meshed.sectionMaterials.size());
+    CHECK(meshed.mesh.submeshes.size() >= 2);
+
+    // In id order, which is what keeps a section's place a fact about the field
+    // rather than about an allocator (R10).
+    for (core::usize at = 1; at < meshed.sectionMaterials.size(); ++at) {
+        CHECK(meshed.sectionMaterials[at - 1] < meshed.sectionMaterials[at]);
+    }
+
+    // Every triangle is in exactly one section.
+    core::usize covered = 0;
+    for (const Submesh& section : meshed.mesh.submeshes) {
+        covered += section.indexCount;
+    }
+    CHECK(covered == meshed.mesh.indices.size());
 }

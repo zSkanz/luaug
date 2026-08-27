@@ -793,6 +793,43 @@ second time.
 
 ---
 
+## V1 — `VoxelService`, and it is NOT `Terrain`
+
+**Recorded 2026-08-27, on the owner's correction**, because the agent had read
+"voxels" in the opening instruction as *the terrain's representation* and that is
+not what was asked for:
+
+> "o Terrain e o VoxelService não é a mesma coisa, VoxelService é uma solução
+> para jogos voxel e não tem nada a ver com o terrain"
+
+They are two features that share a word and nothing else:
+
+| | `Terrain` (F1) | `VoxelService` (V1) |
+|---|---|---|
+| What it is | a sculpted landscape | a world made of blocks |
+| Surface | an isosurface, smooth, any angle | axis-aligned cube faces |
+| The unit | a signed distance sample | a block with a type |
+| Editing | a brush with a radius and a falloff | place one, break one |
+| The game | an open world, a hillside, a cave | Minecraft-shaped: mining, building, chunks |
+| Storage | two encodings under one field (ADR 0067) | a dense chunk of block ids |
+| Mesher | marching tetrahedra | greedy face merging, hidden faces culled |
+
+**Sharing the mesher would be wrong**, and it is worth saying now rather than
+discovering it: a marching mesher rounds every corner, which is exactly what a
+voxel game must not do. A block world's surface is quads on lattice planes, and
+the interesting problem is the opposite one -- merging coplanar faces so a flat
+wall of a thousand blocks is a few triangles rather than two thousand.
+
+What it needs, in order: a chunk store keyed on `(x, y, z)` with a `y` this time
+(unlike `ChunkId`, because a block world is as tall as it is wide); a block
+registry with per-face texture ids; a greedy mesher; `PlaceBlock`/`BreakBlock`/
+`GetBlock` on the service; a collider built from the same chunk; and the
+streaming grid it already fits. It does **not** need a new physics shape: a chunk
+of blocks is a `TriangleMesh`, which ADR 0066 already added.
+
+Sized L rather than XXL: the field, the seam and the streaming it would need all
+exist, and what it adds is one representation and one mesher.
+
 ## The unresolved list, carried forward rather than closed
 
 These are the questions the two design competitions surfaced and did not answer.

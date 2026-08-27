@@ -1,6 +1,7 @@
 #include "luaug/app/debug_overlay.h"
 
 #include "luaug/app/streaming_host.h"
+#include "luaug/asset/terrain_palette.h"
 #include "luaug/audio/audio.h"
 
 #if LUAUG_DEBUG_UI
@@ -3559,80 +3560,39 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
                                       : "the last thing clicked -- click for the middle of the selection");
     }
 
-    // --- The brush (F1) -------------------------------------------------
+    // --- The brush's mode (F1) -------------------------------------------
     //
-    // **Words rather than icons, and that is a decision rather than a
-    // shortcut.** The eighty-seven icons in this editor are drawn art, and a
-    // generated stand-in beside them would read as a missing asset. The same
-    // toolbar already spells `local`/`world` and `pivot`/`centre` out, so a word
-    // here is the established form and not an exception.
+    // **Three chips here and everything else in the Terrain panel**, which is
+    // the split every editor in this shape makes: what a click MEANS is a mode
+    // and belongs beside the manipulator modes, and how wide the brush is, what
+    // it is made of and what it does are settings that need room.
     //
-    // **Shown only when the world has terrain in it.** A brush with nothing to
-    // act on is furniture, and this toolbar has room for exactly the controls
-    // that do something.
-    if (editor.hasTerrain()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
+    // Shown always, and not only where the world has terrain in it. That was the
+    // first version and it was wrong in the way that matters: a person opening
+    // the editor on a project with no terrain saw no brush, no panel and no way
+    // to begin, which is not a missing feature -- it is the feature not being
+    // reachable. `dig` and `paint` on an empty world open the panel at Create.
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
 
+    {
         const auto toolChip = [&](Editor::Tool tool, const char* word, const char* tip) {
             ImGui::SameLine();
             const bool on = editor.tool() == tool;
             if (on)
                 ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::Button(word))
+            if (ImGui::Button(word)) {
                 editor.setTool(tool);
+                if (tool != Editor::Tool::Select)
+                    panels.terrain = true;
+            }
             if (on)
                 ImGui::PopStyleColor();
             ImGui::SetItemTooltip("%s", tip);
         };
         toolChip(Editor::Tool::Select, "pick", "click to select  (Q)");
-        toolChip(Editor::Tool::Sculpt, "dig", "add and remove ground  (T)");
+        toolChip(Editor::Tool::Sculpt, "dig", "shape the ground  (T) -- the Terrain panel has the brush");
         toolChip(Editor::Tool::Paint, "paint", "change what ground is made of, without moving it  (Y)");
-
-        if (editor.tool() != Editor::Tool::Select) {
-            // The brush's own numbers, inline rather than behind a right-click,
-            // because a radius is something somebody changes between every two
-            // strokes -- unlike a snap step, which is set up once.
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(110.0f);
-            f32 radius = editor.brush().radius;
-            if (ImGui::DragFloat("##brush-radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "%.2f m"))
-                editor.setBrushRadius(radius);
-            ImGui::SetItemTooltip("how wide the brush is");
-
-            if (editor.tool() == Editor::Tool::Sculpt) {
-                ImGui::SameLine();
-                const bool erasing = editor.brush().erase;
-                if (ImGui::Button(erasing ? "remove" : "add"))
-                    editor.setBrushErase(!erasing);
-                ImGui::SetItemTooltip(erasing ? "digging ground away -- click to add it instead"
-                                              : "adding ground -- click to dig it away instead");
-            }
-
-            // The material, hidden while erasing because erasing has none.
-            if (editor.tool() == Editor::Tool::Paint || !editor.brush().erase) {
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(90.0f);
-                int material = static_cast<int>(editor.brush().material);
-                if (ImGui::DragInt("##brush-material", &material, 0.2f, 1, 255, "mat %d"))
-                    editor.setBrushMaterial(static_cast<core::u8>(std::clamp(material, 1, 255)));
-                ImGui::SetItemTooltip("which material the brush lays down");
-            }
-
-            // Spacing, behind a right-click on the radius, because it is the
-            // one number here that is set up rather than adjusted.
-            if (ImGui::BeginPopupContextItem("brush-spacing")) {
-                ImGui::TextDisabled("stamp spacing");
-                ImGui::Separator();
-                ImGui::SetNextItemWidth(160.0f);
-                f32 spacing = editor.brush().spacing;
-                if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "%.2f x radius"))
-                    editor.setBrushSpacing(spacing);
-                ImGui::TextDisabled("how far a drag travels between stamps,");
-                ImGui::TextDisabled("as a fraction of the brush's width");
-                ImGui::EndPopup();
-            }
-        }
     }
 
     ImGui::SameLine();
@@ -4015,6 +3975,16 @@ void buildDefaultLayout(ImGuiID dockspace)
     // and the order here is only what makes the tabs read left to right.
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderDockWindow("Stats", right);
+    // **The Terrain brush docks beside Properties**, which is where the editors
+    // this one is measured against put their terrain tools: in the right-hand
+    // column, beside whatever describes the selection. It is a tab in that node
+    // rather than a floating window, so it opens where a person's eyes already
+    // are and can be dragged anywhere from there.
+    //
+    // It starts CLOSED all the same -- a panel every project sees whether or not
+    // it has ground would be furniture -- and the toolbar's `dig` and `paint`
+    // open it, as does Window > Terrain.
+    ImGui::DockBuilderDockWindow("Terrain", right);
     // Content first, so it is the tab that opens. The two share a node on
     // purpose -- they are both "the thing under the viewport" and neither
     // deserves permanent floor space -- but which one greets somebody is a
@@ -4914,6 +4884,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::MenuItem("Content", nullptr, &panels.content);
         ImGui::MenuItem("Console", nullptr, &panels.console);
         ImGui::MenuItem("Stats", nullptr, &panels.stats);
+        ImGui::MenuItem("Terrain", nullptr, &panels.terrain);
         ImGui::MenuItem("Debug", nullptr, &panels.debug);
         ImGui::Separator();
         // Not a panel, but it is a question about what the panels SHOW, and
@@ -5655,6 +5626,179 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
 // shell is drawn above them in this file and the Stats panel needs it.
 void drawStreaming(const StreamingHost& streaming);
 
+// The Terrain panel's contents (F1).
+//
+// **A panel and not a row of buttons.** The editors this one is measured against
+// all give terrain its own dock with the same three areas under different names:
+// somewhere to make ground, somewhere to shape it, somewhere to decide what it
+// is made of. They converge because the work does, and this is the same three.
+//
+// The first version was three chips on the toolbar, and the failure was not that
+// it looked poor -- it was that a person opening a project with no terrain saw no
+// brush, no panel and no way to begin, because the chips were hidden when there
+// was nothing to act on. A tool that cannot be reached is not a tool.
+//
+// Sections rather than tabs, because this is a dock somebody keeps open beside
+// the viewport rather than a modal they visit, and because Create is a thing you
+// touch once while Sculpt is a thing you touch constantly.
+void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root, Inspector& inspector)
+{
+    const core::InstanceId terrainId = editor.terrainIn(world, root);
+    const scene::TerrainComponent* terrain = terrainId.valid() ? world.terrains().find(terrainId) : nullptr;
+
+    // --- Create ---------------------------------------------------
+    if (ImGui::CollapsingHeader("Create", terrain == nullptr ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+        if (terrain == nullptr) {
+            ImGui::TextWrapped("This world has no terrain yet.");
+            if (ImGui::Button("Create Terrain", ImVec2(-FLT_MIN, 0.0f)))
+                editor.createTerrain(world, root, inspector);
+            ImGui::SetItemTooltip("adds a Terrain under the workspace. Nothing is sculpted yet");
+        }
+        else {
+            ImGui::TextDisabled("%zu cell(s)", terrain->field.tileCount() + terrain->field.brickCount());
+        }
+
+        ImGui::Separator();
+        // **A flat square, from the world's floor up.** The one
+        // generator worth having before a noise one: it is what a person
+        // needs to start sculpting, and it is the case that proves the
+        // cheap encoding works -- ground that reaches the floor is a
+        // height function and costs no voxels.
+        static f32 groundSize = 128.0f;
+        static f32 groundHeight = 0.0f;
+        ImGui::SetNextItemWidth(120.0f);
+        ImGui::DragFloat("size", &groundSize, 1.0f, 8.0f, 2048.0f, "%.0f m");
+        ImGui::SetNextItemWidth(120.0f);
+        ImGui::DragFloat("top", &groundHeight, 0.25f, -256.0f, 256.0f, "%.1f m");
+        ImGui::SetItemTooltip("the height the ground's surface ends up at");
+        if (const asset::TerrainMaterial* fill = asset::terrainMaterial(editor.brush().material); fill != nullptr) {
+            ImGui::TextDisabled("made of %.*s -- pick another under Paint", static_cast<int>(fill->name.size()),
+                                fill->name.data());
+        }
+        if (ImGui::Button("Flat Ground", ImVec2(-FLT_MIN, 0.0f))) {
+            // **The palette's selection, not a second one.** The first
+            // version had a material here that no widget showed and nothing
+            // could change, which is a control that lies by being absent --
+            // one palette, one choice.
+            editor.generateGround(world, root, inspector, groundSize, groundHeight, editor.brush().material);
+        }
+
+        if (terrain != nullptr) {
+            if (ImGui::Button("Clear", ImVec2(-FLT_MIN, 0.0f)))
+                editor.clearTerrain(world, root, inspector);
+            ImGui::SetItemTooltip("removes every bit of ground. One ctrl-Z brings it back");
+        }
+    }
+
+    // --- Sculpt ---------------------------------------------------
+    if (ImGui::CollapsingHeader("Sculpt", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const Editor::Brush brush = editor.brush();
+
+        const auto opButton = [&](Editor::BrushOp op, const char* word, const char* tip) {
+            const bool on = brush.op == op && editor.tool() == Editor::Tool::Sculpt;
+            if (on)
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(word, ImVec2(76.0f, 0.0f))) {
+                editor.setBrushOp(op);
+                editor.setTool(Editor::Tool::Sculpt);
+            }
+            if (on)
+                ImGui::PopStyleColor();
+            ImGui::SetItemTooltip("%s", tip);
+        };
+        opButton(Editor::BrushOp::Add, "add", "raise ground where you drag");
+        ImGui::SameLine();
+        opButton(Editor::BrushOp::Subtract, "dig", "take ground away -- this is what carves a cave");
+        ImGui::SameLine();
+        opButton(Editor::BrushOp::Smooth, "smooth",
+                 "soften what is there, pulling each column towards its "
+                 "neighbours");
+        ImGui::SameLine();
+        opButton(Editor::BrushOp::Flatten, "flatten",
+                 "level towards the height you first clicked, so a drag does not chase itself downhill");
+
+        ImGui::Separator();
+
+        const bool box = brush.shape == Editor::BrushShape::Box;
+        if (ImGui::Button(box ? "box" : "sphere", ImVec2(76.0f, 0.0f)))
+            editor.setBrushShape(box ? Editor::BrushShape::Sphere : Editor::BrushShape::Box);
+        ImGui::SetItemTooltip(box ? "square edges -- click for round" : "round edges -- click for square");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        f32 radius = brush.radius;
+        if (ImGui::DragFloat("##radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "size %.2f m"))
+            editor.setBrushRadius(radius);
+
+        // Only the two ops that have one. A slider that did nothing for
+        // half the tools would be a control that lies.
+        if (brush.op == Editor::BrushOp::Smooth || brush.op == Editor::BrushOp::Flatten) {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            f32 strength = brush.strength;
+            if (ImGui::DragFloat("##strength", &strength, 0.01f, 0.02f, 1.0f, "strength %.2f"))
+                editor.setBrushStrength(strength);
+            ImGui::SetItemTooltip("how far towards the target one stamp moves a column");
+        }
+        else {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            f32 spacing = brush.spacing;
+            if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "spacing %.2f x size"))
+                editor.setBrushSpacing(spacing);
+            ImGui::SetItemTooltip("how far a drag travels between stamps. Smaller overlaps more");
+        }
+    }
+
+    // --- Paint ----------------------------------------------------
+    if (ImGui::CollapsingHeader("Paint", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextDisabled("what new ground is made of, and what paint lays down");
+
+        // **Swatches, because a material is a colour before it is a
+        // number.** Every editor here shows a palette rather than an id
+        // field, and this one has to: the field stores a `u8` and a
+        // person cannot recognise 4 as snow.
+        const core::u8 selected = editor.brush().material;
+        const f32 swatch = ImGui::GetFrameHeight() * 1.4f;
+        int column = 0;
+        for (const asset::TerrainMaterial& material : asset::terrainPalette()) {
+            if (column > 0 && column % 4 != 0)
+                ImGui::SameLine();
+            ++column;
+
+            ImGui::PushID(static_cast<int>(material.id));
+            const ImVec4 tint(material.color.x, material.color.y, material.color.z, 1.0f);
+            const bool on = selected == material.id;
+            if (on) {
+                ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+            }
+            if (ImGui::ColorButton("##swatch", tint, ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoAlpha,
+                                   ImVec2(swatch, swatch))) {
+                editor.setBrushMaterial(material.id);
+            }
+            if (on) {
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor();
+            }
+            ImGui::SetItemTooltip("%.*s", static_cast<int>(material.name.size()), material.name.data());
+            ImGui::PopID();
+        }
+
+        if (const asset::TerrainMaterial* current = asset::terrainMaterial(selected); current != nullptr) {
+            ImGui::TextDisabled("%.*s", static_cast<int>(current->name.size()), current->name.data());
+        }
+
+        if (ImGui::Button("Paint With This", ImVec2(-FLT_MIN, 0.0f)))
+            editor.setTool(Editor::Tool::Paint);
+        ImGui::SetItemTooltip("changes what the ground is made of without moving it at all");
+    }
+
+    if (terrain == nullptr && editor.tool() != Editor::Tool::Select) {
+        // Said rather than left to be discovered: the brush is selected,
+        // the ring is not drawing, and the reason is above.
+        ImGui::Separator();
+        ImGui::TextWrapped("The brush has nothing to act on until this world has terrain.");
+    }
+}
+
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
@@ -5773,8 +5917,18 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
 
+    // Where the right-hand column is, so a panel that has never been placed can
+    // be put there rather than left floating in the middle of the screen.
+    //
+    // **Read off the live window rather than rebuilt.** `buildDefaultLayout`
+    // only runs when there is no saved layout, and a person who has one has
+    // arranged it -- so a new panel finding its home must not cost them that
+    // arrangement. This is the node Properties is actually in, this launch.
+    ImGuiID rightColumn = 0;
+
     if (panels.properties) {
         if (ImGui::Begin("Properties", &panels.properties)) {
+            rightColumn = ImGui::GetWindowDockID();
             if (world != nullptr && inspector != nullptr) {
                 drawProperties(*world, treeRoot, *inspector, editor != nullptr ? &editor->content() : nullptr, icons,
                                audio, editor != nullptr ? &commands : nullptr, editor);
@@ -5802,6 +5956,30 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
 
+    // --- The Terrain panel (F1) ------------------------------------------
+    //
+    // `drawTerrainPanel` above argues the shape. What is here is the plumbing:
+    // where it docks the first time, and the three pointers it needs.
+    if (panels.terrain) {
+        // `FirstUseEver`, so this decides only where a panel with no remembered
+        // place goes. Somebody who has moved it keeps it where they put it, and
+        // an existing `layout.ini` is not rewritten for a window it predates.
+        if (rightColumn != 0)
+            ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Terrain", &panels.terrain)) {
+            // **The shell holds pointers, and every one of the three may be
+            // null**: this same function draws the F3 overlay, which has a frame
+            // and counters and no editor at all.
+            if (editor == nullptr || world == nullptr || inspector == nullptr) {
+                ImGui::TextDisabled("no world");
+                ImGui::End();
+                goto terrainPanelDone;
+            }
+            drawTerrainPanel(*editor, *world, treeRoot, *inspector);
+        }
+        ImGui::End();
+    }
+terrainPanelDone:;
     if (panels.stats) {
         if (ImGui::Begin("Stats", &panels.stats)) {
             drawStats(frame, counters);

@@ -4,12 +4,14 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include <vector>
 
 namespace luaug::asset {
 namespace {
 
 using core::i32;
 using core::u32;
+using core::u8;
 using core::usize;
 using core::Vec3;
 
@@ -146,6 +148,15 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         return Vec3{gradient.x / length, gradient.y / length, gradient.z / length};
     };
 
+    // What each vertex is the surface of, parallel to `out.mesh.vertices`. Not a
+    // member of `Vertex`: that struct is a GPU buffer layout and its size is
+    // asserted, so a material byte in it would change every world shader.
+    std::vector<u8> vertexMaterial;
+
+    // Triangles by material, ordered so the sections come out the same way on
+    // every machine.
+    std::map<u8, std::vector<u32>> buckets;
+
     const auto vertexOn = [&](const Corner& a, const Corner& b) -> u32 {
         const EdgeKey key = edgeKeyOf(a, b);
         if (const auto at = emitted.find(key); at != emitted.end()) {
@@ -192,6 +203,12 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         const auto index = static_cast<u32>(out.mesh.vertices.size());
         out.mesh.vertices.push_back(vertex);
         out.colliderPoints.push_back(position);
+        // **A vertex is the surface of the SOLID end of its edge**, so that is
+        // the material it wears. The air end has whatever material the ground
+        // that used to be there had -- carving keeps it, deliberately, because
+        // the material of a point with no ground in it is not a question -- and
+        // reading it here would paint a hole's colour onto the wall around it.
+        vertexMaterial.push_back(a.distance <= 0.0f ? a.material : b.material);
         emitted.emplace(key, index);
         return index;
     };
@@ -218,9 +235,31 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         const u32 second = agreement < 0.0f ? c : b;
         const u32 third = agreement < 0.0f ? b : c;
 
-        out.mesh.indices.push_back(a);
-        out.mesh.indices.push_back(second);
-        out.mesh.indices.push_back(third);
+        // **Bucketed by material rather than appended**, which is what makes a
+        // painted hillside look painted: one section per material, each drawn
+        // with its own colour. The triangle takes the majority of its three
+        // vertices, and a three-way tie takes the lowest id -- an arbitrary rule
+        // that has to be a rule, because a tie broken by iteration order would
+        // put the visit order into the mesh (R10).
+        const u8 ma = vertexMaterial[a];
+        const u8 mb = vertexMaterial[second];
+        const u8 mc = vertexMaterial[third];
+        u8 material = ma;
+        if (mb == mc && mb != ma) {
+            material = mb;
+        }
+        else if (ma != mb && ma != mc && mb != mc) {
+            material = std::min({ma, mb, mc});
+        }
+
+        std::vector<u32>& bucket = buckets[material];
+        bucket.push_back(a);
+        bucket.push_back(second);
+        bucket.push_back(third);
+
+        // **The collider is one surface and stays one.** What a body stands on
+        // does not depend on what it is made of, and splitting it would build a
+        // separate `TriangleMesh` per material for no gain.
         out.colliderIndices.push_back(a);
         out.colliderIndices.push_back(second);
         out.colliderIndices.push_back(third);
@@ -342,14 +381,24 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         out.mesh.bounds = core::AABB{min, max};
     }
 
-    // One section covering everything. A per-material split is what a terrain
-    // wants eventually and it is not what makes the surface correct, so it is
-    // named as absent rather than half-built.
-    if (!out.mesh.indices.empty()) {
+    // **One section per material, in id order.** A `std::map` rather than an
+    // unordered one for the reason everything in this module is ordered: the
+    // section order reaches a GPU buffer and a world hash, and an allocator's
+    // iteration order is not a fact about the world (R10).
+    //
+    // The index buffer is assembled here rather than as it goes, because a
+    // section is a contiguous run and triangles arrive interleaved -- a cell
+    // straddling grass and rock emits both within three lines of each other.
+    for (const auto& entry : buckets) {
+        if (entry.second.empty()) {
+            continue;
+        }
         Submesh section;
-        section.firstIndex = 0;
-        section.indexCount = static_cast<u32>(out.mesh.indices.size());
+        section.firstIndex = static_cast<u32>(out.mesh.indices.size());
+        section.indexCount = static_cast<u32>(entry.second.size());
+        out.mesh.indices.insert(out.mesh.indices.end(), entry.second.begin(), entry.second.end());
         out.mesh.submeshes.push_back(section);
+        out.sectionMaterials.push_back(entry.first);
     }
 
     return out;

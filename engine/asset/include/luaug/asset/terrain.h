@@ -283,6 +283,31 @@ EditReport fillBall(TerrainField& field, core::DVec3 center, double radius, core
 // The same, as an axis-aligned box. `size` is the full extent, never a half.
 EditReport fillBlock(TerrainField& field, core::DVec3 center, core::Vec3 size, core::u8 material);
 
+// Softens the ground under a ball, pulling every column's height towards the
+// average of its neighbours.
+//
+// **The one verb here that is not a union or a subtraction**, and it is why the
+// height layer earns its keep: smoothing a height function is a blur over a
+// grid, which is cheap and stable. It is defined on the height layer only --
+// columns carrying voxels are left alone rather than approximated, because
+// there is no single height to pull towards and a smoother that invented one
+// would flatten a cave's roof into its floor.
+//
+// `strength` is how far towards the average each column moves, from 0 (nothing)
+// to 1 (all the way). Values outside that are clamped: a slider that overshoots
+// is a slider, not an instruction.
+EditReport smoothBall(TerrainField& field, core::DVec3 center, double radius, float strength);
+
+// Pulls every column under a ball towards one height.
+//
+// **The height is given rather than sampled**, which is the difference between
+// a tool a person can aim and one that drifts: an editor passes the height the
+// stroke started at, so dragging across a hillside levels it to where you first
+// clicked instead of to wherever the pointer happens to be.
+//
+// Height layer only, for the same reason `smoothBall` is.
+EditReport flattenBall(TerrainField& field, core::DVec3 center, double radius, float height, float strength);
+
 // Changes what the ground is MADE OF without changing where it is.
 //
 // **The whole point is that it edits no distance.** A paint brush that nudged

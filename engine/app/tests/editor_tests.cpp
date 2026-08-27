@@ -4336,6 +4336,8 @@ struct BrushRig
     Editor editor;
     Inspector inspector;
     core::InstanceId root;
+    // What the viewport draws, and where content lives.
+    core::InstanceId workspace;
     core::InstanceId terrain;
     scene::ClassId partClass = scene::InvalidClass;
     ViewportRect rect{0.0f, 0.0f, 1920.0f, 1080.0f};
@@ -4347,12 +4349,21 @@ struct BrushRig
         partClass = classes.findId(atoms.intern("Part"));
         REQUIRE(partClass != scene::InvalidClass);
 
+        // **A data model with a workspace under it**, which is the shape the
+        // shell actually hands its panels: `root` is what the Explorer draws and
+        // world content belongs one level down. The rig had a bare folder for
+        // one commit and that is exactly why `createTerrain` could put a
+        // `Terrain` beside the services without any test noticing.
         root = world.create(classes.findId(atoms.intern("Folder")));
         REQUIRE(root.valid());
 
+        workspace = world.create(classes.findId(atoms.intern("Workspace")));
+        REQUIRE(workspace.valid());
+        REQUIRE_FALSE(world.setParent(workspace, root).has_value());
+
         terrain = world.create(classes.findId(atoms.intern("Terrain")));
         REQUIRE(terrain.valid());
-        REQUIRE_FALSE(world.setParent(terrain, root).has_value());
+        REQUIRE_FALSE(world.setParent(terrain, workspace).has_value());
 
         scene::TerrainComponent* component = world.terrains().find(terrain);
         REQUIRE(component != nullptr);
@@ -4390,7 +4401,7 @@ struct BrushRig
     {
         const core::InstanceId id = world.create(partClass);
         REQUIRE(id.valid());
-        (void)world.setParent(id, root);
+        (void)world.setParent(id, workspace);
         scene::PartComponent* component = world.parts().find(id);
         REQUIRE(component != nullptr);
         component->cframe.position = at;
@@ -4407,10 +4418,10 @@ struct BrushRig
         if (pressed)
             editor.requestPick(pixel);
         editor.setPointer(pixel, pressed, down);
-        const bool brushTook = editor.driveSculpt(world, root, inspector);
+        const bool brushTook = editor.driveSculpt(world, workspace, inspector);
         const bool gizmoTook = !brushTook && editor.driveGizmo(world, inspector);
         if (!brushTook && !gizmoTook)
-            editor.resolvePick(world, root, inspector);
+            editor.resolvePick(world, workspace, inspector);
         inspector.applyPending(world);
         return brushTook;
     }
@@ -4475,7 +4486,7 @@ TEST_CASE("digging moves the ground, and one stroke is one undo step")
     BrushRig rig;
     rig.lookDown(60.0);
     rig.editor.setTool(Editor::Tool::Sculpt);
-    rig.editor.setBrushErase(true);
+    rig.editor.setBrushOp(Editor::BrushOp::Subtract);
     rig.editor.setBrushRadius(4.0f);
 
     const std::optional<float> before = asset::heightAt(rig.field().field, 0.0, 0.0);
@@ -4527,7 +4538,7 @@ TEST_CASE("a stroke stamps by distance, not by frame count")
         BrushRig rig;
         rig.lookDown(60.0);
         rig.editor.setTool(Editor::Tool::Sculpt);
-        rig.editor.setBrushErase(true);
+        rig.editor.setBrushOp(Editor::BrushOp::Subtract);
         rig.editor.setBrushRadius(4.0f);
 
         rig.frame(rig.pixelOf(core::DVec3{-10.0, 0.0, 0.0}), true, true);
@@ -4622,4 +4633,163 @@ TEST_CASE("a material of zero is refused rather than erasing the world")
     CHECK(editor.brush().radius > 0.0f);
     editor.setBrushSpacing(0.0f);
     CHECK(editor.brush().spacing > 0.0f);
+}
+
+// --- The Terrain panel's verbs (F1) -----------------------------------------
+//
+// **The gap these close is the one that made the brush useless.** For one commit
+// the only way to get a `Terrain` into a world was a script calling
+// `Instance.new`, so opening the editor on any project showed no brush, no panel
+// and no way to begin. That is not a missing feature -- it is the feature not
+// being reachable, and it was found by opening the editor and looking.
+
+TEST_CASE("a world with no terrain can be given some")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    // Take the terrain the rig builds away, so this starts where a real project
+    // starts.
+    rig.world.destroy(rig.terrain);
+    rig.world.retireDestroyed();
+    REQUIRE_FALSE(rig.editor.terrainIn(rig.world, rig.root).valid());
+
+    const core::InstanceId made = rig.editor.createTerrain(rig.world, rig.root, rig.inspector);
+    REQUIRE(made.valid());
+    CHECK(rig.world.terrains().find(made) != nullptr);
+    // Selected, because somebody who pressed the button wants to be looking at
+    // what they made.
+    CHECK(rig.inspector.selection() == made);
+
+    // Pressing it again finds the one that is there rather than making a second.
+    CHECK(rig.editor.createTerrain(rig.world, rig.root, rig.inspector) == made);
+}
+
+TEST_CASE("generated ground reaches the floor, so it costs no voxels")
+{
+    // **The rule F1 paid for.** The height encoding means "solid for every y
+    // under H", so a slab that stops above the floor is genuinely not a height
+    // function and every column of it promotes to bricks. A generator that got
+    // this wrong would make the first thing anybody creates the most expensive
+    // terrain in the world.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.world.destroy(rig.terrain);
+    rig.world.retireDestroyed();
+
+    REQUIRE(rig.editor.generateGround(rig.world, rig.root, rig.inspector, 64.0f, 0.0f, 1));
+
+    const core::InstanceId id = rig.editor.terrainIn(rig.world, rig.root);
+    REQUIRE(id.valid());
+    const scene::TerrainComponent* terrain = rig.world.terrains().find(id);
+    REQUIRE(terrain != nullptr);
+
+    CHECK(terrain->field.tileCount() > 0);
+    CHECK(terrain->field.brickCount() == 0);
+
+    const std::optional<float> height = asset::heightAt(terrain->field, 0.0, 0.0);
+    REQUIRE(height.has_value());
+    CHECK(std::abs(*height) < 1.0f);
+}
+
+TEST_CASE("clearing terrain is one undo step, and refuses when there is nothing")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    const core::InstanceId id = rig.editor.terrainIn(rig.world, rig.root);
+    REQUIRE(id.valid());
+    REQUIRE(rig.world.terrains().find(id)->field.tileCount() > 0);
+
+    const core::usize before = rig.editor.history().depth();
+    REQUIRE(rig.editor.clearTerrain(rig.world, rig.root, rig.inspector));
+    CHECK(rig.world.terrains().find(id)->field.tileCount() == 0);
+    CHECK(rig.editor.history().depth() == before + 1);
+
+    // Nothing left to clear: refused rather than recorded, because a step that
+    // undoes nothing eats a press of ctrl-Z.
+    CHECK_FALSE(rig.editor.clearTerrain(rig.world, rig.root, rig.inspector));
+    CHECK(rig.editor.history().depth() == before + 1);
+
+    // And the ground comes back.
+    REQUIRE(rig.editor.history().undo(rig.world));
+    CHECK(rig.world.terrains().find(id)->field.tileCount() > 0);
+}
+
+TEST_CASE("smooth and flatten reach the ground through the brush")
+{
+    // The two ops the panel added, driven the way a person drives them: through
+    // the pointer, at the frame's own call site.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+
+    // A bump to work on.
+    rig.editor.setBrushOp(Editor::BrushOp::Add);
+    rig.editor.setBrushRadius(4.0f);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+
+    const std::optional<float> raised = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(raised.has_value());
+
+    rig.editor.setBrushOp(Editor::BrushOp::Smooth);
+    rig.editor.setBrushStrength(0.8f);
+    const core::u64 beforeSmooth = rig.field().field.digest();
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    CHECK(rig.field().field.digest() != beforeSmooth);
+
+    rig.editor.setBrushOp(Editor::BrushOp::Flatten);
+    const core::u64 beforeFlatten = rig.field().field.digest();
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    CHECK(rig.field().field.digest() != beforeFlatten);
+}
+
+TEST_CASE("a box brush and a sphere brush cover the same ground")
+{
+    // Switching shape has to be a change of edge rather than of size, or the
+    // control is two controls.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Subtract);
+    rig.editor.setBrushRadius(5.0f);
+
+    rig.editor.setBrushShape(Editor::BrushShape::Box);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+
+    // A box of the brush's WIDTH, so its corner reaches further than the
+    // sphere's rim and its face reaches exactly as far.
+    CHECK(asset::heightAt(rig.field().field, 4.5, 0.0).has_value());
+    const std::optional<float> under = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(under.has_value());
+    CHECK(*under < 0.0f);
+}
+
+TEST_CASE("terrain is created in the workspace and not beside the services")
+{
+    // **Reported by the owner the first time they pressed the button.** The
+    // shell's panels are handed the root the EXPLORER draws, which is the
+    // `DataModel` -- so a verb that took it at face value put a `Terrain` beside
+    // `Lighting` and `RunService` instead of in the world, where nothing draws
+    // it and nothing collides with it.
+    //
+    // The fix is that the verb resolves the workspace itself rather than
+    // trusting whatever root it was handed, and this is what holds it: the rig's
+    // `root` is a plain `Folder` standing in for the data model, with a
+    // workspace under it.
+    BrushRig rig;
+    rig.world.destroy(rig.terrain);
+    rig.world.retireDestroyed();
+
+    // Handed the DATA MODEL, exactly as the panel is.
+    const core::InstanceId made = rig.editor.createTerrain(rig.world, rig.root, rig.inspector);
+    REQUIRE(made.valid());
+    CHECK(rig.world.parentOf(made) == rig.workspace);
+
+    // And every other verb finds it from the same root.
+    CHECK(rig.editor.terrainIn(rig.world, rig.root) == made);
+    CHECK(rig.editor.generateGround(rig.world, rig.root, rig.inspector, 32.0f, 0.0f, 1));
+    CHECK(rig.world.parentOf(rig.editor.terrainIn(rig.world, rig.root)) == rig.workspace);
 }

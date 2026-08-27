@@ -70,6 +70,15 @@ struct TerrainMesh
     // world shader hardcodes.
     Mesh mesh;
 
+    // What each submesh is made of, parallel to `mesh.submeshes`.
+    //
+    // **The material does not live in the vertex**, because `Vertex` is a GPU
+    // buffer layout whose size is asserted and every world shader hardcodes it.
+    // It lives here, one per section, which is the same shape a compiled mesh
+    // already uses for its own materials -- so the renderer resolves a colour
+    // exactly as it does for a `MeshPart`.
+    std::vector<core::u8> sectionMaterials;
+
     // The same surface as a plain position list and index triples, which is what
     // `ShapeType::TriangleMesh` takes. Shared with `mesh` rather than duplicated
     // would mean the collider tracked the render mesh's LOD, and a collider that

@@ -90,16 +90,18 @@ local BasePartFields: { Schema.Field } = {
         Id = 5,
         Encoding = "Bool",
         Source = "Component",
-        Component = "parts",
+        Component = "rigidBodies",
         Doc = "Decides whether the replica's own body is kinematic-driven or asleep, so a stale value "
-            .. "costs a frame of the wrong physics.",
+            .. "costs a frame of the wrong physics. **In `rigidBodies` and not in `parts`**, which "
+            .. "is where the schema first said it was: a part's simulation state is a separate "
+            .. "component from its shape, because `scene` must not learn what a body is.",
     },
     {
         Name = "CanCollide",
         Id = 6,
         Encoding = "Bool",
         Source = "Component",
-        Component = "parts",
+        Component = "rigidBodies",
         Doc = "A door that opened on the authority and not on the replica is a player walking into a "
             .. "wall that is not there.",
     },
@@ -107,14 +109,16 @@ local BasePartFields: { Schema.Field } = {
 
 local CharacterBodyFields: { Schema.Field } = {
     {
-        Name = "Velocity",
+        Name = "VerticalVelocity",
         Id = 1,
-        Encoding = "Vector3",
+        Encoding = "F32",
         Source = "Component",
         Component = "characterBodies",
-        Doc = "**Sent because a position alone cannot be interpolated.** Two positions a tick apart "
-            .. "say where a body was; a velocity says where it is going, which is what lets a replica "
-            .. "draw a smooth frame between two snapshots instead of stepping.",
+        Doc = "**Sent because a position alone cannot be interpolated**, and vertical because that is "
+            .. "the axis a controller integrates itself: a `CharacterVirtual` is not a body the "
+            .. "solver knows about, so gravity accumulates here. Two positions a tick apart say where "
+            .. "a body was; this says where it is going, which is what lets a replica draw a smooth "
+            .. "frame between two snapshots instead of stepping.",
     },
     {
         Name = "Grounded",
@@ -126,7 +130,23 @@ local CharacterBodyFields: { Schema.Field } = {
             .. "rather than something a replica can derive: whether a character is on the ground "
             .. "depends on collision the replica does not solve.",
     },
+    {
+        Name = "State",
+        Id = 3,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "characterBodies",
+        Doc = "`Enum.CharacterState`, raw, exactly as the component stores it. It is what an animation "
+            .. "picks a clip from, and a replica that guessed it from velocity would guess wrong at "
+            .. "every transition -- which is where a player looks.",
+    },
 }
+
+--- **`moveDirection` is deliberately absent**, and it is worth saying why here
+--- rather than in `Excluded`: it is a COMMAND, cleared by the mirror once
+--- consumed, and it travels the other way. A client says what it did on the
+--- `Intent` channel; an authority pushing a move direction back would be an
+--- authority pressing a player's keys.
 
 local ModelFields: { Schema.Field } = {
     {

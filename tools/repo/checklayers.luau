@@ -48,6 +48,12 @@ local Layers: { [string]: number } = {
     -- layer -- and `render` sits here for exactly the same reason.
     audio = 4,
     input = 4,
+    -- **Four rather than two**, and `scene` is the reason. Replication reads a
+    -- world's components and writes them back, so it depends on L3 and has to
+    -- sit above it -- beside `render` and `audio`, which are here for exactly
+    -- the same reason. The transport it uses is L2 and is an ordinary downward
+    -- edge (ADR 0069).
+    replication = 4,
     nav = 4,
 
     ui = 5,

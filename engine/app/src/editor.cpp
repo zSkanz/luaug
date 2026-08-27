@@ -383,6 +383,32 @@ namespace {
 // The tool's name in the preferences file, and back. Unknown reads as `Select`,
 // which is the tool that cannot lose work: a file written by a newer editor
 // naming a tool this one does not have should open in the safe one.
+[[nodiscard]] std::string_view brushOpName(Editor::BrushOp op) noexcept
+{
+    switch (op) {
+    case Editor::BrushOp::Subtract:
+        return "subtract";
+    case Editor::BrushOp::Smooth:
+        return "smooth";
+    case Editor::BrushOp::Flatten:
+        return "flatten";
+    case Editor::BrushOp::Add:
+        break;
+    }
+    return "add";
+}
+
+[[nodiscard]] Editor::BrushOp brushOpFrom(std::string_view name) noexcept
+{
+    if (name == "subtract")
+        return Editor::BrushOp::Subtract;
+    if (name == "smooth")
+        return Editor::BrushOp::Smooth;
+    if (name == "flatten")
+        return Editor::BrushOp::Flatten;
+    return Editor::BrushOp::Add;
+}
+
 [[nodiscard]] std::string_view toolName(Editor::Tool tool) noexcept
 {
     switch (tool) {
@@ -394,6 +420,27 @@ namespace {
         break;
     }
     return "select";
+}
+
+// What one stroke is called in the undo menu. A person reading "Undo Smooth"
+// knows what is about to come back; "Undo Sculpt" for four different tools does
+// not.
+[[nodiscard]] const char* strokeLabel(Editor::Tool tool, Editor::BrushOp op) noexcept
+{
+    if (tool == Editor::Tool::Paint) {
+        return "Paint Terrain";
+    }
+    switch (op) {
+    case Editor::BrushOp::Subtract:
+        return "Dig";
+    case Editor::BrushOp::Smooth:
+        return "Smooth";
+    case Editor::BrushOp::Flatten:
+        return "Flatten";
+    case Editor::BrushOp::Add:
+        break;
+    }
+    return "Sculpt";
 }
 
 [[nodiscard]] Editor::Tool toolFrom(std::string_view name) noexcept
@@ -512,8 +559,10 @@ void Editor::rememberState(const std::filesystem::path& stateDirectory) const
     writer.beginObject();
     writer.field("radius", static_cast<core::f64>(m_brush.radius));
     writer.field("spacing", static_cast<core::f64>(m_brush.spacing));
+    writer.field("strength", static_cast<core::f64>(m_brush.strength));
     writer.field("material", static_cast<core::f64>(m_brush.material));
-    writer.field("erase", m_brush.erase);
+    writer.field("op", brushOpName(m_brush.op));
+    writer.field("shape", m_brush.shape == BrushShape::Box ? "box" : "sphere");
     writer.endObject();
     writer.endObject();
 
@@ -602,8 +651,10 @@ void Editor::recallState(const std::filesystem::path& stateDirectory)
                 setBrushSpacing(static_cast<f32>(spacing.asNumber()));
             if (const core::JsonValue material = brush["material"]; material.type() == core::JsonType::Number)
                 setBrushMaterial(static_cast<core::u8>(std::clamp(material.asNumber(), 0.0, 255.0)));
-            if (const core::JsonValue erase = brush["erase"]; erase.type() == core::JsonType::Boolean)
-                m_brush.erase = erase.asBool();
+            if (const core::JsonValue strength = brush["strength"]; strength.type() == core::JsonType::Number)
+                setBrushStrength(static_cast<f32>(strength.asNumber()));
+            m_brush.op = brushOpFrom(brush["op"].asString());
+            m_brush.shape = brush["shape"].asString() == "box" ? BrushShape::Box : BrushShape::Sphere;
         }
     }
 
@@ -2819,6 +2870,14 @@ void Editor::setBrushSpacing(f32 fraction) noexcept
     m_preferencesDirty = true;
 }
 
+void Editor::setBrushStrength(f32 strength) noexcept
+{
+    // A strength of zero is a tool that does nothing and one of one is a tool
+    // with no feel, so both ends are clamped inside rather than at the extremes.
+    m_brush.strength = std::clamp(strength, 0.02f, 1.0f);
+    m_preferencesDirty = true;
+}
+
 void Editor::setBrushMaterial(core::u8 material) noexcept
 {
     // **Never zero.** Zero means erase to `fillBall`, and a material picker
@@ -2923,8 +2982,11 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         stroke.gesture = inspector.beginGesture();
         stroke.last = m_brushAim->position;
         stroke.aimField = terrain->field;
-        m_history.record(world, m_tool == Tool::Paint ? "Paint Terrain" : (m_brush.erase ? "Dig" : "Sculpt"),
-                         stroke.gesture);
+        // Where `Flatten` levels to. Captured once, here, so a drag across a
+        // hillside levels it to where the stroke began rather than chasing its
+        // own result downhill.
+        stroke.plane = static_cast<f32>(m_brushAim->position.y);
+        m_history.record(world, strokeLabel(m_tool, m_brush.op), stroke.gesture);
         m_stroke = stroke;
 
         applyBrushAt(*terrain, m_brushAim->position);
@@ -2971,16 +3033,151 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
 void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 at)
 {
     const auto radius = static_cast<double>(m_brush.radius);
+    const bool box = m_brush.shape == BrushShape::Box;
+    // A box the brush's width, so the two shapes cover the same ground and
+    // switching between them is a change of edge rather than of size.
+    const auto side = static_cast<f32>(radius * 2.0);
+    const core::Vec3 extent{side, side, side};
+
     if (m_tool == Tool::Paint) {
         asset::paintBall(terrain.field, at, radius, m_brush.material);
     }
     else {
-        asset::fillBall(terrain.field, at, radius, m_brush.erase ? core::u8{0} : m_brush.material);
+        switch (m_brush.op) {
+        case BrushOp::Add:
+            if (box)
+                asset::fillBlock(terrain.field, at, extent, m_brush.material);
+            else
+                asset::fillBall(terrain.field, at, radius, m_brush.material);
+            break;
+        case BrushOp::Subtract:
+            if (box)
+                asset::fillBlock(terrain.field, at, extent, 0);
+            else
+                asset::fillBall(terrain.field, at, radius, 0);
+            break;
+        case BrushOp::Smooth:
+            // **Round whichever shape is selected.** Smoothing walks columns
+            // rather than filling a volume, and a square blur leaves visible
+            // corners in ground that is supposed to be getting softer.
+            asset::smoothBall(terrain.field, at, radius, m_brush.strength);
+            break;
+        case BrushOp::Flatten:
+            asset::flattenBall(terrain.field, at, radius,
+                               m_stroke.has_value() ? m_stroke->plane : static_cast<f32>(at.y), m_brush.strength);
+            break;
+        }
     }
     // **Bumped here and nowhere else**, so the renderer and the physics mirror
     // both learn about a stamp through the one path they already read.
     terrain.fieldRevision += 1;
     m_sceneDirty = true;
+}
+
+// --- Making ground exist -----------------------------------------------------
+
+core::InstanceId Editor::workspaceUnder(const scene::World& world, core::InstanceId root) const
+{
+    if (!root.valid()) {
+        return {};
+    }
+    if (world.workspaces().find(root) != nullptr) {
+        return root;
+    }
+    for (core::InstanceId child = world.firstChild(root); child.valid(); child = world.nextSibling(child)) {
+        if (world.workspaces().find(child) != nullptr) {
+            return child;
+        }
+    }
+    return {};
+}
+
+core::InstanceId Editor::terrainIn(const scene::World& world, core::InstanceId root) const
+{
+    return terrainUnder(world, workspaceUnder(world, root));
+}
+
+core::InstanceId Editor::createTerrain(scene::World& world, core::InstanceId rootOrWorkspace, Inspector& inspector)
+{
+    // **Resolved here rather than trusted from the caller**, because the shell's
+    // panels hold the Explorer's root and that is the `DataModel`.
+    const core::InstanceId root = workspaceUnder(world, rootOrWorkspace);
+    if (const core::InstanceId existing = terrainUnder(world, root); existing.valid()) {
+        // Already there. Selecting it is more useful than refusing: somebody who
+        // pressed the button wants to be looking at the terrain either way.
+        inspector.select(existing);
+        return existing;
+    }
+    if (!root.valid()) {
+        return {};
+    }
+
+    const scene::ClassId terrainClass = world.classes().findId(world.atoms().intern("Terrain"));
+    if (terrainClass == scene::InvalidClass) {
+        return {};
+    }
+
+    m_history.record(world, "Create Terrain");
+    const core::InstanceId id = world.create(terrainClass);
+    if (!id.valid()) {
+        return {};
+    }
+    world.setName(id, world.atoms().intern("Terrain"));
+    if (world.setParent(id, root).has_value()) {
+        world.destroy(id);
+        return {};
+    }
+
+    inspector.select(id);
+    m_sceneDirty = true;
+    return id;
+}
+
+bool Editor::generateGround(scene::World& world, core::InstanceId rootOrWorkspace, Inspector& inspector, f32 size,
+                            f32 height, core::u8 material)
+{
+    const core::InstanceId id = createTerrain(world, rootOrWorkspace, inspector);
+    scene::TerrainComponent* terrain = id.valid() ? world.terrains().find(id) : nullptr;
+    if (terrain == nullptr || !(size > 0.0f) || material == 0) {
+        return false;
+    }
+
+    m_history.record(world, "Generate Ground");
+
+    // **From below the floor up to `height`**, and the "below" is the rule F1
+    // paid for: the height encoding means "solid for every y under H", so a
+    // block that stops exactly at the floor leaves the sample there outside
+    // itself and reads as air -- which makes the whole slab float, and every
+    // column of it costs voxels.
+    const f32 floor = terrain->minHeight;
+    const f32 depth = height - floor + 2.0f;
+    const core::DVec3 centre{0.0, static_cast<double>(height - depth * 0.5f), 0.0};
+    asset::fillBlock(terrain->field, centre, core::Vec3{size, depth, size}, material);
+
+    terrain->fieldRevision += 1;
+    m_sceneDirty = true;
+    return true;
+}
+
+bool Editor::clearTerrain(scene::World& world, core::InstanceId root, Inspector& inspector)
+{
+    (void)inspector;
+    const core::InstanceId id = terrainIn(world, root);
+    scene::TerrainComponent* terrain = id.valid() ? world.terrains().find(id) : nullptr;
+    if (terrain == nullptr) {
+        return false;
+    }
+    if (terrain->field.tileCount() == 0 && terrain->field.brickCount() == 0) {
+        // Nothing to clear. Refused rather than recorded, because a step that
+        // undoes nothing eats a press of ctrl-Z.
+        return false;
+    }
+
+    m_history.record(world, "Clear Terrain");
+    terrain->field = asset::TerrainField(terrain->field.settings());
+    terrain->fieldRevision += 1;
+    m_sceneDirty = true;
+    return true;
 }
 
 bool Editor::driveGizmo(scene::World& world, Inspector& inspector)

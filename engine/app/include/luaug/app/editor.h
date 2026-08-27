@@ -288,6 +288,10 @@ struct EditorPanels
     bool content = true;
     bool console = true;
     bool stats = true;
+    // **The terrain brush's own dock**, off until somebody asks for it -- a
+    // panel every project sees whether or not it has ground would be furniture,
+    // and the toolbar's `dig` and `paint` open it.
+    bool terrain = false;
     // The stack, the variables and the transport (ADR 0057). On by default
     // because a debugger nobody can find is a debugger nobody uses, and it says
     // "running" when nothing is stopped rather than being empty.
@@ -1647,34 +1651,123 @@ public:
     // person can have meant.
     void setTool(Tool tool) noexcept;
 
+    // **What the brush DOES**, which is a different question from which tool is
+    // selected.
+    //
+    // The four are what every editor in this shape offers, under whatever names
+    // -- one adds, one takes away, one softens, one levels. They converge
+    // because they are the four things a person does to ground, not because
+    // anybody copied a list.
+    enum class BrushOp : core::u8
+    {
+        // Union with the brush: ground appears.
+        Add,
+        // Subtract it: ground goes. **Not "material zero"** -- that is the
+        // encoding's spelling and a person choosing the first entry of a
+        // palette must never mean it.
+        Subtract,
+        // Pull each column towards the average of its neighbours.
+        Smooth,
+        // Pull each column towards one height, captured where the stroke began.
+        Flatten,
+    };
+
+    // The brush's footprint.
+    //
+    // Two, and a cylinder is the obvious third: it is a box in plan and a ball
+    // in section, and the field has no verb for it. Adding one means a third
+    // depth function beside `ballDepth` and `blockDepth`, which is small and is
+    // not what makes this panel usable.
+    enum class BrushShape : core::u8
+    {
+        Sphere,
+        Box,
+    };
+
     // What the brush is, and every field of it is persisted.
     //
     // **`spacing` is a fraction of the radius, not a strength.** A signed
     // distance field is filled or it is not -- there is no half-full voxel to
-    // scale -- so the honest continuous knob is how densely a drag stamps, and
-    // calling it strength would name a thing this brush does not have.
+    // scale -- so for `Add` and `Subtract` the honest continuous knob is how
+    // densely a drag stamps. `strength` is a real strength and belongs to the
+    // two ops that have one: smoothing and flattening move a height PART of the
+    // way, and how far is the whole feel of the tool.
     struct Brush
     {
+        BrushOp op = BrushOp::Add;
+        BrushShape shape = BrushShape::Sphere;
         // Metres.
         f32 radius = 4.0f;
         // Stamps every `spacing * radius` metres along a stroke.
         f32 spacing = 0.25f;
-        // What ground is made of. Never zero: erasing is `erase`, not material
-        // zero, because a material picker whose first entry deleted the world
-        // would be the worst possible reading of one shared convention.
+        // How far towards the target one stamp moves a column, for `Smooth` and
+        // `Flatten`. Zero does nothing; one goes all the way in a single stamp.
+        f32 strength = 0.35f;
+        // What ground is made of. Never zero: erasing is `BrushOp::Subtract`,
+        // because a material picker whose first entry deleted the world would be
+        // the worst possible reading of one shared convention.
         core::u8 material = 1;
-        // Sculpt only. Paint never removes ground.
-        bool erase = false;
     };
     [[nodiscard]] const Brush& brush() const noexcept { return m_brush; }
     void setBrushRadius(f32 metres) noexcept;
     void setBrushSpacing(f32 fraction) noexcept;
     void setBrushMaterial(core::u8 material) noexcept;
-    void setBrushErase(bool erase) noexcept
+    void setBrushStrength(f32 strength) noexcept;
+    void setBrushOp(BrushOp op) noexcept
     {
-        m_brush.erase = erase;
+        m_brush.op = op;
         m_preferencesDirty = true;
     }
+    void setBrushShape(BrushShape shape) noexcept
+    {
+        m_brush.shape = shape;
+        m_preferencesDirty = true;
+    }
+
+    // --- Making ground exist ---------------------------------------------
+    //
+    // **The gap that made the brush useless.** For one commit the only way to
+    // get a `Terrain` into a world was a script calling `Instance.new`, so
+    // opening the editor on any project showed no brush, no panel and no way to
+    // begin -- which is not a missing feature, it is the feature not being
+    // reachable. Every editor in this shape has a Create step for exactly this
+    // reason.
+
+    // Creates a `Terrain` under `root`, or returns the one already there.
+    // Records an undo step.
+    core::InstanceId createTerrain(scene::World& world, core::InstanceId root, Inspector& inspector);
+
+    // Fills a square of ground centred on the origin, from the world's floor up
+    // to `height`.
+    //
+    // **From the floor and not from `height` down**, which is the rule F1 paid
+    // for: a fill that reaches the floor is a height function and stays cheap,
+    // and one that does not is a floating slab that costs voxels for every
+    // column of it.
+    bool generateGround(scene::World& world, core::InstanceId root, Inspector& inspector, f32 size, f32 height,
+                        core::u8 material);
+
+    // Empties the field. Records an undo step, so it is not the disaster it
+    // sounds like.
+    bool clearTerrain(scene::World& world, core::InstanceId root, Inspector& inspector);
+
+    // The terrain under the root the viewport is drawing, or nothing.
+    [[nodiscard]] core::InstanceId terrainIn(const scene::World& world, core::InstanceId root) const;
+
+    // **Where world content goes, given whatever root a caller happens to
+    // hold.**
+    //
+    // The shell's panels are handed the root the EXPLORER draws, which is the
+    // `DataModel` -- so a verb that took it at face value put a `Terrain` beside
+    // `Lighting` and `RunService` instead of in the world. Reported by the owner
+    // the first time they pressed the button, which is the shortest path from a
+    // wrong root to a visible symptom there is.
+    //
+    // Returns `root` when it already is a workspace -- a stamp stage's root is
+    // one -- and its `Workspace` child otherwise. Nothing when neither, because
+    // a world with nowhere to put content is a world this verb must refuse
+    // rather than guess about.
+    [[nodiscard]] core::InstanceId workspaceUnder(const scene::World& world, core::InstanceId root) const;
 
     // Where the brush is aiming, in world space, or nothing when it is over sky
     // -- for the ring the viewport draws. Cast against the FIELD rather than
@@ -2011,6 +2104,11 @@ private:
         core::DVec3 last;
         core::u64 gesture = 0;
         core::u32 stamps = 0;
+        // **Captured where the stroke began**, which is what makes `Flatten` a
+        // tool a person can aim: dragging across a hillside levels it to where
+        // you first clicked rather than to wherever the pointer happens to be,
+        // which would chase its own result downhill.
+        f32 plane = 0.0f;
     };
 
     // How far a brush can reach, in metres. A ray fired at the horizon has to
