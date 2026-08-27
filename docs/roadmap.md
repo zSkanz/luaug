@@ -1175,6 +1175,13 @@ effects and world content, then the 2D layer, then multiplayer, then mobile. Thi
 user decision #7", which had put the 2D layer first — that item is unchanged and
 only its position moved.
 
+**Numbering is intent and not a queue.** A phase is OPEN when the owner opens it
+and not before, which is the escalation R15 names — and they are not obliged to
+open them in order. As of 2026-08-27 three are open: **1** (2026-08-22, complete),
+and **2 and 4** (both 2026-08-27, in the same instruction). Phase 3 was skipped
+over rather than dropped: the 2D layer and navmesh stay closed, and so do mobile
+and the ecosystem work.
+
 1. **Visual editor** — built on the engine (Studio-like, phase 2 of the
    original vision). **Opened 2026-08-22 by human decision** and specified below
    under "Phase 1 detail"; it is the first work this repository does that v1's
@@ -1186,6 +1193,13 @@ only its position moved.
    this is the scheduling. It sits after the editor because most of it is
    *authored* — a particle system and a terrain are both miserable to tune
    without one.
+
+   **Opened 2026-08-27 by human decision**, in the same instruction that opened
+   phase 4, and **the terrain's one open question below is answered by it:
+   voxel, not height field, so caves and overhangs are possible.** The owner's
+   words were "terrain editor multiplayer voxels" — the editor half is named as
+   explicitly as the representation, which is the whole reason this phase sits
+   after phase 1 rather than before it.
 
    - **Particles** (`ParticleEmitter`, named in `api-design.md` as not-in-v1).
      **The most visible gap of the group**: without it a game has no fire, smoke,
@@ -1219,11 +1233,17 @@ only its position moved.
      read, but CPU work per decal and access to the mesh. Choose with the reason
      written down.
    - **Terrain** — a sculpted, collidable landscape rather than a floor made of
-     parts. Jolt has a height-field shape, so the physics half is a shape type
-     rather than a system; the render half is a chunked LOD surface, which is
-     what M7's streaming and LOD chain already do for meshes. The open question
-     is authoring: height field or voxel, and the answer decides whether caves
-     are possible.
+     parts. The render half is a chunked LOD surface, which is what M7's
+     streaming and LOD chain already do for meshes, and layer 2 has been
+     reserved for "terrain features" since M7 with nothing occupying it.
+
+     **The open question is answered: VOXEL, by human decision 2026-08-27**, and
+     it was asked here as "height field or voxel, and the answer decides whether
+     caves are possible". Caves are possible. The cost of that answer is that
+     the physics half stops being a shape type Jolt hands over — a height field
+     is one `HeightFieldShape` and a voxel volume is not — so a per-chunk
+     collider and its rebuild cost become part of the milestone rather than a
+     line in it.
    - **`SurfaceGui` and billboards** — the UI tree rendered in world space: a
      screen on a wall, a name over a head, a health bar that follows a body. The
      tree, the layout and the `ui2d` pass all exist since M6; what does not is
@@ -1246,6 +1266,13 @@ only its position moved.
    channel. **Designed and approved by the human on 2026-08-21**, and ready to
    start as soon as v1 ships. The shape below is a commitment, not a sketch: what
    it costs v1 is nothing, because every seam it needs is already open.
+
+   **Opened 2026-08-27 by human decision**, in the same instruction that opened
+   phase 2, and **out of order on purpose** — phase 3, the 2D layer and navmesh,
+   was not opened with it and stays closed. Everything below was written as a
+   commitment before v1 shipped and is inherited rather than re-decided; what the
+   milestone owes is the part this section deliberately did not commit, named at
+   its end: replication semantics, which is the genuinely hard part.
 
    - **Authority is world state, not build flavour.** A `World` is authoritative
      or a replica, and that single fact produces every topology. **One binary,

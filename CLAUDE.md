@@ -126,8 +126,10 @@ R5 pinned versions only · R6 permissive licenses only · R7 clean-room re Roblo
 world coords engine-side · R10 sim determinism (no wall-clock/unseeded
 RNG/unordered iteration; stable parallel commit) · R11 main always green ·
 R12 conventional commits · R13 never edit `third_party/` in place ·
-R14 out-of-tree builds only · R15 v1 scope closed (no editor/multiplayer/2D/
-mobile/navmesh) · R16 interpreter-first perf (iOS has no JIT) · R17 no backend
+R14 out-of-tree builds only · R15 v1 scope closed, and post-v1 phases open one
+at a time by human decision (1 editor, 2 effects/world and 4 multiplayer are
+OPEN; 2D, navmesh and mobile are not) · R16 interpreter-first perf (iOS has no
+JIT) · R17 no backend
 types in the public API · R18 rendering is judged against a stated reference,
 and visual fidelity is a v1 target (ADR 0038).
 
@@ -154,7 +156,10 @@ and visual fidelity is a v1 target (ADR 0038).
 - Do not disable sandbox, strict mode, or lints to make CI pass.
 - Do not add/upgrade dependencies without a human-approved ADR.
 - Do not write to `main` while red; do not skip milestone gates.
-- Do not implement anything on the R15 post-v1 list.
+- Do not implement anything on the R15 post-v1 list **whose phase is not open**.
+  Phases 1 (editor), 2 (effects and world content) and 4 (multiplayer) ARE open;
+  the 2D layer, navmesh and mobile are not. Opening one is the owner's decision —
+  taking it for them is what R15 actually forbids.
 
 ## Map
 

@@ -84,9 +84,20 @@ without a human-approved ADR.
   through `third_party/patches/` + the manifest (ADR 0021).
 - **R14** — Builds are **out-of-tree** (`$env{LUAUG_BUILD_ROOT}` via the CMake
   presets). Never write build output into the source tree.
-- **R15** — **v1 scope is closed.** No editor, no multiplayer/replication, no
-  2D layer, no mobile ports, no navmesh integration (ADR 0022) — no matter how
-  tempting the seam. Scope changes are escalation items.
+- **R15** — **v1 scope is closed, and v1 shipped.** The list it froze — editor,
+  multiplayer/replication, 2D layer, mobile ports, navmesh integration
+  (ADR 0022) — was never "forbidden for ever"; it was "not in v1, and a scope
+  change is an escalation item". **The escalation mechanism is the post-v1
+  phases in `docs/roadmap.md`, opened ONE AT A TIME by human decision**, and
+  three have been:
+
+  - **Phase 1, the visual editor** — opened 2026-08-22. E1 through E9, complete.
+  - **Phase 2, effects and world content** — opened 2026-08-27.
+  - **Phase 4, multiplayer/replication** — opened 2026-08-27.
+
+  Everything still on the list and not in an opened phase stays closed, and
+  opening one is the owner's call and nobody else's. What R15 forbids is taking
+  that decision on their behalf, not the work itself.
 - **R16** — **Interpreter-first performance mindset**: iOS forbids JIT, so hot
   paths must be fast *without* native codegen. Bind through vectors, buffers,
   atoms, and tagged userdata — never tables-of-numbers (the API schema rejects
