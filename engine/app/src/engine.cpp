@@ -22,6 +22,7 @@
 #include "luaug/app/launcher.h"
 #include "luaug/app/partition_cache.h"
 #include "luaug/app/picking.h"
+#include "luaug/app/pointer_ownership.h"
 #include "luaug/app/reference_grid.h"
 #include "luaug/app/reload.h"
 #include "luaug/app/screenshot.h"
@@ -2292,44 +2293,35 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (window != nullptr) {
             scene::EngineState& engineState = host->world().engineState();
 
-            // **In the editor the cursor belongs to the person, not to the
-            // game** (D059). `examples/10-open-world` locks the pointer at file
-            // scope for its mouse look, and the boot drain runs that before the
-            // first frame -- so an editor opened on it started with no cursor
-            // and no way to click a panel. The rule is the one Unity and Unreal
-            // use and it is the same rule the transport applies to time: while
-            // the world is paused the editor owns the device, and pressing play
-            // hands it back.
+            // **Who owns the mouse**, decided by `decidePointer` rather than
+            // here (S7.11). Four defects came out of this question -- D049,
+            // D059, D063 and D069 -- and every one of them was reported by a
+            // person, because the rule was arithmetic inline in this loop and
+            // nothing could call it. The rules and the reasons are in
+            // `pointer_ownership.cpp` and the cases that hold them are in
+            // `pointer_ownership_tests.cpp`.
             //
             // The game's property is not overwritten, only overridden. A script
             // that reads `InputService.PointerLocked` sees what it wrote, which
             // keeps the property honest and keeps a replay of a game that locks
             // its pointer legal.
-            // **A detached view owns the pointer too**, and that is not a
-            // second decision: the fly camera is driven by a right-drag, and a
-            // game holding the pointer (D069) means the drag never reaches the
-            // editor -- so detaching without this is a camera you cannot turn.
-            const bool editorOwnsPointer = options.editor && (editing(editor.runState()) || editor.cameraDetached());
-            // **While turning the camera the pointer is hidden and held**, which
-            // is SDL's relative mode and is what puts the cursor back exactly
-            // where it was when the button is released. Without it a right-drag
-            // walks the cursor across the desktop and out of the window, and the
-            // turn stops when it leaves.
-            const bool editorLooking = editorOwnsPointer && editor.lookInput().active;
-            const bool wantLocked = editorOwnsPointer ? editorLooking : engineState.pointerLocked;
-            const bool wantVisible = editorOwnsPointer ? !editorLooking : engineState.pointerVisible;
+            const PointerOwnership pointer = decidePointer({
+                .editorProfile = options.editor,
+                .editing = editing(editor.runState()),
+                .cameraDetached = editor.cameraDetached(),
+                .lookActive = editor.lookInput().active,
+                .gameWantsLocked = engineState.pointerLocked,
+                .gameWantsVisible = engineState.pointerVisible,
+            });
+            const bool wantLocked = pointer.locked;
+            const bool wantVisible = pointer.visible;
 
-            // **Handed back means handed back** (D069). The pointer belongs to
-            // whoever holds it, and while that is the GAME the panels must not
-            // see the mouse at all -- relative mode keeps posting motion with a
-            // logical position SDL accumulates, and the invisible cursor walks
-            // across the explorer hovering and clicking things a player turning
-            // their head cannot see. Told here rather than inferred there,
-            // because this is where the question is already answered, and told
-            // BEFORE `handleEvents` runs later in this same frame, so there is
-            // no frame of lag on either edge.
+            // Told here rather than inferred in the overlay, because this is
+            // where the question is already answered, and told BEFORE
+            // `handleEvents` runs later in this same frame, so there is no frame
+            // of lag on either edge.
             if (overlay.has_value())
-                overlay->setGameHoldsPointer(wantLocked && !editorOwnsPointer);
+                overlay->setGameHoldsPointer(pointer.gameHoldsPointer);
 
             if (wantLocked != pointerLocked) {
                 pointerLocked = wantLocked;

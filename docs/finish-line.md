@@ -654,8 +654,32 @@ that sends the next session to the wrong place.
       claim stated as an assertion instead of as a comment.
 - [ ] **S7.10** `tools/iconpatch`, the exotic importer, the SDL3 GPU backend and
       the forward renderer.
-- [ ] **S7.11** The input harness that found three defects and was never
-      committed.
+- [x] **S7.11** The harness was never committed and there is no trace of it left,
+      so what is committed instead is the coverage it existed for — and the
+      right place turned out not to be the input module at all. `input_tests`
+      has thirty-one cases over actions, bindings, contexts and the virtual
+      seam. What has none is **who owns the mouse**, and four defects came out
+      of that one question: D049 (the pointer lock did nothing, because the
+      property was stored and read by nothing), D059 (the editor opened on a
+      project that locks its pointer and had no cursor to click a panel with),
+      D063 (a right-drag hid the cursor without holding it, so it walked out of
+      the window) and D069 (the invisible cursor still hovered and clicked
+      Explorer rows nobody could see).
+
+      **Every one of those was reported by a person**, and the reason is the
+      same reason each time: the rule was arithmetic inline in the frame loop,
+      so nothing could call it. `decidePointer` is that rule as a function —
+      what is wanted in, what should be true out, no SDL and no world — and
+      `engine.cpp` now asks it instead of working it out. It is the move
+      `debug_overlay_tests.cpp` already argues for at the top of its own file:
+      a decision made with arithmetic rather than with pixels is a function, and
+      the cases run on any machine at all.
+
+      Nine cases, each named after the defect it would have caught, plus the two
+      that would go unnoticed in the other direction — play handing the pointer
+      back, and a `lookActive` that must not reach the answer in a player build
+      where there is no editor camera to turn. Break-verified by dropping
+      `cameraDetached` from the ownership test, which fails four assertions.
 - [x] **S7.12** A release-time check that the tag and the project version agree
       — built as `tools/repo/versioncheck.luau`, run by the Luau gate locally
       when HEAD carries a tag and by CI on every `v*` push. A release names

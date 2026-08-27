@@ -32,6 +32,7 @@ luaug_add_module(app
         src/launcher_run.cpp
         src/partition_cache.cpp
         src/picking.cpp
+        src/pointer_ownership.cpp
         src/chunk_overlay.cpp
         src/reference_grid.cpp
         src/skeleton_overlay.cpp
@@ -200,6 +201,7 @@ add_custom_command(TARGET luaug_host POST_BUILD
 
 luaug_add_module_tests(app
     SOURCES
+        tests/pointer_ownership_tests.cpp
         tests/preserved_tests.cpp
         tests/reload_state_tests.cpp
         tests/reload_tests.cpp
