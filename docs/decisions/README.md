@@ -106,3 +106,5 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0063](0063-https-stays-refused-and-tls-comes-from-the-platform.md) | `https://` stays refused, and when TLS arrives it comes from the platform |
 | [0064](0064-jolt-solves-on-a-fixed-thread-pool.md) | Jolt solves on a fixed thread pool, and the count is part of the hash |
 | [0065](0065-a-loose-gltf-is-not-a-runtime-format.md) | A loose `.gltf` is not a runtime format; everything arrives compiled |
+| [0066](0066-the-physics-seam-learns-two-static-shapes.md) | The physics seam learns two static shapes: height field and triangle mesh |
+| [0067](0067-terrain-is-one-field-with-two-encodings.md) | Terrain is one signed-distance field with two encodings, and the claim is what was measured |
