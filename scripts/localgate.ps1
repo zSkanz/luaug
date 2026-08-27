@@ -18,6 +18,8 @@
 #   scripts/localgate.ps1              # everything -- what you run before a push
 #   scripts/localgate.ps1 -Only docs   # one stage: docs | luau | format | windows | linux | shipping
 #   scripts/localgate.ps1 -Only asan   # address and UB sanitizers, opt-in (see below)
+#   scripts/localgate.ps1 -Only winprofiles   # the three profiles a Windows release
+#                                             # ships, on MSVC, opt-in (see below)
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
 #   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
 #   scripts/localgate.ps1 -AllowSkips         # ONLY on a machine with no GPU
@@ -39,7 +41,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipLinux,
-    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan')]
+    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan', 'winprofiles')]
     [string]$Only,
     # Only meaningful with -Only format: reformat in place rather than report.
     # Off by default, because a gate that edits your tree without being asked is
@@ -398,6 +400,63 @@ Invoke-Stage 'shipping' {
         -v "luaug-tier2-build:/build" `
         luaug-tier2:latest bash scripts/gates/shipping-build.sh
     if ($LASTEXITCODE -ne 0) { throw "the shipping, player or editor profile failed to build" }
+}
+
+# **The three profiles a WINDOWS release ships, on the compiler that ships them**
+# (S7.4).
+#
+# The `shipping` stage above builds `shipping`, `player` and `editor` -- on
+# Tier-2, deliberately, because Clang with warnings-as-errors is the stricter
+# reader of the `#if`s only those profiles take. What it cannot read is MSVC.
+# And MSVC is what the Windows release is compiled with, so the three artifacts
+# a person actually downloads were built by no gate on any machine: `luaug
+# build` packages `win-msvc-player`, a released editor archive is
+# `win-msvc-editor`, and neither had ever been compiled outside a release.
+#
+# The failure that hides here is specific rather than hypothetical. These
+# profiles differ from `dev` by what `LUAUG_LUAU_COMPILER` and `LUAUG_DEBUG_UI`
+# gate, so what rots in them is code inside an `#if` -- and a preprocessor
+# branch that one compiler takes and another does not is precisely where the
+# two disagree. D056 is this repository's own instance: an unknown number of
+# commits where the shipping profile did not compile at all.
+#
+# Opt-in for the same reason as `asan`: three Release configures and three
+# builds of the vendored tree is minutes, not seconds, and the standing gate is
+# something a person runs before every push. It belongs before a RELEASE, which
+# is where `docs/finish-line.md` S8.6 puts it, and here for the afternoon
+# somebody has touched a `#if LUAUG_DEBUG_UI`.
+#
+# It runs the same `shipping-build.sh` the Tier-2 stage does, with the three
+# preset names passed in -- the script already takes them that way, and one
+# implementation of "which profiles and which target" is what CLAUDE.md asks
+# for. The `.cmd` around it exists only to supply a Developer Shell, which the
+# Ninja presets require and Git Bash does not have.
+Invoke-Stage 'winprofiles' {
+    if (-not $Only) {
+        Write-Host '[gate] winprofiles: skipped (opt-in; run scripts/localgate.ps1 -Only winprofiles)' -ForegroundColor DarkGray
+        return
+    }
+
+    $vcvars = Get-DeveloperShellEnv
+    $bash = Get-BashPath
+    $script = @"
+chcp 65001 >nul
+call "$vcvars" >nul || exit /b 1
+set LUAUG_SHIPPING_PRESET=win-msvc-shipping
+set LUAUG_PLAYER_PRESET=win-msvc-player
+set LUAUG_EDITOR_PRESET=win-msvc-editor
+"$bash" scripts/gates/shipping-build.sh || exit /b 1
+"@
+    $temp = Join-Path $env:TEMP "luaug-winprofiles-$PID.cmd"
+    Set-Content -Path $temp -Value $script -Encoding ascii
+    try {
+        & cmd.exe /c $temp
+        if ($LASTEXITCODE -ne 0) {
+            throw "the shipping, player or editor profile failed to build on MSVC"
+        }
+    } finally {
+        Remove-Item $temp -ErrorAction SilentlyContinue
+    }
 }
 
 Pop-Location

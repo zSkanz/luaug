@@ -560,7 +560,34 @@ that sends the next session to the wrong place.
       with `-AllowSkips` as the deliberate escape for a machine with no GPU.
       `--no-tests=error` beside it, because an empty suite is not a passing
       one either. **The CI half is still owed** and belongs with S7.2.
-- [ ] **S7.4** No gate builds the three Windows profiles the release ships.
+- [x] **S7.4** `scripts/localgate.ps1 -Only winprofiles` builds them, on the
+      compiler that ships them. The `shipping` stage already builds `shipping`,
+      `player` and `editor` — on Tier-2, deliberately, because Clang with
+      warnings-as-errors is the stricter reader of the `#if`s only those
+      profiles take. What Clang cannot read is MSVC, and MSVC is what a Windows
+      release is compiled with.
+
+      `package.ps1` does build `editor` and `player`, which is why this looked
+      covered and is not: it builds them **as part of producing the artifact**,
+      so a break is found at release time by the person doing the release. No
+      gate built them, ever.
+
+      What hides here is specific. These profiles differ from `dev` only by what
+      `LUAUG_LUAU_COMPILER` and `LUAUG_DEBUG_UI` gate, so what rots in them is
+      code inside an `#if` — and a preprocessor branch one compiler takes and
+      another does not is exactly where two compilers disagree. D056 is this
+      repository's own instance: an unknown number of commits where the shipping
+      profile did not compile at all.
+
+      It runs the same `shipping-build.sh` the Tier-2 stage does, with the three
+      preset names passed in — the script already took them that way, so there is
+      one statement of which profiles and which target. The `.cmd` around it
+      exists only to supply the Developer Shell the Ninja presets require.
+
+      Opt-in, like `asan`, and for the same reason: 97 s warm against a standing
+      gate that is 90 s for everything else. Break-verified with an `#error`
+      inside `#if !LUAUG_DEBUG_UI` — which fails the stage in 3.5 s and also
+      proves these builds really do have the overlay compiled out.
 - [x] **S7.5** `linux-clang-asan` is fully wired and run by nothing. **Now
       run**: a `-Only asan` stage locally and a non-blocking nightly job,
       both through the same script. Two blockers found and fixed, neither in
