@@ -82,12 +82,60 @@ struct BlockShape
     return std::min({block.half.x - dx, block.half.y - dy, block.half.z - dz});
 }
 
+// One column's storage, resolved once.
+//
+// **Every sample of a column asks the same two questions**: which brick covers
+// it, and which tile holds it. Answering them per sample means two binary
+// searches per lattice step, and a column is walked dozens of steps deep -- so
+// an eight-metre brush spent most of its time looking up storage it had already
+// found. Resolved once, a non-bricked column's sample is one subtraction.
+struct ColumnView
+{
+    // Null when the column carries voxels, which is the case that still needs a
+    // lookup per step because a brick covers sixteen of them vertically.
+    const HeightTile* tile = nullptr;
+    u32 index = 0;
+    bool bricked = false;
+};
+
+[[nodiscard]] ColumnView viewOf(const TerrainField& field, i32 x, i32 z)
+{
+    ColumnView view;
+    view.bricked = field.isBricked(x, z);
+    if (view.bricked) {
+        return view;
+    }
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    view.tile = field.findTile(key);
+    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
+    view.index = localZ * TileEdge + localX;
+    return view;
+}
+
+// What the field says at one lattice point of a column already resolved.
+//
+// The same answer `TerrainField::sample` gives; it just does not look the
+// storage up again. A bricked column falls back, because a brick covers sixteen
+// steps and the right one changes as the walk climbs.
+[[nodiscard]] FieldSample sampleThrough(const TerrainField& field, const ColumnView& view, i32 x, i32 y, i32 z)
+{
+    if (view.bricked) {
+        return field.sample(x, y, z);
+    }
+    if (view.tile == nullptr || view.tile->material[view.index] == 0) {
+        return FieldSample{DistanceRange * field.settings().voxelSize, 0};
+    }
+    return FieldSample{static_cast<float>(y) * field.settings().voxelSize - view.tile->height[view.index],
+                       view.tile->material[view.index]};
+}
+
 // The field with the brush applied, at one lattice point, without writing
 // anything. **The whole edit is expressed through this**: the promotion test
 // needs to know what the column WILL look like, and computing that twice -- once
 // to decide and once to write -- is how the two come to disagree.
-[[nodiscard]] FieldSample afterEdit(const TerrainField& field, i32 x, i32 y, i32 z, Depth depth, const void* shape,
-                                    u8 material)
+[[nodiscard]] FieldSample afterEdit(const TerrainField& field, const ColumnView& view, i32 x, i32 y, i32 z, Depth depth,
+                                    const void* shape, u8 material)
 {
     // **R9's f32/f64 split, made explicit.** A lattice coordinate is an integer,
     // a voxel size is `f32` and a world position is `f64`, so every place they
@@ -96,7 +144,7 @@ struct BlockShape
     const auto voxel = static_cast<double>(field.settings().voxelSize);
     const DVec3 at{static_cast<double>(x) * voxel, static_cast<double>(y) * voxel, static_cast<double>(z) * voxel};
     const float inside = depth(at, shape);
-    const FieldSample existing = field.sample(x, y, z);
+    const FieldSample existing = sampleThrough(field, view, x, y, z);
 
     if (material == 0) {
         // **Removing: the union with the brush's INSIDE becomes air.** A carve
@@ -139,8 +187,8 @@ struct ColumnVerdict
     i32 highY = 0;
 };
 
-[[nodiscard]] ColumnVerdict examineColumn(const TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth depth,
-                                          const void* shape, u8 material)
+[[nodiscard]] ColumnVerdict examineColumn(const TerrainField& field, const ColumnView& view, i32 x, i32 z, i32 lowY,
+                                          i32 highY, Depth depth, const void* shape, u8 material)
 {
     ColumnVerdict verdict;
     verdict.lowY = lowY;
@@ -148,14 +196,14 @@ struct ColumnVerdict
 
     const float voxel = field.settings().voxelSize;
     int crossings = 0;
-    FieldSample previous = afterEdit(field, x, lowY, z, depth, shape, material);
+    FieldSample previous = afterEdit(field, view, x, lowY, z, depth, shape, material);
     bool previousSolid = previous.distance <= 0.0f;
     // A column whose bottom sample is air has nothing below it either, and one
     // whose bottom is ground is the ordinary case.
     verdict.material = previous.material;
 
     for (i32 y = lowY + 1; y <= highY; ++y) {
-        const FieldSample current = afterEdit(field, x, y, z, depth, shape, material);
+        const FieldSample current = afterEdit(field, view, x, y, z, depth, shape, material);
         const bool solid = current.distance <= 0.0f;
         if (solid != previousSolid) {
             ++crossings;
@@ -199,22 +247,16 @@ struct ColumnVerdict
     return verdict;
 }
 
-// Writes one column into the height layer, cloning the tile it belongs to.
+// Writes one column into the height layer.
+//
+// **One column, not one tile**, and the difference is the whole reason
+// `setColumn` exists. This used to clone the tile's five kilobytes and hash them
+// to change four bytes, so a stroke touching two hundred columns moved and
+// hashed a megabyte -- and generating a 128 m square took 285 milliseconds,
+// which a person feels as the editor stopping.
 void writeHeight(TerrainField& field, i32 x, i32 z, float height, u8 material)
 {
-    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
-    std::vector<float> heights(TileArea, 0.0f);
-    std::vector<u8> materials(TileArea, 0);
-    if (const HeightTile* existing = field.findTile(key); existing != nullptr) {
-        std::copy(std::begin(existing->height), std::end(existing->height), heights.begin());
-        std::copy(std::begin(existing->material), std::end(existing->material), materials.begin());
-    }
-
-    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
-    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
-    heights[localZ * TileEdge + localX] = height;
-    materials[localZ * TileEdge + localX] = material;
-    field.setTile(key, heights, materials);
+    field.setColumn(x, z, height, material);
 }
 
 // Writes one column as bricks, cloning each brick it spans.
@@ -252,7 +294,7 @@ void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth d
                     continue;
                 }
                 const FieldSample before = field.sample(x, worldY, z);
-                const FieldSample after = afterEdit(field, x, worldY, z, depth, shape, material);
+                const FieldSample after = afterEdit(field, viewOf(field, x, z), x, worldY, z, depth, shape, material);
                 if ((before.distance <= 0.0f) != (after.distance <= 0.0f)) {
                     differs = true;
                 }
@@ -289,12 +331,15 @@ void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth d
             }
         }
 
+        // Resolved after the brick above is created, because creating one is
+        // what makes the column bricked.
+        const ColumnView brickView = viewOf(field, x, z);
         for (u32 y = 0; y < BrickEdge; ++y) {
             const i32 worldY = brickY * static_cast<i32>(BrickEdge) + static_cast<i32>(y);
             if (worldY < lowY || worldY > highY) {
                 continue;
             }
-            const FieldSample edited = afterEdit(field, x, worldY, z, depth, shape, material);
+            const FieldSample edited = afterEdit(field, brickView, x, worldY, z, depth, shape, material);
             const u32 index = (y * BrickEdge + localZ) * BrickEdge + localX;
             distances[index] = quantiseDistance(edited.distance, voxel);
             materials[index] = edited.material;
@@ -355,8 +400,11 @@ EditReport applyBrush(TerrainField& field, const core::AABB& bounds, Depth depth
     }
 
     for (const Column& column : columns) {
-        const ColumnVerdict verdict = examineColumn(field, column.x, column.z, minY, maxY, depth, shape, material);
-        const bool wasBricked = field.isBricked(column.x, column.z);
+        // One resolution per column, shared by the examination and the write.
+        const ColumnView view = viewOf(field, column.x, column.z);
+        const ColumnVerdict verdict =
+            examineColumn(field, view, column.x, column.z, minY, maxY, depth, shape, material);
+        const bool wasBricked = view.bricked;
 
         // A column that is already bricked stays bricked even when the edit made
         // it single-valued again. Demotion is `compact` and nothing else, because
@@ -484,6 +532,36 @@ struct Column2D
 }
 
 } // namespace
+
+EditReport fillFlat(TerrainField& field, DVec3 center, float size, float height, u8 material)
+{
+    EditReport report;
+    const float voxel = field.settings().voxelSize;
+    if (!(size > 0.0f) || !(voxel > 0.0f) || material == 0) {
+        return report;
+    }
+
+    const float clamped = std::clamp(height, field.settings().minHeight, field.settings().maxHeight);
+    const auto wide = static_cast<double>(voxel);
+    const double half = static_cast<double>(size) * 0.5;
+
+    const auto low = [wide](double metres) { return static_cast<i32>(std::floor(metres / wide)); };
+    const auto high = [wide](double metres) { return static_cast<i32>(std::ceil(metres / wide)); };
+
+    for (i32 z = low(center.z - half); z <= high(center.z + half); ++z) {
+        for (i32 x = low(center.x - half); x <= high(center.x + half); ++x) {
+            if (field.isBricked(x, z)) {
+                // Voxels are not a height, and this verb has no opinion about
+                // them. Counted so a caller can say what it did not do.
+                report.promoted += 1;
+                continue;
+            }
+            field.setColumn(x, z, clamped, material);
+            report.touched += 1;
+        }
+    }
+    return report;
+}
 
 EditReport smoothBall(TerrainField& field, DVec3 center, double radius, float strength)
 {

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace luaug::asset {
@@ -79,7 +80,31 @@ struct EdgeKey
     i32 by = 0;
     i32 bz = 0;
 
-    [[nodiscard]] constexpr auto operator<=>(const EdgeKey&) const noexcept = default;
+    [[nodiscard]] constexpr bool operator==(const EdgeKey&) const noexcept = default;
+};
+
+// A mix over the six lattice coordinates. Splitmix64's finaliser on a packed
+// key, which is cheap and scatters the low bits a lattice walk is full of.
+struct EdgeKeyHash
+{
+    [[nodiscard]] usize operator()(const EdgeKey& key) const noexcept
+    {
+        core::u64 hash = 1469598103934665603ull;
+        const auto mix = [&hash](i32 value) noexcept {
+            hash ^= static_cast<core::u64>(static_cast<core::u32>(value));
+            hash *= 1099511628211ull;
+        };
+        mix(key.ax);
+        mix(key.ay);
+        mix(key.az);
+        mix(key.bx);
+        mix(key.by);
+        mix(key.bz);
+        hash ^= hash >> 33;
+        hash *= 0xff51afd7ed558ccdull;
+        hash ^= hash >> 33;
+        return static_cast<usize>(hash);
+    }
 };
 
 [[nodiscard]] EdgeKey edgeKeyOf(const Corner& a, const Corner& b) noexcept
@@ -122,13 +147,73 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     const auto solid = [](const Corner& corner) noexcept { return corner.distance <= 0.0f; };
 
     // Vertex identity, so an edge shared by several tetrahedra produces one
-    // vertex and one index. A `std::map` rather than a hash map for R10: this
-    // walk decides the order vertices are emitted in, and therefore the mesh's
-    // bytes.
-    std::map<EdgeKey, u32> emitted;
+    // vertex and one index.
+    //
+    // **A hash map, and the comment that used to be here was wrong.** It said a
+    // `std::map` was required by R10 because "this walk decides the order
+    // vertices are emitted in, and therefore the mesh's bytes" -- which is true
+    // of the WALK and says nothing about the container. This is only ever
+    // `find` and `emplace`; it is never iterated, and an index comes from
+    // `vertices.size()` at the moment of first encounter. The order is the
+    // nested loops' and nothing else's.
+    //
+    // The cost of being wrong about that was a red-black tree with a
+    // twenty-four-byte key, hit a million times for a 32-cubed region: meshing
+    // one tile took ten milliseconds, and the loader does two a frame against a
+    // sixteen-millisecond budget.
+    std::unordered_map<EdgeKey, u32, EdgeKeyHash> emitted;
+    emitted.reserve(static_cast<usize>(region.cellsX + 1) * (region.cellsZ + 1) * 4);
+
+    // **The lattice, sampled once.**
+    //
+    // Every cell wants its eight corners and every corner is shared by eight
+    // cells, so sampling per cell asks the field for the same point eight times
+    // -- 262,000 lookups for a 32-cubed region where 36,000 would do. Each
+    // lookup is two binary searches and a pair of floor-divisions, and together
+    // they were most of the ten milliseconds a tile cost to mesh.
+    //
+    // Read straight through, in x-fastest order, which is also the order the
+    // walk below asks for them in.
+    //
+    // The gradient reaches one step OUTSIDE this grid at its faces, and that
+    // falls back to the field -- a surface of the region's own edge rather than
+    // a special case in the hot path.
+    const usize gridX = static_cast<usize>(region.cellsX) + 1;
+    const usize gridY = static_cast<usize>(region.cellsY) + 1;
+    const usize gridZ = static_cast<usize>(region.cellsZ) + 1;
+    std::vector<FieldSample> lattice(gridX * gridY * gridZ);
+    for (usize iz = 0; iz < gridZ; ++iz) {
+        for (usize iy = 0; iy < gridY; ++iy) {
+            for (usize ix = 0; ix < gridX; ++ix) {
+                lattice[(iz * gridY + iy) * gridX + ix] =
+                    field.sample(region.minX + static_cast<i32>(ix) * static_cast<i32>(stride),
+                                 region.minY + static_cast<i32>(iy) * static_cast<i32>(stride),
+                                 region.minZ + static_cast<i32>(iz) * static_cast<i32>(stride));
+            }
+        }
+    }
+
+    // A lattice point's sample, from the grid when it is in it and from the
+    // field when it is not.
+    const auto sampleOf = [&](i32 x, i32 y, i32 z) noexcept -> FieldSample {
+        const i32 dx = x - region.minX;
+        const i32 dy = y - region.minY;
+        const i32 dz = z - region.minZ;
+        const auto step = static_cast<i32>(stride);
+        if (dx < 0 || dy < 0 || dz < 0 || dx % step != 0 || dy % step != 0 || dz % step != 0) {
+            return field.sample(x, y, z);
+        }
+        const auto ix = static_cast<usize>(dx / step);
+        const auto iy = static_cast<usize>(dy / step);
+        const auto iz = static_cast<usize>(dz / step);
+        if (ix >= gridX || iy >= gridY || iz >= gridZ) {
+            return field.sample(x, y, z);
+        }
+        return lattice[(iz * gridY + iy) * gridX + ix];
+    };
 
     const auto sampleAt = [&](i32 x, i32 y, i32 z) noexcept {
-        const FieldSample got = field.sample(x, y, z);
+        const FieldSample got = sampleOf(x, y, z);
         return Corner{x, y, z, got.distance, got.material};
     };
 
@@ -137,9 +222,10 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     // is faceted and a field gradient is smooth, and the gradient is also what
     // decides the winding below.
     const auto gradientAt = [&](i32 x, i32 y, i32 z) noexcept {
-        const float dx = field.sample(x + stride, y, z).distance - field.sample(x - stride, y, z).distance;
-        const float dy = field.sample(x, y + stride, z).distance - field.sample(x, y - stride, z).distance;
-        const float dz = field.sample(x, y, z + stride).distance - field.sample(x, y, z - stride).distance;
+        const auto step = static_cast<i32>(stride);
+        const float dx = sampleOf(x + step, y, z).distance - sampleOf(x - step, y, z).distance;
+        const float dy = sampleOf(x, y + step, z).distance - sampleOf(x, y - step, z).distance;
+        const float dz = sampleOf(x, y, z + step).distance - sampleOf(x, y, z - step).distance;
         const Vec3 gradient{dx, dy, dz};
         const float length = std::sqrt(gradient.x * gradient.x + gradient.y * gradient.y + gradient.z * gradient.z);
         if (length < 1e-8f) {

@@ -206,6 +206,51 @@ to a file and taxes every configuration to enable.
 | E9 | `tests/bench/physics1k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **2.00 ms** | 16 ms — unchanged from M5's 2.02, which is the claim |
 | E9 | `tests/bench/churn10k` **after the constraint family** (the same scene, unchanged) | `win-msvc-dev` | mean sim tick | **6.98 ms** | 32 ms — 7.32 at M6, so the three new per-tick passes cost a scene with no joints in it nothing |
 
+| **F1** | `tests/bench/terrain_sculpt` (128 m of ground, one brush stamp every tick at 2, 4 and 8 m, one dig in seven, one paint in seven) | `win-msvc-dev` | mean sim tick | **4.27 ms** | 16 ms |
+| F1 | `tests/bench/terrain_sculpt` | `win-msvc-dev` | worst sim tick | 15.06 ms | — |
+
+**This bench should have been F1's first commit and was its last, and the cost of
+that is the honest part of this table.** The plan said it in as many words --
+"the first commit of each milestone is the bench, not the feature" -- and skipping
+it meant the owner found the performance by using the editor and finding every
+stroke slow. What the first measurement reported, on the code as shipped:
+
+| Operation | Before | After | |
+|---|---|---|---|
+| Generate a 128 m square of ground | **285 ms** | **1.0 ms** | 285x |
+| `FillBall`, radius 8 m, one stamp | 2.47 ms | 0.83 ms | 3.0x |
+| `FillBall`, radius 4 m, one stamp | 0.62 ms | 0.18 ms | 3.4x |
+| `SmoothBall`, radius 4 m, one stamp | 0.15 ms | 0.03 ms | 5.0x |
+| Meshing one 32-cubed region | 10.4 ms | 4.1 ms | 2.5x |
+
+**Four causes, and they are the same mistake in four places**: work done per
+column that only needed doing per tile, and per sample that only needed doing per
+column.
+
+- **A column write cloned and re-hashed its whole tile.** `writeHeight` built a
+  5 KB tile and took an xxh3 over it to change four bytes, so a stroke touching
+  two hundred columns moved and hashed a megabyte. Now a tile is mutated in place
+  where the field alone owns it, cloned where a snapshot still holds it, and its
+  digest is computed when somebody asks rather than at every write.
+- **Making flat ground went through the general brush.** Carving a box that
+  reaches below the world floor makes every column's promotion examination walk
+  the whole reserved range -- 256 samples for a result that is one number.
+  `fillFlat` says the same thing in the encoding's own terms.
+- **Every sample re-resolved its own storage.** Two binary searches and a pair of
+  floor-divisions per lattice step, for a column walked dozens of steps deep.
+  Resolved once per column now.
+- **The mesher sampled each lattice point eight times**, once per cell that
+  shares it, and cached its vertex identity in a red-black tree with a
+  twenty-four-byte key. The lattice is read once into a flat array and the cache
+  is a hash map -- **and the comment claiming R10 required the tree was simply
+  wrong**: the container is never iterated, and emission order comes from the
+  walk.
+
+Plus one that is not in the table because it is per frame rather than per call:
+the loader meshed a slab **64 cells tall** around every tile's surface, a margin
+standing in for "whatever bricks reach". Bricks are measured now, and flat ground
+meshes 8 cells instead of 64.
+
 **A ragdoll is cheaper than two hundred sockets, and the ratio is the point.**
 `sockets200` is 400 bodies in 200 two-body islands and costs 0.58 ms of solver;
 `ragdoll10` is 160 bodies in 10 sixteen-body islands and costs 0.26 ms. Per BODY

@@ -90,7 +90,25 @@ float dequantiseDistance(u8 quantised, float voxelSize) noexcept
     return voxels * voxelSize;
 }
 
-std::shared_ptr<const HeightTile> makeHeightTile(std::span<const float> heights, std::span<const u8> materials)
+u64 digestOf(const HeightTile& tile) noexcept
+{
+    if (!tile.digestValid) {
+        tile.digest = digestOf(tile.height, sizeof(tile.height), tile.material, sizeof(tile.material));
+        tile.digestValid = true;
+    }
+    return tile.digest;
+}
+
+u64 digestOf(const Brick& brick) noexcept
+{
+    if (!brick.digestValid) {
+        brick.digest = digestOf(brick.sd, sizeof(brick.sd), brick.material, sizeof(brick.material));
+        brick.digestValid = true;
+    }
+    return brick.digest;
+}
+
+std::shared_ptr<HeightTile> makeHeightTile(std::span<const float> heights, std::span<const u8> materials)
 {
     auto tile = std::make_shared<HeightTile>();
     const usize count = std::min<usize>(TileArea, heights.size());
@@ -101,14 +119,13 @@ std::shared_ptr<const HeightTile> makeHeightTile(std::span<const float> heights,
     for (usize at = 0; at < materialCount; ++at) {
         tile->material[at] = materials[at];
     }
-    // **Computed here and nowhere else**, which is why this is a free function
-    // rather than a constructor: a tile built any other way would carry a zero
-    // digest and hash as though it were empty.
-    tile->digest = digestOf(tile->height, sizeof(tile->height), tile->material, sizeof(tile->material));
+    // Left stale, and `digestOf` computes it when somebody asks. A tile built
+    // and then edited a hundred times would otherwise hash itself a hundred and
+    // one times.
     return tile;
 }
 
-std::shared_ptr<const Brick> makeBrick(std::span<const u8> distances, std::span<const u8> materials)
+std::shared_ptr<Brick> makeBrick(std::span<const u8> distances, std::span<const u8> materials)
 {
     auto brick = std::make_shared<Brick>();
     const usize count = std::min<usize>(BrickVolume, distances.size());
@@ -119,7 +136,6 @@ std::shared_ptr<const Brick> makeBrick(std::span<const u8> distances, std::span<
     for (usize at = 0; at < materialCount; ++at) {
         brick->material[at] = materials[at];
     }
-    brick->digest = digestOf(brick->sd, sizeof(brick->sd), brick->material, sizeof(brick->material));
     return brick;
 }
 
@@ -237,11 +253,13 @@ u64 TerrainField::digest() const noexcept
     XXH3_64bits_reset(&state);
     for (const auto& entry : m_tiles) {
         XXH3_64bits_update(&state, &entry.first, sizeof(entry.first));
-        XXH3_64bits_update(&state, &entry.second->digest, sizeof(u64));
+        const u64 tile = digestOf(*entry.second);
+        XXH3_64bits_update(&state, &tile, sizeof(u64));
     }
     for (const auto& entry : m_bricks) {
         XXH3_64bits_update(&state, &entry.first, sizeof(entry.first));
-        XXH3_64bits_update(&state, &entry.second->digest, sizeof(u64));
+        const u64 brick = digestOf(*entry.second);
+        XXH3_64bits_update(&state, &brick, sizeof(u64));
     }
     return XXH3_64bits_digest(&state);
 }
@@ -254,6 +272,72 @@ void TerrainField::setTile(TileKey key, std::span<const float> heights, std::spa
 void TerrainField::setBrick(BrickKey key, std::span<const u8> distances, std::span<const u8> materials)
 {
     insertOrReplace(m_bricks, key, makeBrick(distances, materials));
+}
+
+// The tile a column belongs to, cloned first when anything else still holds it.
+//
+// **Copy-on-write is what makes both promises true at once**: a snapshot is a
+// vector of shared pointers and costs nothing, and writing a column into a tile
+// this field alone owns costs four bytes rather than five kilobytes.
+HeightTile* TerrainField::tileFor(TileKey key)
+{
+    const auto at = std::lower_bound(m_tiles.begin(), m_tiles.end(), key,
+                                     [](const auto& entry, const TileKey& probe) { return entry.first < probe; });
+    if (at != m_tiles.end() && at->first == key) {
+        if (at->second.use_count() > 1) {
+            at->second = std::make_shared<HeightTile>(*at->second);
+        }
+        at->second->digestValid = false;
+        return at->second.get();
+    }
+    const auto inserted = m_tiles.insert(at, {key, std::make_shared<HeightTile>()});
+    return inserted->second.get();
+}
+
+Brick* TerrainField::brickFor(BrickKey key)
+{
+    const auto at = std::lower_bound(m_bricks.begin(), m_bricks.end(), key,
+                                     [](const auto& entry, const BrickKey& probe) { return entry.first < probe; });
+    if (at != m_bricks.end() && at->first == key) {
+        if (at->second.use_count() > 1) {
+            at->second = std::make_shared<Brick>(*at->second);
+        }
+        at->second->digestValid = false;
+        return at->second.get();
+    }
+    const auto inserted = m_bricks.insert(at, {key, std::make_shared<Brick>()});
+    return inserted->second.get();
+}
+
+void TerrainField::setColumn(i32 x, i32 z, float height, u8 material)
+{
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    HeightTile* tile = tileFor(key);
+    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
+    const u32 index = localZ * TileEdge + localX;
+    tile->height[index] = height;
+    tile->material[index] = material;
+}
+
+void TerrainField::setVoxel(i32 x, i32 y, i32 z, u8 distance, u8 material)
+{
+    const BrickKey key{floorDiv(x, static_cast<i32>(BrickEdge)), floorDiv(y, static_cast<i32>(BrickEdge)),
+                       floorDiv(z, static_cast<i32>(BrickEdge))};
+    const auto at = findEntry(m_bricks, key);
+    if (at == m_bricks.end()) {
+        return;
+    }
+    if (at->second.use_count() > 1) {
+        at->second = std::make_shared<Brick>(*at->second);
+    }
+    at->second->digestValid = false;
+    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(BrickEdge)));
+    const auto localY = static_cast<u32>(floorMod(y, static_cast<i32>(BrickEdge)));
+    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(BrickEdge)));
+    const u32 index = (localY * BrickEdge + localZ) * BrickEdge + localX;
+    at->second->sd[index] = distance;
+    at->second->material[index] = material;
 }
 
 void TerrainField::setHeightRange(float minHeight, float maxHeight) noexcept

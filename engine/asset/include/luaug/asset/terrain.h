@@ -92,9 +92,12 @@ inline constexpr float DistanceRange = 4.0f;
 
 // One 32x32 patch of single-valued ground.
 //
-// Immutable: every member is written by `makeHeightTile` and never again, which
-// is what makes sharing one between sixty-four world snapshots safe without a
-// lock or a copy.
+// Shared, and edited through `TerrainField` alone.
+//
+// **Immutable from the outside**, which is what makes sharing one between
+// sixty-four world snapshots safe without a lock or a copy. Inside, the field
+// mutates a tile it uniquely owns and clones one it does not -- copy on write,
+// so a snapshot taken a moment ago is untouched by the next brush stroke.
 struct HeightTile
 {
     // Metres, in the field's own space. Kept as `f32` rather than quantised
@@ -104,11 +107,26 @@ struct HeightTile
     float height[TileArea] = {};
     core::u8 material[TileArea] = {};
 
-    // xxh3 of the two arrays, computed once at construction. **This is the
-    // reason the world hash stays affordable**: hashing a tile means reading
-    // eight bytes rather than five kilobytes.
-    core::u64 digest = 0;
+    // xxh3 of the two arrays. **This is the reason the world hash stays
+    // affordable**: hashing a tile means reading eight bytes rather than five
+    // kilobytes.
+    //
+    // **Computed lazily, and that was a measured decision rather than a
+    // preference.** It used to be computed at construction, which was right
+    // while a tile was built once -- and wrong the moment editing wrote one
+    // COLUMN at a time, because every column rebuilt the whole tile and hashed
+    // five kilobytes to change four bytes. Generating a 128 m square took 285
+    // milliseconds, which a person feels as the editor stopping.
+    //
+    // `valid` says whether it has been computed since the last write. Read it
+    // through `digestOf`, never directly.
+    mutable core::u64 digest = 0;
+    mutable bool digestValid = false;
 };
+
+// A tile's digest, computed if it has to be. **Every reader goes through this**
+// -- the raw field is stale by design after a write.
+[[nodiscard]] core::u64 digestOf(const HeightTile& tile) noexcept;
 
 // One 16-cubed patch of field that is not a height function -- a cave, an
 // overhang, an arch.
@@ -118,8 +136,13 @@ struct Brick
     // solid, above is air. See `DistanceRange` for the scale.
     core::u8 sd[BrickVolume] = {};
     core::u8 material[BrickVolume] = {};
-    core::u64 digest = 0;
+
+    // Lazy, for the reason `HeightTile::digest` is.
+    mutable core::u64 digest = 0;
+    mutable bool digestValid = false;
 };
+
+[[nodiscard]] core::u64 digestOf(const Brick& brick) noexcept;
 
 // --- The field ---------------------------------------------------------------
 
@@ -215,6 +238,32 @@ public:
     // Every one of these CLONES what it touches and leaves the rest shared,
     // which is what makes an undo snapshot a vector of pointers.
 
+    // **Writes ONE column, in place where the tile is not shared.**
+    //
+    // The verb the editor actually needs, and the reason it exists is a
+    // measurement rather than a preference: writing a column through `setTile`
+    // meant cloning five kilobytes and hashing them to change four bytes, so a
+    // brush stroke that touched two hundred columns moved a megabyte and hashed
+    // a megabyte. Generating a 128 m square took 285 ms.
+    //
+    // Copy-on-write: a tile another snapshot still holds is cloned first, so an
+    // undo step taken a moment ago is untouched. A tile this field alone owns is
+    // mutated where it lies.
+    void setColumn(core::i32 x, core::i32 z, float height, core::u8 material);
+
+    // The same, for one voxel of one brick. Creates neither: a brick that does
+    // not exist is the caller's to make, because filling a new one from the
+    // height layer is a decision `writeBricks` makes and this cannot.
+    void setVoxel(core::i32 x, core::i32 y, core::i32 z, core::u8 distance, core::u8 material);
+
+    // A brick to write into, created empty if there is none. Copy-on-write, like
+    // `setColumn`.
+    //
+    // **Returns a mutable pointer into the field**, which is a narrower promise
+    // than it looks: it is valid until the next call that inserts a tile or a
+    // brick, and the only caller is the edit path, which writes and moves on.
+    [[nodiscard]] Brick* brickFor(BrickKey key);
+
     // Replaces a tile wholesale. `heights` and `materials` are `TileArea` long.
     void setTile(TileKey key, std::span<const float> heights, std::span<const core::u8> materials);
 
@@ -232,8 +281,17 @@ public:
 private:
     FieldSettings m_settings;
     // Sorted by key. See the class comment: never a hash map.
-    std::vector<std::pair<TileKey, std::shared_ptr<const HeightTile>>> m_tiles;
-    std::vector<std::pair<BrickKey, std::shared_ptr<const Brick>>> m_bricks;
+    // The tile a key names, created empty if there is none, and cloned first
+    // when anything else still holds a reference to it.
+    [[nodiscard]] HeightTile* tileFor(TileKey key);
+
+    // **Mutable inside, const outside.** Every accessor hands out a
+    // `const HeightTile*`; the edit path reaches these through `setColumn` and
+    // friends, which clone before writing when anything else still holds a
+    // reference. That is what keeps "a snapshot is free" true while making
+    // "writing one column is cheap" true as well.
+    std::vector<std::pair<TileKey, std::shared_ptr<HeightTile>>> m_tiles;
+    std::vector<std::pair<BrickKey, std::shared_ptr<Brick>>> m_bricks;
 };
 
 // --- Construction helpers ----------------------------------------------------
@@ -242,11 +300,11 @@ private:
 // exactly one place: an object built any other way would carry a zero digest and
 // hash as though it were empty, which is the silent kind of wrong.
 
-[[nodiscard]] std::shared_ptr<const HeightTile> makeHeightTile(std::span<const float> heights,
-                                                               std::span<const core::u8> materials);
+[[nodiscard]] std::shared_ptr<HeightTile> makeHeightTile(std::span<const float> heights,
+                                                         std::span<const core::u8> materials);
 
-[[nodiscard]] std::shared_ptr<const Brick> makeBrick(std::span<const core::u8> distances,
-                                                     std::span<const core::u8> materials);
+[[nodiscard]] std::shared_ptr<Brick> makeBrick(std::span<const core::u8> distances,
+                                               std::span<const core::u8> materials);
 
 // The quantisation the brick's `sd` array uses, exposed because the mesher and
 // the serializer both have to agree with it exactly.
@@ -282,6 +340,24 @@ EditReport fillBall(TerrainField& field, core::DVec3 center, double radius, core
 
 // The same, as an axis-aligned box. `size` is the full extent, never a half.
 EditReport fillBlock(TerrainField& field, core::DVec3 center, core::Vec3 size, core::u8 material);
+
+// Lays a flat square of ground, from the world's floor up to `height`.
+//
+// **A generator and not a brush, and the difference is measured.** Making flat
+// ground through `fillBlock` means carving a box that reaches below the floor,
+// which makes every column's examination walk the whole reserved range -- two
+// hundred and fifty-six samples per column, each a pair of binary searches, for
+// a result that is one number. A 128 m square took 225 milliseconds, which is a
+// person watching the editor stop.
+//
+// This writes the height layer directly: one column, one float, one material.
+// The same result, in about a thousandth of the time.
+//
+// **Columns that already carry voxels are left alone and counted.** Their shape
+// is not a height and this verb has no opinion about it; a generator that
+// flattened somebody's cave because they pressed the wrong button would be a
+// generator nobody trusts. `EditReport::promoted` carries the count skipped.
+EditReport fillFlat(TerrainField& field, core::DVec3 center, float size, float height, core::u8 material);
 
 // Softens the ground under a ball, pulling every column's height towards the
 // average of its neighbours.

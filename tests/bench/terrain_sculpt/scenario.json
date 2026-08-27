@@ -1,0 +1,7 @@
+{
+  "name": "terrain_sculpt",
+  "script": "init.luau",
+  "seed": 20260827,
+  "ticks": 240,
+  "budgetMs": 16.0
+}

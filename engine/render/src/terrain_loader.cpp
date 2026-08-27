@@ -24,14 +24,21 @@ using core::usize;
 // otherwise show half of itself for a frame.
 constexpr u32 TilesPerSync = 2;
 
-// How tall a slab of field one tile's mesh covers, in lattice steps.
+// How far above and below a tile's own heights the mesher looks, in lattice
+// steps, when the tile carries NO bricks.
 //
-// **The terrain's own reservation would be the honest answer and it is far too
-// tall**: `MinHeight` to `MaxHeight` at half a metre is a thousand cells of
-// empty air per column, meshed to find nothing. So a tile is meshed around the
-// heights it actually holds, plus a margin for whatever bricks reach above or
-// below them.
-constexpr core::i32 VerticalMargin = static_cast<core::i32>(asset::BrickEdge) * 2;
+// **Two, and it used to be thirty-two.** The terrain's whole reservation would
+// be the honest answer and is far too tall -- `MinHeight` to `MaxHeight` at half
+// a metre is a thousand cells of empty air per column, meshed to find nothing --
+// so a tile is meshed around the heights it holds. The margin exists so the
+// surface has a cell of air above it and a cell of ground below it to cross
+// between; a height column has exactly one crossing and needs no more than that.
+//
+// Thirty-two was a guess standing in for "whatever bricks reach", and it cost
+// eight times the triangles on flat ground: sixty-four cells of Y where eight
+// would do, on every tile, twice a frame, against a sixteen-millisecond budget.
+// Bricks are now measured rather than guessed at -- see `brickRangeOf`.
+constexpr core::i32 SurfaceMargin = 2;
 
 } // namespace
 
@@ -88,11 +95,34 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                 highest = std::max(highest, tile->height[sample]);
             }
 
+            auto bottom = static_cast<core::i32>(std::floor(lowest / voxel)) - SurfaceMargin;
+            auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + SurfaceMargin;
+
+            // **And whatever bricks this tile's columns actually carry**,
+            // measured rather than assumed. A cave is voxels somewhere below the
+            // surface, and a mesher that stopped at the height layer would leave
+            // its roof and its floor unmeshed -- a hole you can see through. The
+            // scan is over the brick keys, which is a handful even in a heavily
+            // sculpted world, and it runs once per tile rebuild rather than per
+            // cell.
+            const core::i32 firstColumn = key.x * edge;
+            const core::i32 firstRow = key.z * edge;
+            const auto brickEdge = static_cast<core::i32>(asset::BrickEdge);
+            for (const asset::BrickKey brick : terrain.field.brickKeys()) {
+                const core::i32 brickMinX = brick.x * brickEdge;
+                const core::i32 brickMinZ = brick.z * brickEdge;
+                if (brickMinX + brickEdge <= firstColumn || brickMinX >= firstColumn + edge)
+                    continue;
+                if (brickMinZ + brickEdge <= firstRow || brickMinZ >= firstRow + edge)
+                    continue;
+                bottom = std::min(bottom, brick.y * brickEdge - SurfaceMargin);
+                top = std::max(top, (brick.y + 1) * brickEdge + SurfaceMargin);
+            }
+
             asset::MeshRegion region;
-            region.minX = key.x * edge;
-            region.minZ = key.z * edge;
-            region.minY = static_cast<core::i32>(std::floor(lowest / voxel)) - VerticalMargin;
-            const auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + VerticalMargin;
+            region.minX = firstColumn;
+            region.minZ = firstRow;
+            region.minY = bottom;
             region.cellsX = asset::TileEdge;
             region.cellsZ = asset::TileEdge;
             region.cellsY = static_cast<u32>(std::max(top - region.minY, 1));
