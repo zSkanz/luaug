@@ -876,13 +876,19 @@ CompileResult compile(const CompileOptions& options)
             // an `asset::Model` into named pieces since E9 opened and had no
             // caller outside its own tests.
             //
-            // **Emitted BESIDE the whole model rather than instead of it**, and
-            // that is what makes this landable before the cut-over: every scene
-            // naming `asset://models/horse.gltf` still resolves to exactly the
-            // blob it resolved to before, and a scene naming
-            // `asset://models/horse.gltf#Body` resolves to the piece. Step 14
-            // is where the whole-model row goes away, and it is last because it
-            // is the only irreversible one.
+            // **Emitted BESIDE the whole model rather than instead of it**,
+            // and it stays that way (ADR 0065). Every scene naming
+            // `asset://models/horse.gltf` resolves to exactly the blob it
+            // resolved to before, and one naming
+            // `asset://models/horse.gltf#Body` resolves to the piece.
+            //
+            // This note used to say the cut-over would remove the whole-model
+            // row. It does not, and the reason is below: one piece IS the whole
+            // model, so a single-primitive file and every skinned file have the
+            // whole-model row as their only name. What made the row look
+            // redundant was the import placing a `Model` of named parts -- true
+            // of new content, and silent about the scenes that already name the
+            // model.
             //
             // The fragment IS the piece's name (decision 7 in the finish-line
             // ledger), which is also the instance name the editor gives it --

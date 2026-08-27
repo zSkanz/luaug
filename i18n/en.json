@@ -190,7 +190,7 @@
   "ui.warn.font_missing": "No font named {font} could be loaded; this label is drawn in the default face instead.",
   "ui.warn.default_font_missing": "The default typeface is not at {path}, so text is drawn with the built-in fallback face: ASCII only, one weight, no kerning. A packaged build stages it beside the executable.",
   "ui.warn.glyph_cache_cleared": "The glyph cache filled ({entries} entries) and was cleared; something is asking for a new text size every frame.",
-  "render.err.mesh_file_missing": "Could not read the mesh at {path}.",
+  "render.err.mesh_not_compiled": "The mesh {path} has no compiled form, so nothing was drawn for it. Open the project once to compile it, or run `luaug build-assets`.",
   "render.err.material_file_missing": "Could not read the material at {path}.",
   "render.err.material_texture_missing": "Could not read the texture at {path}; the material draws without it.",
   "render.err.pipeline_create_failed": "Could not create a graphics pipeline for the renderer.",

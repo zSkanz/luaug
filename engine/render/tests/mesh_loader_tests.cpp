@@ -10,9 +10,14 @@
 // So there are two modes, and both are asserted here: one that finishes before
 // the frame does, because a capture records the frame it was told to, and one
 // that lets the frame finish first, because a person is watching.
+#include "luaug/asset/content.h"
+#include "luaug/asset/gltf.h"
+#include "luaug/asset/mesh_format.h"
+#include "luaug/core/content_hash.h"
 #include "luaug/core/i18n.h"
 #include "luaug/jobs/jobs.h"
 #include "luaug/platform/async_io.h"
+#include "luaug/platform/file.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/mesh_loader.h"
 #include "luaug/rhi/backends.h"
@@ -24,6 +29,9 @@
 #include <chrono>
 #include <doctest/doctest.h>
 #include <filesystem>
+#include <span>
+#include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -319,24 +327,85 @@ TEST_CASE("the loader says WHICH meshes it loaded, not just how many")
 
 namespace {
 
-// A world of `MeshPart`s, each naming one real glTF from `asset`'s fixtures.
-// The URN is the path itself, which is what `resolve` falls back to when no
-// mount answers -- the dev-mode path ADR 0010 keeps forever.
-[[nodiscard]] core::usize fillWithMeshes(Fixture& fixture, scene::World& world, scene::ClassId meshPartClass,
-                                         core::InstanceId workspace)
+// **An object store built out of `asset`'s own glTF fixtures** (E9 step 14).
+//
+// This used to point each `MeshPart` at the source file and let `resolve` fall
+// through to the path -- the dev-mode feed ADR 0010 kept, and the cut-over
+// deleted. What replaces it is the real compiled pipeline in miniature:
+// `importGltf` reads the fixture, `compileMesh` builds its chain, `encodeMesh`
+// writes the bytes, and those bytes land in a content-addressed store the loader
+// mounts. Which means this case now exercises the ONLY feed there is, rather
+// than the one that no longer exists.
+//
+// Returns the object directory and the index beside it, or an empty pair when
+// this build stages no fixtures.
+struct CompiledFixtures
 {
-    (void)fixture;
+    std::filesystem::path objects;
+    std::filesystem::path index;
+    std::vector<std::string> urns;
+};
+
+[[nodiscard]] CompiledFixtures compileFixtures(const std::filesystem::path& root)
+{
     static const char* const kFiles[] = {"quad.gltf", "textured.gltf", "two_materials.gltf", "flat_normals.gltf"};
-    core::usize named = 0;
+
+    CompiledFixtures out;
+    out.objects = root / "objects";
+    out.index = root / "index.json";
+
+    std::string index = R"({"format":"luaug-content-manifest","version":1,"assets":[)";
+    bool first = true;
     for (const char* file : kFiles) {
         const std::filesystem::path path = std::filesystem::path(LUAUG_RENDER_TEST_MESH_DIR) / file;
         if (!std::filesystem::exists(path))
             continue;
+
+        std::vector<std::byte> bytes;
+        if (!platform::readFile(path, bytes))
+            continue;
+        asset::Model model;
+        if (asset::importGltf(bytes, path.parent_path(), {}, model).has_value())
+            continue;
+        asset::CompiledMesh compiled;
+        if (asset::compileMesh(model, {}, {}, compiled).has_value())
+            continue;
+
+        const std::vector<std::byte> encoded = asset::encodeMesh(compiled);
+        const core::ContentHash hash = core::hashBytes(encoded);
+        const std::filesystem::path blob = asset::ContentMounts::objectPath(out.objects, hash);
+        std::error_code ec;
+        std::filesystem::create_directories(blob.parent_path(), ec);
+        if (!platform::writeFile(blob, encoded))
+            continue;
+
+        const std::string urn = std::string("asset://") + file;
+        if (!first)
+            index += ",";
+        first = false;
+        index += R"({"urn":")" + urn + R"(","hash":")" + hash.toHex() + R"(","kind":"mesh"})";
+        out.urns.push_back(urn);
+    }
+    index += "]}";
+
+    std::error_code ec;
+    std::filesystem::create_directories(root, ec);
+    if (!platform::writeFile(out.index, std::span{reinterpret_cast<const std::byte*>(index.data()), index.size()}))
+        out.urns.clear();
+    return out;
+}
+
+// A world of `MeshPart`s, one per compiled fixture.
+[[nodiscard]] core::usize fillWithMeshes(const CompiledFixtures& compiled, scene::World& world,
+                                         scene::ClassId meshPartClass, core::InstanceId workspace)
+{
+    core::usize named = 0;
+    for (const std::string& urn : compiled.urns) {
         const core::InstanceId id = world.create(meshPartClass);
         scene::PartComponent part;
         world.parts().add(id, part);
         scene::MeshPartComponent mesh;
-        mesh.meshContent = world.atoms().intern(path.generic_string());
+        mesh.meshContent = world.atoms().intern(urn);
         world.meshParts().add(id, mesh);
         (void)world.setParent(id, workspace);
         ++named;
@@ -367,16 +436,33 @@ TEST_CASE("meshes arrive one frame at a time, or all at once, and it is a decisi
         .defaultName = fixture.atoms.intern("Workspace"),
     });
 
+    // Compiled once for both subcases, into a directory that goes away with the
+    // process. `doctest` re-enters this body per SUBCASE, so this runs twice --
+    // which is fine and is also the point: writing the same bytes to the same
+    // content-addressed name twice is what a re-import does.
+    std::error_code ec;
+    const std::filesystem::path root = std::filesystem::temp_directory_path(ec) / "luaug-mesh-loader-tests" / "import";
+    std::filesystem::remove_all(root, ec);
+    const CompiledFixtures compiled = compileFixtures(root);
+    if (compiled.urns.size() < 2) {
+        MESSAGE("LUAUG_TEST_SKIP: this build stages fewer than two glTF fixtures to compile");
+        return;
+    }
+
+    asset::ContentMounts mounts;
+    REQUIRE_FALSE(mounts.mountObjects(compiled.objects, compiled.index).has_value());
+
     SUBCASE("synchronous: everything in the frame that asked")
     {
         scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
         const core::InstanceId workspace = world.create(workspaceClass);
-        const core::usize named = fillWithMeshes(fixture, world, meshPartClass, workspace);
+        const core::usize named = fillWithMeshes(compiled, world, meshPartClass, workspace);
         REQUIRE(named > 1);
 
         render::MeshCache cache;
         render::MeshLibrary library;
         render::MeshLoader loader;
+        loader.setContentMounts(&mounts);
 
         (void)loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library);
         CHECK(library.size() == named);
@@ -389,12 +475,13 @@ TEST_CASE("meshes arrive one frame at a time, or all at once, and it is a decisi
     {
         scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
         const core::InstanceId workspace = world.create(workspaceClass);
-        const core::usize named = fillWithMeshes(fixture, world, meshPartClass, workspace);
+        const core::usize named = fillWithMeshes(compiled, world, meshPartClass, workspace);
         REQUIRE(named > 1);
 
         render::MeshCache cache;
         render::MeshLibrary library;
         render::MeshLoader loader;
+        loader.setContentMounts(&mounts);
         loader.setDeferredMeshes(true);
 
         (void)loader.sync(*fixture.device, *fixture.cmd, world, workspace, cache, library);

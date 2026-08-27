@@ -369,6 +369,44 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
         };
 
         const asset::ResolvedContent resolved = mounts_ != nullptr ? mounts_->resolve(text) : asset::ResolvedContent{};
+
+        // **The compiled form first, and it needs no IO at all** (E9 step 14).
+        //
+        // A texture the compiler has seen is BC7 with a mip chain, and it was
+        // already being produced -- `importOne` writes one `.ktx2` per image
+        // into the project's object store, and this function then read the raw
+        // PNG beside it anyway. So every editor session was paying a 14-to-36 ms
+        // decode to upload four times the GPU memory of a file it already had.
+        //
+        // **This is the branch that makes "BC7 and mips reach editor content"
+        // true**, which the plan promised and nothing had delivered. It also
+        // needs no deferral: `resolved.bytes` is already resident -- that is the
+        // documented lifetime of a mount -- so there is no read to move off the
+        // frame, and a transcode is a fraction of a decode.
+        if (resolved.source == asset::ResolvedContent::Source::Pack && resolved.kind == asset::AssetKind::Texture) {
+            asset::TextureAsset texture;
+            if (asset::transcodeTexture(resolved.bytes, transcode_, texture).has_value()) {
+                markFailed();
+                return;
+            }
+            const rhi::TextureHandle handle = uploadTranscoded(device, cmd, texture, "material");
+            if (!handle.valid()) {
+                markFailed();
+                return;
+            }
+            textures_.push_back(handle);
+            library.set(urn, handle);
+            ++loaded;
+            return;
+        }
+
+        // **The source file, for a map that has no compiled form.** Unlike a
+        // mesh, this is kept rather than deleted, and the difference is the
+        // pathology each one had: a loose `.gltf` was a 191 ms parse on the
+        // frame thread that also reached out to read its own companion files,
+        // and a loose PNG is one read the async pipeline above already handles.
+        // A map the compiler has not seen -- one written by a script, one in a
+        // format it declines -- still draws.
         const std::filesystem::path path =
             resolved.source == asset::ResolvedContent::Source::Loose ? resolved.path : resolve(contentRoot_, text);
 
@@ -492,11 +530,13 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
             failed_.insert(position, content);
         };
 
-        // Two feeds, one library. A mounted pack answers with a compiled mesh
-        // -- meshopt streams and transcodable textures, nothing to parse; a
-        // content directory answers with the source file, parsed on the way in.
-        // ADR 0010 keeps the second forever as the dev-mode path, and the first
-        // is what a shipped game reads.
+        // **One feed** (E9 step 14). There were two: a mounted pack answering
+        // with a compiled mesh, and a content directory answering with the
+        // source file parsed on the way in. ADR 0010 kept the second as the
+        // dev-mode path; the cut-over deleted it, and a project that has no
+        // compiled form is compiled when it opens rather than parsed when it
+        // draws. What reaches here is meshopt streams and transcodable
+        // textures, and nothing else.
         const asset::ResolvedContent resolved = mounts_ != nullptr ? mounts_->resolve(urn) : asset::ResolvedContent{};
 
         // **One mesh per call while deferred** (D125). A parse is the largest
@@ -512,15 +552,15 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
         // meshes cost N frames instead of one frame N times as long, which is
         // the difference between a tool that hitches and a tool that stops.
         //
-        // **Why not on the job pool.** `jobs.h` rule 1 is explicit -- no
-        // blocking IO on a worker -- and `importGltf` reads a glTF's external
-        // `.bin` and `.png` files itself, from `baseDirectory`, as part of
-        // parsing. The COMPILED path below has no external files and does go to
-        // the pool; the loose path cannot until the importer can be handed
-        // buffers somebody else read, which is a change to `asset` and is
-        // recorded rather than smuggled in here. E9's whole direction -- a loose
-        // `.gltf` stops working and everything arrives compiled -- retires this
-        // caveat rather than fixing it.
+        // **The budget outlived the parse it was sized for**, and that is
+        // deliberate rather than forgotten. It was one-per-call because
+        // `importGltf` cost 191 ms and could not be split; a compiled mesh is
+        // `decodeMesh` over meshopt streams, which is a different order of
+        // magnitude. It stays because the cost that remains is the UPLOAD --
+        // vertex and index buffers, plus a transcode per texture slot -- and a
+        // folder of five models dropped in at once would still put all of it in
+        // one frame. Raising it is a measurement, not a deletion, and there is
+        // no measurement here yet.
         if (deferredMeshes_) {
             if (meshesThisCall > 0)
                 return;
@@ -636,95 +676,33 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
                 skeletons->set(content, SkeletonLibrary::Entry{std::move(compiled.joints), std::move(compiled.clips)});
         }
         else {
-            const std::filesystem::path path =
-                resolved.source == asset::ResolvedContent::Source::Loose ? resolved.path : resolve(contentRoot_, urn);
-
-            std::vector<std::byte> bytes;
-            if (!platform::readFile(path, bytes)) {
-                const std::array<core::I18nArg, 1> args{core::I18nArg{"path", path.string()}};
-                core::log(core::LogLevel::Warn, LUAUG_TR("render.err.mesh_file_missing"), args);
-                markFailed();
-                return;
-            }
-
-            asset::Model model;
-            // The palette is a fixed array in a uniform block, so the number of
-            // joints this renderer can pose is a fact the importer needs: past it,
-            // a rig is not posed badly, it indexes off the end and scatters.
-            const asset::GltfImportOptions importOptions{.maxSkinJoints = kMaxSkinJoints};
-            if (auto error = asset::importGltf(bytes, path.parent_path(), importOptions, model); error.has_value()) {
-                // **The reason, and not only that there was one.** `MeshContent`
-                // promises that a file which fails to import "reports why,
-                // because a part that silently becomes invisible is harder to
-                // diagnose than one that says it could not load" -- and this
-                // line was throwing the why away. The message is the sentence a
-                // catalog can translate; the detail is what the parser actually
-                // objected to, which is the half somebody needs to fix a file.
-                std::string reported = error->message;
-                if (!error->detail.empty()) {
-                    reported += " (";
-                    reported += error->detail;
-                    reported += ")";
-                }
-                reported += " -- ";
-                reported += path.string();
-                core::logText(core::LogLevel::Warn, reported);
-                markFailed();
-                return;
-            }
-            triangles = static_cast<core::u32>(model.mesh.indices.size() / 3);
-
-            // **Said out loud, because a character that quietly stopped being
-            // animatable is a bug report.** The numbers are the answer: this is
-            // not a file that failed, it is a rig larger than anything this
-            // build can pose, imported as the geometry it will always be.
-            if (model.bakedBindPose()) {
-                const core::I18nArg args[] = {
-                    {"path", path.string()},
-                    {"joints", static_cast<core::i64>(model.sourceJointCount)},
-                    {"budget", static_cast<core::i64>(kMaxSkinJoints)},
-                };
-                core::log(core::LogLevel::Info, LUAUG_TR("render.info.mesh_bind_pose_baked"), args);
-            }
-
-            // A file with a skin gets the second stream and a file without gets
-            // exactly what M4 uploaded -- which is what keeps an unskinned draw
-            // byte-identical to the one the goldens recorded.
-            const MeshHandle handle = model.skinned()
-                                          ? cache.createSkinned(device, cmd, model.mesh, model.skin, &uploadError)
-                                          : cache.create(device, cmd, model.mesh, MeshUsage::Static, &uploadError);
-            if (!handle.valid()) {
-                core::logText(core::LogLevel::Warn, uploadError.message);
-                markFailed();
-                return;
-            }
-            entry.mesh = handle;
-
-            // Images upload once each even when two materials share one, because
-            // the importer already decoded them once for the same reason.
-            std::vector<rhi::TextureHandle> images;
-            images.reserve(model.images.size());
-            for (const asset::Image& image : model.images) {
-                const rhi::TextureHandle texture = uploadImage(device, cmd, image, "material");
-                if (texture.valid())
-                    textures_.push_back(texture);
-                images.push_back(texture);
-            }
-
-            fillEntry(entry, model.mesh.bounds, model.mesh.submeshes, model.materials, images, urn);
-            entry.positions.reserve(model.mesh.vertices.size());
-            for (const asset::Vertex& vertex : model.mesh.vertices)
-                entry.positions.push_back(vertex.position);
-            library.set(content, entry);
-            if (completed != nullptr)
-                completed->push_back(content);
-
-            // The skeleton half of the same file, handed to whoever asked for
-            // it. Read here rather than in a second pass because the file was
-            // already parsed once and parsing it again to find the joints would
-            // be the clearest kind of waste.
-            if (skeletons != nullptr && !model.joints.empty())
-                skeletons->set(content, SkeletonLibrary::Entry{std::move(model.joints), std::move(model.clips)});
+            // **A loose `.gltf` no longer feeds the runtime** (E9 step 14, the
+            // cut-over -- the human's constraint in their own words).
+            //
+            // What used to be here read the source file and parsed it on the
+            // frame: 3 MB of JSON and 14 MB of buffer for one horse, on every
+            // launch, with no LOD chain, no meshlets, and its textures uploaded
+            // as raw RGBA8 with no mips. It was ADR 0010's dev-mode path and it
+            // was the reason `sync` could only afford ONE mesh per call (D125),
+            // because a parse cannot be split and a 191 ms parse is three
+            // frames.
+            //
+            // Everything arrives compiled now. `engine.cpp` compiles a project
+            // that has no compiled form when it opens it -- in EVERY host mode,
+            // not only the editor, precisely because this fallback is gone --
+            // so a project cloned from git still works with no command, which
+            // was the whole of assumption 3.
+            //
+            // **Named rather than silent.** A part that quietly turns invisible
+            // is harder to diagnose than one that says why, and the two reasons
+            // this can fire are both actionable: the file is not something the
+            // compiler accepted, or the URN names a piece that no longer
+            // exists. `markFailed` means one line per mesh rather than one per
+            // frame.
+            const std::array<core::I18nArg, 1> args{core::I18nArg{"path", urn}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("render.err.mesh_not_compiled"), args);
+            markFailed();
+            return;
         }
 
         ++loaded;

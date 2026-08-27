@@ -12,6 +12,7 @@
 #pragma once
 
 #include "luaug/app/preserved.h"
+#include "luaug/asset/content.h"
 #include "luaug/audio/audio.h"
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
@@ -268,6 +269,12 @@ public:
     // mirror and the input system, and for the same reasons.
     [[nodiscard]] audio::AudioSystem& audio() noexcept { return m_audio; }
 
+    // Where a compiled mesh comes from, for the skeleton half of one. Set before
+    // `boot`, because `syncSkeletons` runs at the top of the FIRST tick and a
+    // rig that arrived one tick late would be a character that starts a replay
+    // in its bind pose.
+    void setContentMounts(const asset::ContentMounts* mounts) noexcept { m_mounts = mounts; }
+
     // `Workspace.CurrentCamera`, which is the audio listener (§2.1). Resolved
     // per call rather than cached: it is a property a script may reassign, and a
     // cached id is how M4 spent four milestones lighting scenes with defaults.
@@ -365,8 +372,13 @@ private:
     [[nodiscard]] std::optional<core::EngineError> registerRuntimeModules();
 
     // Reads the skeleton and clips of every `MeshPart` content the library does
-    // not yet hold, once per URN. A parse and nothing else: no image is decoded
-    // and no vertex is touched (`GltfImportOptions::skeletonOnly`).
+    // not yet hold, once per URN -- out of the COMPILED mesh (E9 step 14).
+    //
+    // It used to read the source `.gltf` and parse it with `skeletonOnly`, which
+    // was the third of the loose feeds the cut-over removed. What it does now is
+    // `decodeMesh` over the same blob the renderer uploads, so a headless replay
+    // and a rendered frame get their joints from one set of bytes rather than
+    // from two readers that could disagree about a rig.
     //
     // Synchronous, at the top of a tick, which is the same narrowing
     // `MeshLoader` made for the same reason: M7 is the milestone with a job pool
@@ -400,6 +412,15 @@ private:
     // before nothing: `m_animation` is destroyed first, which is the order its
     // own references need.
     render::SkeletonLibrary m_skeletons;
+    // Where a compiled mesh comes from. Borrowed from whoever built the mounts
+    // -- the same object `MeshLoader` and the audio system are handed -- because
+    // a second set of mounts is a second answer to "what is this URN".
+    //
+    // **Null is a working configuration**, not an error: a host booted with no
+    // project (a bare script, a conformance run) resolves nothing, and the only
+    // consequence is that a `MeshPart` naming a rig has no skeleton, which is
+    // already true of one naming a file that does not exist.
+    const asset::ContentMounts* m_mounts = nullptr;
     // Content atoms already attempted, so a file with no skeleton is parsed once
     // rather than once a tick forever.
     // **A set rather than a list**, because `syncSkeletons` asks about every

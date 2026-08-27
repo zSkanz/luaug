@@ -215,6 +215,7 @@ luaug_add_module_tests(app
         tests/skeleton_overlay_tests.cpp
         tests/editor_tests.cpp
         tests/content_tree_tests.cpp
+        tests/content_import_tests.cpp
         tests/partition_cache_tests.cpp
         tests/soak_tests.cpp
         tests/streaming_host_tests.cpp
@@ -233,6 +234,16 @@ if(LUAUG_BUILD_TESTS)
     # prove every key the host raises exists in i18n/en.json.
     target_compile_definitions(luaug_app_tests PRIVATE
         LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
+
+    # **The compiler, for the cut-over's end-to-end case** (E9 step 14).
+    # `luaug_app` links this PRIVATE, deliberately, so a shipping build carries
+    # no encoder -- which means its headers do not reach a test through the
+    # module. Named again here, behind the same flag, because the thing under
+    # test is a project compiling itself and there is no way to assert that
+    # without the thing that compiles it.
+    if(LUAUG_DEBUG_UI)
+        target_link_libraries(luaug_app_tests PRIVATE luaug_assetc_lib)
+    endif()
 
     # One real encoded picture, so the thumbnail cache can be asserted end to
     # end -- read, decoded, resampled, uploaded -- rather than only on the paths
@@ -427,9 +438,18 @@ if(LUAUG_BUILD_TESTS)
     # explains why the instance count flattening is the property that separates
     # a streamed world from a growing one.
     #
-    # The ceiling is 192 MiB against 25 MiB measured. Loose rather than tight on
-    # purpose: it is a backstop for a leak the growth check somehow misses, and a
-    # ceiling with no headroom is a gate that goes red when an allocator changes.
+    # **Re-measured at the E9 cut-over** (ADR 0065), which is one of that
+    # milestone's own gate items: BC7 and mips reached editor content for the
+    # first time, and a ceiling that stays generous after the thing it measures
+    # got cheaper no longer measures anything. 192 MiB against a 25 MiB peak was
+    # not a backstop, it was a number nothing could reach.
+    #
+    # 96 MiB against 29 MiB on Windows and 25 MiB on Linux -- two platforms
+    # within sixteen per cent of each other, which is what makes 3x headroom a
+    # judgement rather than a guess. It is still a backstop for a leak the growth
+    # check misses rather than a tight budget: a ceiling with no headroom is a
+    # gate that goes red when an allocator changes, and macOS is Tier-3, so
+    # nothing local can measure it before CI does.
     add_test(NAME streaming_soak
         COMMAND ${CMAKE_COMMAND}
             -DHOST=$<TARGET_FILE:luaug_host>
@@ -440,7 +460,7 @@ if(LUAUG_BUILD_TESTS)
             -DWORLD=${CMAKE_SOURCE_DIR}/examples/05-streaming/content/world
             -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/streaming-soak.json
             -DFRAMES=18000
-            -DCEILING_MB=192
+            -DCEILING_MB=96
                 -DMIN_INSTANCES=1000
             # **D066's named successor lives here**, because this fly-through is
             # a circular orbit: the camera comes back to every place it has been,
@@ -469,10 +489,19 @@ if(LUAUG_BUILD_TESTS)
     # comparison is between like and like rather than between a walk and a
     # flight.
     #
-    # The ceiling is 384 MiB against 169 measured. Loose on purpose, as M7's
-    # is: it is a backstop for a leak the growth check somehow misses, and a
-    # ceiling with no headroom is a gate that goes red when an allocator
-    # changes.
+    # **Re-measured at the E9 cut-over** (ADR 0065), and the interesting part is
+    # the disagreement: this said 384 MiB against 169 measured, and the peak
+    # today is 47 MiB on Windows and 46 on Linux. The 169 predates ADR 0053,
+    # which stopped the flagship's generator writing `*.chunk.json` for `assetc`
+    # and had it write a SCENE the engine cuts up on the way to the first frame
+    # -- so the number is not wrong, it is about a different program.
+    #
+    # 192 MiB, which is above the historical 169 rather than below it. Two
+    # current measurements beat one stale one, but not by enough to bet a red
+    # `main` on a platform nothing here can run: macOS is Tier-3 and only CI
+    # builds it. So this halves a ceiling that measured nothing, and leaves the
+    # tightening that the 47 MiB peak would justify to somebody who can watch
+    # all three tiers go green.
     add_test(NAME openworld_soak
         COMMAND ${CMAKE_COMMAND}
             -DHOST=$<TARGET_FILE:luaug_host>
@@ -490,7 +519,7 @@ if(LUAUG_BUILD_TESTS)
             -DWORLD=${CMAKE_SOURCE_DIR}/examples/10-open-world/content/scenes/main.scene.json
             -DREPORT=${CMAKE_CURRENT_BINARY_DIR}/openworld-soak.json
             -DFRAMES=6000
-            -DCEILING_MB=384
+            -DCEILING_MB=192
             -DMIN_INSTANCES=2000
             # **No return radius here, and that is a measurement rather than an
             # omission.** D066's successor needs a path that doubles back, and

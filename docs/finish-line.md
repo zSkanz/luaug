@@ -269,15 +269,69 @@ that sends the next session to the wrong place.
       invented rig; the one that measures a bone's endpoints for a part ten
       metres out and turned a quarter turn fails when the composition is
       dropped.
-- [ ] **S4.5** Step 14 — the cut-over. Last, because it is the only
-      irreversible one.
-- [~] **S4.6** Step 15 — **benches and baselines done**, decision records and
-      the roadmap left. `tests/bench/ragdoll10` is built and
+- [x] **S4.5** Step 14 — the cut-over. **Done, and the plan named one loose
+      feed where there were three.** `MeshLoader::sync`'s branch was the one
+      everybody knew about. `WorldHost::syncSkeletons` was a second, building a
+      path by hand and parsing the source with `skeletonOnly` — on the SIM
+      thread. And `syncTextures` was a third that nobody had counted, because it
+      had no compiled branch AT ALL: it read the raw PNG sitting beside a
+      `.ktx2` the compiler had already produced, every time, for every editor
+      session since step 12 landed. "BC7 and mips reach editor content" was in
+      the plan's performance section as a delivered consequence, and it was
+      false.
+
+      **The precondition was the real work.** Compiling on open was gated on
+      `options.editor`, which was fine while a headless run could fall back to
+      parsing — and fatal the moment it could not. That is now
+      `openProjectContent`: mount the source tree, compile what has no compiled
+      form through the same `assetc::importOne` a command-line build uses, mount
+      the store above it. The editor, `--headless`, a replay and a capture gate
+      all take the one call, which is assumption 3 made load-bearing rather than
+      convenient. Measured on `examples/02-meshes`: 0.08 s cold for twelve
+      blobs, 0.03 s warm and silent.
+
+      **The whole-model row does NOT go away**, against what a note in
+      `compiler.cpp` and one clause of E9's own gate both promised. One piece is
+      the whole model, so every skinned file and every static single-primitive
+      file has that row as its only name — removing it would break them in
+      order to punish a scene that is not wrong. Recorded as a decision rather
+      than done quietly: [ADR 0065](decisions/0065-a-loose-gltf-is-not-a-runtime-format.md),
+      which also amends ADR 0010, whose "fast dev-mode loads" this deletes.
+
+      **Verified from the side that can only pass if the reader is gone**:
+      compile a project, delete every source file, require that the mesh and the
+      map still load. A test asserting "the mesh loaded" would have passed on
+      the old build too, because the loose reader loaded meshes perfectly well
+      — which was the problem with it. The migrated `render` case and
+      `replay_gates` are the break-verification, both observed failing before the
+      mounts were wired and passing after.
+
+      **One golden moved**: `lavapipe/specular.png`, one pixel at a maximum
+      channel delta of 4, from meshopt quantisation. The plan predicted the
+      rendercapture streams would move as well; they did not, because those
+      scenes' meshes are 12 and 48 triangles and the simplifier builds no chain
+      for them. The determinism traces and the animation replay did not move
+      either — the compiled joints and clips hash identically to the parsed
+      ones, which is a stronger statement about the format than anything that was
+      asserted before.
+- [x] **S4.6** Step 15 — done. Benches and baselines were already in; the
+      records and the roadmap are now with them, and the last piece was a gate
+      item nobody could have closed before the cut-over: **`streaming_soak`'s
+      ceiling re-measured**. 192 MiB against a 29 MiB peak on Windows and 25 on
+      Linux is not a backstop, it is a number nothing can reach — it is 96 now.
+      `openworld_soak` went 384 to 192, and that one turned up a stale record
+      rather than a cheaper program: the comment claimed 169 MiB measured and the
+      peak today is 47. The 169 predates ADR 0053, which stopped the flagship's
+      generator writing chunk sources and had it write a scene, so it is a number
+      about a different program. The new ceiling is set ABOVE the historical
+      figure anyway, because macOS is Tier-3 and nothing local can watch it go
+      green — halving a ceiling that measured nothing is worth doing, betting a
+      red `main` on an unobservable platform is not. `tests/bench/ragdoll10` is built and
       `docs/perf-baselines.md` carries an E9 block: `sockets200`, `ragdoll10`,
       and `physics1k`/`churn10k` re-measured to show the constraint family's
       three new per-tick passes cost a jointless scene nothing (2.00 against
       M5's 2.02; 6.98 against M6's 7.32).
-- [~] **S4.7** E9's declared verification — **four of six built**.
+- [x] **S4.7** E9's declared verification — **all six built**.
       `tests/determinism/ragdoll` (four bodies, sixty joints, three thousand
       ticks, reproduced) and `tests/bench/ragdoll10` are in; so is
       `physics/ragdoll.spec.luau`, and so is decision 6's own
@@ -286,8 +340,17 @@ that sends the next session to the wrong place.
       one found D145's dangling pool pointer, and the bench found the joint
       frame the builder was giving a swing-twist — a cone measured across the
       bone instead of along it, so every shoulder started outside its own limit
-      and the character launched. What is left is `import_matches_build` and
-      the rendercapture leg, both of which belong to step 14.
+      and the character launched.
+
+      **The last two are in with the cut-over.** `import_matches_build` asserts
+      the editor's import and a command-line build agree per URN, per hash, per
+      kind and per stored size — which `importOne` makes structural, and which
+      is worth asserting anyway because two entry points that agree by inspection
+      stop agreeing the first time one of them changes. The rendercapture leg
+      needed no re-recording: `capture_gate_meshes` and `capture_gate_skinned`
+      load compiled meshes now and their command streams are byte-identical, so
+      the evidence is that the gates ran and matched rather than that a golden
+      was replaced.
 - [x] **S4.8** E5's unfinished half — **the screenshot row is closed, and it
       is closed by moving the picture rather than by finding a way to
       photograph a panel.** The row asked for a screenshot of the chunk-state

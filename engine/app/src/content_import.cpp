@@ -102,4 +102,48 @@ ContentImportReport compileImported(const std::filesystem::path&, const std::fil
 
 #endif
 
+ContentImportReport openProjectContent(const std::filesystem::path& projectRoot,
+                                       const std::filesystem::path& contentRoot, asset::ContentMounts& mounts)
+{
+    ContentImportReport report;
+    std::error_code ec;
+
+    // **A source tree is optional and the store is not.** They are separate
+    // conditions rather than one, because the compiled form is the authoritative
+    // one now: a project whose `content/` has been stripped -- shipped compiled,
+    // or simply deleted -- still has everything it needs to run, and refusing to
+    // mount its store because the sources are gone would be the tail wagging the
+    // dog.
+    if (!contentRoot.empty() && std::filesystem::is_directory(contentRoot, ec)) {
+        mounts.mountDirectory(contentRoot);
+
+        // **The tree is walked here rather than taken from the editor's**, so a
+        // headless run needs no browser. A `ContentTree` is a directory scan and
+        // nothing else -- no watcher, no window -- and the editor's own copy
+        // stays its own, because a tool's view of a folder is a tool's business.
+        ContentTree tree;
+        (void)tree.open(contentRoot);
+        std::vector<std::string> pending = tree.filesOfKind(ContentKind::Mesh);
+        for (std::string& texture : tree.filesOfKind(ContentKind::Texture))
+            pending.push_back(std::move(texture));
+        if (!pending.empty())
+            report = compileImported(projectRoot, contentRoot, pending);
+    }
+
+    // **Above the source directory**, which is the point: `resolve` walks mounts
+    // in reverse, so the compiled form of a texture -- BC7 with mips -- outranks
+    // the raw PNG beside it, and the compiled form of a mesh outranks the JSON
+    // that no longer has a reader.
+    //
+    // A store that is not there is not an error. A project whose content the
+    // compiler had nothing to do with has none, and so does one in a build with
+    // no compiler.
+    const std::filesystem::path objects = importObjectsDir(projectRoot);
+    const std::filesystem::path index = importIndexPath(projectRoot);
+    if (std::filesystem::is_regular_file(index, ec))
+        (void)mounts.mountObjects(objects, index);
+
+    return report;
+}
+
 } // namespace luaug::app

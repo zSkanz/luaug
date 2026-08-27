@@ -682,7 +682,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     meshLoader.setContentRoot(contentRoot);
 
     contentMounts.clear();
-    contentMounts.mountDirectory(contentRoot);
+    if (!isProject)
+        contentMounts.mountDirectory(contentRoot);
 
     // **The content directory is the asset manager, and a scene is one of the
     // assets in it** (human decision, 2026-08-22). The browser shows the same
@@ -692,75 +693,46 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (options.editor)
         editor.openContent(contentRoot);
 
-    // **Opening a project compiles what has no compiled form** (E9 step 12,
-    // assumption 3). A project cloned from git has a `content/` and no store, so
-    // without this it would need a command nobody told anybody to run -- and the
-    // difference is not cosmetic: the compiled path is the only one that reads
-    // an FBX at all, and it is BC7 with mips where the loose one is raw RGBA8.
+    // **Mounted, compiled and mounted again, in one call** (E9 step 14).
+    // `openProjectContent` puts the source tree down, compiles whatever has no
+    // compiled form, and puts the object store above it -- which is the whole of
+    // assumption 3: a project cloned from git works with no command.
     //
-    // **It is cheap after the first time and that is the whole reason it can
-    // live here.** `importOne` goes through the same content-addressed cache a
-    // command-line build uses, so a re-open compiles nothing and reads a
-    // manifest. The first open of a large project pays once.
-    if (options.editor && isProject) {
-        std::vector<std::string> pending = editor.content().filesOfKind(ContentKind::Mesh);
-        for (std::string& texture : editor.content().filesOfKind(ContentKind::Texture))
-            pending.push_back(std::move(texture));
-
-        if (!pending.empty()) {
-            const ContentImportReport compiled = compileImported(options.scriptPath, contentRoot, pending);
-            // **Only when it did something.** Every re-open of a project would
-            // otherwise announce the same totals, because the counts are
-            // reported identically on a cache hit -- so the line would be there
-            // every time and mean nothing any time.
-            if (compiled.cacheMisses > 0) {
-                const std::array<core::I18nArg, 2> args{
-                    core::I18nArg{"meshes", static_cast<core::i64>(compiled.meshes)},
-                    core::I18nArg{"textures", static_cast<core::i64>(compiled.textures)}};
-                core::log(LogLevel::Info, LUAUG_TR("app.info.import_compiled"), args);
-            }
-            if (!compiled.failed.empty()) {
-                // Named and survivable: the loose file is still there, so a
-                // source the compiler refused is slower rather than absent --
-                // except for the formats only the compiler can read, and saying
-                // which one it was is the whole value of this line.
-                const std::array<core::I18nArg, 2> args{core::I18nArg{"name", compiled.failed.front()},
-                                                        core::I18nArg{"detail", compiled.diagnostic}};
-                core::log(LogLevel::Warn, LUAUG_TR("app.warn.import_compile"), args);
-            }
-        }
-    }
+    // **In every host mode, not only the editor.** While the loose feed existed
+    // this could be an editor convenience, because a headless run fell back to
+    // parsing the `.gltf`. The cut-over deleted that fallback, so this is now
+    // the only thing that puts a mesh in front of a project that has not been
+    // built -- and a conformance run, a replay and a capture gate all open
+    // projects exactly this way.
     if (isProject) {
-        // **The import store, between the source tree and the pack** (E9 step
-        // 12). `resolve` walks mounts in reverse, so this outranks the loose
-        // files -- which is the point: the compiled form of a texture is BC7
-        // with mips where the loose one is raw RGBA8, and the compiled form of a
-        // mesh is a `.lmesh` where the loose one is JSON re-parsed on every
-        // launch.
-        //
-        // A shipped pack still outranks BOTH, because it is mounted after. That
-        // ordering is what lets a project keep its editor store while a build
-        // ships something else entirely.
-        //
-        // A store that is not there yet is not an error: a project nobody has
-        // imported into has none, and the loose mount answers for everything.
-        const std::filesystem::path objects = importObjectsDir(options.scriptPath);
-        const std::filesystem::path storeIndex = importIndexPath(options.scriptPath);
-        if (std::filesystem::exists(storeIndex, pathError)) {
-            if (auto storeError = contentMounts.mountObjects(objects, storeIndex); storeError.has_value()) {
-                // Survivable for the same reason a bad pack is: the loose mount
-                // stands, so a broken store is a slower load rather than a world
-                // with no meshes in it.
-                core::logText(LogLevel::Warn, storeError->message);
-            }
+        const ContentImportReport compiled = openProjectContent(options.scriptPath, contentRoot, contentMounts);
+        // **Only when it did something.** Every re-open of a project would
+        // otherwise announce the same totals, because the counts are reported
+        // identically on a cache hit -- so the line would be there every time
+        // and mean nothing any time.
+        if (compiled.cacheMisses > 0) {
+            const std::array<core::I18nArg, 2> args{
+                core::I18nArg{"meshes", static_cast<core::i64>(compiled.meshes)},
+                core::I18nArg{"textures", static_cast<core::i64>(compiled.textures)}};
+            core::log(LogLevel::Info, LUAUG_TR("app.info.import_compiled"), args);
+        }
+        if (!compiled.failed.empty()) {
+            // Named and survivable in the sense that matters: the source file is
+            // still there to be fixed, and saying which one it was and what the
+            // compiler objected to is the whole value of this line. What it is
+            // NOT any more is cosmetic -- a mesh the compiler refused has no
+            // other way in.
+            const std::array<core::I18nArg, 2> args{core::I18nArg{"name", compiled.failed.front()},
+                                                    core::I18nArg{"detail", compiled.diagnostic}};
+            core::log(LogLevel::Warn, LUAUG_TR("app.warn.import_compile"), args);
         }
 
         const std::filesystem::path pack = options.scriptPath / ".luaug" / "content.lpack";
         if (std::filesystem::exists(pack, pathError)) {
             if (auto mountError = contentMounts.mountPack(pack); mountError.has_value()) {
-                // Named and survivable: a pack that will not open leaves the
-                // loose mount standing, so a broken build is a message and a
-                // slower load rather than a world with no meshes in it.
+                // Named and survivable: the object store below it stands, so a
+                // broken build is a message and the editor's own compiled
+                // content rather than a world with no meshes in it.
                 core::logText(LogLevel::Warn, mountError->message);
             }
             else {
@@ -957,6 +929,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     };
 
     auto host = std::make_unique<WorldHost>();
+    // **Before `boot`, and that is load-bearing.** `syncSkeletons` runs at the
+    // top of the FIRST tick, and a rig that arrived one tick late would be a
+    // character that starts a replay in its bind pose -- which a determinism
+    // trace would record as a different world.
+    host->setContentMounts(&contentMounts);
     if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
 

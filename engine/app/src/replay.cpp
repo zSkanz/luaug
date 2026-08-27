@@ -1,5 +1,6 @@
 #include "luaug/app/replay.h"
 
+#include "luaug/app/content_import.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/json.h"
 #include "luaug/core/log.h"
@@ -210,7 +211,23 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
         ~SinkScope() { core::setLogSink(std::move(hostSink())); }
     } sinkScope;
 
+    // **A replay opens its project's content the same way a host does** (E9
+    // step 14). It used to need nothing: `syncSkeletons` built a path by hand
+    // and parsed the source `.gltf`, so a scenario with a rig in it worked with
+    // no mounts at all. The cut-over deleted that reader, and what replaced it
+    // resolves through the mounts -- so without this a skinned scenario replays
+    // a character that never leaves its bind pose, which is a DIFFERENT world
+    // and would be recorded as one.
+    //
+    // Declared before the host and destroyed after it, because the host holds a
+    // pointer to this and reads through it on every tick.
+    asset::ContentMounts mounts;
+    (void)openProjectContent(scenario.scriptPath, scenario.scriptPath / "content", mounts);
+
     WorldHost host;
+    // Before `boot`: `syncSkeletons` runs at the top of the first tick, and tick
+    // zero's hash is sampled before that.
+    host.setContentMounts(&mounts);
     if (auto error = host.boot({
             .projectPath = scenario.scriptPath,
             .seed = scenario.seed,

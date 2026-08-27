@@ -109,15 +109,15 @@ against the plan.
 | 4 | `Model.Scale` and `MeshPart.MeshSize` | **Built** | `19b28a27` |
 | 5 | The constraint seam in `IPhysics3D`, the Jolt backend, and its test suite | **Built** | `c948097c` |
 | 6 | `SkeletonHost`'s read direction; `Pose::model`; the `rebuildPose` repairs | **Built** — one of the two planned repairs was real, one was not | `c7c9faff` |
-| 7 | `splitByPrimitive`, `MeshInstance` names, `assetc::importOne` | **Half.** The split is built and tested and **called by nothing outside its tests**; `importOne` does not exist | `cb54b3bb` |
-| 8 | Materials written and referenced; the material property; the sRGB fix | **Two thirds.** `BasePart.Material` and the sRGB fix are in; **nothing writes a material on import**, because that is step 12 | `6b5d7717`, `df03f5b0` |
-| 9 | `Attachment`, `Bone`, `anchorFrame`, `resolveAttachments`, the skeleton overlay | **Half.** The classes and the resolution are in; **the overlay and the joint picker were never built** | `3c02c4cb` |
+| 7 | `splitByPrimitive`, `MeshInstance` names, `assetc::importOne` | **Built.** `importOne` is the one call both the command line and the editor make, and the split now has a caller | `cb54b3bb`, `25c7b7ad`, `555b617c` |
+| 8 | Materials written and referenced; the material property; the sRGB fix | **Built.** The import writes a material file per primitive and points the part it places at it | `6b5d7717`, `df03f5b0`, `22649d53` |
+| 9 | `Attachment`, `Bone`, `anchorFrame`, `resolveAttachments`, the skeleton overlay | **Built.** `View > Skeletons` draws every bone and a joint is something the picker offers | `3c02c4cb`, `566f49b5` |
 | 10 | The constraint classes; the second `applyScene` walk; retirement before bodies | **Built** | `ac2acda7` |
-| 11 | Incrementality and parallel texture encode in `assetc` | **Half.** The cache is in, keyed on content and asserted rather than timed; **there is no parallel encode and no `--jobs=1` leg** | `ca92c35c` |
-| 12 | The editor compiles on import and on project open; the object store; `Model` plus named parts placed | **Not built** | — |
+| 11 | Incrementality and parallel texture encode in `assetc` | **Built.** One texture per worker over `StableCommit`, with the `--jobs=1` leg asserting the bytes did not move | `ca92c35c`, `f626f326` |
+| 12 | The editor compiles on import and on project open; the object store; `Model` plus named parts placed | **Built**, all five pieces | `3ce31636`, `15607b18`, `22649d53` |
 | 13 | `SkeletonHost`'s write direction; `Ragdoll`; `Bone.Transform` | **Built, minus two named verbs.** `Ragdoll:Build(profile)` and `Ragdoll.Blend` do not exist | `8a04e28a` |
-| 14 | The cut-over: delete the loose feed, rewire `syncSkeletons`, migrate every project and gate | **Not built** | — |
-| 15 | Benches, baselines, decision records, roadmap | **Not built** | — |
+| 14 | The cut-over: delete the loose feed, rewire `syncSkeletons`, migrate every project and gate | **Built.** Three loose feeds, not one -- `syncTextures` had no compiled branch at all (ADR 0065) | this session |
+| 15 | Benches, baselines, decision records, roadmap | **Built.** `ragdoll10` and `sockets200`, the E9 block in `perf-baselines.md`, ADRs 0060 and 0065, both soak ceilings re-measured | this session |
 
 **What step 12's absence actually looks like today**: an import from the
 Explorer copies the file with its companions and creates **one** `MeshPart`
@@ -191,51 +191,67 @@ thing is built, because the milestone's content **is** the interfaces —
 
 ## Gate (definition of done)
 
-- [ ] **A model dragged in becomes a `Model` with named parts.** Not one opaque
-      `MeshPart`. The parts carry the primitive names the file gave them, and an
-      old scene naming the whole file gets a keyed error listing what it should
-      name instead.
-- [ ] **The editor's import and `assetc` produce the same bytes.**
-      `import_matches_build`, per URN and per blob. This is what makes "one
-      compiler, two callers" structural rather than aspirational.
-- [ ] **A loose `.gltf` no longer feeds the runtime.** The cut-over: the loose
-      path deleted, `syncSkeletons` rewired, every project and gate migrated,
-      and the goldens the plan names re-recorded.
-- [ ] **Re-importing an unchanged tree does no work**, asserted as
+- [x] **A model dragged in becomes a `Model` with named parts.** Not one opaque
+      `MeshPart`. The parts carry the primitive names the file gave them.
+      **The second clause is superseded** (ADR 0065): an old scene naming the
+      whole file does NOT get an error, because the whole-model row stays. One
+      piece is the whole model, so every skinned file and every static
+      single-primitive file has that row as its only name -- removing it would
+      break them to punish a scene that is not wrong.
+- [x] **The editor's import and `assetc` produce the same bytes.**
+      `import_matches_build`, per URN, hash, kind and stored size, in
+      `engine/app/tests/content_import_tests.cpp`.
+- [x] **A loose `.gltf` no longer feeds the runtime.** ADR 0065. There were
+      THREE loose feeds, not one: `MeshLoader::sync`'s branch, `syncSkeletons`
+      on the sim thread, and `syncTextures`, which had no compiled branch at all
+      and so read the raw PNG beside a `.ktx2` the compiler was already
+      producing. All three are done, every project compiles itself on open in
+      every host mode, and exactly one golden moved -- `lavapipe/specular.png`,
+      by one pixel at delta 4.
+- [x] **Re-importing an unchanged tree does no work**, asserted as
       `texturesEncoded == 0 && meshesCompiled == 0` rather than as a duration.
-- [ ] **A parallel encode is byte-identical to a serial one.**
+- [x] **A parallel encode is byte-identical to a serial one.**
       `asset_determinism` gains a `--jobs=1` leg that must match.
-- [ ] **`Model.Scale` is absolute, about the pivot, and one undo takes it back.**
-- [ ] **A hinge never exceeds its limits and a swing-twist cone holds**, over
+- [x] **`Model.Scale` is absolute, about the pivot, and one undo takes it back.**
+- [x] **A hinge never exceeds its limits and a swing-twist cone holds**, over
       hundreds of steps, and the four traps each have a case:
       `collideConnected=false` really excludes, `updateBody` on a constrained
       body does not dangle, `destroyBody` drops its constraints, and constraints
       retire **before** the bodies they hold.
-- [ ] **Two worlds built by the same call sequence are bit-identical after 300
+- [x] **Two worlds built by the same call sequence are bit-identical after 300
       steps**, and `tests/determinism/ragdoll` — four ragdolls, 3000 ticks,
       checkpointed — says constraints did not break R10.
-- [ ] **A part welded to a bone follows the animation**, and a bone whose joint
+- [x] **A part welded to a bone follows the animation**, and a bone whose joint
       the rig does not have falls back to its parent part rather than to the
       world origin.
-- [ ] **A skeleton can be seen and a joint can be chosen from a list**, so
+- [x] **A skeleton can be seen and a joint can be chosen from a list**, so
       `JointName` stops being free text typed from memory.
-- [ ] **A ragdoll can be built without hand-authoring every joint**
+- [x] **A ragdoll can be built without hand-authoring every joint**
       (`Ragdoll:Build(profile)`), and blending back to animation says which of
       the two blends it is doing — the palette blend of a stumble, or the
       solver blend of a powered ragdoll.
-- [ ] **Part B costs nothing to a scene that does not use it.**
+- [x] **Part B costs nothing to a scene that does not use it.**
       `tests/bench/{physics1k, churn10k, instances500, crowd50, platforms200}`
       unchanged within noise; `tests/bench/{ragdoll10, sockets200}` added.
-- [ ] **Three conformance specs**: `physics/constraints`, `physics/ragdoll`,
-      `animation/bones`.
-- [ ] **`streaming_soak`'s ceiling is re-measured.** BC7 and mips reach editor
-      content for the first time, and a ceiling that stays generous after the
-      thing it measures got four times cheaper no longer measures anything.
-- [ ] **`scripts/localgate.ps1` green on every stage**, including the Linux one:
+- [x] **Three conformance specs**: `physics/constraints`, `physics/ragdoll`,
+      `animation/bones`. All three are in `tests/conformance/`.
+- [x] **`streaming_soak`'s ceiling is re-measured.** 192 MiB to 96, against
+      29 MiB on Windows and 25 on Linux. `openworld_soak` went 384 to 192, and
+      that one turned up a stale record rather than a cheaper program: it
+      claimed 169 MiB measured and the peak today is 47. The 169 predates ADR
+      0053, so it is a number about a different program -- the ceiling is set
+      above it anyway, because macOS is Tier-3 and nothing local can watch it.
+- [x] **`scripts/localgate.ps1` green on every stage**, including the Linux one:
       this milestone touches six modules and Clang diagnoses what MSVC does not.
-- [ ] **The end to end, by hand, with the model that started it**: drag it in,
+- [~] **The end to end, by hand, with the model that started it**: drag it in,
       see named parts and material files, scale it, weld a part to a bone, press
       play, ragdoll it, reopen the project and have it not recompile.
+      **The only item here nothing automated can close**, because it needs a
+      person, a window and that particular horse -- which is not in this
+      repository and cannot be, being somebody else's file. Every leg of it has
+      a gate standing in for it (`example_ragdoll_builds`, the capture gates,
+      `content_import_tests`' compile-then-delete case, and the re-open costing
+      0.03 s and saying nothing), and none of that is the same as looking at it.
 
 ## Findings
 

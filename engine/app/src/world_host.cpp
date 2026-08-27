@@ -1,6 +1,7 @@
 #include "luaug/app/world_host.h"
 
 #include "luaug/asset/gltf.h"
+#include "luaug/asset/mesh_format.h"
 #include "luaug/audio/scene_types.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/json.h"
@@ -709,25 +710,37 @@ void WorldHost::syncSkeletons()
         if (!m_skeletonsTried.insert(content.id).second)
             return;
 
+        // **Out of the compiled mesh** (E9 step 14). This used to build a path
+        // by hand and parse the source `.gltf` with `skeletonOnly` -- the third
+        // of the three loose feeds the cut-over removed, and the only one that
+        // ran on the SIM thread.
+        //
+        // Resolving rather than path-joining also fixes something the old code
+        // could not do: a URN with a fragment (`...gltf#Torso`) named a file
+        // that does not exist on disk, so a ragdoll built from one piece of a
+        // split model found no rig at all.
+        if (m_mounts == nullptr)
+            return;
         const std::string urn(m_world->atoms().text(content));
-        constexpr std::string_view scheme = "asset://";
-        if (!urn.starts_with(scheme))
+        const asset::ResolvedContent resolved = m_mounts->resolve(urn);
+        if (resolved.source != asset::ResolvedContent::Source::Pack || resolved.kind != asset::AssetKind::Mesh)
             return;
 
-        const std::filesystem::path base = m_root.empty() ? platform::paths().contentDir : m_root / "content";
-        const std::filesystem::path path = base / urn.substr(scheme.size());
-
-        std::vector<std::byte> bytes;
-        if (!platform::readFile(path, bytes))
+        // **The joints and the clips only.** `decodeMesh` also produces the
+        // vertex, index and meshlet streams, and every one of them is thrown
+        // away here -- which is the cost this pays for reading one set of bytes
+        // instead of two. It is paid ONCE per URN, guarded by `m_skeletonsTried`
+        // above, so a world of five hundred props pays it five hundred times at
+        // boot and never again; the alternative is a second decoder that reads
+        // only the joint chunk, which is a format-shaped answer to a question
+        // that has not been measured.
+        asset::CompiledMesh compiled;
+        if (asset::decodeMesh(resolved.bytes, compiled).has_value())
+            return;
+        if (compiled.joints.empty())
             return;
 
-        asset::Model model;
-        if (asset::importGltf(bytes, path.parent_path(), {.skeletonOnly = true}, model).has_value())
-            return;
-        if (model.joints.empty())
-            return;
-
-        m_skeletons.set(content, render::SkeletonLibrary::Entry{std::move(model.joints), std::move(model.clips)});
+        m_skeletons.set(content, render::SkeletonLibrary::Entry{std::move(compiled.joints), std::move(compiled.clips)});
     });
 }
 

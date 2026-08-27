@@ -18,6 +18,7 @@
 // linked behind, and a shipping build carries no encoder at all.
 #pragma once
 
+#include "luaug/asset/content.h"
 #include "luaug/core/types.h"
 
 #include <filesystem>
@@ -77,6 +78,30 @@ struct ContentImportReport
 [[nodiscard]] ContentImportReport compileImported(const std::filesystem::path& projectRoot,
                                                   const std::filesystem::path& contentRoot,
                                                   std::span<const std::string> names);
+
+// **Opens a project's content for reading: mounts it, compiles what has no
+// compiled form, and mounts that** (E9 step 14).
+//
+// This is the whole of assumption 3 in one call. While the loose feed existed,
+// compiling on open was an editor convenience -- a headless run fell back to
+// parsing the source `.gltf` and got its geometry either way. The cut-over
+// deleted that fallback, so this is now the only thing standing between a
+// project cloned from git and a world of invisible parts, and every host mode
+// needs it: the editor, `--headless`, a replay, a capture gate.
+//
+// **Cheap after the first time**, which is what makes it affordable here.
+// `importOne` goes through the same content-addressed cache a command-line build
+// uses, so a second open compiles nothing and reads a manifest.
+//
+// The mounts are appended in the order `resolve` needs: the source directory
+// first, the object store above it. A caller that also has a pack mounts it
+// after this, because a shipped pack outranks a local store.
+//
+// Returns what compiling did, so a caller can say so. In a build with no editor
+// the compile is a no-op and only the mounts happen -- which is correct, because
+// such a build reads a pack.
+ContentImportReport openProjectContent(const std::filesystem::path& projectRoot,
+                                       const std::filesystem::path& contentRoot, asset::ContentMounts& mounts);
 
 // Where the store lives, so the mount at boot and the writer at import cannot
 // disagree about it. `<project>/.luaug/import/objects` and `.../index.json`.

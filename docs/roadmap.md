@@ -1381,7 +1381,7 @@ size were normal.
 | E6 | The Launcher | M | `luaug-host` with no project opens a project browser instead of printing a usage error: recent projects, a new one from a template, a folder picker, and the editor started on what you chose. **Settled: ADR 0055.** **COMPLETE**, signed off 2026-08-24, tagged `milestone/e6` |
 | E7 | The Look | M | The shell stops looking like the debug overlay it grew out of: one theme as data rather than `StyleColorsDark` plus nine literals, Inter instead of a 13 px bitmap face, square everywhere, a palette measured against WCAG rather than argued about, and a launcher laid out for somebody arriving rather than for whoever wired it. **Settled: ADR 0056.** **BUILT, awaiting review** since 2026-08-24: what it waits on is a person looking at the four pictures in `docs/images/e7/` |
 | E8 | The Script Editor | XL | You can write Luau inside the engine: any number of scripts as tabs beside the Viewport, Luau colour from the engine's own lexer, find and replace, errors underlined where the parser puts them, autocomplete from the reflection tables, and a **working debugger** -- breakpoints, stepping, the call stack and the locals, with the script parked and the frame loop still drawing. **Settled: ADR 0057.** **BUILT, awaiting review** since 2026-08-24 |
-| E9 | Compiled Assets and a Skeleton You Can Touch | XL | Dragging a model in makes a `Model` you can open, with named parts you can select and materials you can edit; `Model.Scale` grows it with one number; a `Bone` is something a part can be welded to; and a character can be made a ragdoll. The import compiles rather than the runtime parsing, so a loose `.gltf` stops being what ships. **The material reversal is settled: ADR 0060.** **In progress** -- twelve of its fifteen steps are in `main`, one of those twelve was reversed, and steps 12, 14 and 15 are unbuilt |
+| E9 | Compiled Assets and a Skeleton You Can Touch | XL | Dragging a model in makes a `Model` you can open, with named parts you can select and materials you can edit; `Model.Scale` grows it with one number; a `Bone` is something a part can be welded to; and a character can be made a ragdoll. The import compiles rather than the runtime parsing, so a loose `.gltf` stops being what ships. **The material reversal is settled: ADR 0060.** **Done** -- all fifteen steps in `main`, one of them (step 3, the material) reversed on the way and settled by ADR 0060; the cut-over is ADR 0065 |
 
 **What moved into E1 and why it was right.** Undo was E2's, and E1 grew delete
 and duplicate — the two actions that make its absence dangerous. The content
@@ -2243,11 +2243,12 @@ invariant written where whoever enables it will read it.
 
 ### E9 — Compiled Assets and a Skeleton You Can Touch (XL)
 
-**In progress, and it is the first milestone in this phase that was built
-before anything wrote down what it was.** Its plan lived outside this repository
-and its decisions lived in commit messages;
+**Complete, and it is the first milestone in this phase that was built before
+anything wrote down what it was.** Its plan lived outside this repository and its
+decisions lived in commit messages;
 [ADR 0060](decisions/0060-a-material-is-an-instance-and-a-stamp-is-how-one-is-shared.md)
-is the first of them to get a record, and the rest are owed at step 15. The
+and [ADR 0065](decisions/0065-a-loose-gltf-is-not-a-runtime-format.md) are the
+records step 15 owed. The
 reconnaissance and the account of what is actually in `main` are in
 `docs/briefs/e9-kickoff.md`; this section is the scope statement and the gate,
 because a milestone that is being deferred against by number needs something to
@@ -2296,18 +2297,29 @@ off the plan:
   white on both sides is the identity and no existing scene changes. **Settled
   by ADR 0060**, written after the reversal had already shipped, which is the
   order this milestone has done everything in and the reason step 15 exists.
-- **Unbuilt:** steps 12, 14 and 15 — the editor compiling on import (the
-  object-store writer, `luaug_assetc_lib` linked into the app under
-  `LUAUG_DEBUG_UI`, and `splitByPrimitive` reaching a world); the cut-over,
-  which is last because it is the only irreversible one; and the benches,
-  baselines and decision records. **And four pieces of steps that otherwise
-  landed**, which is the part a step count hides: `assetc::importOne`, without
-  which the editor's import and `assetc` stay two code paths rather than one
-  call; the skeleton overlay and the joint picker, without which `JointName` is
-  free text typed from memory; parallel texture encode; and `Ragdoll:Build` and
-  `Ragdoll.Blend` — the class exists and is driven, but the profile that says
-  which joints, what capsule and what limits does not, so a ragdoll is still
-  assembled by hand.
+- **Also in `main`, and each was the unbuilt half of a step the count said had
+  landed** — which is the part a step count hides: `assetc::importOne`, so the
+  editor's import and `assetc` are one call rather than two code paths; the
+  skeleton overlay and the joint picker, so `JointName` stopped being free text
+  typed from memory; parallel texture encode with the `--jobs=1` leg that proves
+  it changed nothing; and `Ragdoll:Build(profile)` with `Ragdoll.Blend`.
+- **Step 12:** the editor compiles on import — the object-store writer,
+  `luaug_assetc_lib` linked into the app under `LUAUG_DEBUG_UI`, the store
+  mounted between the source tree and the pack, and `splitByPrimitive` reaching
+  both a pack and a world as a `Model` of named parts.
+- **Step 14, the cut-over, last because it was the only irreversible one:** a
+  loose `.gltf` no longer feeds the runtime
+  ([ADR 0065](decisions/0065-a-loose-gltf-is-not-a-runtime-format.md)). There
+  turned out to be **three** loose feeds rather than the one the plan named —
+  `MeshLoader::sync`, `syncSkeletons` on the sim thread, and `syncTextures`,
+  which had no compiled branch at all and so read the raw PNG sitting beside a
+  `.ktx2` the compiler was already producing and nobody was reading. Opening a
+  project now compiles what has no compiled form in EVERY host mode, so a clone
+  from git still works with no command. One golden moved:
+  `tests/screenshots/lavapipe/specular.png`, by a single pixel.
+- **Step 15:** `tests/bench/{ragdoll10, sockets200}`, the E9 block in
+  `docs/perf-baselines.md`, both decision records, and both soak ceilings
+  re-measured — `streaming_soak` 192 MiB to 96, `openworld_soak` 384 to 192.
 
 #### Gate (definition of done)
 
