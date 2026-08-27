@@ -509,8 +509,46 @@ that sends the next session to the wrong place.
       that changes nothing reports `Unchanged`, the duplicate-name chain is
       rebuilt around it, and the world hash follows. The Explorer's
       drag-between-rows half is what is left.
-- [ ] **S5.19** The typed stubs every scaffolded project's settings already
-      point at.
+- [x] **S5.19** Written, and the command two documents already named now exists.
+
+      `.vscode/settings.json` has always aliased `@luaug/` to
+      `.luaug/types/luaug/` and `@std/` to `.luaug/types/std/`, and **nothing
+      created either**: `luaug new` wrote `engine.d.luau` and stopped. So every
+      `require("@luaug/camera")` in a scaffolded project came up unresolved in
+      the editor — no completion, no hover — while running perfectly. That is
+      the worst shape for a beginner, because the tooling says the line is wrong
+      and the engine says it is fine.
+
+      **The modules themselves, not hand-written stubs.** They are `--!strict`
+      Luau exporting their own types, so copying them copies the truth; a stub
+      would be a second declaration of one surface and would drift the first
+      time either moved. It is the argument `engine.d.luau` already makes,
+      applied to the modules beside it.
+
+      **`luaug setup` exists now**, and it had to for a reason narrower than the
+      alias: `.luaug/` is gitignored, so only the machine that ran `luaug new`
+      ever had types — anyone who CLONED the project had none. Two documents
+      named the command before it was written: `settings.json` says it
+      "regenerates it, and .luaug/types/, for whatever engine version is
+      pinned", and the starter's own test says the editor resolves `@std` and
+      `@luaug` "against the stubs `luaug setup` generates". `luaug new` calls
+      the same function rather than carrying a second copy of the layout, and
+      `api-design.md` — which said the command "does not exist" — says what
+      it does instead.
+
+      **The engine's `@std/` and deliberately not Lute's**, which is the one
+      real decision here. A game script is sandboxed (R4) and can reach
+      `@std/net` and nothing else of that family; pointing the editor at Lute's
+      typedefs would offer `fs`, `process` and `io` to a VM that has none of
+      them — the same mistake `settings.json` already refuses for the Roblox
+      API dump. The ANALYZER resolves `@std` separately through `.luaurc`, which
+      is what keeps a project's Lute-run tests working, and the starter's test
+      says so in its own header.
+
+      Verified end to end: `new` produces all five stubs, `setup` rebuilds them
+      after `.luaug/` is deleted the way a clone would have it, and it refuses
+      with a keyed message outside a project rather than writing into whatever
+      directory somebody was standing in.
 
 ### S6 — Inert surfaces resolved
 

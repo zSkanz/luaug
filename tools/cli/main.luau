@@ -22,6 +22,8 @@ local dev = require("./commands/dev")
 local edit = require("./commands/edit")
 local fmt = require("./commands/fmt")
 local new = require("./commands/new")
+local projectlib = require("./project")
+local setup = require("./commands/setup")
 local test = require("./commands/test")
 local version = require("./commands/version")
 
@@ -195,6 +197,24 @@ local function main(): number
             return 2
         end
         return fmt.run({ path = firstPositional(parsed, "."), ignore = DefaultIgnore })
+    end
+
+    -- **Regenerates `.luaug/types/` for the engine that is pinned** (S5.19).
+    -- Two documents named this command before it existed: `settings.json` says
+    -- it regenerates the types, and the starter's own test says the editor
+    -- resolves `@std` and `@luaug` against "the stubs `luaug setup` generates".
+    -- A project cloned from git has none of them, because `.luaug/` is
+    -- gitignored and only the machine that ran `new` ever wrote it.
+    if parsed.command == "setup" then
+        if not rejectUnknownFlags(parsed, {}) then
+            return 2
+        end
+        local root = projectlib.installRoot()
+        if root == nil then
+            print(tr("cli.new.err.no_install"))
+            return 1
+        end
+        return setup.run({ target = firstPositional(parsed, "."), root = root })
     end
 
     if parsed.command == "new" then

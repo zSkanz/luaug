@@ -14,6 +14,7 @@ local process = require("@std/process")
 
 local catalog = require("../catalog")
 local projectlib = require("../project")
+local setup = require("./setup")
 
 local tr = catalog.tr
 
@@ -95,12 +96,13 @@ local function run(options: Options): number
     -- `.luaug/` is generated and gitignored, which is why it is written here
     -- rather than kept in the template: it belongs to the engine version, not
     -- to the template.
-    local types = projectlib.joined(target, ".luaug", "types")
-    fs.createDirectory(types, { makeParents = true })
-    -- One file, and the hover documentation is inside it: the IDL's doc text is
-    -- emitted as `---` comments above each declaration, so there is no second
-    -- artifact to copy and none to keep in step.
-    fs.copy(projectlib.joined(root, "runtime", "types", "engine.d.luau"), projectlib.joined(types, "engine.d.luau"))
+    --
+    -- **`luaug setup` writes it, and this asks that** rather than carrying its
+    -- own copy (S5.19). The same directory has to be writable a second time --
+    -- `.luaug/` is gitignored, so a project cloned from git has none of it --
+    -- and two functions writing one layout would disagree the first time either
+    -- learned about a new module.
+    setup.writeTypes({ target = target, root = root })
 
     print(tr("cli.new.created", { path = target, name = options.name }))
     return 0

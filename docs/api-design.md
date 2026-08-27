@@ -119,9 +119,12 @@ and is an ordinary child of it.
   rather than resolving a version.
 - `luaug.toml` `[project] engine = "0.1"` records the engine series a project
   targets. **Nothing compares it to the runtime**, so the CLI warning this line
-  promised does not exist, and neither does the `luaug setup` that was to
-  regenerate `.luaug/types/` against it — `luaug new` writes those definitions
-  once, at scaffold time (§4).
+  promised still does not exist. `luaug setup` does now (S5.19): it rewrites
+  `.luaug/types/` for whatever engine the CLI belongs to, and `luaug new` calls
+  the same function rather than carrying a second copy of the layout. It had to
+  exist for a reason narrower than versioning — `.luaug/` is gitignored, so a
+  project CLONED from git had no types at all, and every `require("@luaug/…")`
+  came up unresolved in the editor while running perfectly.
 - At runtime: `game.EngineVersion: string` and `game.LuauVersion: string`
   (read-only).
 - Type defs and the api-dump are versioned artifacts of each engine release.
@@ -1336,6 +1339,7 @@ exists:
 | Command | Wraps |
 |---|---|
 | `luaug new <name>` | scaffold from a template. `--template` exists and `starter` is the only value it accepts |
+| `luaug setup [path]` | rewrite `.luaug/types/` for the pinned engine. `.luaug/` is gitignored, so a project cloned from git has no types until this runs |
 | `luaug dev [path]` | run the project with a watcher attached: a saved file rebuilds the world (asset watcher/importer + the hot-reload server, §3.2) |
 | `luaug edit [path]` | run the project with the editor UI in place of the debug overlay (ADR 0046) |
 | `luaug build [path]` | The distributable folder: the host binary under the game's name and wearing its icon, the engine's content beside it, and the game in `game/` — which the player mounts when given no script. Ships Luau **source** rather than bytecode; ADR 0045 says why, and amends this row |
