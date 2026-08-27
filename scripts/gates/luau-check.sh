@@ -183,6 +183,14 @@ fi
 echo "== stored-and-unread properties =="
 lute tools/repo/inertcheck.luau
 
+# **Every concrete class is a replication decision, and absence is not one.**
+# A class nobody thought about and a class deliberately left off the wire look
+# identical in a schema; this is what makes the difference visible. It also holds
+# the rule the whole format rests on -- field ids are permanent, retired ones
+# stay claimed -- which no amount of care remembers on its own (ADR 0069).
+echo "== the wire schema decides about every class =="
+lute tools/repo/wirecheck.luau
+
 # The API reference is generated from the same IDL and checked in like every
 # other generated artifact (roadmap M8). Compared as a DIRECTORY rather than as a
 # file list, because a class removed from the IDL has to take its page with it --

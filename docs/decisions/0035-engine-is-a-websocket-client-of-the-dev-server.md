@@ -4,6 +4,12 @@
 - Date: 2026-08-20
 - Supersedes: nothing. Its own first draft (stdio to the engine) was refuted
   before any code was written — see "What this ADR nearly said".
+- **Narrowed by [ADR 0070](0070-a-port-is-opened-by-a-posture-and-never-by-a-script.md)**
+  (2026-08-27). "The engine opens no port in any profile" was true when it was
+  written and is false now: a dedicated game server listens. What survives is
+  the reason — no port, no firewall prompt and no inbound parse surface on the
+  machine of somebody who is merely running a game — and 0070 fences the
+  exception so that a *script* can never be the thing that opens a socket.
 
 ## Context
 `api-design.md` §3.2 specified the hot-reload transport as the dev server
@@ -38,6 +44,13 @@ and the engine.
 
 **Only the dev server listens.** The engine opens no port in any profile, and
 the client half is compiled into dev builds only.
+
+> **Narrowed 2026-08-27 by [ADR 0070](0070-a-port-is-opened-by-a-posture-and-never-by-a-script.md).**
+> A dedicated server binds, and it binds because somebody typed `--host`. The
+> rule is now that a listening socket is opened by a command-line posture and by
+> nothing else — no service, no property, no method — and that a build without
+> the replication module cannot bind at all. Every profile that ships to a
+> player still opens nothing.
 
 This costs a small `net` seam in C++: a TCP client, the HTTP upgrade handshake
 with the SHA-1 + base64 `Sec-WebSocket-Accept` check, and RFC 6455 frame

@@ -387,43 +387,46 @@ jobs:
       # a property of *this* environment, not of the dev profile: locally, `/Zi`
       # is the better default (smaller objects, faster incremental links) and
       # nobody is sharing a compiler cache.
-      # **Two tests need `lute` and this job never had it.**
+      # **Before the build, not after it.**
       #
-      # `asset_determinism` and `streaming_soak` both run against
+      # This step used to sit below the build and the tests, which was fine while
+      # its only consumers were `luaug test` and the hot-reload gate further
+      # down. It stopped being fine when `asset_determinism` and
+      # `streaming_soak` started needing `lute`: they run against
       # `examples/05-streaming/content/world`, which is GENERATED rather than
-      # committed -- `tests/support/ensure_generated_world.cmake` builds it on
-      # demand and says, in as many words, that it needs `lute` on PATH or the
-      # bootstrap to have run. Neither had happened here: this job installs
-      # sccache and Ninja and nothing else, so both tests failed in 0.00 s with
-      # a CMake error rather than a test result.
+      # committed, and `tests/support/ensure_generated_world.cmake` says in as
+      # many words that it needs `lute` on PATH or the bootstrap to have run.
+      # Both failed in 0.03 s with a CMake error rather than a test result.
       #
-      # It never showed because the tests were dark: CI was blocked on billing
-      # and the local gate runs after `bootstrap`, which puts `lute` on PATH.
-      # The first run after the repository went public reported it immediately.
-      #
-      # Installed by pinned URL and authenticated exactly as the `luau-check`
-      # job does, for the same two reasons: one fewer supply-chain surface, and
-      # the version is visible in this file (R5).
-      - name: Install rokit and the pinned tools (for the generated world)
+      # Nothing showed it while CI was dark for the billing block; the first run
+      # after the repository went public reported it immediately.
+      - name: Install the pinned Luau toolchain
+        if: runner.os != 'macOS'
         shell: bash
         env:
+          # Rokit resolves every pinned tool through api.github.com, and
+          # unauthenticated that is sixty requests an hour shared across the
+          # runner's whole IP -- so it returns 403 on a busy afternoon and the
+          # step dies with "GitHub error: 403 Forbidden" for a release that is
+          # public and present. It happened once, on the push that closed M4.5,
+          # and the job it killed had already built and passed all 25 tests.
+          #
+          # `GITHUB_TOKEN` is the workflow's own automatic token: nothing to
+          # create, nothing to store, and read-only on a fork's pull request,
+          # which is all this needs.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "$RUNNER_OS" in
             Windows) archive="rokit-${ROKIT_VERSION}-windows-x86_64.zip" ;;
-            Linux)   archive="rokit-${ROKIT_VERSION}-linux-x86_64.zip" ;;
-            # Named rather than defaulted, so adding a platform to this job's
-            # matrix fails here instead of silently downloading a Linux binary.
-            *) echo "::error::no pinned rokit artifact for ${RUNNER_OS}"; exit 1 ;;
+            *)       archive="rokit-${ROKIT_VERSION}-linux-x86_64.zip" ;;
           esac
-          curl -fsSL -o "${RUNNER_TEMP}/rokit.zip" \
-            "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/${archive}"
-          unzip -q "${RUNNER_TEMP}/rokit.zip" -d "${RUNNER_TEMP}/rokit"
-          "${RUNNER_TEMP}/rokit/rokit" self-install
+          curl -fsSL -o /tmp/rokit.zip             "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/${archive}"
+          unzip -q /tmp/rokit.zip -d /tmp/rokit
+          /tmp/rokit/rokit self-install
           # **A Windows path on Windows.** `$HOME` in the runner's bash is
           # `/c/Users/runneradmin`, and `$GITHUB_PATH` is read by every later
-          # step -- including the one that runs ctest under `cmd`, where a POSIX
+          # step -- including the ctest one, which runs under `cmd` where a POSIX
           # path means nothing. The Linux tier found `lute` and the Windows tier
           # did not, on the same step, which is what gave this away.
           if [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -431,13 +434,14 @@ jobs:
           else
             echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
           fi
+          # Before `install`, so every release lookup it makes is authenticated.
+          # The subcommand and its flag are read off the pinned binary's own
+          # `--help` at 1.2.0 rather than from documentation for some other
+          # version (MASTER_PROMPT §9).
           "$HOME/.rokit/bin/rokit" authenticate github --token "$GH_TOKEN"
           # --no-trust-check: the tools are pinned in the in-repo, ADR-gated
           # rokit.toml (R5); the interactive trust prompt has no answer in CI.
           "$HOME/.rokit/bin/rokit" install --no-trust-check
-          # `lute setup` for the same reason `bootstrap` runs it: without it the
-          # `@std` requires under tools/ resolve to nothing.
-          "$HOME/.rokit/bin/lute" setup
 
       - name: Configure, build and test (Windows)
         if: runner.os == 'Windows'
@@ -472,7 +476,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
 
       - name: Configure, build and test (Linux)
         if: runner.os == 'Linux'
@@ -514,7 +518,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
 
       # The M3 gate wants two things green "on both tiers" that ctest cannot
       # give: `luaug test`, which is the CLI's own path to the same suite, and
@@ -522,40 +526,6 @@ jobs:
       # build headless against it and waits for a reload to be confirmed over
       # the WebSocket. Both need the pinned Luau toolchain, which only the
       # `luau-check` job installed before M3.
-      - name: Install the pinned Luau toolchain
-        if: runner.os != 'macOS'
-        shell: bash
-        env:
-          # Rokit resolves every pinned tool through api.github.com, and
-          # unauthenticated that is sixty requests an hour shared across the
-          # runner's whole IP -- so it returns 403 on a busy afternoon and the
-          # step dies with "GitHub error: 403 Forbidden" for a release that is
-          # public and present. It happened once, on the push that closed M4.5,
-          # and the job it killed had already built and passed all 25 tests.
-          #
-          # `GITHUB_TOKEN` is the workflow's own automatic token: nothing to
-          # create, nothing to store, and read-only on a fork's pull request,
-          # which is all this needs.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          case "$RUNNER_OS" in
-            Windows) archive="rokit-${ROKIT_VERSION}-windows-x86_64.zip" ;;
-            *)       archive="rokit-${ROKIT_VERSION}-linux-x86_64.zip" ;;
-          esac
-          curl -fsSL -o /tmp/rokit.zip             "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/${archive}"
-          unzip -q /tmp/rokit.zip -d /tmp/rokit
-          /tmp/rokit/rokit self-install
-          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
-          # Before `install`, so every release lookup it makes is authenticated.
-          # The subcommand and its flag are read off the pinned binary's own
-          # `--help` at 1.2.0 rather than from documentation for some other
-          # version (MASTER_PROMPT §9).
-          "$HOME/.rokit/bin/rokit" authenticate github --token "$GH_TOKEN"
-          # --no-trust-check: the tools are pinned in the in-repo, ADR-gated
-          # rokit.toml (R5); the interactive trust prompt has no answer in CI.
-          "$HOME/.rokit/bin/rokit" install --no-trust-check
-
       - name: luaug test (the CLI's path to the conformance suite)
         if: runner.os != 'macOS'
         shell: bash
@@ -805,7 +775,7 @@ jobs:
             echo "no ctest log; the test step did not get that far"
             exit 0
           fi
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
 
       - name: Summary
         if: always()

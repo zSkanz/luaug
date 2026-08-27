@@ -108,3 +108,5 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0065](0065-a-loose-gltf-is-not-a-runtime-format.md) | A loose `.gltf` is not a runtime format; everything arrives compiled |
 | [0066](0066-the-physics-seam-learns-two-static-shapes.md) | The physics seam learns two static shapes: height field and triangle mesh |
 | [0067](0067-terrain-is-one-field-with-two-encodings.md) | Terrain is one signed-distance field with two encodings, and the claim is what was measured |
+| [0069](0069-replication-reads-state-and-diffs-it.md) | Replication reads state and diffs it, against a declared wire schema; the change queue cannot serve |
+| [0070](0070-a-port-is-opened-by-a-posture-and-never-by-a-script.md) | A listening socket is opened by a command-line posture and by nothing else; ADR 0035 narrowed |
