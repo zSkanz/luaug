@@ -3,6 +3,7 @@
 #include <luaug/core/error.h>
 #include <luaug/core/id.h>
 #include <luaug/core/name_atom.h>
+#include <luaug/scene/value.h>
 
 #include <functional>
 #include <memory>
@@ -253,5 +254,14 @@ readScene(World& world, std::string_view json, SceneIoReport* report = nullptr, 
 // save writes in full and counts, and which this reports as no overrides at all
 // rather than as every property being one.
 [[nodiscard]] std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId id, StampLibrary& stamps);
+
+// What the stamp says one property of `id` should be.
+//
+// The other half of an override being actionable: `stampOverrides` says WHICH
+// properties are the instance's own, and this says what reverting one would put
+// back. Absent for anything not inside a placed stamp, for a stamp that cannot
+// be read, and for a property the stamp's own class does not have.
+[[nodiscard]] std::optional<Value> stampReferenceValue(const World& world, core::InstanceId id, core::NameAtom property,
+                                                       StampLibrary& stamps);
 
 } // namespace luaug::scene

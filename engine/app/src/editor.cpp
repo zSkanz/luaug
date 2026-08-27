@@ -1240,6 +1240,181 @@ void Editor::syncMaterialPreview(const Inspector& inspector)
     }
 }
 
+std::vector<core::NameAtom> Editor::overridesOf(const scene::World& world, core::InstanceId id)
+{
+    if (!id.valid() || !world.alive(id))
+        return {};
+
+    // A library per call rather than one kept on the editor: it caches the
+    // stamps it reads for as long as it lives, and a cache that outlives an
+    // edit to the file it read is a panel showing yesterday's answer.
+    scene::StampLibrary stamps(const_cast<scene::World&>(world), stampSource());
+    return scene::stampOverrides(world, id, stamps);
+}
+
+bool Editor::revertOverride(scene::World& world, core::InstanceId id, core::NameAtom property)
+{
+    if (!id.valid() || !world.alive(id) || !property.valid()) {
+        m_status = EditorStatus{"there is nothing selected to revert", true};
+        return false;
+    }
+
+    scene::StampLibrary stamps(world, stampSource());
+    const std::optional<scene::Value> theirs = scene::stampReferenceValue(world, id, property, stamps);
+    if (!theirs.has_value()) {
+        m_status = EditorStatus{"that is not part of a stamp, so there is nothing to revert to", true};
+        return false;
+    }
+
+    const std::string name(world.atoms().text(property));
+
+    // **Asked before it is recorded.** A revert of a property that already
+    // matches the file is a step that undoes nothing, and `UndoStack::record`
+    // clears the redo stack -- so it would destroy a real redo future and leave
+    // a junk one in its place (D134).
+    const scene::PropertyDesc* descriptor = world.classes().findProperty(world.classOf(id), property);
+    if (descriptor == nullptr || descriptor->get == nullptr) {
+        m_status = EditorStatus{name + " is not a property of that instance", true};
+        return false;
+    }
+    const std::optional<scene::Value> mine = descriptor->get(world, id);
+    if (mine.has_value() && *mine == *theirs) {
+        m_status = EditorStatus{name + " already matches the stamp"};
+        return true;
+    }
+
+    m_history.record(world, "Revert " + name);
+    const scene::World::SetResult wrote = world.setProperty(id, property, *theirs);
+    if (wrote != scene::World::SetResult::Changed && wrote != scene::World::SetResult::Unchanged) {
+        m_status = EditorStatus{"could not revert " + name, true};
+        return false;
+    }
+    touch();
+    m_status = EditorStatus{"reverted " + name + " to the stamp"};
+    return true;
+}
+
+bool Editor::applyOverride(scene::World& world, core::InstanceId gameRoot, core::InstanceId id, core::NameAtom property)
+{
+    if (!id.valid() || !world.alive(id) || !property.valid()) {
+        m_status = EditorStatus{"there is nothing selected to apply", true};
+        return false;
+    }
+
+    // The stamp this instance belongs to, which is the file about to change.
+    core::InstanceId stampRoot = id;
+    core::NameAtom mark{};
+    while (stampRoot.valid()) {
+        mark = world.stampOf(stampRoot);
+        if (mark.valid())
+            break;
+        stampRoot = world.parentOf(stampRoot);
+    }
+    if (!mark.valid()) {
+        m_status = EditorStatus{"that is not part of a stamp, so there is nothing to apply to", true};
+        return false;
+    }
+    const std::string path(world.atoms().text(mark));
+
+    // **Refused while that stamp is open on the stage**, because then there are
+    // two writers of one file and the one a person can see would lose. Said
+    // rather than silently preferred: the stage is right there.
+    if (m_stamp.open() && m_stamp.path == path) {
+        m_status = EditorStatus{path + " is open for editing; apply from the stage instead", true};
+        return false;
+    }
+
+    const std::string name(world.atoms().text(property));
+    const scene::PropertyDesc* descriptor = world.classes().findProperty(world.classOf(id), property);
+    if (descriptor == nullptr || descriptor->get == nullptr) {
+        m_status = EditorStatus{name + " is not a property of that instance", true};
+        return false;
+    }
+    const std::optional<scene::Value> mine = descriptor->get(world, id);
+    if (!mine.has_value()) {
+        m_status = EditorStatus{"could not read " + name, true};
+        return false;
+    }
+
+    const std::optional<std::string> before = stampSource()(path);
+    if (!before.has_value()) {
+        m_status = EditorStatus{"could not read " + path, true};
+        return false;
+    }
+
+    // **Built into a scratch world of its own, edited there, and written back.**
+    // The alternative -- editing the JSON text -- would be a second reader of
+    // the stamp format, and `readSceneNode`'s own comment gives the reason that
+    // is not worth having: one definition of what a stamp means.
+    scene::World scratch(world.classes(), world.enums(), world.atoms(), 1u);
+    const core::InstanceId scratchRoot = scene::readStamp(scratch, *before, core::InstanceId{}, path);
+    if (!scratchRoot.valid()) {
+        m_status = EditorStatus{"could not read " + path, true};
+        return false;
+    }
+
+    // The same walk down from each root, which is what pairs the live instance
+    // with the one in the file.
+    std::vector<core::u32> descent;
+    for (core::InstanceId step = id; step != stampRoot; step = world.parentOf(step)) {
+        const core::InstanceId parent = world.parentOf(step);
+        if (!parent.valid())
+            break;
+        core::u32 index = 0;
+        core::InstanceId child = world.firstChild(parent);
+        while (child.valid() && child != step) {
+            child = world.nextSibling(child);
+            ++index;
+        }
+        descent.push_back(index);
+    }
+    core::InstanceId target = scratchRoot;
+    for (auto step = descent.rbegin(); step != descent.rend(); ++step) {
+        core::InstanceId child = scratch.firstChild(target);
+        for (core::u32 skipped = 0; skipped < *step && child.valid(); ++skipped)
+            child = scratch.nextSibling(child);
+        if (!child.valid()) {
+            m_status = EditorStatus{"that instance is not in " + path + " any more", true};
+            return false;
+        }
+        target = child;
+    }
+
+    const scene::World::SetResult intoStamp = scratch.setProperty(target, property, *mine);
+    if (intoStamp != scene::World::SetResult::Changed && intoStamp != scene::World::SetResult::Unchanged) {
+        m_status = EditorStatus{"could not write " + name + " into " + path, true};
+        return false;
+    }
+
+    scene::SceneIoReport wrote;
+    const std::string after = scene::writeStamp(scratch, scratchRoot, &wrote);
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(path);
+    if (!platform::createDirectories(absolute.parent_path()) || !platform::writeTextFile(absolute, after)) {
+        m_status = EditorStatus{"could not write " + path, true};
+        return false;
+    }
+
+    // **Every linked instance follows, measured against the text they were
+    // built from** -- the same arithmetic `saveStamp` does, and for the same
+    // reason: an instance that overrode this property with some other value
+    // differs from `before` and keeps what it has.
+    scene::SceneIoReport moved;
+    const core::u32 followed =
+        gameRoot.valid() && world.alive(gameRoot) ? scene::restamp(world, gameRoot, path, *before, after, &moved) : 0u;
+    if (m_stamp.open() && m_stamp.path == path)
+        m_stamp.baseline = after;
+    if (followed > 0 || moved.unlinkedStamps > 0)
+        m_sceneDirty = true;
+
+    std::string message = "applied " + name + " to " + path;
+    if (followed > 0)
+        message += ", " + std::to_string(followed) + " in the world";
+    if (moved.unlinkedStamps > 0)
+        message += ", " + std::to_string(moved.unlinkedStamps) + " left alone (changed structurally)";
+    m_status = EditorStatus{message};
+    return true;
+}
+
 bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
 {
     if (!m_stamp.open() || m_stage == nullptr || !m_stage->world().alive(m_stamp.root)) {

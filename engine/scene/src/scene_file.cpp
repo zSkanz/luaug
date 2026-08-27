@@ -1224,7 +1224,25 @@ core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, s
     return refreshed;
 }
 
-std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId id, StampLibrary& stamps)
+namespace {
+
+// Where an instance sits inside the stamp it came from: the stamp's root in the
+// LIVE world, and the instance that corresponds to it in the stamp's own tree.
+//
+// Shared by the two questions a panel asks -- which properties are overridden,
+// and what the stamp says one of them should be -- because a second copy of this
+// walk is a second chance to pair the wrong instances.
+struct ReferenceSite
+{
+    const World* world = nullptr;
+    core::InstanceId id;
+    core::InstanceId referenceRoot;
+    core::InstanceId stampRoot;
+
+    [[nodiscard]] bool found() const noexcept { return world != nullptr && id.valid(); }
+};
+
+[[nodiscard]] ReferenceSite locateInStamp(const World& world, core::InstanceId id, StampLibrary& stamps)
 {
     if (!world.alive(id))
         return {};
@@ -1282,6 +1300,42 @@ std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId 
     if (world.classOf(id) != reference.classOf(refId))
         return {};
 
+    return ReferenceSite{&reference, refId, entry->root, stampRoot};
+}
+
+} // namespace
+
+std::optional<Value> stampReferenceValue(const World& world, core::InstanceId id, core::NameAtom property,
+                                         StampLibrary& stamps)
+{
+    const ReferenceSite site = locateInStamp(world, id, stamps);
+    if (!site.found())
+        return std::nullopt;
+
+    const std::string_view name = world.atoms().text(property);
+    const core::NameAtom referenceAtom = site.world->atoms().lookup(name);
+    if (!referenceAtom.valid())
+        return std::nullopt;
+    const PropertyDesc* referenceProperty =
+        site.world->classes().findProperty(site.world->classOf(site.id), referenceAtom);
+    if (referenceProperty == nullptr || referenceProperty->get == nullptr)
+        return std::nullopt;
+    return referenceProperty->get(*site.world, site.id);
+}
+
+std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId id, StampLibrary& stamps)
+{
+    if (!world.alive(id))
+        return {};
+
+    const ReferenceSite site = locateInStamp(world, id, stamps);
+    if (!site.found())
+        return {};
+
+    const World& reference = *site.world;
+    const core::InstanceId refId = site.id;
+    const core::InstanceId stampRoot = site.stampRoot;
+
     std::vector<core::NameAtom> overridden;
     const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
     for (const ClassDescriptor* current = descriptor; current != nullptr;
@@ -1295,7 +1349,7 @@ std::vector<core::NameAtom> stampOverrides(const World& world, core::InstanceId 
             const std::optional<Value> mine = property.get(world, id);
             if (!mine.has_value())
                 continue;
-            if (differsFromReference(world, property, name, reference, refId, stampRoot, entry->root, *mine))
+            if (differsFromReference(world, property, name, reference, refId, stampRoot, site.referenceRoot, *mine))
                 overridden.push_back(property.name);
         }
     }

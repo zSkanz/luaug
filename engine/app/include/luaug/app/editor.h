@@ -517,6 +517,14 @@ struct EditorCommands
     // Take the mark off this one, so it stops following its file.
     core::InstanceId breakStamp;
 
+    // **One property of one instance, taken back or pushed up** (S5.6). Two
+    // fields rather than a pair per verb, because a menu can only be open on
+    // one row at a time and the alternative is four fields that must agree.
+    core::InstanceId overrideSubject;
+    core::NameAtom overrideProperty;
+    // Which of the two. Absent means neither was asked for this frame.
+    std::optional<bool> overrideApply;
+
     // **Copy, cut and the two pastes.** `pasteInto` is the difference between
     // "another one beside this" and "one inside this", which is the distinction
     // every editor with a tree draws and the only one a person has to be told.
@@ -1082,6 +1090,44 @@ public:
     // `DataModel` rather than the `Workspace`, because a linked instance is not
     // obliged to live under one.
     bool saveStamp(scene::World& game, core::InstanceId gameRoot);
+
+    // --- What a placed stamp has of its own (S5.6) --------------------------
+    //
+    // ADR 0049 was reversed to inheritance-with-overrides: an instance inherits
+    // from its stamp, a change to one instance stays local, and a change to the
+    // stamp reaches every instance that has not overridden that property. The
+    // SAVE has understood that since ADR 0051 and the EDITOR could not say it,
+    // so a person could see neither which properties were theirs nor how to
+    // take one back.
+    //
+    // Which properties of `id` are its own rather than its stamp's. Empty for
+    // anything that is not inside a placed stamp, which is most of a world.
+    //
+    // **This reads the stamp FILE, so a caller drawing every frame must not ask
+    // every frame** -- that is the shape of D118, the defect that made the
+    // editor feel like it reloaded the world whenever anybody touched anything.
+    // Deliberately NOT cached here: the world can be changed by a gizmo drag, a
+    // script or a queued property write, none of which this object hears about,
+    // so a cache in here would be a wrong answer with no way to notice. The
+    // Properties panel caches it against its own selection and a frame budget,
+    // which is a cost decision made where the cost is.
+    [[nodiscard]] std::vector<core::NameAtom> overridesOf(const scene::World& world, core::InstanceId id);
+
+    // Put the stamp's value back. ONE undo step, and refused rather than
+    // recorded when there is nothing to revert -- a step that undoes nothing
+    // eats a press of ctrl-Z, which is the invariant D134 and D141 both record.
+    bool revertOverride(scene::World& world, core::InstanceId id, core::NameAtom property);
+
+    // Push this instance's value up into the stamp FILE, so every other
+    // instance that has not overridden that property follows it.
+    //
+    // **The instance stops being overridden as a consequence rather than as a
+    // step**: once the file says what the instance says, there is nothing left
+    // to differ. Instances that had overridden the same property with some
+    // OTHER value keep theirs, because `restamp` measures them against the
+    // file's previous text -- applying is not a way to overwrite other people's
+    // edits.
+    bool applyOverride(scene::World& world, core::InstanceId gameRoot, core::InstanceId id, core::NameAtom property);
 
     // Drops the stage. `save` writes it out first; without it the edits go with
     // it, which is what "close without saving" means.

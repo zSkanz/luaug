@@ -353,7 +353,50 @@ that sends the next session to the wrong place.
       and remove over the whole selection, and a picker of the names this world
       already uses -- because a typo is a tag nothing will ever find, which
       looks exactly like a working one.
-- [ ] **S5.6** A stamp override is visible, revertable and appliable.
+- [x] **S5.6** All three, and the model half is where the work was.
+
+      ADR 0049 was reversed to inheritance-with-overrides — an instance
+      inherits from its stamp, a change to one instance stays local, and a
+      change to the stamp reaches every instance that has not overridden that
+      property. **The SAVE has understood that since ADR 0051 and nothing else
+      could ask it**, so a person editing a placed lamp post could not see which
+      of its properties were their own and which came from the file, and
+      therefore had nothing to revert and nothing to push back up.
+
+      `scene::stampOverrides` is that question. It shares its comparison with
+      the writer rather than restating it — `differsFromReference` is one
+      predicate both ask — because two definitions of "differs" would disagree
+      the first time either was touched, and the panel would offer to revert
+      something the save had already decided was not an override. Seven cases,
+      including the three that must answer EMPTY and are easy to get wrong the
+      other way: a freshly placed instance, an instance in no stamp at all, and
+      a stamp whose file cannot be read. One case asserts the query and the save
+      count the same overrides.
+
+      **Revert** puts the stamp's value back on one instance as one undo step,
+      and refuses to record a step when the property already matches — the
+      invariant D134 and D141 both record, because `UndoStack::record` clears
+      the redo stack, so a step that undoes nothing has destroyed a real redo
+      future before anybody presses ctrl-Z. **Apply** builds the stamp into a
+      scratch world, writes the property there, writes the file, and restamps:
+      the instance stops being overridden as a CONSEQUENCE rather than as a
+      step, since once the file says what the instance says there is nothing
+      left to differ. An instance that had overridden the same property with
+      some other value keeps it, because `restamp` measures against the file's
+      previous text — applying is not a way to overwrite other people's edits.
+      Refused while that stamp is open on the stage, because two writers of one
+      file means the one a person can see would lose. Seven more cases.
+
+      The panel marks an overridden row and offers both verbs on it, disabled
+      rather than hidden when there is nothing to do. **The cache lives in the
+      panel and deliberately not in the editor**: answering reads the stamp
+      file, and a model-side cache would be a wrong answer with no way to notice
+      — the world can be changed by a gizmo drag, a script or a queued write,
+      none of which the editor hears about. A unit test caught exactly that and
+      is the reason it moved. The panel keys it on the selection and re-asks
+      four times a second, so an edit made by something else appears without
+      anybody clicking away and back, and D118's shape — a file read per frame
+      on the frame thread — does not come back.
 - [x] **S5.7** Project settings — built, and the writer it needed is a
       **surgical** one rather than a serialiser. Every `luaug.toml` in this
       repository opens with a paragraph explaining why its settings are what

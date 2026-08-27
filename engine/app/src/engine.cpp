@@ -1946,6 +1946,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (editorCommands.save)
                     (void)editor.saveOpenScene(host->world());
+
+                // **One property of one placed stamp, taken back or pushed up**
+                // (S5.6). Drained here with the rest: applying rewrites a file
+                // and restamps every linked instance in the world, which is a
+                // structural change and belongs at the safe point rather than
+                // inside the row that asked for it.
+                if (editorCommands.overrideApply.has_value() && editorCommands.overrideSubject.valid() &&
+                    editorCommands.overrideProperty.valid()) {
+                    if (*editorCommands.overrideApply) {
+                        (void)editor.applyOverride(host->world(), host->runtime().dataModel(),
+                                                   editorCommands.overrideSubject, editorCommands.overrideProperty);
+                    }
+                    else {
+                        (void)editor.revertOverride(host->world(), editorCommands.overrideSubject,
+                                                    editorCommands.overrideProperty);
+                    }
+                }
                 if (!editorCommands.saveAs.empty())
                     (void)editor.saveSceneAs(host->world(), editorCommands.saveAs);
 

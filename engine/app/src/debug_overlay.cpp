@@ -2761,7 +2761,7 @@ void drawTags(scene::World& world, Inspector& inspector, core::InstanceId primar
 
 void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspector, ContentTree* tree = nullptr,
                     const IconAtlas* icons = nullptr, audio::AudioSystem* audio = nullptr,
-                    EditorCommands* commands = nullptr)
+                    EditorCommands* commands = nullptr, Editor* editor = nullptr)
 {
     // **The whole selection, not the primary.** A grid pointed at one instance
     // while three are highlighted is the editor disagreeing with itself, and it
@@ -2781,6 +2781,41 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     // for forty is one somebody edits forty instances with by accident.
     if (live > 1)
         ImGui::Text("%zu instances selected - every edit writes to all of them", live);
+
+    // **Which of these properties are this instance's own** (S5.6). Asked once
+    // for the whole grid rather than once per row, and answered from a cache the
+    // editor drops whenever anything changes -- the question reads the stamp
+    // FILE, and a panel that asked it per row per frame would be D118 again.
+    //
+    // Only for a single selection. With several selected the answer differs per
+    // instance, and one mark that meant "some of these" would be worse than no
+    // mark: a person would revert what they could not see.
+    //
+    // Cached against the selection and a frame budget, in that order: a new
+    // selection is answered at once, and a selection somebody is sitting on is
+    // re-asked about four times a second so an edit made by a gizmo drag or a
+    // script -- neither of which the editor hears about -- shows up without
+    // anybody clicking away and back.
+    static core::InstanceId s_overridesFor;
+    static std::vector<core::NameAtom> s_overrides;
+    static int s_overridesAge = 0;
+
+    std::span<const core::NameAtom> overridden;
+    if (editor != nullptr && live == 1 && targets.size() == 1) {
+        constexpr int kRefreshFrames = 15;
+        if (targets.front() != s_overridesFor || s_overridesAge >= kRefreshFrames) {
+            s_overrides = editor->overridesOf(world, targets.front());
+            s_overridesFor = targets.front();
+            s_overridesAge = 0;
+        }
+        else {
+            ++s_overridesAge;
+        }
+        overridden = s_overrides;
+    }
+    else {
+        s_overridesFor = core::InstanceId{};
+    }
 
     // One loop over the descriptor tables. There is no switch on a class name
     // anywhere below this line, which is Decision 16's whole claim.
@@ -2854,6 +2889,36 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
             }
             else {
                 ImGui::TextUnformatted(nameLabel);
+            }
+
+            // **The mark, and the two things a person can do about it** (S5.6).
+            // A dot rather than a colour on the label: the label is already
+            // coloured by state elsewhere, and a second meaning on one channel
+            // is how a panel becomes unreadable. The tooltip says what the dot
+            // means, because a dot on its own is a puzzle.
+            const bool isOverride =
+                std::find(overridden.begin(), overridden.end(), descriptor->name) != overridden.end();
+            if (isOverride) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "*");
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("This instance's own value. The stamp says something else.");
+            }
+            // Offered on the row whether or not it is overridden, so the menu is
+            // in one place; the items themselves are disabled when there is
+            // nothing to do, which says WHY rather than hiding the answer.
+            if (commands != nullptr && targets.size() == 1 && ImGui::BeginPopupContextItem("override")) {
+                if (ImGui::MenuItem("Revert to stamp", nullptr, false, isOverride)) {
+                    commands->overrideSubject = targets.front();
+                    commands->overrideProperty = descriptor->name;
+                    commands->overrideApply = false;
+                }
+                if (ImGui::MenuItem("Apply to stamp", nullptr, false, isOverride)) {
+                    commands->overrideSubject = targets.front();
+                    commands->overrideProperty = descriptor->name;
+                    commands->overrideApply = true;
+                }
+                ImGui::EndPopup();
             }
 
             // The IDL's own prose for this property, which now rides on the
@@ -5496,7 +5561,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         if (ImGui::Begin("Properties", &panels.properties)) {
             if (world != nullptr && inspector != nullptr) {
                 drawProperties(*world, treeRoot, *inspector, editor != nullptr ? &editor->content() : nullptr, icons,
-                               audio, editor != nullptr ? &commands : nullptr);
+                               audio, editor != nullptr ? &commands : nullptr, editor);
                 // **The write log is a DEBUG panel and the editor is not one.**
                 // It stays in the F3 overlay, where showing the machinery is the
                 // whole point; here it was a collapsing header that appeared

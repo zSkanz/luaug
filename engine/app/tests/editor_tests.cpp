@@ -4093,3 +4093,172 @@ TEST_CASE("the centre is the mean of the transforms, not of a bounding box")
 
     CHECK(after.x == doctest::Approx(before.x));
 }
+
+// --- Taking one override back, and pushing one up (S5.6) ---------------------
+//
+// `stampOverrides` says WHICH properties a placed instance has of its own. These
+// two verbs are what make that actionable: revert puts the stamp's value back on
+// this one instance, apply writes this instance's value into the FILE so every
+// instance that has not overridden it follows.
+//
+// The invariant both have to respect is the one D134 and D141 record: a step
+// that undoes nothing eats a press of ctrl-Z, and `UndoStack::record` clears the
+// redo stack with it -- so a revert of something that already matches must not
+// record a step.
+
+namespace {
+
+// Two placements of one stamp, which is the arrangement every case here needs:
+// one instance to edit and one to watch.
+struct OverrideRig
+{
+    StampRig rig;
+    core::InstanceId first;
+    core::InstanceId second;
+    core::NameAtom transparency;
+
+    explicit OverrideRig(const StampProject& project) : rig(project)
+    {
+        const core::InstanceId post = rig.part("Post", rig.root, {0.0, 0.0, 0.0});
+        (void)rig.part("Lantern", post, {0.0, 4.0, 0.0});
+        REQUIRE(rig.editor.createStamp(rig.world, post, rig.root, "post"));
+
+        REQUIRE(rig.editor.instantiateStamp(rig.world, "post", rig.root, rig.root, rig.inspector));
+        first = rig.inspector.selection();
+        REQUIRE(rig.editor.instantiateStamp(rig.world, "post", rig.root, rig.root, rig.inspector));
+        second = rig.inspector.selection();
+        REQUIRE(first.valid());
+        REQUIRE(second.valid());
+        CHECK(first != second);
+
+        transparency = rig.atoms.intern("Transparency");
+    }
+
+    [[nodiscard]] core::f64 transparencyOf(core::InstanceId id)
+    {
+        const scene::PropertyDesc* descriptor = rig.world.classes().findProperty(rig.world.classOf(id), transparency);
+        REQUIRE(descriptor != nullptr);
+        REQUIRE(descriptor->get != nullptr);
+        const std::optional<scene::Value> value = descriptor->get(rig.world, id);
+        REQUIRE(value.has_value());
+        const core::f64* held = std::get_if<core::f64>(&*value);
+        REQUIRE(held != nullptr);
+        return *held;
+    }
+
+    void setTransparency(core::InstanceId id, core::f64 value)
+    {
+        REQUIRE(rig.world.setProperty(id, transparency, scene::Value{value}) == scene::World::SetResult::Changed);
+    }
+};
+
+} // namespace
+
+TEST_CASE("a freshly placed stamp has no overrides, and an edit gives it exactly one")
+{
+    StampProject project("override-visible");
+    OverrideRig fixture(project);
+
+    // The case the mark rests on: if a placement reported overrides, every stamp
+    // in a world would come up marked and the mark would mean nothing.
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first).empty());
+
+    fixture.setTransparency(fixture.first, 0.75);
+    const std::vector<core::NameAtom> overrides = fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first);
+    REQUIRE(overrides.size() == 1);
+    CHECK(overrides.front() == fixture.transparency);
+    // And it is this instance's own, not the stamp's.
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).empty());
+}
+
+TEST_CASE("reverting puts the stamp's value back on this instance and leaves the other alone")
+{
+    StampProject project("override-revert");
+    OverrideRig fixture(project);
+
+    const core::f64 original = fixture.transparencyOf(fixture.first);
+    fixture.setTransparency(fixture.first, 0.75);
+
+    CHECK(fixture.rig.editor.revertOverride(fixture.rig.world, fixture.first, fixture.transparency));
+    CHECK(fixture.transparencyOf(fixture.first) == doctest::Approx(original));
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first).empty());
+
+    // One instance, not a reload of the stamp.
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).empty());
+
+    // And it is ONE undo step, which puts the edit back.
+    REQUIRE(fixture.rig.editor.undo(fixture.rig.world, fixture.rig.inspector));
+    CHECK(fixture.transparencyOf(fixture.first) == doctest::Approx(0.75));
+}
+
+TEST_CASE("reverting something that already matches the stamp records no undo step")
+{
+    StampProject project("override-noop");
+    OverrideRig fixture(project);
+
+    // **The invariant D134 records.** `UndoStack::record` clears the redo stack,
+    // so a step that changes nothing has already destroyed a real redo future by
+    // the time somebody presses ctrl-Z and watches nothing happen.
+    const core::usize before = fixture.rig.editor.history().depth();
+    CHECK(fixture.rig.editor.revertOverride(fixture.rig.world, fixture.first, fixture.transparency));
+    CHECK(fixture.rig.editor.history().depth() == before);
+}
+
+TEST_CASE("reverting is refused on an instance that is not part of a stamp")
+{
+    StampProject project("override-loose");
+    OverrideRig fixture(project);
+
+    const core::InstanceId loose = fixture.rig.part("Loose", fixture.rig.root, {0.0, 0.0, 0.0});
+    const core::usize before = fixture.rig.editor.history().depth();
+
+    CHECK_FALSE(fixture.rig.editor.revertOverride(fixture.rig.world, loose, fixture.transparency));
+    CHECK(fixture.rig.editor.status().failed);
+    // A refusal must not eat a press of ctrl-Z either.
+    CHECK(fixture.rig.editor.history().depth() == before);
+}
+
+TEST_CASE("applying writes the file, and the instance that did not override it follows")
+{
+    StampProject project("override-apply");
+    OverrideRig fixture(project);
+
+    fixture.setTransparency(fixture.first, 0.75);
+    CHECK(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, fixture.first, fixture.transparency));
+
+    // **The instance stops being overridden as a consequence, not as a step**:
+    // once the file says what the instance says, there is nothing left to differ.
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first).empty());
+
+    // And the sibling followed, which is the whole point of applying rather than
+    // editing each one by hand.
+    CHECK(fixture.transparencyOf(fixture.second) == doctest::Approx(0.75));
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).empty());
+}
+
+TEST_CASE("applying leaves another instance's own override of the same property alone")
+{
+    StampProject project("override-apply-keep");
+    OverrideRig fixture(project);
+
+    fixture.setTransparency(fixture.first, 0.75);
+    fixture.setTransparency(fixture.second, 0.25);
+
+    CHECK(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, fixture.first, fixture.transparency));
+
+    // **Applying is not a way to overwrite other people's edits.** `restamp`
+    // measures each instance against the file's PREVIOUS text, so one that had
+    // its own value for this property keeps it.
+    CHECK(fixture.transparencyOf(fixture.second) == doctest::Approx(0.25));
+    CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).size() == 1);
+}
+
+TEST_CASE("applying is refused on an instance that is not part of a stamp")
+{
+    StampProject project("override-apply-loose");
+    OverrideRig fixture(project);
+
+    const core::InstanceId loose = fixture.rig.part("Loose", fixture.rig.root, {0.0, 0.0, 0.0});
+    CHECK_FALSE(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, loose, fixture.transparency));
+    CHECK(fixture.rig.editor.status().failed);
+}
