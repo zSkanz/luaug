@@ -5,6 +5,15 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
 
 ## State
 
+- **Post-v1 phases 2 and 4 opened 2026-08-27 by the owner**, in the same
+  instruction, and phase 1 (the visual editor, E1–E9) is complete behind them.
+  Phase 2 is effects and world content — **voxel terrain with a sculpting tool**
+  first, then particles, decals, `SurfaceGui`/billboards and rich text. Phase 4
+  is multiplayer/replication, whose shape was designed and approved on
+  2026-08-21 and is inherited rather than re-decided; what its milestone owes is
+  the part that section deliberately did not commit — replication semantics.
+  Phase 3 and phase 5 stay closed.
+
 - **E8 — The Script Editor — BUILT, awaiting review, 2026-08-24.** Its entry
   moved to
   [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) with
@@ -141,18 +150,27 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 
 ## Now / Next
 
-- **The campaign in [`docs/finish-line.md`](docs/finish-line.md) is finished,
-  and what is left is the owner's.** They left on 2026-08-26 having asked for
-  one thing — finish everything the audit found, take every repository-level
-  decision on their behalf, and do not stop to ask. **Eighty-seven of its
-  eighty-eight rows are closed.** The one that is not is S1.7, and it is not
-  work: `milestone/e5`, `e7` and `e8` wait on a person signing those milestones
-  off, and S1.7 now names exactly what each is waiting for rather than leaving
+- **Post-v1 phases 2 and 4 are OPEN and being built.** The owner opened both on
+  2026-08-27 in one instruction — *"terrain editor multiplayer voxels etc."* —
+  which also answers the terrain's one recorded open question: **voxel, not
+  height field, so caves and overhangs are possible.** Phase 3 (2D layer,
+  navmesh) and phase 5 (mobile) were skipped over rather than dropped and stay
+  closed; the roadmap's numbering is intent, not a queue. R15 is not a permanent
+  ban and never was — it says v1's scope is closed and that a scope change is an
+  escalation item, and the post-v1 phase list is that escalation.
+
+  **The next action, as a sentence:** read the milestone brief for whichever of
+  the two is in flight and continue from its order-of-work table.
+- **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
+  and it is the reason the tree is in a state worth building on. **Eighty-seven
+  of its eighty-eight rows are done.** The one that is not is S1.7, and it is
+  not work: `milestone/e5`, `e7` and `e8` wait on a person signing those
+  milestones off, and S1.7 names exactly what each waits for rather than leaving
   it as "review".
 
-  **The next action, as a sentence:** read S8.7, which is the handback and lists
-  the four things that need the owner, in order — sign off three milestones,
-  cut `v1.1.0`, fix the billing so Actions runs again, and make the repository
+  **Four things still need the owner** and none of them blocks the phases above.
+  S8.7 is the handback and lists them in order: sign off three milestones, cut
+  `v1.1.0`, fix the billing so Actions runs again, and make the repository
   public.
 - **`v1.1.0` is prepared but not tagged.** The tree declares it, the changelog
   carries the editor phase, and `lute tools/repo/package.luau` writes
