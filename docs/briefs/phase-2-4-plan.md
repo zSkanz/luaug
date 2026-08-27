@@ -503,6 +503,47 @@ correctness and false of cost.** A bricked cell needs a budgeted, off-frame
 collider rebuild that a height-encoded cell does not, and that path is now part
 of the milestone rather than a detail of it.
 
+### B1 and B2 — the field and the mesher, built (2026-08-27)
+
+**One deviation from the plan, with its reason and its price.** B2 says Marching
+Cubes; what was built is marching **tetrahedra**. Every property ADR 0067 claims
+survives — vertices land on edge crossings by linear interpolation, so
+`sd(p) = p.y − H(x, z)` still puts the vertical crossing at exactly `y = H`, and
+there is a test asserting that height is exact rather than approximate. What
+changed is how a cell is subdivided first.
+
+Three reasons, in the order they decided it. **Marching cubes needs a 256-entry
+triangulation table**, which is somebody else's work to vendor — R5 and R6 make
+that an ADR rather than an `#include`, and deriving it from the fifteen base
+cases under the cube's symmetry group is real work with a silent failure mode. **A
+tetrahedron has no ambiguous face**, so the case where two neighbouring cells
+disagree about whether a surface connects — a crack, which in terrain is a hole
+somebody falls through — does not exist. And **the winding is derived from the
+field's gradient rather than from a table**, so "which way does this face" stops
+being something a table can have backwards; that exact bug had already cost this
+milestone a failing test in the physics seam an hour earlier.
+
+**The price is about twice the triangles, and worse-shaped ones.** Against A3's
+numbers that matters for a bricked cell's collider and not for a height-encoded
+one, whose collider is a height field. If the count becomes the problem the fix
+is the derived marching-cubes table and it is a change to one file.
+
+Nine cases, 6,444 assertions: no surface where there is no sign change; a flat
+field meshing at exactly its height and facing up; **watertightness asserted as
+edge use** — no edge used more than twice, which is the non-manifold failure —
+a spherical cave inside solid ground meshing as a sphere, the collider being the
+same triangles as the render mesh at the level actually meshed, a coarser stride
+being the same plane with fewer triangles, and the same field meshing to the same
+bytes twice.
+
+Two `std::map`s rather than hash maps, in the field and in the mesher's vertex
+cache, and both for R10: the walk order decides the vertex order, which decides
+the mesh's bytes, which reaches a content hash.
+
+Clang caught the last defect in each of the two commits, and it was the same one
+both times — `doctest::Approx` takes a `double` and an `f32` compared against it
+is a promotion MSVC does not diagnose.
+
 ## Risks entering F1
 
 1. **The slope precondition cascades.** Measured at A5 before anything depends

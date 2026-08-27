@@ -15,6 +15,7 @@ luaug_add_module(asset
         src/chunk.cpp
         src/content.cpp
         src/terrain.cpp
+        src/terrain_mesher.cpp
         src/image.cpp
         src/gltf.cpp
         src/mesh_format.cpp
@@ -58,6 +59,7 @@ luaug_add_module_tests(asset
         tests/chunk_tests.cpp
         tests/content_tests.cpp
         tests/terrain_tests.cpp
+        tests/terrain_mesher_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp
         tests/mesh_format_tests.cpp
