@@ -19,7 +19,6 @@ luaug_add_module(asset
         src/terrain_raycast.cpp
         src/terrain_cell.cpp
         src/terrain_edit.cpp
-        src/terrain_codec.cpp
         src/image.cpp
         src/gltf.cpp
         src/mesh_format.cpp
@@ -65,7 +64,6 @@ luaug_add_module_tests(asset
         tests/terrain_tests.cpp
         tests/terrain_mesher_tests.cpp
         tests/terrain_cell_tests.cpp
-        tests/terrain_codec_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp
         tests/mesh_format_tests.cpp

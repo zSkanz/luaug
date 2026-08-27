@@ -310,32 +310,6 @@ EditReport paintBall(TerrainField& field, core::DVec3 center, double radius, cor
 // be a world that changed when nobody touched it.
 core::u32 compact(TerrainField& field);
 
-// --- Saving a field ----------------------------------------------------------
-
-// The field as bytes, and back.
-//
-// **A sculpted world is somebody's afternoon**, and until this existed a save
-// wrote every instance in the scene and none of the ground. The encoding is
-// versioned, refuses a version it does not know rather than guessing, and is a
-// pure function of the field's contents -- the keys come out in the field's own
-// sorted order, so two identical worlds produce identical bytes and a scene file
-// stays diffable (R10).
-//
-// Run-length coded, which is worth a sentence because a real compressor was the
-// obvious alternative. Zstd is vendored inside `basis_universal`, and reaching
-// into another library's bundled dependency to shrink a scene file is a
-// dependency decision that deserves an ADR rather than a convenience. What this
-// data looks like is long runs -- a brick is mostly saturated distance, a tile's
-// materials are usually one value, flat ground repeats four height bytes across
-// a thousand columns -- and a run coder captures nearly all of that at a worst
-// case of one byte per hundred and twenty-eight.
-[[nodiscard]] std::vector<core::u8> encodeTerrain(const TerrainField& field);
-
-// The field back, or nothing when the bytes are not a terrain this build can
-// read. Nothing is returned rather than a partly-filled field: a world that
-// loads and is silently wrong is worse than one that says it cannot load.
-[[nodiscard]] std::optional<TerrainField> decodeTerrain(std::span<const core::u8> bytes);
-
 // --- Raycasting the field directly -------------------------------------------
 
 // Where a ray met the ground.

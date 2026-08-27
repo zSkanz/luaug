@@ -184,9 +184,12 @@ TEST_CASE("a count larger than the ceiling is refused before anything is reserve
     // sixteen gigabytes before the first read failed.
     std::vector<std::byte> encoded = encodeTerrainCell(sampleCell());
 
-    // The tile count is the eighth word: magic, version, flags, x, z, voxel,
-    // giveUp, tiles.
-    const core::usize tileCountAt = 7 * 4;
+    // The tenth word: magic, version, flags, x, z, voxelSize, minHeight,
+    // maxHeight, giveUpColumns, tileCount. It was the eighth until version 2
+    // added the reserved range, which is why `TerrainCellHeaderBytes` is now
+    // exported -- three hand-counted offsets is three things that go quietly
+    // wrong the next time a word is added.
+    const core::usize tileCountAt = 9 * 4;
     for (core::usize i = 0; i < 4; ++i) {
         encoded[tileCountAt + i] = static_cast<std::byte>(0xFF);
     }
@@ -205,11 +208,16 @@ TEST_CASE("a directory whose keys are out of order is a corrupt file")
     // that accepted any order would accept a file whose directory and payloads
     // disagree -- and the failure would be terrain in the wrong place rather
     // than an error, which is the worst kind.
-    std::vector<std::byte> encoded = encodeTerrainCell(sampleCell());
+    std::vector<std::byte> encoded = encodeTerrainCell(sampleCell(), TerrainCellCompression::None);
 
+    // **Written uncompressed**, because the directory lives in the body and a
+    // run-coded body has no fixed offset to poke. That is not a workaround: the
+    // format carries both codings, and a decoder whose uncompressed branch no
+    // test ever reached would be a branch that rots.
+    //
     // Two tiles, at `{-1, 2}` and `{0, 0}` sorted. Swap the first key's x so the
     // directory descends.
-    const core::usize firstKeyAt = 9 * 4;
+    const core::usize firstKeyAt = TerrainCellHeaderBytes;
     for (core::usize i = 0; i < 4; ++i) {
         encoded[firstKeyAt + i] = static_cast<std::byte>(0x7F);
     }
@@ -232,4 +240,144 @@ TEST_CASE("a voxel size that cannot describe a field is refused rather than clam
 
     TerrainCell decoded;
     CHECK(decodeTerrainCell(encoded, decoded).has_value());
+}
+
+// --- Version 2: the reserved range, and the run coder ------------------------
+
+namespace {
+
+// Ground that reaches the floor -- height tiles -- with a cave through it, which
+// is what puts voxel bricks in the field. Both encodings, because the format has
+// to carry both and a fixture with only one would pass while half of it was
+// broken.
+[[nodiscard]] TerrainField sculptedField()
+{
+    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -48.0f, .maxHeight = 48.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{48.0f, 40.0f, 48.0f}, 1);
+    fillBall(field, core::DVec3{0.0, -3.0, 0.0}, 4.0, 0);
+    fillBall(field, core::DVec3{6.0, 1.0, 3.0}, 5.0, 2);
+    return field;
+}
+
+} // namespace
+
+TEST_CASE("the reserved height range survives a round trip")
+{
+    // **The hole version 2 exists to close.** Version 1 wrote `voxelSize` and
+    // `giveUpColumns` and dropped the range, so a saved field came back with the
+    // DEFAULT band -- and ADR 0066 says the band is spread across a collider's
+    // height precision at construction and cannot be widened afterwards. Every
+    // later edit to a reloaded world would have been clamped to a range it was
+    // never sculpted under, with no error anywhere.
+    //
+    // Non-default on purpose, in both directions: a test that used the defaults
+    // would pass against a decoder that read nothing at all.
+    TerrainCell cell;
+    cell.x = 3;
+    cell.z = -7;
+    cell.settings = FieldSettings{.voxelSize = 0.5f, .minHeight = -48.0f, .maxHeight = 48.0f};
+    cell.field = sculptedField();
+
+    TerrainCell back;
+    REQUIRE_FALSE(decodeTerrainCell(encodeTerrainCell(cell), back).has_value());
+
+    CHECK(back.settings.minHeight == -48.0f);
+    CHECK(back.settings.maxHeight == 48.0f);
+    // And the field carries it too, which is what every later edit reads.
+    CHECK(back.field.settings().minHeight == -48.0f);
+    CHECK(back.field.settings().maxHeight == 48.0f);
+    CHECK(back.x == 3);
+    CHECK(back.z == -7);
+    CHECK(back.field.digest() == cell.field.digest());
+}
+
+TEST_CASE("an inverted reserved range is refused rather than clamped")
+{
+    // Its symptom would be terrain that cannot be sculpted -- every promotion
+    // examination empty -- rather than an error, which is the worst shape a
+    // corrupt file can take.
+    TerrainCell cell;
+    cell.settings = FieldSettings{.voxelSize = 0.5f, .minHeight = 8.0f, .maxHeight = 8.0f};
+    cell.field = TerrainField(cell.settings);
+
+    std::vector<std::byte> bytes = encodeTerrainCell(cell);
+    TerrainCell back;
+    CHECK(decodeTerrainCell(bytes, back).has_value());
+}
+
+TEST_CASE("the run coder actually pays for itself on ground")
+{
+    // Not a threshold on a benchmark -- an assertion about the data. A tile of
+    // flat ground is one height repeated a thousand times and one material
+    // repeated a thousand times, and a coder that did not collapse that would be
+    // a coder worth removing. This is what version 1's comment asked for before
+    // adding a compressor: a measurement rather than a hope.
+    TerrainCell cell;
+    cell.settings = FieldSettings{.voxelSize = 0.5f, .minHeight = -48.0f, .maxHeight = 48.0f};
+    cell.field = TerrainField(cell.settings);
+    fillBlock(cell.field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{64.0f, 40.0f, 64.0f}, 1);
+    REQUIRE(cell.field.tileCount() >= 4);
+
+    const core::usize plain = cell.field.tileCount() * (TileArea * 5) + cell.field.brickCount() * (BrickVolume * 2);
+    const core::usize coded = encodeTerrainCell(cell).size();
+    CHECK(coded * 8 < plain);
+}
+
+TEST_CASE("a coder this build does not have is refused rather than guessed at")
+{
+    TerrainCell cell;
+    cell.settings = FieldSettings{.voxelSize = 0.5f, .minHeight = -48.0f, .maxHeight = 48.0f};
+    cell.field = sculptedField();
+
+    std::vector<std::byte> bytes = encodeTerrainCell(cell);
+    // The compression word is the tenth: magic, version, flags, x, z, voxelSize,
+    // minHeight, maxHeight, giveUpColumns, tileCount, brickCount, compression.
+    REQUIRE(bytes.size() > 48);
+    bytes[44] = std::byte{0x7F};
+
+    TerrainCell back;
+    CHECK(decodeTerrainCell(bytes, back).has_value());
+}
+
+TEST_CASE("a truncated cell is an error and never a crash")
+{
+    TerrainCell cell;
+    cell.settings = FieldSettings{.voxelSize = 0.5f, .minHeight = -48.0f, .maxHeight = 48.0f};
+    cell.field = sculptedField();
+    const std::vector<std::byte> good = encodeTerrainCell(cell);
+
+    // Every prefix. A run coder that walked off its input would be a decoder
+    // that read whatever came next in memory.
+    for (core::usize length = 0; length < good.size(); length += 1 + length / 16) {
+        std::vector<std::byte> cut(good.begin(), good.begin() + static_cast<std::ptrdiff_t>(length));
+        TerrainCell back;
+        CAPTURE(length);
+        CHECK(decodeTerrainCell(cut, back).has_value());
+    }
+}
+
+TEST_CASE("both codings round-trip, and the coded one is smaller")
+{
+    // The format carries two, so both are asserted. A decoder with a branch no
+    // test reaches is a branch that rots -- and version 1's files are exactly
+    // that branch, minus the two words version 2 added.
+    TerrainCell cell;
+    cell.x = -2;
+    cell.z = 5;
+    cell.settings = FieldSettings{.voxelSize = 0.5f, .minHeight = -48.0f, .maxHeight = 48.0f};
+    cell.field = sculptedField();
+
+    const std::vector<std::byte> coded = encodeTerrainCell(cell, TerrainCellCompression::RunLength);
+    const std::vector<std::byte> plain = encodeTerrainCell(cell, TerrainCellCompression::None);
+    CHECK(coded.size() < plain.size());
+
+    for (const std::vector<std::byte>& bytes : {coded, plain}) {
+        TerrainCell back;
+        REQUIRE_FALSE(decodeTerrainCell(bytes, back).has_value());
+        CHECK(back.x == cell.x);
+        CHECK(back.z == cell.z);
+        CHECK(back.field.digest() == cell.field.digest());
+        CHECK(back.settings.minHeight == cell.settings.minHeight);
+        CHECK(back.settings.maxHeight == cell.settings.maxHeight);
+    }
 }

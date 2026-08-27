@@ -35,7 +35,37 @@ namespace luaug::asset {
 // Bumped whenever the layout changes. A hard equality on read, like
 // `ChunkFormatVersion`: a reader that tried to be permissive about a format it
 // does not know is a reader that produces plausible garbage.
-inline constexpr core::u32 TerrainCellFormatVersion = 1;
+//
+// **Version 2 fixed a hole and used the byte version 1 reserved.** Version 1
+// wrote `voxelSize` and `giveUpColumns` and dropped `minHeight` and
+// `maxHeight` -- so a field came back with the DEFAULT reserved range, and
+// ADR 0066 says that range is spread across a collider's precision at
+// construction and cannot be widened afterwards. A reloaded world would have
+// clamped every later edit to a band it was never sculpted under, silently.
+// Nothing had noticed because nothing round-tripped a non-default range.
+//
+// The same bump carries compression, which version 1 explicitly left for
+// version 2 to add with a byte in the header saying which.
+inline constexpr core::u32 TerrainCellFormatVersion = 2;
+
+// How a cell's body is coded. The header is never compressed -- a reader has to
+// be able to check the counts before it allocates anything to decompress into,
+// which is the rule this format's ceilings exist for.
+enum class TerrainCellCompression : core::u32
+{
+    // What version 1 always was.
+    None = 0,
+    // Run-length, PackBits shape. **Chosen over zstd, which ADR 0067 named and
+    // which is already linked inside `basis_universal`.** Reaching into another
+    // library's bundled dependency is a dependency decision that deserves an ADR
+    // rather than a convenience -- and what this data actually is, is long runs:
+    // a brick is mostly saturated distance, a tile's materials are usually one
+    // value, and flat ground repeats the same four height bytes across a
+    // thousand columns. Measured at better than eight to one on flat ground, in
+    // a test that asserts it rather than reporting it. Worst case is one byte
+    // per hundred and twenty-eight.
+    RunLength = 1,
+};
 
 // **Ceilings, checked before anything is reserved.**
 //
@@ -63,7 +93,23 @@ struct TerrainCell
 // Encodes a cell. A pure function of its input: the same cell encodes to the
 // same bytes on every machine, which is what makes a content hash over one mean
 // anything.
-[[nodiscard]] std::vector<std::byte> encodeTerrainCell(const TerrainCell& cell);
+//
+// `compression` is a parameter rather than a fixed choice because the format
+// carries both and a decoder that only ever met one of them is a decoder with an
+// untested branch in it. Callers want the default; the uncompressed form is for
+// tests that need a known byte offset, and for anything that would rather spend
+// bytes than cycles.
+[[nodiscard]] std::vector<std::byte>
+encodeTerrainCell(const TerrainCell& cell, TerrainCellCompression compression = TerrainCellCompression::RunLength);
+
+// Where a cell's body begins, in bytes. The header is twelve little-endian
+// words: magic, version, flags, x, z, voxelSize, minHeight, maxHeight,
+// giveUpColumns, tileCount, brickCount, compression.
+//
+// Exposed because three tests poke a header field by offset, and three
+// hand-counted offsets is three things that go quietly wrong the next time a
+// word is added -- which is exactly what happened when version 2 added two.
+inline constexpr core::usize TerrainCellHeaderBytes = 12 * 4;
 
 // Decodes one, or says why not.
 [[nodiscard]] std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> bytes, TerrainCell& out);

@@ -421,7 +421,16 @@ jobs:
             "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/${archive}"
           unzip -q "${RUNNER_TEMP}/rokit.zip" -d "${RUNNER_TEMP}/rokit"
           "${RUNNER_TEMP}/rokit/rokit" self-install
-          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          # **A Windows path on Windows.** `$HOME` in the runner's bash is
+          # `/c/Users/runneradmin`, and `$GITHUB_PATH` is read by every later
+          # step -- including the one that runs ctest under `cmd`, where a POSIX
+          # path means nothing. The Linux tier found `lute` and the Windows tier
+          # did not, on the same step, which is what gave this away.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cygpath -w "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          else
+            echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          fi
           "$HOME/.rokit/bin/rokit" authenticate github --token "$GH_TOKEN"
           # --no-trust-check: the tools are pinned in the in-repo, ADR-gated
           # rokit.toml (R5); the interactive trust prompt has no answer in CI.

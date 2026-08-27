@@ -541,8 +541,22 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/blake3/c/blake3.c")
         blake3/c/blake3_dispatch.c
         blake3/c/blake3_portable.c)
     target_include_directories(blake3 SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/blake3/c")
+    # **`BLAKE3_USE_NEON=0` belongs in this list and was missing from it**, which
+    # is not a new decision -- it is the decision above, applied to the
+    # architecture nothing had ever built.
+    #
+    # The four `BLAKE3_NO_*` macros turn off the x86 paths. NEON has no matching
+    # `BLAKE3_NO_` spelling: `blake3_dispatch.c` defines `BLAKE3_USE_NEON` to 1
+    # on aarch64 unless something says otherwise, and then calls
+    # `blake3_hash_many_neon`, which lives in `blake3_neon.c` -- a file this
+    # target deliberately does not compile. The result is a link error naming an
+    # undefined symbol, on arm64 only.
+    #
+    # Found by the first macOS run after the repository went public. Every hosted
+    # macOS runner is Apple silicon, so this had been unbuildable there since
+    # blake3 was vendored, and no tier that could run said so.
     target_compile_definitions(blake3 PRIVATE
-        BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512)
+        BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512 BLAKE3_USE_NEON=0)
     add_library(blake3::blake3 ALIAS blake3)
 endif()
 

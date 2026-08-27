@@ -280,7 +280,11 @@ u64 World::worldHash() const
         // The representation itself is state and is covered for free: which
         // columns carry bricks decides which digests appear here, promotion
         // happens exactly at an edit, demotion only at an explicit `Compact`,
-        // and `.lterrain` preserves it -- so a save and a reload hash the same.
+        // and `.lterrain` preserves it byte for byte -- so a save and a reload
+        // hash the same. An authored world carries that format base64'd in the
+        // scene's own `terrain` key rather than in a file beside it, because
+        // `writeScene` returns a string and a scene is one text file; a streamed
+        // one will carry the same bytes per cell.
         if (const TerrainComponent* terrain = m_terrains.find(id); terrain != nullptr) {
             hasher.number(static_cast<f64>(terrain->field.settings().voxelSize));
             hasher.number(static_cast<f64>(terrain->minHeight));

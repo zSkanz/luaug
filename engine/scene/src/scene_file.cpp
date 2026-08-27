@@ -1,4 +1,5 @@
 #include <luaug/asset/terrain.h>
+#include <luaug/asset/terrain_cell.h>
 #include <luaug/core/base64.h>
 #include <luaug/core/i18n.h>
 #include <luaug/core/json.h>
@@ -510,12 +511,24 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     // Its own key beside `attributes` and `tags` rather than a side-car file,
     // and the reason is the contract: `writeScene` returns a string and a scene
     // is one text file, which the editor, the packager, `readScene` and every
-    // round-trip test all depend on. Base64 over a run-coded encoding keeps that
-    // true at a size the runs make reasonable (`asset::encodeTerrain` argues the
-    // coder). A field with nothing in it writes nothing.
+    // round-trip test all depend on. Base64 keeps that true at a size the cell
+    // format's run coder makes reasonable.
+    //
+    // **`.lterrain`, the same format a streamed cell uses, and not a second
+    // one.** Two encoders for one thing is two behaviours for one thing, which
+    // is the argument this repository already made about importers. An authored
+    // world is written as the cell at the origin -- the whole field, unsplit --
+    // and when streaming arrives that field is what gets divided into real
+    // cells. A field with nothing in it writes nothing, which is what keeps
+    // every existing scene byte-identical.
     if (const TerrainComponent* terrain = world.terrains().find(id); terrain != nullptr) {
         if (terrain->field.tileCount() > 0 || terrain->field.brickCount() > 0) {
-            out.field("terrain", core::base64Encode(asset::encodeTerrain(terrain->field)));
+            asset::TerrainCell cell;
+            cell.settings = terrain->field.settings();
+            cell.field = terrain->field;
+            const std::vector<std::byte> encoded = asset::encodeTerrainCell(cell);
+            out.field("terrain", core::base64Encode(std::span<const core::u8>{
+                                     reinterpret_cast<const core::u8*>(encoded.data()), encoded.size()}));
             ++report.properties;
         }
     }
@@ -756,9 +769,14 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
         TerrainComponent* component = world.terrains().find(id);
         if (component != nullptr) {
             const std::optional<std::vector<core::u8>> bytes = core::base64Decode(terrain.asString());
-            std::optional<asset::TerrainField> field = bytes.has_value() ? asset::decodeTerrain(*bytes) : std::nullopt;
-            if (field.has_value()) {
-                component->field = std::move(*field);
+            asset::TerrainCell cell;
+            const bool decoded =
+                bytes.has_value() &&
+                !asset::decodeTerrainCell(
+                     std::span<const std::byte>{reinterpret_cast<const std::byte*>(bytes->data()), bytes->size()}, cell)
+                     .has_value();
+            if (decoded) {
+                component->field = std::move(cell.field);
                 // **The settings ride with the field**, so `MinHeight` and
                 // `MaxHeight` are whatever the ground was actually sculpted
                 // under rather than whatever the properties happened to say.
