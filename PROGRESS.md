@@ -166,12 +166,15 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   E8: two rows -- a photograph of the debugger stopped, which the eight headless
   cases cannot stand in for, and a `localgate` row its brief marks *(filled
   below)* and then does not fill.
-- **The full six-stage gate has not been run since the untracked tree landed**,
-  which is `docs/finish-line.md` S1.5: those five commits are unverified on this
-  machine, and CI cannot answer for them either. And a green gate is green with
-  one instrument switched off -- `openworld_soak`'s instance-growth check is
-  QUARANTINED at its second flake (D066), still measuring and still logging at
-  warn level, no longer failing the run.
+- **The full gate is green and it is nine stages now** (S1.5, 2026-08-27): the
+  seven that run by default, plus `asan`, `winprofiles` and `lavapipe` on
+  request. 57 tests on Windows, 56 on Linux, 1,168 conformance cases on each
+  tier. The sanitizers had their first fully clean run in the same pass.
+  **Two instruments are still switched off and both are deliberate**:
+  `openworld_soak`'s instance-growth check is QUARANTINED at its second flake
+  (D066), still measuring and still logging at warn level, no longer failing the
+  run; and macOS has no local instrument at all, so the only thing that can
+  answer for Tier 3 is Actions, which is not running.
 - **One writer, settled 2026-08-26.** Three agent sessions were writing this
   tree while the protocol in this file described two; all three were asked, all
   three declared what they held, confirmed nothing was mid-edit, and stood down.
@@ -253,41 +256,46 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 ## Session Log
 
 Entries for the planning session, for M0 through M4, and for sessions 11 and 19
-through 25 are in
+through 26 are in
 [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md), moved
 there each time this file passed its ~300-line cap (§11). What was worth
-carrying out of session 19 is under E3 above.
+carrying out of session 19 is under E3 above, and session 26's -- the campaign
+opening, and what a `git push` found -- went there on 2026-08-27 to make room
+for this one.
 
-- **2026-08-26 (session 26, Claude Opus): the campaign opened, and the first
-  thing it did was push.**
-  [`docs/finish-line.md`](docs/finish-line.md) is the mission it was given and
-  the record of every decision taken in the owner's absence.
+- **2026-08-27 (session 27, Claude Opus): S7 closed, and what a gate reports
+  when it did not run.** Twelve boxes of
+  [`docs/finish-line.md`](docs/finish-line.md) went from 27 unticked to 14;
+  every item of S7 is closed.
 
-  **Did:** claimed the tree, which took asking rather than inferring -- three
-  sessions were writing it, all three declared what they held and stood down;
-  pushed the 164 commits that existed on one machine only; pushed
-  `milestone/e4` and `milestone/e6`, which existed only there too, and created
-  `milestone/e2` and `milestone/e3`; landed the orphaned untracked tree in four
-  commits -- the documentation site with the two gate edits that already invoked
-  it, the branding set, `examples/11-ocean` with the island rework, and the icon
-  masters that `icons/bake.py` reads to generate the committed theme; swept the
-  scratch; and archived this file back under its cap.
+  **Did:** `inertcheck` stopped sharing one verdict between components that
+  share a field name, which found `GuiObject.Rotation` stored and drawn by
+  nothing for the whole of v1 and `InputBinding.Image` genuinely unread;
+  `Rotation` now draws, descendants included, as an affine on the quad. The
+  editor shell runs on both tiers rather than one -- the Tier-2 image had a
+  Vulkan device through lavapipe and no screen at all -- and crashed the moment
+  it could (D147). `assert-no-skips.sh` makes a skipped test a failure on every
+  tier and in CI, not just on the Windows stage. The three profiles a Windows
+  release ships are built by a gate on MSVC. The icon file is parsed and
+  asserted, and its parser is a library so Tier-2 reads it too. The real-image
+  golden suite two documents promised exists, compared EXACTLY on lavapipe.
+  macOS runs the tests it was already building and discarding. An exhausted IO
+  pool says so. And the sanitizers had their first fully clean run: 199.7 s.
 
-  **Learned, and a `git push` found it rather than a reading:** `origin/main`
-  had not moved since 2026-08-22. Eight milestones were recorded here as built
-  and three of them as tagged, while every commit since E1's sign-off and two of
-  those three tags existed nowhere but this machine -- no backup, no review, and
-  nothing for CI to run against. **A ledger cannot tell a commit from a
-  published one**, which is why "and pushed" is part of what ends a stage now.
+  **Learned, and it is the session's theme:** *a gate that reports green is not
+  the same as a gate that ran.* Six CI gates had reported green on every push
+  without executing; the one test that enters the editor shell had never run on
+  Linux and said nothing; three SDL_GPU cases returned before asserting when
+  there was no device; a UI golden checked in at M6 was read by nothing and had
+  drifted 1,585 pixels; a test that SET a field counted as a reader of it. None
+  of these was a failing test. Every one of them was a passing one.
 
-  **Learned, from this file itself:** it named a next action -- "the only
-  milestone still awaiting review" -- that two of its own entries contradicted,
-  and it repeated as a live limit the exact claim its newest entry had spent a
-  paragraph disproving. Neither survived because somebody believed it; both
-  survived because a section that is appended to and never re-read is a pile of
-  facts nobody compares. The archiving is not tidiness for its own sake: this
-  file was 707 lines against a ~300 cap, and a section nobody scrolls to is
-  where a contradiction lives undisturbed.
+  **Learned, from GitHub rather than from the code:** Actions is not merely out
+  of quota, it is refusing to start any job at all -- *"recent account payments
+  have failed or your spending limit needs to be increased"* -- so a red run
+  means the account and not the commit. Three closed items therefore wrote
+  CI-side code that has never executed, and the ledger's **Blocked** section
+  says which.
 
-  **Next:** open [`docs/finish-line.md`](docs/finish-line.md), find the first
-  unticked box, and continue.
+  **Next:** the first unticked box of
+  [`docs/finish-line.md`](docs/finish-line.md), which is S5.6.

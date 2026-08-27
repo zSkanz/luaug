@@ -760,9 +760,31 @@ that sends the next session to the wrong place.
       renderer than a unit test would be, and `architecture.md` §9 already says
       so: the capture gate and not the image comparison is the blocking render
       gate.
-- [x] **S7.11** The harness was never committed and there is no trace of it left,
-      so what is committed instead is the coverage it existed for — and the
-      right place turned out not to be the input module at all. `input_tests`
+- [x] **S7.11** **Found the trace after writing this entry, and it changes what
+      the item was about.** `docs/briefs/e8-kickoff.md` Finding 5 records it:
+      E1 concluded "SDL does not accept injected input" and five milestones
+      repeated it, which is true of ImGui-level injection and **false of real
+      Win32 input** — `SetCursorPos` + `mouse_event` + `SendKeys` reaches SDL
+      exactly as a person's does, and three script-editor defects were found by
+      driving the window that way.
+
+      So the harness was a **discovery** instrument, not a regression one, and
+      the three defects it found already carry unit tests: the IME's
+      `WantTextInput`, the byte-column-versus-codepoint defect asserted over a
+      two-byte and a four-byte character, and AltGr read as a Ctrl chord. What
+      was lost is the technique, and the technique is written down in that brief
+      where somebody looking for it will find it.
+
+      **Rebuilding it as a gate is declined, with the reason recorded so it is
+      not re-litigated**: a Win32 driver needs a focused window on a real
+      desktop session, and a gate that fails when somebody alt-tabs is the exact
+      class of thing this whole stage is about — a check nobody trusts is a
+      check nobody runs. It is worth having as an exploratory tool and it is
+      worth nothing as a blocking one.
+
+      What is committed instead is durable coverage for the OTHER thing nothing
+      could reach, and the right place turned out not to be the input module at
+      all. `input_tests`
       has thirty-one cases over actions, bindings, contexts and the virtual
       seam. What has none is **who owns the mouse**, and four defects came out
       of that one question: D049 (the pointer lock did nothing, because the
@@ -874,7 +896,25 @@ that sends the next session to the wrong place.
 
 ### S8 — Small debt, then the release
 
-- [ ] **S8.1** `../PROGRESS.md` archiving, now that one writer makes it safe.
+- [x] **S8.1** Archived, and the file is back under its cap with this session's
+      entry in it. It stood at 293 lines against §11's ~300, which means the
+      next entry written would have broken the rule rather than the one after
+      — a cap you are already at is a cap you have already lost.
+
+      Session 26's entry moved whole to
+      `docs/progress-archive/2026-08.md`, not summarised: an archive that
+      paraphrases is a second version of the record to keep in step. The pointer
+      in `## Session Log` names what went and when.
+
+      Two stale claims went with it, which is the part that matters more than
+      the line count. `## Now / Next` said "the full six-stage gate has not been
+      run since the untracked tree landed" — that is S1.5 and it is closed, and
+      the gate is nine stages now. It also named one quarantined instrument and
+      not the second: macOS has no local instrument at all, so the only thing
+      that can answer for Tier 3 is Actions, which is not running. **That is
+      exactly the failure session 26 recorded about this file** — a section
+      appended to and never re-read is a pile of facts nobody compares — and
+      it had already grown two more.
 - [x] **S8.2** The starter template's unnecessary incantation — gone, and the
       fix was not where the item pointed. `StreamingMode = "Persistent"` was
       CORRECT usage: a partitioned record carries no parent path, by design,
