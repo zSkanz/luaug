@@ -27,8 +27,10 @@
 	**The engine's `@std/`, deliberately, and not Lute's.** A game script runs
 	sandboxed (R4) and can reach `@std/net` and nothing else of that family;
 	pointing the editor at Lute's typedefs would offer `fs`, `process` and `io`
-	to a VM that has none of them -- the same mistake `settings.json` refuses for
-	the Roblox API dump two comments higher up. The ANALYZER resolves `@std`
+	to a VM that has none of them -- the same mistake `settings.json` already
+	refuses two comments higher up, where it pins the LSP's platform so the
+	extension cannot fetch a surface this engine does not have. The ANALYZER
+	resolves `@std`
 	separately through `.luaurc`, which is what makes a project's Lute-run tests
 	work, and the starter's test says so in its own header.
 ]]

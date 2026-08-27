@@ -599,10 +599,19 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                                                                       : classOfSubject(classes, atoms, request.subject);
         if (id != scene::InvalidClass)
             collectMembers(classes, atoms, id, request, out);
-        // A colon is a call, and a child is not one -- so children are offered
-        // after a dot and not after a colon.
-        if (!request.method)
-            collectChildren(tree, atoms, at, request, out);
+        // **No children here, and that is decision 10** (`api-design.md`
+        // divergence #26). This used to offer them after a dot, which is the
+        // one place a completion must not: dot access to a child is REFUSED by
+        // this engine, deliberately, so the list was teaching a line the
+        // runtime raises on and the analyser rejects. A completion that
+        // proposes something the language will not accept is worse than an
+        // empty one -- somebody accepts it, runs it, and learns that the editor
+        // and the engine disagree.
+        //
+        // Children are offered where they can be typed: inside `WaitForChild("`
+        // and `FindFirstChild("`, which `CompletionQuoted::Child` answers
+        // above.
+        //
         // A subject nothing recognises offers nothing rather than offering the
         // whole world: a list that is always the same is a list people learn to
         // dismiss, and a list of keywords under a dot is never right.
@@ -658,6 +667,79 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     }
 
     sortCompletions(out);
+}
+
+// --- Dot access to a live child, at edit time (decision 10) ------------------
+
+void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegistry& classes,
+                        const core::AtomTable& atoms, const CompletionWorld& tree, std::vector<Diagnostic>& out)
+{
+    if (tree.world == nullptr)
+        return;
+
+    const scene::World& world = *tree.world;
+
+    // **Line by line, over the same reader the completion uses**, rather than
+    // over an AST. The completion already answers "what is the dotted path
+    // ending here" for any caret, and asking it once per dot is the same
+    // question this needs -- so there is one path resolver in this file rather
+    // than a second one that would disagree with it the first time either was
+    // touched. It also inherits `expandLocals` for free, which is what makes
+    // `local W = game:GetService("Workspace")` followed by `W.Thing` resolve.
+    for (core::u32 line = 0; line < document.lineCount(); ++line) {
+        const std::string_view text = document.line(line);
+        for (core::u32 column = 0; column < text.size(); ++column) {
+            if (text[column] != '.')
+                continue;
+
+            // The identifier after the dot, which is what would be indexed.
+            core::u32 end = column + 1;
+            while (end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) != 0 || text[end] == '_'))
+                ++end;
+            if (end == column + 1)
+                continue;
+            const std::string member(text.substr(column + 1, end - column - 1));
+
+            // What the completion would answer at the caret just after the dot,
+            // which is the resolved subject of this access.
+            const CompletionRequest request = completionAt(document, Position{line, column + 1});
+            if (!request.joined || request.method || request.quoted != CompletionQuoted::No)
+                continue;
+            std::vector<std::string> path = request.path;
+            if (path.empty())
+                continue;
+            (void)expandLocals(document, path);
+
+            const core::InstanceId at = resolvePath(tree, atoms, path);
+            if (!at.valid())
+                continue;
+
+            // **A declared member wins, and is not a finding.** The runtime
+            // resolves a property before it looks for a child, so a child
+            // called `Name` does not shadow `Name` -- and reporting one here
+            // would underline a line that works.
+            const core::NameAtom memberAtom = atoms.lookup(member);
+            if (memberAtom.valid() && classes.findProperty(world.classOf(at), memberAtom) != nullptr)
+                continue;
+            if (memberAtom.valid() && classes.findMethod(world.classOf(at), memberAtom) != nullptr)
+                continue;
+
+            // Only when the name really is a child. A misspelled property is
+            // somebody else's diagnostic -- `luau-analyze` types this file and
+            // ADR 0018 keeps type inference there -- and guessing at one here
+            // would be the false positive this pass is written to avoid.
+            if (!memberAtom.valid() || !world.findFirstChild(at, memberAtom).valid())
+                continue;
+
+            out.push_back(Diagnostic{
+                .at = Position{line, column + 1},
+                .length = static_cast<core::u32>(member.size()),
+                .message =
+                    "`" + member + "` is a child, not a member -- reach it with FindFirstChild(\"" + member + "\")",
+                .severity = Severity::Warning,
+            });
+        }
+    }
 }
 
 } // namespace luaug::app

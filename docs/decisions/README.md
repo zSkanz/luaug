@@ -86,3 +86,19 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0043](0043-per-instance-vertex-stepping.md) | The frozen RHI gains per-instance vertex stepping, and nothing else |
 | [0044](0044-graphics-settings-are-host-settings.md) | Graphics settings are host settings, in three layers |
 | [0045](0045-a-packaged-game-is-a-folder-that-ships-source.md) | A packaged game is a folder, and it ships Luau source |
+| [0046](0046-the-editor-is-a-mode-of-the-engine-binary.md) | The editor is a mode of the engine binary, drawn in ImGui |
+| [0047](0047-the-world-is-data-and-scripts-are-behaviour.md) | The world is data and scripts are behaviour |
+| [0048](0048-content-is-the-source-and-an-instance-is-a-link-to-it.md) | Content is the source, an instance is a link to it, and editing breaks the link |
+| [0049](0049-a-stamp-is-a-source-and-an-instance-carries-its-mark.md) | A Stamp is a source, an instance carries its mark, and editing it breaks the mark |
+| [0050](0050-a-script-is-an-ordinary-instance-and-its-source-is-a-property.md) | A script is an ordinary instance, and its source is a property |
+| [0051](0051-a-prefab-is-inherited-and-an-edit-is-an-override.md) | A prefab is inherited, an edit is an override, and a copy is the other thing |
+| [0052](0052-the-content-tree-is-what-the-project-holds.md) | The content tree, and why it was taken out the same day |
+| [0053](0053-the-grid-decides-when-and-the-model-decides-what.md) | The grid decides *when*, the model decides *what*, and partitioning is the tool's job |
+| [0054](0054-the-editor-ships-as-a-folder-and-the-cli-finds-its-own-install.md) | The editor ships as a folder, and the CLI finds its own installation |
+| [0055](0055-the-launcher-is-the-engine-with-no-project-open.md) | The launcher is the engine with no project open |
+| [0056](0056-the-shell-has-one-theme-and-it-is-square.md) | The shell has one theme, it is data, and it is square |
+| [0057](0057-a-script-is-an-instance-and-the-editor-edits-one-thing.md) | A script is an instance, and the editor edits one thing |
+| [0058](0058-a-script-runs-when-you-press-play.md) | A script runs when you press play, and not when you open the project |
+| [0059](0059-enabled-is-about-resumption-and-nothing-else.md) | `Enabled` is about resumption, and nothing else |
+| [0060](0060-a-material-is-an-instance-and-a-stamp-is-how-one-is-shared.md) | A material is an instance, a stamp is how one is shared, and a trace moves when the hash's inputs do |
+| [0061](0061-a-child-is-not-a-member-and-the-refusal-says-so.md) | A child is not a member, and the refusal says so in three places |

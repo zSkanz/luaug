@@ -914,8 +914,20 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // **Parsed when the text is at rest**, which is one frame after the last
     // edit: per keystroke would re-parse a file per character, and a timer would
     // put a clock in a panel.
-    if (tab.document.diagnosticsStale() && tab.document.revision() == tab.idleRevision)
+    if (tab.document.diagnosticsStale() && tab.document.revision() == tab.idleRevision) {
         tab.document.refreshDiagnostics();
+        // **The half that needs the tree** (decision 10). `refreshDiagnostics`
+        // parses TEXT and knows nothing about a world; dot access to a live
+        // child can only be told from a plain table field by resolving the
+        // path, so it is a second pass in the same breath and lands in the same
+        // list.
+        if (world != nullptr) {
+            std::vector<Diagnostic> reached;
+            lintInstanceAccess(tab.document, world->classes(), world->atoms(),
+                               CompletionWorld{world, root, tab.instance}, reached);
+            tab.document.appendDiagnostics(reached);
+        }
+    }
     tab.idleRevision = tab.document.revision();
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(p.surface.r, p.surface.g, p.surface.b, 1.0f));

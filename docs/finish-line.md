@@ -613,8 +613,50 @@ that sends the next session to the wrong place.
       which is where a hand-written rule is always right.
 - [ ] **S6.10** Jolt on a real job pool.
 - [ ] **S6.11** The four outstanding items of the rendering reference decision.
-- [ ] **S6.12** Decision 10 above, and whichever half of the dot-access
-      inconsistency it leaves standing.
+- [x] **S6.12** All three instruments, and the decision record that states the
+      price. **ADR 0061.**
+
+      `workspace.Baseplate` raises in this engine and always has. The divergence
+      note explained why to somebody who already agreed; what it never did was
+      state the **price of reversing it**, which is the thing a future reader
+      needs. It also undersold the cost: reaching a child with a dot needs a
+      string indexer on `Instance`, and an indexer does not merely type the
+      child access — it makes every unknown key on every instance resolve to
+      `Instance?` instead of erroring, so `part.Positon = ...` stops being a
+      type error and becomes a silent nil write. The cost is **typo detection
+      across the whole language**, in a repository where R2 makes every file
+      strict.
+
+      **The half left standing was the completion**, and it was the sharp end:
+      it offered children under a dot, so the editor was proposing a line the
+      runtime raises on. A completion the language will not accept is worse than
+      an empty one — somebody accepts it, runs it, and learns that the editor
+      and the engine disagree. Children are offered inside `WaitForChild("` and
+      `FindFirstChild("` now, where they can be typed.
+
+      **At run time** the message names the child and the accessor instead of
+      answering "has no member named", which is true and useless when the thing
+      IS there and visible in the Explorer. A name that is nothing at all still
+      gets the plain message: one message for both would recommend
+      `FindFirstChild` for `part.Positon`. Six conformance cases, break-verified.
+
+      **At edit time** `lintInstanceAccess` underlines it while somebody types.
+      It resolves the path first, so every report is a fact — that instance
+      exists, it has that child, its class has no such member. It lives with the
+      completion rather than in the AST lint pass because it needs the TREE:
+      without one, `t.Baseplate` on a plain table cannot be told from
+      `workspace.Baseplate`, and a lint with false positives is a lint people
+      turn off. Four of its six cases assert **silence**.
+
+      `FindFirstChild` is what all three recommend and `WaitForChild` is not:
+      scripts start when play starts and the tree is already built, so
+      recommending the yielding one would teach exactly the load-order habit the
+      divergence exists to kill.
+
+      Found while writing the record: **the ADR index stopped at 0045** while
+      sixty-one records existed, so a third of this project's decisions were
+      unreachable from their own map. Sixteen rows added, and CLAUDE.md's
+      "ADRs 0001-0040" corrected with them.
 
 ### S7 — The gates prove what they claim
 

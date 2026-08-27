@@ -62,9 +62,43 @@ using scene::World;
 
 [[noreturn]] void raiseUnknownInstanceMember(lua_State* L, core::InstanceId id, const char* member)
 {
+    const std::string_view name{member == nullptr ? "" : member};
+
+    // **When the name is a CHILD, say so and say what to type instead**
+    // (decision 10, `api-design.md` divergence #26). Dot access to children is
+    // refused deliberately: allowing `script.Nested` needs a string indexer on
+    // `Instance`, and an indexer does not merely type the child access -- it
+    // makes every unknown key on every instance resolve to `Instance?` instead
+    // of erroring, so `part.Positon = ...` stops being a type error and becomes
+    // a silent nil write. The price is typo detection across the whole
+    // language, in a repository where R2 makes every file strict.
+    //
+    // What was reported twice was not "give me the indexer", it was "this fails
+    // and tells me nothing". So it tells them.
+    //
+    // **`FindFirstChild` and not `WaitForChild`**, which is not a stylistic
+    // preference: scripts start when play starts and the tree is already built,
+    // so recommending the yielding one would teach exactly the load-order habit
+    // this divergence exists to kill.
+    //
+    // `lookup` and never `intern`: the name comes from a script, and interning
+    // it would let a loop of misspellings grow the atom table without bound.
+    const World& w = world(L);
+    if (!name.empty()) {
+        if (const core::NameAtom atom = w.atoms().lookup(name); atom.valid()) {
+            if (w.findFirstChild(id, atom).valid()) {
+                const core::I18nArg childArgs[] = {
+                    {"className", className(L, id)},
+                    {"member", name},
+                };
+                raise(L, LUAUG_TR("scene.err.child_not_member"), childArgs);
+            }
+        }
+    }
+
     const core::I18nArg args[] = {
         {"className", className(L, id)},
-        {"member", std::string_view{member == nullptr ? "" : member}},
+        {"member", name},
     };
     raise(L, LUAUG_TR("scene.err.unknown_member"), args);
 }

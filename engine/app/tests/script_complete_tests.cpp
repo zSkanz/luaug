@@ -24,8 +24,11 @@ using namespace luaug;
 using app::Completion;
 using app::CompletionKind;
 using app::CompletionRequest;
+using app::CompletionWorld;
+using app::Diagnostic;
 using app::Position;
 using app::ScriptDocument;
+using app::Severity;
 
 namespace {
 
@@ -297,12 +300,36 @@ TEST_CASE("a local holding an instance is NOT resolved, and that is the decision
     CHECK(list.empty());
 }
 
-TEST_CASE("a path through the tree offers what is inside it")
+TEST_CASE("a dot offers members and never children, which is decision 10")
 {
     Reflection fixture;
     Tree tree(fixture);
 
+    // **This used to offer `Baseplate` here, and that was the inconsistency**
+    // (`api-design.md` divergence #26). Dot access to a child is REFUSED by this
+    // engine -- deliberately, because the string indexer it would need turns
+    // every misspelled property into a silent nil write -- so a list that
+    // proposed one was teaching a line the runtime raises on. A completion the
+    // language will not accept is worse than an empty one: somebody accepts it,
+    // runs it, and learns that the editor and the engine disagree.
     const std::vector<Completion> rows = at(fixture, tree, "local c = Workspace.");
+    CHECK(find(rows, "Baseplate") == nullptr);
+
+    // The class's own members are what a dot is for, and they are all still
+    // here -- including the accessor the runtime's own diagnostic recommends.
+    CHECK(has(rows, "Name"));
+    CHECK(has(rows, "FindFirstChild"));
+}
+
+TEST_CASE("children are offered where they can be typed, with their class beside them")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // Inside the quotes of an accessor that takes a child's name. Both are
+    // completed, because the rule is about where a NAME goes rather than about
+    // which of the two somebody reached for.
+    const std::vector<Completion> rows = at(fixture, tree, "Workspace:FindFirstChild(\"");
     const Completion* part = find(rows, "Baseplate");
     REQUIRE(part != nullptr);
     // The CLASS on the right, because "what is this thing" is the question a
@@ -310,14 +337,7 @@ TEST_CASE("a path through the tree offers what is inside it")
     CHECK(part->detail == "Part");
     CHECK(part->kind == CompletionKind::Instance);
 
-    // Its members are still there: a child does not replace the class.
-    CHECK(has(rows, "Name"));
-
-    // **First**, which is the ordering decision. Somebody typing `Workspace.`
-    // is reaching into their own tree far more often than for a class member,
-    // and the members are one keystroke of filtering away either way.
-    REQUIRE_FALSE(rows.empty());
-    CHECK(rows.front().kind == CompletionKind::Instance);
+    CHECK(find(at(fixture, tree, "Workspace:WaitForChild(\""), "Baseplate") != nullptr);
 }
 
 TEST_CASE("the whole chain is walked, not just the name before the dot")
@@ -326,7 +346,10 @@ TEST_CASE("the whole chain is walked, not just the name before the dot")
     Tree tree(fixture);
 
     // `Baseplate` on its own names nothing -- the same name under two parents
-    // is two instances -- which is why the request carries the chain.
+    // is two instances -- which is why the request carries the chain. The chain
+    // is still WALKED through children even though a dot does not OFFER them:
+    // resolving `game.Workspace.Baseplate.` to a `Part` is what puts `Size` in
+    // the list, and it is the same walk `FindFirstChild("` uses.
     CHECK(has(at(fixture, tree, "game.Workspace.Baseplate."), "Size"));
 
     ScriptDocument document("game.Workspace.Baseplate.");
@@ -341,7 +364,10 @@ TEST_CASE("the lowercase workspace global resolves to the service")
 {
     Reflection fixture;
     Tree tree(fixture);
-    CHECK(has(at(fixture, tree, "workspace.Base"), "Baseplate"));
+    // Asked through the accessor, because a dot offers no children (decision
+    // 10). What is under test is that `workspace` and `Workspace` are one
+    // thing, and the child list is how that is visible.
+    CHECK(has(at(fixture, tree, "workspace:FindFirstChild(\"Base"), "Baseplate"));
     // And any other service by its own name, because a service IS a child of
     // the DataModel -- so there is no list of service names in this file.
     CHECK(has(at(fixture, tree, "TagService."), "Name"));
@@ -354,9 +380,16 @@ TEST_CASE("script names the instance being edited")
 
     // `script.Parent` is `Workspace` when the script sits beside the baseplate.
     // `Parent` is the one property a path may step through, and this is why.
-    const std::vector<Completion> rows = at(fixture, tree, "script.Parent.", tree.baseplate);
+    // Asked through the accessor for the reason decision 10 gives: a dot
+    // resolves the path and answers with the class, and children are typed
+    // inside `FindFirstChild("`.
+    const std::vector<Completion> rows = at(fixture, tree, "script.Parent:FindFirstChild(\"", tree.baseplate);
     CHECK(has(rows, "Baseplate"));
     CHECK(has(rows, "Level"));
+
+    // And the dot itself still WALKS that path -- it just answers with the
+    // class rather than with the tree.
+    CHECK(has(at(fixture, tree, "script.Parent.", tree.baseplate), "Name"));
 }
 
 TEST_CASE("a name in quotes is completed from the tree")
@@ -457,9 +490,12 @@ TEST_CASE("a call that names something is a step in a path")
     Tree tree(fixture);
 
     // The shape at the top of most Luau files ever written, and without this
-    // every one of them completes nothing from the line after it.
-    CHECK(has(at(fixture, tree, "game:GetService(\"Workspace\")."), "Baseplate"));
+    // every one of them completes nothing from the line after it. What proves
+    // the call was FOLLOWED is a member of the thing it returned -- children are
+    // not offered under a dot (decision 10), so `Name` is the evidence and
+    // `Baseplate` is asked for through the accessor beside it.
     CHECK(has(at(fixture, tree, "game:GetService(\"Workspace\")."), "Name"));
+    CHECK(has(at(fixture, tree, "game:GetService(\"Workspace\"):FindFirstChild(\""), "Baseplate"));
 
     // And the same for the two that name a child.
     CHECK(has(at(fixture, tree, "Workspace:WaitForChild(\"Level\")."), "Name"));
@@ -507,7 +543,10 @@ TEST_CASE("a local whose assignment is commented does not derail the walk")
     Tree tree(fixture);
 
     const std::string source = "local W = game:GetService(\"Workspace\") -- the world\nW.";
-    CHECK(has(at(fixture, tree, source), "Baseplate"));
+    CHECK(has(at(fixture, tree, source), "Name"));
+    // And through the accessor, which is where a child's name is typed.
+    const std::string reached = "local W = game:GetService(\"Workspace\") -- the world\nW:FindFirstChild(\"";
+    CHECK(has(at(fixture, tree, reached), "Baseplate"));
 }
 
 TEST_CASE("Luau's own libraries are offered, and from the pin rather than a guess")
@@ -649,4 +688,107 @@ TEST_CASE("a module this cannot read answers nothing rather than guessing")
 
     // A require of something that is not a module in this tree.
     CHECK(at(fixture, tree, "local X = require(script.Parent.NoSuchModule)\nX.", tree.baseplate).empty());
+}
+
+// --- Dot access to a live child, at edit time (decision 10) ------------------
+//
+// The third of three instruments for one fact. The runtime raises a message
+// naming the child; the completion no longer offers one under a dot; this
+// underlines it while somebody is typing.
+//
+// **What matters most here is what it does NOT report.** The lint pass in
+// `script_syntax.cpp` says in its own comment that it has no false positives to
+// apologise for, and a warning people learn to ignore has made every other
+// warning worth less. Half of these are cases that must stay silent.
+
+namespace {
+
+[[nodiscard]] std::vector<Diagnostic> lintOf(Reflection& fixture, Tree& tree, const std::string& source)
+{
+    ScriptDocument document(source);
+    std::vector<Diagnostic> out;
+    app::lintInstanceAccess(document, fixture.classes, fixture.atoms,
+                            CompletionWorld{&tree.world, tree.root, core::InstanceId{}}, out);
+    return out;
+}
+
+[[nodiscard]] bool mentions(const std::vector<Diagnostic>& out, std::string_view needle)
+{
+    for (const Diagnostic& diagnostic : out) {
+        if (diagnostic.message.find(needle) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("reaching a child with a dot is underlined, and told what to type")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::vector<Diagnostic> out = lintOf(fixture, tree, "local x = workspace.Baseplate");
+    REQUIRE(out.size() == 1);
+    CHECK(mentions(out, "Baseplate"));
+    // Named rather than implied, and `FindFirstChild` rather than
+    // `WaitForChild`: scripts start when play starts and the tree is already
+    // built, so recommending the yielding one would teach exactly the
+    // load-order habit this divergence exists to kill.
+    CHECK(mentions(out, "FindFirstChild"));
+    CHECK(out.front().severity == Severity::Warning);
+}
+
+TEST_CASE("a declared member is never underlined, even when a child shares its name")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // The runtime resolves a property before it looks for a child, so a child
+    // called `Name` does not shadow `Name` -- and underlining one here would
+    // mark a line that works.
+    CHECK(lintOf(fixture, tree, "local n = workspace.Name").empty());
+    CHECK(lintOf(fixture, tree, "local f = workspace.FindFirstChild").empty());
+}
+
+TEST_CASE("a misspelled property is left to the type checker")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // `Positon` is nothing at all: not a member, not a child. Guessing at it
+    // here would be the false positive this pass is written to avoid, and
+    // `luau-analyze` types this file -- ADR 0018 keeps inference there.
+    CHECK(lintOf(fixture, tree, "local p = workspace.Positon").empty());
+}
+
+TEST_CASE("a plain table is not an instance and is not underlined")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // The case that makes an AST-only version of this lint impossible: without
+    // resolving the path, `t.Baseplate` on a table is indistinguishable from
+    // `workspace.Baseplate` on the service.
+    CHECK(lintOf(fixture, tree, "local t = {}\nlocal x = t.Baseplate").empty());
+    CHECK(lintOf(fixture, tree, "local s = string.format").empty());
+}
+
+TEST_CASE("a path through a local is followed, because that is how people write it")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::string source = "local W = game:GetService(\"Workspace\")\nlocal b = W.Baseplate";
+    CHECK(mentions(lintOf(fixture, tree, source), "Baseplate"));
+}
+
+TEST_CASE("a name inside quotes is where a child belongs and is not underlined")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    // Which is the whole point of the message: this is the line it asks for,
+    // and it must not then complain about it.
+    CHECK(lintOf(fixture, tree, "local b = workspace:FindFirstChild(\"Baseplate\")").empty());
 }

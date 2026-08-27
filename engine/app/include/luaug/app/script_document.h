@@ -284,6 +284,13 @@ public:
     // this is a plain call rather than something an edit triggers.
     void refreshDiagnostics();
     [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept { return m_diagnostics; }
+    // Diagnostics a second pass produced. `refreshDiagnostics` parses TEXT and
+    // knows nothing about a world; what needs the tree is appended by the panel
+    // in the same breath, so a reader of `diagnostics()` sees one list.
+    void appendDiagnostics(std::span<const Diagnostic> extra)
+    {
+        m_diagnostics.insert(m_diagnostics.end(), extra.begin(), extra.end());
+    }
     // Whether the text has moved since `refreshDiagnostics` last ran, so the
     // panel can ask at rest instead of on a timer.
     [[nodiscard]] bool diagnosticsStale() const noexcept { return m_diagnosticsRevision != m_revision; }

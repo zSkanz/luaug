@@ -188,6 +188,30 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
 // One list with two readers, and the second is the reason it is exported: the
 // unknown-global lint has to know exactly the same set the completion offers,
 // or it underlines names the editor itself just suggested.
+// **Dot access to a live child, named at edit time** (decision 10,
+// `api-design.md` divergence #26).
+//
+// The refusal is deliberate and the reason is not about children: allowing
+// `script.Nested` needs a string indexer on `Instance`, and an indexer makes
+// every unknown key on every instance resolve to `Instance?` instead of
+// erroring -- so `part.Positon = ...` stops being a type error and becomes a
+// silent nil write. The price is typo detection across the whole language, in a
+// repository where R2 makes every file strict.
+//
+// So the divergence stays and the FAILURE stops being silent. It is reported in
+// three places, and this is the earliest: the runtime raises a message naming
+// the child, the completion no longer offers one under a dot, and this
+// underlines it while somebody is typing.
+//
+// **It lives here rather than in `parseDiagnostics` because it needs the
+// TREE.** Without one, `t.foo` on a plain table is indistinguishable from
+// `script.Nested`, and a lint with false positives is a lint people turn off --
+// which the existing pass says in its own comment. Resolving the path first
+// means every report is a fact: that instance exists, it has that child, and
+// its class has no such member.
+void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegistry& classes,
+                        const core::AtomTable& atoms, const CompletionWorld& tree, std::vector<Diagnostic>& out);
+
 [[nodiscard]] std::span<const std::string_view> engineGlobals() noexcept;
 
 // How many rows the popup shows before it scrolls. A list somebody has to scan

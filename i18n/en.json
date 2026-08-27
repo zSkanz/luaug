@@ -262,6 +262,7 @@
   "scene.err.not_creatable": "Instance.new cannot create {className}: the class is tagged {classTag}.",
   "scene.err.unknown_service": "No service named \"{className}\".",
   "scene.err.unknown_member": "{className} has no member named \"{member}\".",
+  "scene.err.child_not_member": "{className} has no member named \"{member}\", but it has a child called that. Children are not reached by dot access: use FindFirstChild(\"{member}\").",
   "scene.err.unknown_property": "{className} has no property named \"{property}\"; attributes are watched with GetAttributeChangedSignal.",
   "scene.err.read_only_property": "{className}.{property} is read-only.",
   "scene.err.expected_boolean": "Cannot set {className}.{property}: it takes a boolean.",
