@@ -96,6 +96,14 @@ private:
         core::NameAtom urn;
         MeshHandle mesh;
         core::u64 revision = 0;
+        // **What the mesh was built FROM**: the digests of the tile, its eight
+        // neighbours (the mesher reads one column past every edge, for the
+        // seam and for the normals) and every brick in reach. `fieldRevision` is
+        // one counter for the whole terrain, so on its own it said "every tile
+        // is stale" after any brush stroke, and the loader spent each frame
+        // re-meshing whichever tiles were nearest the camera while the one the
+        // brush touched waited its turn.
+        core::u64 content = 0;
         // The stride the resident mesh was built at, so a change of level is a
         // rebuild exactly as a change of field is.
         core::u32 stride = 0;

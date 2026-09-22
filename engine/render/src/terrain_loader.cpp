@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <string>
 
 namespace luaug::render {
@@ -52,6 +53,52 @@ constexpr double Hysteresis = 1.1;
 // would do, on every tile, twice a frame, against a sixteen-millisecond budget.
 // Bricks are now measured rather than guessed at -- see `brickRangeOf`.
 constexpr core::i32 SurfaceMargin = 2;
+
+// Order-sensitive, which is what a key built from an ordered walk wants.
+[[nodiscard]] core::u64 combine(core::u64 seed, core::u64 value) noexcept
+{
+    core::u64 z = seed ^ (value + 0x9E3779B97F4A7C15ull + (seed << 6) + (seed >> 2));
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
+
+[[nodiscard]] core::i32 floorDivide(core::i32 value, core::i32 divisor) noexcept
+{
+    const core::i32 quotient = value / divisor;
+    return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient;
+}
+
+// What one tile's mesh reads: itself and its eight neighbours, and every brick
+// whose footprint reaches within a column of it. `bricks` is the field's brick
+// keys, fetched once per terrain rather than once per tile.
+[[nodiscard]] core::u64 contentOf(const asset::TerrainField& field, asset::TileKey key,
+                                  std::span<const asset::BrickKey> bricks) noexcept
+{
+    core::u64 content = 0;
+    for (core::i32 dz = -1; dz <= 1; ++dz) {
+        for (core::i32 dx = -1; dx <= 1; ++dx) {
+            const asset::HeightTile* tile = field.findTile(asset::TileKey{key.x + dx, key.z + dz});
+            content = combine(content, tile == nullptr ? 0x6E6F74696C65ull : asset::digestOf(*tile));
+        }
+    }
+    const auto edge = static_cast<core::i32>(asset::TileEdge);
+    const auto brickEdge = static_cast<core::i32>(asset::BrickEdge);
+    const core::i32 minX = floorDivide(key.x * edge - 1, brickEdge);
+    const core::i32 maxX = floorDivide(key.x * edge + edge + 1, brickEdge);
+    const core::i32 minZ = floorDivide(key.z * edge - 1, brickEdge);
+    const core::i32 maxZ = floorDivide(key.z * edge + edge + 1, brickEdge);
+    for (const asset::BrickKey brick : bricks) {
+        if (brick.x < minX || brick.x > maxX || brick.z < minZ || brick.z > maxZ)
+            continue;
+        const asset::Brick* found = field.findBrick(brick);
+        content = combine(content, (static_cast<core::u64>(static_cast<core::u32>(brick.x)) << 40) ^
+                                       (static_cast<core::u64>(static_cast<core::u32>(brick.y)) << 20) ^
+                                       static_cast<core::u32>(brick.z));
+        content = combine(content, found == nullptr ? 0 : asset::digestOf(*found));
+    }
+    return content;
+}
 
 } // namespace
 
@@ -115,6 +162,9 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
         if (!(voxel > 0.0f))
             return;
         const auto tileMetres = static_cast<double>(asset::TileEdge) * static_cast<double>(voxel);
+        // Fetched lazily: a tick with nothing written never needs them.
+        std::vector<asset::BrickKey> bricks;
+        bool bricksFetched = false;
 
         for (const asset::TileKey key : terrain.field.tileKeys()) {
             // Distance in the horizontal plane, to the tile's nearest point
@@ -143,6 +193,21 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
             if (exists && at->revision == terrain.fieldRevision && at->stride == stride) {
                 at->seen = true;
                 continue;
+            }
+            // Something was written somewhere. Whether it was HERE is the
+            // content key's question, and a tile it did not reach keeps its mesh.
+            core::u64 content = 0;
+            if (exists && at->stride == stride) {
+                if (!bricksFetched) {
+                    bricks = terrain.field.brickKeys();
+                    bricksFetched = true;
+                }
+                content = contentOf(terrain.field, key, bricks);
+                if (content == at->content) {
+                    at->revision = terrain.fieldRevision;
+                    at->seen = true;
+                    continue;
+                }
             }
             // Keep what is there while it waits: a tile that vanished during its
             // rebuild is a hole in the ground somebody can see through.
@@ -262,6 +327,7 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
         const asset::TileKey key = job.key;
         const scene::TerrainComponent& terrain = *job.component;
         const asset::TerrainMesh& meshed = job.meshed;
+        const core::u64 content = contentOf(terrain.field, key, terrain.field.brickKeys());
         // Looked up again here rather than carried from the choice: an earlier
         // slot's insert or erase has moved the list since.
         const auto at = findResident(id, key);
@@ -338,11 +404,12 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                 cache.release(device, at->mesh);
             at->mesh = handle;
             at->revision = terrain.fieldRevision;
+            at->content = content;
             at->stride = job.stride;
             at->seen = true;
         }
         else {
-            m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, job.stride, true});
+            m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, content, job.stride, true});
         }
         library.set(urn, std::move(entry));
         rebuilt += 1;
