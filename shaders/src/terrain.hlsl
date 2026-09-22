@@ -91,6 +91,36 @@ float heightOr(int2 lattice, float fallback)
     return present ? height : fallback;
 }
 
+// --- Procedural surface detail --------------------------------------------
+//
+// **Until the terrain has texture sets, the ground is given its variation by
+// the shader.** A flat palette colour reads as plastic at any distance; real
+// ground varies at every scale -- patches tens of metres across, clumps a few
+// metres across, grain at a hand's width. Three octaves of value noise, pinned
+// to the FIELD's own coordinates so nothing swims when the camera moves, give
+// each of those scales a little brightness and hue, and a slope rule gives
+// steep ground its rock the way the reference terrains' "autoshader" does.
+
+float terrainHash(float2 cell)
+{
+    // A classic sine-free hash: fract of a dot with irrational-ish constants.
+    float3 p = frac(float3(cell.xyx) * 0.1031f);
+    p += dot(p, p.yzx + 33.33f);
+    return frac((p.x + p.y) * p.z);
+}
+
+float terrainNoise(float2 position)
+{
+    const float2 cell = floor(position);
+    const float2 f = position - cell;
+    const float2 u = f * f * (3.0f - 2.0f * f);
+    const float a = terrainHash(cell);
+    const float b = terrainHash(cell + float2(1.0f, 0.0f));
+    const float c = terrainHash(cell + float2(0.0f, 1.0f));
+    const float d = terrainHash(cell + float2(1.0f, 1.0f));
+    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
 // The material id at a lattice point, or `fallback` where there is none.
 uint materialOr(int2 lattice, uint fallback)
 {
@@ -145,13 +175,49 @@ float4 FragmentMain(TerrainInterpolants input) : SV_Target0
     const float3 c11 = Palette[m11 & 31u].rgb;
     float3 albedo = lerp(lerp(c00, c10, f.x), lerp(c01, c11, f.x), f.y);
 
+    // Where the ground is in the field, in metres: the coordinate every octave
+    // below is pinned to.
+    const float2 ground = input.Lattice * step;
+    const float macro = terrainNoise(ground * (1.0f / 37.0f));
+    const float clump = terrainNoise(ground * (1.0f / 4.3f) + 17.0f);
+    const float grain = terrainNoise(ground * (1.0f / 0.55f) + 41.0f);
+    // **Each octave fades out as it shrinks below a pixel.** Noise finer than
+    // the pixels drawing it does not look like grain, it looks like noise --
+    // a shimmering pattern that crawls as the camera moves, and on a specular
+    // surface a scatter of sparkles. `fwidth` is how many metres one pixel
+    // spans here, so an octave is kept only while a pixel is well inside it.
+    const float footprint = max(fwidth(ground.x), fwidth(ground.y));
+    const float grainFade = saturate(1.0f - footprint / 0.25f);
+    const float clumpFade = saturate(1.0f - footprint / 2.0f);
+
+    // Steep ground is rock, whatever it was painted: grass does not hold to a
+    // cliff. The threshold wanders with the clump noise so the boundary is a
+    // ragged edge rather than a contour line, and rock and basalt are left as
+    // they are.
+    const uint dominant = f.x < 0.5f ? (f.y < 0.5f ? m00 : m01) : (f.y < 0.5f ? m10 : m11);
+    const float slope = 1.0f - normal.y;
+    const float rockiness = smoothstep(0.24f, 0.36f, slope + (clump - 0.5f) * 0.12f);
+    if (dominant != 3u && dominant != 7u)
+        albedo = lerp(albedo, Palette[3].rgb, rockiness);
+
+    // Brightness at three scales, and a slight hue drift at the largest: a
+    // field is not one green.
+    const float shade = 1.0f + (macro - 0.5f) * 0.28f + (clump - 0.5f) * 0.16f * clumpFade +
+                        (grain - 0.5f) * 0.10f * grainFade;
+    albedo *= shade;
+    albedo *= lerp(float3(1.04f, 0.97f, 0.94f), float3(0.95f, 1.03f, 1.02f), macro);
+
     // The four material slots are bound -- to white, flat, white and black
     // today -- and read, so the terrain has the same fragment layout as every
     // other forward shader and a texture set can arrive without one.
     const float2 uv = input.Lattice * step * 0.25f;
     albedo *= BaseColorTexture.Sample(BaseColorSampler, uv).rgb;
     const float roughness = 0.92f * MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, uv).g;
-    const float3 detail = NormalTexture.Sample(NormalSampler, uv).xyz * 2.0f - 1.0f;
+    // Grain in the normal as well as the colour, so a low sun rakes across it.
+    const float grainX = terrainNoise((ground + float2(0.07f, 0.0f)) * (1.0f / 0.55f) + 41.0f) - grain;
+    const float grainZ = terrainNoise((ground + float2(0.0f, 0.07f)) * (1.0f / 0.55f) + 41.0f) - grain;
+    float3 detail = NormalTexture.Sample(NormalSampler, uv).xyz * 2.0f - 1.0f;
+    detail.xy += float2(grainX, grainZ) * (0.8f * grainFade);
     const float3x3 frame = tangentFrame(normal, float4(1.0f, 0.0f, 0.0f, 1.0f));
     const float3 shadingNormal = normalize(mul(normalize(detail), frame));
 
