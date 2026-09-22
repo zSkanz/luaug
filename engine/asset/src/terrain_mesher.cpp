@@ -267,11 +267,10 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         const Vec3 ga = gradientAt(a.x, a.y, a.z);
         const Vec3 gb = gradientAt(b.x, b.y, b.z);
         Vec3 blended{ga.x + (gb.x - ga.x) * t, ga.y + (gb.y - ga.y) * t, ga.z + (gb.z - ga.z) * t};
-        const float blendedLength =
-            std::sqrt(blended.x * blended.x + blended.y * blended.y + blended.z * blended.z);
-        const Vec3 normal = blendedLength < 1e-8f ? ga
-                                                  : Vec3{blended.x / blendedLength, blended.y / blendedLength,
-                                                         blended.z / blendedLength};
+        const float blendedLength = std::sqrt(blended.x * blended.x + blended.y * blended.y + blended.z * blended.z);
+        const Vec3 normal = blendedLength < 1e-8f
+                                ? ga
+                                : Vec3{blended.x / blendedLength, blended.y / blendedLength, blended.z / blendedLength};
 
         Vertex vertex;
         vertex.position = position;

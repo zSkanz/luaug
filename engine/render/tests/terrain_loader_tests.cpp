@@ -5,9 +5,20 @@
 // the cascade doubles, and where a tile stops being meshed at all.
 #include "luaug/asset/terrain.h"
 #include "luaug/asset/terrain_mesher.h"
+#include "luaug/jobs/jobs.h"
+#include "luaug/render/mesh_cache.h"
+#include "luaug/render/render_world.h"
 #include "luaug/render/terrain_loader.h"
+#include "luaug/rhi/backends.h"
+#include "luaug/scene/class_registry.h"
+#include "luaug/scene/components.h"
+#include "luaug/scene/enum_registry.h"
+#include "luaug/scene/world.h"
 
 #include <doctest/doctest.h>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace luaug;
 using namespace luaug::render;
@@ -105,4 +116,91 @@ TEST_CASE("a coarse tile has a sixteenth of the triangles or fewer")
     const auto coarse = meshAt(4);
     REQUIRE(fine > 0);
     CHECK(coarse * 16 <= fine + fine / 4);
+}
+
+namespace {
+
+// What one run of the loader left in the library, per tile, in the order the
+// tiles were uploaded.
+struct Uploaded
+{
+    std::string urn;
+    core::u32 meshIndex = 0;
+    core::u32 sectionCount = 0;
+    core::Vec3 min;
+    core::Vec3 max;
+};
+
+std::vector<Uploaded> syncToRest(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms,
+                                 scene::ClassId terrainClass)
+{
+    rhi::DeviceResult device = rhi::createNullDevice({.backend = rhi::BackendId::Null});
+    REQUIRE(device != nullptr);
+    rhi::ICmdList* cmd = device->beginFrame();
+    REQUIRE(cmd != nullptr);
+
+    scene::World world(classes, enums, atoms, 1234u);
+    const core::InstanceId id = world.create(terrainClass);
+    scene::TerrainComponent terrain;
+    terrain.field =
+        asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    asset::fillFlat(terrain.field, core::DVec3{0.0, 0.0, 0.0}, 96.0f, 0.0f, 1);
+    asset::fillBall(terrain.field, core::DVec3{20.0, 0.0, 20.0}, 6.0, 2);
+    world.terrains().add(id, std::move(terrain));
+
+    render::MeshCache cache;
+    render::MeshLibrary library;
+    TerrainLoader loader;
+    loader.setFocus(core::DVec3{0.0, 0.0, 0.0});
+    for (int call = 0; call < 64; ++call) {
+        if (loader.sync(*device, *cmd, world, atoms, cache, library) == 0)
+            break;
+    }
+
+    std::vector<Uploaded> out;
+    for (const asset::TileKey key : world.terrains().find(id)->field.tileKeys()) {
+        const std::string urn = terrainTileUrn(id, key);
+        const MeshLibrary::Entry* entry = library.find(atoms.intern(urn));
+        if (entry == nullptr)
+            continue;
+        out.push_back(Uploaded{urn, entry->mesh.index, entry->sectionCount, entry->bounds.min, entry->bounds.max});
+    }
+    loader.destroy(*device, cache, library);
+    cache.destroy(*device);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("tiles meshed across the job pool upload exactly what a serial run does")
+{
+    // Meshing runs on however many workers the machine has; the order meshes
+    // reach the GPU, and so the handles `extract` sorts draws by, must not
+    // depend on that. A serial pool and a four-worker pool are run over the
+    // same field and compared tile by tile.
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    const scene::ClassId terrainClass = classes.registerClass({
+        .name = atoms.intern("Terrain"),
+        .defaultName = atoms.intern("Terrain"),
+    });
+
+    REQUIRE_FALSE(jobs::initialized());
+    const std::vector<Uploaded> serial = syncToRest(classes, enums, atoms, terrainClass);
+    jobs::init(4);
+    const std::vector<Uploaded> pooled = syncToRest(classes, enums, atoms, terrainClass);
+    jobs::shutdown();
+
+    REQUIRE(serial.size() > 4);
+    REQUIRE(serial.size() == pooled.size());
+    for (core::usize at = 0; at < serial.size(); ++at) {
+        CAPTURE(serial[at].urn);
+        CHECK(serial[at].urn == pooled[at].urn);
+        CHECK(serial[at].meshIndex == pooled[at].meshIndex);
+        CHECK(serial[at].sectionCount == pooled[at].sectionCount);
+        CHECK(serial[at].min.x == pooled[at].min.x);
+        CHECK(serial[at].min.y == pooled[at].min.y);
+        CHECK(serial[at].max.y == pooled[at].max.y);
+    }
 }

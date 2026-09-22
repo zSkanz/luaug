@@ -3,6 +3,7 @@
 #include "luaug/asset/terrain_mesher.h"
 #include "luaug/asset/terrain_palette.h"
 #include "luaug/core/log.h"
+#include "luaug/jobs/jobs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,11 +21,12 @@ using core::usize;
 // got round to it" is a different amount of missing ground on every machine.
 // Cells rather than tiles because tiles stopped costing the same once they had
 // levels -- a tile at stride 8 is a sixty-fourth of one at stride 1, and a tile
-// budget would spend a whole slot on it. This is two full-detail tiles' worth,
-// which is what a brush straddling a tile boundary needs to show all of itself
-// in one frame, and it lets a camera move re-level dozens of distant tiles at
-// once.
-constexpr core::u64 CellsPerSync = 2ull * asset::TileEdge * asset::TileEdge * 16ull;
+// budget would spend a whole slot on it. This is four full-detail tiles' worth:
+// a brush on a tile corner touches four, and all four have to show the stroke
+// in the frame it was made. It was two while meshing ran on this thread; the
+// tiles now mesh in parallel, so four costs a four-core machine what two used
+// to cost, and a camera move re-levels dozens of distant tiles at once.
+constexpr core::u64 CellsPerSync = 4ull * asset::TileEdge * asset::TileEdge * 16ull;
 
 // The skirt, in lattice steps of the tile's own stride. Two steps is deeper than
 // the largest disagreement two neighbouring levels can have at their seam.
@@ -158,7 +160,27 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
         return a.key < b.key;
     });
 
-    u32 rebuilt = 0;
+    // **Chosen in series, meshed in parallel, applied in series.**
+    //
+    // Meshing is the whole cost of a tile and reads nothing but a field `sync`
+    // holds by const reference, so the budgeted tiles are meshed at once across
+    // the job pool, each into its own slot. Everything that has an ORDER -- the
+    // atoms interned, the handles `MeshCache` hands out, the residency list --
+    // happens afterwards on this thread, walking the slots in the order the
+    // tiles were chosen. How many workers the machine has decides how soon the
+    // meshes are ready and nothing else, and a serial pool runs the same slots
+    // in the same order.
+    struct Work
+    {
+        core::InstanceId terrain;
+        asset::TileKey key;
+        u32 stride = 1;
+        const scene::TerrainComponent* component = nullptr;
+        asset::MeshRegion region;
+        asset::TerrainMesh meshed;
+    };
+    std::vector<Work> work;
+
     core::u64 spent = 0;
     for (const Want& want : wants) {
         if (spent >= CellsPerSync)
@@ -168,151 +190,162 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
         if (terrainPtr == nullptr)
             continue;
         const scene::TerrainComponent& terrain = *terrainPtr;
-        const core::InstanceId id = want.terrain;
         const asset::TileKey key = want.key;
         const float voxel = terrain.field.settings().voxelSize;
         const auto edge = static_cast<core::i32>(asset::TileEdge);
         const asset::HeightTile* tile = terrain.field.findTile(key);
         if (tile == nullptr)
             continue;
+        const auto stride = static_cast<core::i32>(want.stride);
 
+        // The slab this tile's surface actually lives in, rather than the
+        // terrain's whole legal range.
+        float lowest = tile->height[0];
+        float highest = tile->height[0];
+        for (usize sample = 1; sample < asset::TileArea; ++sample) {
+            lowest = std::min(lowest, tile->height[sample]);
+            highest = std::max(highest, tile->height[sample]);
+        }
+
+        auto bottom = static_cast<core::i32>(std::floor(lowest / voxel)) - SurfaceMargin * stride;
+        auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + SurfaceMargin * stride;
+
+        // **And whatever bricks this tile's columns actually carry**,
+        // measured rather than assumed. A cave is voxels somewhere below the
+        // surface, and a mesher that stopped at the height layer would leave
+        // its roof and its floor unmeshed -- a hole you can see through. The
+        // scan is over the brick keys, which is a handful even in a heavily
+        // sculpted world, and it runs once per tile rebuild rather than per
+        // cell.
+        const core::i32 firstColumn = key.x * edge;
+        const core::i32 firstRow = key.z * edge;
+        const auto brickEdge = static_cast<core::i32>(asset::BrickEdge);
+        for (const asset::BrickKey brick : terrain.field.brickKeys()) {
+            const core::i32 brickMinX = brick.x * brickEdge;
+            const core::i32 brickMinZ = brick.z * brickEdge;
+            if (brickMinX + brickEdge <= firstColumn || brickMinX >= firstColumn + edge)
+                continue;
+            if (brickMinZ + brickEdge <= firstRow || brickMinZ >= firstRow + edge)
+                continue;
+            bottom = std::min(bottom, brick.y * brickEdge - SurfaceMargin);
+            top = std::max(top, (brick.y + 1) * brickEdge + SurfaceMargin);
+        }
+
+        // Snapped down to the stride, so a coarse tile samples the same
+        // lattice points its fine neighbour does and their shared edge
+        // agrees wherever it can.
+        bottom = static_cast<core::i32>(std::floor(static_cast<double>(bottom) / stride)) * stride;
+
+        asset::MeshRegion region;
+        region.minX = firstColumn;
+        region.minZ = firstRow;
+        region.minY = bottom;
+        region.cellsX = asset::TileEdge / static_cast<u32>(stride);
+        region.cellsZ = asset::TileEdge / static_cast<u32>(stride);
+        region.cellsY = static_cast<u32>(std::max((top - region.minY + stride - 1) / stride, 1));
+        region.stride = static_cast<u32>(stride);
+        region.skirt = SkirtSteps * static_cast<float>(stride) * voxel;
+
+        spent += static_cast<core::u64>(region.cellsX) * region.cellsY * region.cellsZ;
+        work.push_back(Work{want.terrain, key, want.stride, terrainPtr, region, {}});
+    }
+
+    jobs::parallelFor("terrain.mesh", jobs::Domain::Render, 0, work.size(), 1,
+                      [&work](usize begin, usize end, u32) noexcept {
+                          for (usize at = begin; at < end; ++at)
+                              work[at].meshed = asset::meshField(work[at].component->field, work[at].region);
+                      });
+
+    u32 rebuilt = 0;
+    for (Work& job : work) {
+        const core::InstanceId id = job.terrain;
+        const asset::TileKey key = job.key;
+        const scene::TerrainComponent& terrain = *job.component;
+        const asset::TerrainMesh& meshed = job.meshed;
+        // Looked up again here rather than carried from the choice: an earlier
+        // slot's insert or erase has moved the list since.
         const auto at = findResident(id, key);
         const bool exists = at != m_tiles.end() && at->terrain == id && at->key == key;
-        const auto stride = static_cast<core::i32>(want.stride);
-        {
+        // **Interned through the non-const table the caller owns.** A
+        // tile's URN has to exist as an atom for `extract` to look it up,
+        // and `sync` holds the world by const reference -- so the atom
+        // table is taken separately, which also makes it explicit that this
+        // is the one thing here that mutates anything shared.
+        const core::NameAtom urn = atoms.intern(terrainTileUrn(id, key));
 
-            // The slab this tile's surface actually lives in, rather than the
-            // terrain's whole legal range.
-            float lowest = tile->height[0];
-            float highest = tile->height[0];
-            for (usize sample = 1; sample < asset::TileArea; ++sample) {
-                lowest = std::min(lowest, tile->height[sample]);
-                highest = std::max(highest, tile->height[sample]);
-            }
-
-            auto bottom = static_cast<core::i32>(std::floor(lowest / voxel)) - SurfaceMargin * stride;
-            auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + SurfaceMargin * stride;
-
-            // **And whatever bricks this tile's columns actually carry**,
-            // measured rather than assumed. A cave is voxels somewhere below the
-            // surface, and a mesher that stopped at the height layer would leave
-            // its roof and its floor unmeshed -- a hole you can see through. The
-            // scan is over the brick keys, which is a handful even in a heavily
-            // sculpted world, and it runs once per tile rebuild rather than per
-            // cell.
-            const core::i32 firstColumn = key.x * edge;
-            const core::i32 firstRow = key.z * edge;
-            const auto brickEdge = static_cast<core::i32>(asset::BrickEdge);
-            for (const asset::BrickKey brick : terrain.field.brickKeys()) {
-                const core::i32 brickMinX = brick.x * brickEdge;
-                const core::i32 brickMinZ = brick.z * brickEdge;
-                if (brickMinX + brickEdge <= firstColumn || brickMinX >= firstColumn + edge)
-                    continue;
-                if (brickMinZ + brickEdge <= firstRow || brickMinZ >= firstRow + edge)
-                    continue;
-                bottom = std::min(bottom, brick.y * brickEdge - SurfaceMargin);
-                top = std::max(top, (brick.y + 1) * brickEdge + SurfaceMargin);
-            }
-
-            // Snapped down to the stride, so a coarse tile samples the same
-            // lattice points its fine neighbour does and their shared edge
-            // agrees wherever it can.
-            bottom = static_cast<core::i32>(std::floor(static_cast<double>(bottom) / stride)) * stride;
-
-            asset::MeshRegion region;
-            region.minX = firstColumn;
-            region.minZ = firstRow;
-            region.minY = bottom;
-            region.cellsX = asset::TileEdge / static_cast<u32>(stride);
-            region.cellsZ = asset::TileEdge / static_cast<u32>(stride);
-            region.cellsY = static_cast<u32>(std::max((top - region.minY + stride - 1) / stride, 1));
-            region.stride = static_cast<u32>(stride);
-            region.skirt = SkirtSteps * static_cast<float>(stride) * voxel;
-            spent += static_cast<core::u64>(region.cellsX) * region.cellsY * region.cellsZ;
-
-            const asset::TerrainMesh meshed = asset::meshField(terrain.field, region);
-            // **Interned through the non-const table the caller owns.** A
-            // tile's URN has to exist as an atom for `extract` to look it up,
-            // and `sync` holds the world by const reference -- so the atom
-            // table is taken separately, which also makes it explicit that this
-            // is the one thing here that mutates anything shared.
-            const core::NameAtom urn = atoms.intern(terrainTileUrn(id, key));
-
-            if (meshed.mesh.indices.empty()) {
-                // Nothing to draw here any more. The entry goes, and so does the
-                // GPU mesh -- an empty draw is cheaper than a stale one, and a
-                // stale one is ground that is not there.
-                if (exists) {
-                    if (at->mesh.valid())
-                        cache.release(device, at->mesh);
-                    library.remove(urn);
-                    m_tiles.erase(at);
-                }
-                rebuilt += 1;
-                continue;
-            }
-
-            core::EngineError uploadError;
-            const MeshHandle handle = cache.create(device, cmd, meshed.mesh, MeshUsage::Static, &uploadError);
-            if (!handle.valid()) {
-                core::logText(core::LogLevel::Warn, uploadError.message);
-                continue;
-            }
-
-            MeshLibrary::Entry entry;
-            entry.mesh = handle;
-            entry.bounds = meshed.mesh.bounds;
-            entry.sectionCount = static_cast<u32>(meshed.mesh.submeshes.size());
-            // **One material per section, coloured from the palette**, which is
-            // what makes a painted hillside look painted rather than uniformly
-            // grey. The mesher buckets its triangles by material and hands over
-            // `sectionMaterials` parallel to `submeshes`; this turns each id into
-            // a colour and points the section at it.
-            //
-            // A colour and not a texture, deliberately and for now: a terrain
-            // texture set is per-material albedo, normal and roughness plus the
-            // triplanar blend the mesher's UVs are already laid out for, and
-            // that is a texture pipeline rather than a colour lookup. Shipping
-            // the colour first means painting is visible today and the textures
-            // land later without moving anything here.
-            entry.sectionMaterial.resize(entry.sectionCount);
-            entry.materials.reserve(entry.sectionCount);
-            for (u32 section = 0; section < entry.sectionCount; ++section) {
-                const core::u8 materialId =
-                    section < meshed.sectionMaterials.size() ? meshed.sectionMaterials[section] : 0;
-                const core::Vec3 tint = asset::terrainColorOf(materialId);
-                RenderMaterial material;
-                material.uniforms.baseColor[0] = tint.x;
-                material.uniforms.baseColor[1] = tint.y;
-                material.uniforms.baseColor[2] = tint.z;
-                material.uniforms.baseColor[3] = 1.0f;
-                // x metallic, y roughness. Ground is rough and not metal, and
-                // the defaults are the other way round.
-                material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
-                material.uniforms.metallicRoughnessNormalCutoff[1] = 0.92f;
-                entry.sectionMaterial[section] = section;
-                entry.materials.push_back(material);
-            }
-            // **`positions` is left empty deliberately.** It exists for whoever
-            // needs a collision hull off a `MeshPart`, and terrain's collider
-            // comes from the field through `PhysicsSync` rather than from this --
-            // filling it would be a second copy of the same surface with no
-            // reader.
-
+        if (meshed.mesh.indices.empty()) {
+            // Nothing to draw here any more. The entry goes, and so does the
+            // GPU mesh -- an empty draw is cheaper than a stale one, and a
+            // stale one is ground that is not there.
             if (exists) {
                 if (at->mesh.valid())
                     cache.release(device, at->mesh);
-                at->mesh = handle;
-                at->revision = terrain.fieldRevision;
-                at->stride = want.stride;
-                at->seen = true;
+                library.remove(urn);
+                m_tiles.erase(at);
             }
-            else {
-                m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, want.stride, true});
-            }
-            library.set(urn, std::move(entry));
             rebuilt += 1;
+            continue;
         }
+
+        core::EngineError uploadError;
+        const MeshHandle handle = cache.create(device, cmd, meshed.mesh, MeshUsage::Static, &uploadError);
+        if (!handle.valid()) {
+            core::logText(core::LogLevel::Warn, uploadError.message);
+            continue;
+        }
+
+        MeshLibrary::Entry entry;
+        entry.mesh = handle;
+        entry.bounds = meshed.mesh.bounds;
+        entry.sectionCount = static_cast<u32>(meshed.mesh.submeshes.size());
+        // **One material per section, coloured from the palette**, which is
+        // what makes a painted hillside look painted rather than uniformly
+        // grey. The mesher buckets its triangles by material and hands over
+        // `sectionMaterials` parallel to `submeshes`; this turns each id into
+        // a colour and points the section at it.
+        //
+        // A colour and not a texture, deliberately and for now: a terrain
+        // texture set is per-material albedo, normal and roughness plus the
+        // triplanar blend the mesher's UVs are already laid out for, and
+        // that is a texture pipeline rather than a colour lookup. Shipping
+        // the colour first means painting is visible today and the textures
+        // land later without moving anything here.
+        entry.sectionMaterial.resize(entry.sectionCount);
+        entry.materials.reserve(entry.sectionCount);
+        for (u32 section = 0; section < entry.sectionCount; ++section) {
+            const core::u8 materialId = section < meshed.sectionMaterials.size() ? meshed.sectionMaterials[section] : 0;
+            const core::Vec3 tint = asset::terrainColorOf(materialId);
+            RenderMaterial material;
+            material.uniforms.baseColor[0] = tint.x;
+            material.uniforms.baseColor[1] = tint.y;
+            material.uniforms.baseColor[2] = tint.z;
+            material.uniforms.baseColor[3] = 1.0f;
+            // x metallic, y roughness. Ground is rough and not metal, and
+            // the defaults are the other way round.
+            material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
+            material.uniforms.metallicRoughnessNormalCutoff[1] = 0.92f;
+            entry.sectionMaterial[section] = section;
+            entry.materials.push_back(material);
+        }
+        // **`positions` is left empty deliberately.** It exists for whoever
+        // needs a collision hull off a `MeshPart`, and terrain's collider
+        // comes from the field through `PhysicsSync` rather than from this --
+        // filling it would be a second copy of the same surface with no
+        // reader.
+
+        if (exists) {
+            if (at->mesh.valid())
+                cache.release(device, at->mesh);
+            at->mesh = handle;
+            at->revision = terrain.fieldRevision;
+            at->stride = job.stride;
+            at->seen = true;
+        }
+        else {
+            m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, job.stride, true});
+        }
+        library.set(urn, std::move(entry));
+        rebuilt += 1;
     }
 
     // A tile the field no longer holds takes its mesh with it.
