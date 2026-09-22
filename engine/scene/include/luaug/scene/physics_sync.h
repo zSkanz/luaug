@@ -370,12 +370,26 @@ private:
     struct TerrainCollider
     {
         core::InstanceId terrain;
+        // False: a `HeightField` over one height tile, keyed by the tile.
+        // True: a `TriangleMesh` over one bricked column -- a 16 by 16 footprint
+        // carrying at least one brick -- keyed by the brick's x and z. Height
+        // colliders sort first, so within a terrain every height body is
+        // created before every cave body.
+        bool bricked = false;
         asset::TileKey key;
         physics::BodyHandle body;
-        // Which version of the field this was built from. A tile whose revision
-        // still matches is a tile whose collider is current, which is what stops
-        // every tick rebuilding every collider.
+        // `fieldRevision` when this was last checked, which answers "nothing
+        // was written" for the cost of a compare.
         core::u64 revision = 0;
+        // **What the collider was built FROM**: the digests of every tile and
+        // brick it read and the bricked columns that punch holes in it. A write
+        // anywhere bumps `fieldRevision` for the whole terrain, and before this
+        // key existed that rebuilt every collider in the world, four a tick, to
+        // change the one a brush touched.
+        core::u64 content = 0;
+        // The terrain's origin and height reservation, folded, so a moved
+        // terrain moves its bodies without re-sending their samples.
+        core::u64 placement = 0;
         bool seen = false;
     };
     std::vector<TerrainCollider> m_terrainColliders;
@@ -384,7 +398,7 @@ private:
     // says "nothing measured reaches the world hash", and that explicitly does
     // not extend to a collider -- a collider IS part of the world, so how many
     // get rebuilt in a tick has to be a fact about the operation sequence rather
-    // than about how fast the machine was that day.
+    // than about how fast the machine was that day. Shared by both kinds.
     static constexpr core::u32 TerrainRebuildsPerTick = 4;
 
     void applyTerrain();

@@ -39,6 +39,9 @@ public:
         // `desc.shape.points` after the fact, which happened to work only
         // because nothing had replaced it yet.
         std::vector<core::Vec3> points;
+        // The same, for a height field's samples and a mesh's triangles.
+        std::vector<float> heights;
+        core::usize indexCount = 0;
     };
 
     [[nodiscard]] physics::WorldHandle createWorld(const physics::WorldDesc&) override
@@ -66,15 +69,19 @@ public:
         // whoever is mirroring.
         physics::BodyDesc kept = desc;
         std::vector<core::Vec3> points(desc.shape.points.begin(), desc.shape.points.end());
+        std::vector<float> heights(desc.shape.heights.begin(), desc.shape.heights.end());
+        const core::usize indexCount = desc.shape.indices.size();
         kept.shape.points = {};
+        kept.shape.heights = {};
+        kept.shape.indices = {};
         if (refuseCreates) {
             // The attempt is still recorded, because what a case wants to count
             // is how many times the mirror ASKED.
-            created.push_back(Created{physics::BodyHandle{}, kept, std::move(points)});
+            created.push_back(Created{physics::BodyHandle{}, kept, std::move(points), std::move(heights), indexCount});
             return {};
         }
         const physics::BodyHandle handle{nextBody++, 1};
-        created.push_back(Created{handle, kept, std::move(points)});
+        created.push_back(Created{handle, kept, std::move(points), std::move(heights), indexCount});
         live.push_back(handle);
         calls.emplace_back("createBody", handle.index);
         return handle;
@@ -159,7 +166,7 @@ public:
         physics::BodyDesc kept = desc;
         std::vector<core::Vec3> points(desc.shape.points.begin(), desc.shape.points.end());
         kept.shape.points = {};
-        rebuilt.push_back(Created{handle, kept, std::move(points)});
+        rebuilt.push_back(Created{handle, kept, std::move(points), {}, 0});
         return !refuseUpdates;
     }
 
@@ -1869,7 +1876,7 @@ TEST_CASE("a terrain's tiles become static height-field colliders")
     const physics::BodyDesc& desc = mirror.backend.created.front().desc;
     CHECK(desc.shape.type == physics::ShapeType::HeightField);
     CHECK(desc.motion == physics::MotionType::Static);
-    CHECK(desc.shape.heightSampleCount == asset::TileEdge);
+    CHECK(desc.shape.heightSampleCount == asset::TileEdge + 1);
 
     // **The reservation is handed over**, which is what makes the terrain
     // diggable later: a height field's precision is spread across this range at
@@ -1908,8 +1915,8 @@ TEST_CASE("a sculpted tile is edited in place rather than rebuilt")
     // Edited, not recreated.
     CHECK(mirror.backend.created.size() == 1);
     REQUIRE(mirror.backend.heightEdits.size() == 1);
-    CHECK(mirror.backend.heightEdits.front().sizeX == asset::TileEdge);
-    CHECK(mirror.backend.heightEdits.front().sizeZ == asset::TileEdge);
+    CHECK(mirror.backend.heightEdits.front().sizeX == asset::TileEdge + 1);
+    CHECK(mirror.backend.heightEdits.front().sizeZ == asset::TileEdge + 1);
 }
 
 TEST_CASE("a terrain that is cleared takes its colliders with it")
@@ -1930,6 +1937,111 @@ TEST_CASE("a terrain that is cleared takes its colliders with it")
     // The tile is gone, so its collider is -- a collider for ground that is not
     // there is a wall somebody walks into.
     CHECK(mirror.backend.destroyed.size() > destroyedBefore);
+}
+
+TEST_CASE("a height tile's collider reaches its neighbour's first column, as the drawn tile does")
+{
+    // A tile is 32 columns and 32 intervals wide once its neighbour's first
+    // column is counted. The collider used to have 32 samples stretched over
+    // it -- 31 intervals -- which put the ground it collided with up to a voxel
+    // sideways of the ground that was drawn.
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    const std::vector<float> higher(asset::TileArea, 7.0f);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    component->field.setTile(asset::TileKey{1, 0}, higher, materials);
+    component->fieldRevision += 1;
+    mirror.step();
+
+    REQUIRE(mirror.backend.created.size() == 2);
+    const std::vector<float>& heights = mirror.backend.created.front().heights;
+    constexpr core::u32 Samples = asset::TileEdge + 1;
+    REQUIRE(heights.size() == Samples * Samples);
+    // Its own columns, then the +x neighbour's first.
+    CHECK(heights[0] == doctest::Approx(3.0));
+    CHECK(heights[asset::TileEdge - 1] == doctest::Approx(3.0));
+    CHECK(heights[asset::TileEdge] == doctest::Approx(7.0));
+    // No +z neighbour: the last row is no collision, so the ground stops where
+    // the drawn ground stops.
+    CHECK(heights[asset::TileEdge * Samples] > 1e30f);
+    // And a quad is a voxel wide.
+    CHECK(mirror.backend.created.front().desc.shape.size.x == doctest::Approx(asset::TileEdge * 0.5));
+}
+
+TEST_CASE("an edit to one tile does not rebuild the colliders of tiles it did not touch")
+{
+    // `fieldRevision` is one counter for the whole terrain. Before colliders
+    // were keyed by what they were built from, a brush stroke on one tile sent
+    // every tile in the world back to the backend, four a tick.
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    const std::vector<float> flat(asset::TileArea, 3.0f);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    component->field.setTile(asset::TileKey{5, 5}, flat, materials);
+    component->fieldRevision += 1;
+    mirror.step();
+    REQUIRE(mirror.backend.created.size() == 2);
+
+    const std::vector<float> raised(asset::TileArea, 5.0f);
+    component->field.setTile(asset::TileKey{5, 5}, raised, materials);
+    component->fieldRevision += 1;
+    mirror.step();
+
+    CHECK(mirror.backend.heightEdits.size() == 1);
+    CHECK(mirror.backend.created.size() == 2);
+}
+
+TEST_CASE("a cave is a hole in the height field and a mesh in its place")
+{
+    // A height field cannot say "ground, then air, then ground". A bricked
+    // column's samples are no-collision, and the column's surface -- the
+    // cave's roof and floor as well as the ground above -- is a triangle mesh.
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 0.0f);
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    (void)asset::fillBall(component->field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
+    component->fieldRevision += 1;
+    REQUIRE(component->field.brickCount() > 0);
+    mirror.step();
+
+    // Every height tile first, then the cave: the order bodies are created in
+    // is the order the backend numbers them (R10).
+    REQUIRE(mirror.backend.created.size() >= 2);
+    const auto& height = mirror.backend.created.front();
+    REQUIRE(height.desc.shape.type == physics::ShapeType::HeightField);
+    constexpr core::u32 Samples = asset::TileEdge + 1;
+    // Column (8, 8) is inside brick column (0, 0) at half a metre; column 20
+    // is outside it.
+    CHECK(height.heights[8 * Samples + 8] > 1e30f);
+    CHECK(height.heights[20 * Samples + 20] == doctest::Approx(0.0));
+
+    const auto& cave = mirror.backend.created.back();
+    CHECK(cave.desc.shape.type == physics::ShapeType::TriangleMesh);
+    CHECK(cave.desc.motion == physics::MotionType::Static);
+    CHECK(cave.indexCount >= 3);
+    CHECK_FALSE(cave.points.empty());
+
+    // A tick with nothing written builds nothing.
+    const core::usize before = mirror.backend.created.size();
+    mirror.step();
+    CHECK(mirror.backend.created.size() == before);
+}
+
+TEST_CASE("two terrains with a tile at the same key each get their collider")
+{
+    Mirror mirror;
+    (void)terrainWith(mirror, 3.0f);
+    (void)terrainWith(mirror, 9.0f);
+    mirror.step();
+    CHECK(mirror.backend.created.size() == 2);
+    mirror.step();
+    CHECK(mirror.backend.created.size() == 2);
+    CHECK(mirror.backend.destroyed.empty());
 }
 
 TEST_CASE("a world with no terrain mirrors exactly as it did before")

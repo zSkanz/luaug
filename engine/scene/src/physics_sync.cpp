@@ -1,10 +1,17 @@
 #include "luaug/scene/physics_sync.h"
 
+#include "luaug/asset/terrain_mesher.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
+#include <limits>
+#include <optional>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace luaug::scene {
 namespace {
@@ -523,17 +530,84 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
 
 // --- Terrain colliders (ADR 0066, ADR 0067) ----------------------------------
 //
-// **One static `HeightField` body per height tile.** A tile is 32x32 columns,
-// which is exactly the grid `HeightFieldShape` wants -- 32 samples over a block
-// size of 2 is sixteen blocks a side -- and it is also the unit the field itself
-// stores and clones, so a tile's collider and a tile's data are invalidated
-// together by construction.
+// **One static `HeightField` body per height tile**, and **one static
+// `TriangleMesh` body per bricked column.**
 //
-// **What a bricked column costs is named rather than half-built.** A cave's
-// surface needs a `TriangleMesh` body, which A3 measured at 12 ms for 32,000
-// triangles -- most of a frame -- so it needs a budgeted, off-frame rebuild that
-// this does not have yet. Until it does, a cave is visible and not collidable,
-// and that is stated here rather than discovered by walking into one.
+// A height tile is 32 by 32 columns, and its collider has 33 samples a side:
+// its own 32 and the first row and column of its +x and +z neighbours, so the
+// last quad reaches the neighbour's first column exactly as the drawn tile does.
+// It used to be 32 samples stretched over the same 32 columns -- thirty-one
+// intervals where the ground has thirty-two -- which put every collider up to a
+// voxel sideways of the ground drawn over it, and on a slope that is a
+// character standing in the air or sunk into the hill. Jolt pads 33 up to its
+// block size with no-collision samples, so the odd count costs nothing.
+//
+// **A bricked column is a hole in the height field and a mesh in its place.**
+// Bricks are where the field stops being a height function -- a cave, an
+// overhang, a tunnel -- and a height field cannot say "ground, then air, then
+// ground". So every sample inside a bricked column is no-collision, and the
+// column's whole surface, height layer and bricks alike, is meshed from the
+// field by the same mesher the renderer uses and handed over as triangles. The
+// mesh reaches one lattice column past the footprint on every side, because a
+// hole sample takes the quads on both sides of it: without the overlap there
+// would be a one-voxel gap round every cave mouth.
+//
+// A column's mesh is a few thousand triangles at most, which A3's measurement
+// (12 ms for 32,000) puts near a millisecond, and the shared budget caps how
+// many are rebuilt in one tick.
+namespace {
+
+constexpr f32 HeightNoCollision = std::numeric_limits<f32>::max();
+
+// How far above and below the surface a column's mesh looks, in lattice steps.
+// The render loader's margin, for the same reason: a crossing needs a cell on
+// each side of it.
+constexpr i32 ColumnMargin = 2;
+
+[[nodiscard]] i32 floorDivide(i32 value, i32 divisor) noexcept
+{
+    const i32 quotient = value / divisor;
+    return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient;
+}
+
+// Order-sensitive, which is what a key built from an ordered walk wants.
+[[nodiscard]] u64 combine(u64 seed, u64 value) noexcept
+{
+    u64 z = seed ^ (value + 0x9E3779B97F4A7C15ull + (seed << 6) + (seed >> 2));
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
+
+[[nodiscard]] u64 packKey(i32 a, i32 b) noexcept
+{
+    return (static_cast<u64>(static_cast<u32>(a)) << 32) | static_cast<u32>(b);
+}
+
+// The height of one lattice column, or nothing where no tile holds it.
+[[nodiscard]] std::optional<f32> columnHeight(const asset::TerrainField& field, i32 x, i32 z) noexcept
+{
+    const auto edge = static_cast<i32>(asset::TileEdge);
+    const i32 tileX = floorDivide(x, edge);
+    const i32 tileZ = floorDivide(z, edge);
+    const asset::HeightTile* tile = field.findTile(asset::TileKey{tileX, tileZ});
+    if (tile == nullptr)
+        return std::nullopt;
+    const auto localX = static_cast<usize>(x - tileX * edge);
+    const auto localZ = static_cast<usize>(z - tileZ * edge);
+    return tile->height[localZ * asset::TileEdge + localX];
+}
+
+// The digest of a tile, or a fixed marker where there is none -- a neighbour
+// appearing changes this tile's collider though this tile did not change.
+[[nodiscard]] u64 tileDigestOr(const asset::TerrainField& field, asset::TileKey key) noexcept
+{
+    const asset::HeightTile* tile = field.findTile(key);
+    return tile == nullptr ? 0x6E6F74696C65ull : asset::digestOf(*tile);
+}
+
+} // namespace
+
 void PhysicsSync::applyTerrain()
 {
     for (auto& collider : m_terrainColliders)
@@ -545,30 +619,101 @@ void PhysicsSync::applyTerrain()
     // reaches the world hash", and a collider is the world hash.
     u32 rebuilt = 0;
 
+    // Sorted by (terrain, kind, key): the order the walk below meets them in,
+    // which is the order bodies are created in, which decides the ids the
+    // backend hands out (R10). It used to compare the key alone, which put two
+    // terrains' tiles in one interleaved run and could find the other
+    // terrain's entry.
+    const auto locate = [this](core::InstanceId id, bool bricked, asset::TileKey key) {
+        const auto at = std::lower_bound(m_terrainColliders.begin(), m_terrainColliders.end(), key,
+                                         [&](const TerrainCollider& entry, const asset::TileKey& probe) {
+                                             if (entry.terrain.index != id.index)
+                                                 return entry.terrain.index < id.index;
+                                             if (entry.bricked != bricked)
+                                                 return !entry.bricked;
+                                             return entry.key < probe;
+                                         });
+        const bool exists =
+            at != m_terrainColliders.end() && at->terrain == id && at->bricked == bricked && at->key == key;
+        return std::pair{at, exists};
+    };
+
+    std::vector<f32> heights;
+    std::vector<asset::TileKey> brickedColumns;
+
     m_scene.terrains().forEach([&](core::InstanceId id, TerrainComponent& terrain) {
         if (!inWorld(id))
             return;
 
-        const f32 voxel = terrain.field.settings().voxelSize;
-        const auto edge = static_cast<f32>(asset::TileEdge);
+        const asset::TerrainField& field = terrain.field;
+        const f32 voxel = field.settings().voxelSize;
+        const auto edge = static_cast<i32>(asset::TileEdge);
+        const auto brickEdge = static_cast<i32>(asset::BrickEdge);
+        const u64 placement =
+            combine(combine(combine(std::bit_cast<u64>(terrain.origin.x), std::bit_cast<u64>(terrain.origin.y)),
+                            std::bit_cast<u64>(terrain.origin.z)),
+                    packKey(std::bit_cast<i32>(terrain.minHeight), std::bit_cast<i32>(terrain.maxHeight)));
+        const std::vector<asset::BrickKey> bricks = field.brickKeys();
 
-        // Sorted, because `tileKeys()` answers sorted -- and this walk decides
-        // the order bodies are created in, which decides the ids the backend
-        // hands out (R10).
-        for (const asset::TileKey key : terrain.field.tileKeys()) {
-            const asset::HeightTile* tile = terrain.field.findTile(key);
+        // The bricked columns, sorted and unique.
+        brickedColumns.clear();
+        for (const asset::BrickKey brick : bricks)
+            brickedColumns.push_back(asset::TileKey{brick.x, brick.z});
+        std::sort(brickedColumns.begin(), brickedColumns.end());
+        brickedColumns.erase(std::unique(brickedColumns.begin(), brickedColumns.end()), brickedColumns.end());
+        const auto columnBricked = [&](i32 x, i32 z) {
+            return std::binary_search(brickedColumns.begin(), brickedColumns.end(),
+                                      asset::TileKey{floorDivide(x, brickEdge), floorDivide(z, brickEdge)});
+        };
+
+        // Whether a collider still describes the field -- cheaply first, then
+        // by what it was built from. Answers true when nothing needs sending.
+        const auto current = [&](TerrainCollider& collider, u64 content) {
+            collider.seen = true;
+            if (collider.placement != placement)
+                return false;
+            if (collider.revision == terrain.fieldRevision)
+                return true;
+            if (collider.content == content) {
+                collider.revision = terrain.fieldRevision;
+                return true;
+            }
+            return false;
+        };
+
+        // --- Height tiles ---------------------------------------------------
+        //
+        // Sorted, because `tileKeys()` answers sorted.
+        for (const asset::TileKey key : field.tileKeys()) {
+            const asset::HeightTile* tile = field.findTile(key);
             if (tile == nullptr)
                 continue;
-
-            const auto at = std::lower_bound(
-                m_terrainColliders.begin(), m_terrainColliders.end(), key,
-                [](const TerrainCollider& entry, const asset::TileKey& probe) { return entry.key < probe; });
-
-            const bool exists = at != m_terrainColliders.end() && at->key == key && at->terrain == id;
-            if (exists && at->revision == terrain.fieldRevision) {
+            auto [at, exists] = locate(id, false, key);
+            // Nothing written and nothing moved: the tick's common case, and
+            // answered before any key is built.
+            if (exists && at->revision == terrain.fieldRevision && at->placement == placement) {
                 at->seen = true;
                 continue;
             }
+
+            const i32 firstColumn = key.x * edge;
+            const i32 firstRow = key.z * edge;
+            u64 content = asset::digestOf(*tile);
+            content = combine(content, tileDigestOr(field, asset::TileKey{key.x + 1, key.z}));
+            content = combine(content, tileDigestOr(field, asset::TileKey{key.x, key.z + 1}));
+            content = combine(content, tileDigestOr(field, asset::TileKey{key.x + 1, key.z + 1}));
+            // The bricked columns this tile's samples reach: a window of three
+            // by three brick columns at most.
+            for (i32 bz = floorDivide(firstRow, brickEdge); bz <= floorDivide(firstRow + edge, brickEdge); ++bz) {
+                for (i32 bx = floorDivide(firstColumn, brickEdge); bx <= floorDivide(firstColumn + edge, brickEdge);
+                     ++bx) {
+                    if (std::binary_search(brickedColumns.begin(), brickedColumns.end(), asset::TileKey{bx, bz}))
+                        content = combine(content, packKey(bx, bz));
+                }
+            }
+
+            if (exists && current(*at, content))
+                continue;
             if (rebuilt >= TerrainRebuildsPerTick) {
                 // Over budget: leave it as it was and come back next tick. Marked
                 // seen so it is not retired for being stale, which would destroy
@@ -578,53 +723,65 @@ void PhysicsSync::applyTerrain()
                 continue;
             }
 
-            // A tile's own samples, laid out the way `HeightFieldShape` reads
-            // them: row-major, `sampleCount` on a side.
-            std::vector<f32> heights(asset::TileArea);
-            for (usize sample = 0; sample < asset::TileArea; ++sample)
-                heights[sample] = tile->height[sample];
+            // Row-major, `Samples` on a side. The last row and column come from
+            // the neighbours, and are holes where there is no neighbour -- the
+            // ground stops where the drawn ground stops.
+            constexpr u32 Samples = asset::TileEdge + 1;
+            heights.assign(static_cast<usize>(Samples) * Samples, HeightNoCollision);
+            for (u32 z = 0; z < Samples; ++z) {
+                for (u32 x = 0; x < Samples; ++x) {
+                    const i32 column = firstColumn + static_cast<i32>(x);
+                    const i32 row = firstRow + static_cast<i32>(z);
+                    if (columnBricked(column, row))
+                        continue;
+                    if (x < asset::TileEdge && z < asset::TileEdge) {
+                        heights[z * Samples + x] = tile->height[z * asset::TileEdge + x];
+                        continue;
+                    }
+                    if (const std::optional<f32> height = columnHeight(field, column, row))
+                        heights[z * Samples + x] = *height;
+                }
+            }
 
             physics::BodyDesc desc;
             desc.shape.type = physics::ShapeType::HeightField;
-            desc.shape.size = core::Vec3{edge * voxel, 1.0f, edge * voxel};
+            desc.shape.size = core::Vec3{static_cast<f32>(edge) * voxel, 1.0f, static_cast<f32>(edge) * voxel};
             desc.shape.heights = heights;
-            desc.shape.heightSampleCount = asset::TileEdge;
+            desc.shape.heightSampleCount = Samples;
             // **The reservation, and it is why a terrain has Min/MaxHeight at
             // all**: the collider's precision is spread across this range when
             // the shape is built and cannot be widened afterwards, so digging
             // past it does not deepen the world.
             desc.shape.heightMin = terrain.minHeight;
             desc.shape.heightMax = terrain.maxHeight;
-            desc.shape.geometryRevision = terrain.fieldRevision;
+            desc.shape.geometryRevision = content;
             desc.motion = physics::MotionType::Static;
 
-            // A tile covers lattice columns `key * TileEdge` upward, and the
-            // shape centres itself on its footprint -- so the body sits at the
-            // tile's middle.
-            const f32 originX = (static_cast<f32>(key.x) * edge + edge * 0.5f) * voxel;
-            const f32 originZ = (static_cast<f32>(key.z) * edge + edge * 0.5f) * voxel;
-            // **Offset by the terrain's own origin**, which is what makes a
-            // terrain a thing you can move. The field is untouched -- baking the
-            // offset into every tile would make dragging a world a rewrite of
-            // every one of them -- so the consumers apply it, and this is the
-            // physics one.
+            // The shape centres itself on its footprint, which runs from the
+            // tile's first column to its neighbour's first -- so the body sits
+            // at the tile's middle. **Offset by the terrain's own origin**, which
+            // is what makes a terrain a thing you can move: the field is
+            // untouched, and every consumer applies the offset instead.
+            const f32 originX = (static_cast<f32>(firstColumn) + static_cast<f32>(edge) * 0.5f) * voxel;
+            const f32 originZ = (static_cast<f32>(firstRow) + static_cast<f32>(edge) * 0.5f) * voxel;
             desc.transform.position = core::DVec3{static_cast<f64>(originX) + terrain.origin.x, terrain.origin.y,
                                                   static_cast<f64>(originZ) + terrain.origin.z};
 
             if (exists) {
-                // **`updateHeightField` where the grid is the same shape**, which
-                // is the whole reason a height field is its own kind: A3 measured
+                // **`updateHeightField` while the reservation holds**, which is
+                // the whole reason a height field is its own kind: A3 measured
                 // it 58 times cheaper than a rebuild at this size, and it keeps
-                // the body, its id and its contacts.
-                const bool edited =
-                    m_backend.updateHeightField(m_world, at->body, 0, 0, asset::TileEdge, asset::TileEdge, heights);
+                // the body, its id and its contacts. A changed reservation
+                // cannot be edited into a built shape, so it is a rebuild.
+                const bool edited = at->placement == placement &&
+                                    m_backend.updateHeightField(m_world, at->body, 0, 0, Samples, Samples, heights);
                 if (!edited) {
-                    // A grid that could not be edited in place is rebuilt, which
-                    // is correct and slower rather than a refusal.
                     m_backend.destroyBody(m_world, at->body);
                     at->body = m_backend.createBody(m_world, desc);
                 }
                 at->revision = terrain.fieldRevision;
+                at->content = content;
+                at->placement = placement;
                 at->seen = true;
                 rebuilt += 1;
                 continue;
@@ -633,7 +790,114 @@ void PhysicsSync::applyTerrain()
             const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
             if (!handle.valid())
                 continue;
-            m_terrainColliders.insert(at, TerrainCollider{id, key, handle, terrain.fieldRevision, true});
+            m_terrainColliders.insert(
+                at, TerrainCollider{id, false, key, handle, terrain.fieldRevision, content, placement, true});
+            rebuilt += 1;
+        }
+
+        // --- Bricked columns ------------------------------------------------
+        for (const asset::TileKey column : brickedColumns) {
+            auto [at, exists] = locate(id, true, column);
+            if (exists && at->revision == terrain.fieldRevision && at->placement == placement) {
+                at->seen = true;
+                continue;
+            }
+
+            // The region: the column's footprint plus one lattice column on
+            // every side, from below its lowest surface to above its highest.
+            const i32 minX = column.x * brickEdge - 1;
+            const i32 minZ = column.z * brickEdge - 1;
+            const i32 span = brickEdge + 2;
+
+            u64 content = 0;
+            for (i32 tz = floorDivide(minZ, edge); tz <= floorDivide(minZ + span, edge); ++tz) {
+                for (i32 tx = floorDivide(minX, edge); tx <= floorDivide(minX + span, edge); ++tx)
+                    content = combine(content, tileDigestOr(field, asset::TileKey{tx, tz}));
+            }
+
+            f32 lowest = std::numeric_limits<f32>::max();
+            f32 highest = std::numeric_limits<f32>::lowest();
+            for (i32 z = 0; z <= span; ++z) {
+                for (i32 x = 0; x <= span; ++x) {
+                    if (const std::optional<f32> height = columnHeight(field, minX + x, minZ + z)) {
+                        lowest = std::min(lowest, *height);
+                        highest = std::max(highest, *height);
+                    }
+                }
+            }
+            const bool anyHeight = lowest <= highest;
+            i32 bottom = anyHeight ? static_cast<i32>(std::floor(lowest / voxel)) - ColumnMargin
+                                   : std::numeric_limits<i32>::max();
+            i32 top = anyHeight ? static_cast<i32>(std::ceil(highest / voxel)) + ColumnMargin
+                                : std::numeric_limits<i32>::lowest();
+
+            // Every brick the region reaches -- its own and its neighbours' rims
+            // -- goes into the key; only its own decide the slab's height.
+            const i32 reachMinX = floorDivide(minX, brickEdge);
+            const i32 reachMaxX = floorDivide(minX + span, brickEdge);
+            const i32 reachMinZ = floorDivide(minZ, brickEdge);
+            const i32 reachMaxZ = floorDivide(minZ + span, brickEdge);
+            for (const asset::BrickKey brick : bricks) {
+                if (brick.x < reachMinX || brick.x > reachMaxX || brick.z < reachMinZ || brick.z > reachMaxZ)
+                    continue;
+                if (const asset::Brick* found = field.findBrick(brick)) {
+                    content = combine(content, packKey(brick.x, brick.z));
+                    content = combine(content, static_cast<u64>(static_cast<u32>(brick.y)));
+                    content = combine(content, asset::digestOf(*found));
+                }
+                if (brick.x != column.x || brick.z != column.z)
+                    continue;
+                bottom = std::min(bottom, brick.y * brickEdge - ColumnMargin);
+                top = std::max(top, (brick.y + 1) * brickEdge + ColumnMargin);
+            }
+
+            if (exists && current(*at, content))
+                continue;
+            if (rebuilt >= TerrainRebuildsPerTick) {
+                if (exists)
+                    at->seen = true;
+                continue;
+            }
+
+            physics::BodyHandle handle{};
+            if (bottom < top) {
+                asset::MeshRegion region;
+                region.minX = minX;
+                region.minZ = minZ;
+                region.minY = bottom;
+                region.cellsX = static_cast<u32>(span);
+                region.cellsZ = static_cast<u32>(span);
+                region.cellsY = static_cast<u32>(top - bottom);
+                const asset::TerrainMesh meshed = asset::meshField(field, region);
+
+                if (meshed.colliderIndices.size() >= 3) {
+                    physics::BodyDesc desc;
+                    desc.shape.type = physics::ShapeType::TriangleMesh;
+                    desc.shape.points = meshed.colliderPoints;
+                    desc.shape.indices = meshed.colliderIndices;
+                    desc.shape.pointsRevision = content;
+                    desc.shape.geometryRevision = content;
+                    desc.motion = physics::MotionType::Static;
+                    desc.transform.position = terrain.origin;
+                    handle = m_backend.createBody(m_world, desc);
+                }
+            }
+
+            // Kept even with no body -- a column dug out to nothing is a column
+            // whose collider is current -- so it is not remeshed every tick.
+            if (exists) {
+                if (at->body.valid())
+                    m_backend.destroyBody(m_world, at->body);
+                at->body = handle;
+                at->revision = terrain.fieldRevision;
+                at->content = content;
+                at->placement = placement;
+                at->seen = true;
+            }
+            else {
+                m_terrainColliders.insert(
+                    at, TerrainCollider{id, true, column, handle, terrain.fieldRevision, content, placement, true});
+            }
             rebuilt += 1;
         }
     });

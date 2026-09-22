@@ -479,7 +479,33 @@ struct CharacterPair
         const JPH::Vec3 scale(desc.size.x / span, 1.0f, desc.size.z / span);
         const JPH::Vec3 offset(-desc.size.x * 0.5f, 0.0f, -desc.size.z * 0.5f);
 
-        JPH::HeightFieldShapeSettings settings(desc.heights.data(), offset, scale, samples);
+        // **Padded to a power-of-two count of blocks, with no-collision samples
+        // on the +x and +z sides.** Jolt 5.6.0 builds its range-block hierarchy
+        // over the block count rounded UP to a power of two, and `SetHeights`
+        // walks it with the count halved and rounded DOWN -- so an in-place edit
+        // of a grid of, say, 17 blocks writes its ranges into the wrong cells
+        // and the ground stops colliding. Measured, not read: a 33-sample grid
+        // edited in place let a resting cube fall through, a 32-sample one did
+        // not. The padding sits beyond the last real sample, so the scale and
+        // offset above -- and so every real sample's position -- are unchanged.
+        const u32 blocks = (samples + block - 1) / block;
+        u32 blocksPow2 = 1;
+        while (blocksPow2 < blocks)
+            blocksPow2 <<= 1;
+        const u32 padded = blocksPow2 * block;
+        std::vector<float> paddedHeights;
+        const float* heightData = desc.heights.data();
+        if (padded != samples) {
+            paddedHeights.assign(static_cast<core::usize>(padded) * padded,
+                                 JPH::HeightFieldShapeConstants::cNoCollisionValue);
+            for (u32 row = 0; row < samples; ++row) {
+                std::copy_n(desc.heights.data() + static_cast<core::usize>(row) * samples, samples,
+                            paddedHeights.data() + static_cast<core::usize>(row) * padded);
+            }
+            heightData = paddedHeights.data();
+        }
+
+        JPH::HeightFieldShapeSettings settings(heightData, offset, scale, padded);
         settings.mBlockSize = block;
         // **The range the field may ever hold, reserved now because it cannot be
         // widened later.** Jolt spreads its sample bits across
@@ -1045,8 +1071,29 @@ public:
                 return false;
             }
 
-            const_cast<JPH::HeightFieldShape*>(shape)->SetHeights(x, z, sizeX, sizeZ, heights.data(),
-                                                                  static_cast<intptr_t>(sizeX), m_temp);
+            // **A rectangle is widened to whole blocks.** `SetHeights` reads the
+            // samples around the rectangle it is given with `GetHeights`, which
+            // asserts on an unaligned start -- so an odd-sized rectangle, the 33
+            // samples a terrain tile hands over among them, asserts on the
+            // column just past its end. The widened part is filled from the
+            // shape's own current samples, so nothing the caller did not name
+            // changes. The grid is always a whole number of blocks (the build
+            // pads it), so the widened rectangle always fits.
+            const u32 fullX = std::min((sizeX + block - 1) / block * block, samples - x);
+            const u32 fullZ = std::min((sizeZ + block - 1) / block * block, samples - z);
+            auto* const editable = const_cast<JPH::HeightFieldShape*>(shape);
+            if (fullX == sizeX && fullZ == sizeZ) {
+                editable->SetHeights(x, z, sizeX, sizeZ, heights.data(), static_cast<intptr_t>(sizeX), m_temp);
+            }
+            else {
+                std::vector<float> widened(static_cast<core::usize>(fullX) * fullZ);
+                editable->GetHeights(x, z, fullX, fullZ, widened.data(), static_cast<intptr_t>(fullX));
+                for (u32 row = 0; row < sizeZ; ++row) {
+                    std::copy_n(heights.data() + static_cast<core::usize>(row) * sizeX, sizeX,
+                                widened.data() + static_cast<core::usize>(row) * fullX);
+                }
+                editable->SetHeights(x, z, fullX, fullZ, widened.data(), static_cast<intptr_t>(fullX), m_temp);
+            }
         }
 
         // **The broadphase still holds the old bounds.** `SetHeights` changes

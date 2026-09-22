@@ -456,3 +456,44 @@ TEST_CASE("what a terrain collider costs" * doctest::skip())
                                 << " triangles  create=" << ms(before, after) << " ms");
     }
 }
+
+TEST_CASE("an odd sample count with holes builds, edits in place, and a hole lets a body through")
+{
+    // **Exactly what the terrain mirror hands over**: a tile's 32 columns plus
+    // its neighbour's first, so 33 samples -- not a multiple of the block, which
+    // Jolt pads with no-collision samples -- and a no-collision square where a
+    // cave's columns are. Asserted against the real backend because the mirror's
+    // own tests run against a fake that would accept anything.
+    Fixture fixture;
+    constexpr u32 Samples = 33;
+    constexpr float NoCollision = 3.402823466e38f;
+    std::vector<float> heights(static_cast<core::usize>(Samples) * Samples, 0.0f);
+    for (u32 z = 8; z < 16; ++z) {
+        for (u32 x = 8; x < 16; ++x)
+            heights[z * Samples + x] = NoCollision;
+    }
+
+    BodyDesc desc = heightFieldDesc(heights);
+    // One metre a quad: 32 intervals over 32 metres, centred on the origin, so
+    // sample i sits at -16 + i.
+    desc.shape.size = core::Vec3{32.0f, 1.0f, 32.0f};
+    desc.shape.heightSampleCount = Samples;
+    const BodyHandle ground = fixture.physics->createBody(fixture.world, desc);
+    REQUIRE(ground.valid());
+
+    // The whole 33 by 33 rectangle, in place, holes and all.
+    for (float& height : heights) {
+        if (height != NoCollision)
+            height = 2.0f;
+    }
+    REQUIRE(fixture.physics->updateHeightField(fixture.world, ground, 0, 0, Samples, Samples, heights));
+
+    const BodyHandle solid = fixture.physics->createBody(fixture.world, cubeAbove({10.0, 8.0, 10.0}));
+    const BodyHandle overHole = fixture.physics->createBody(fixture.world, cubeAbove({-4.5, 8.0, -4.5}));
+    REQUIRE(solid.valid());
+    REQUIRE(overHole.valid());
+    fixture.run(240);
+
+    CHECK(fixture.physics->bodyState(fixture.world, solid).transform.position.y == doctest::Approx(2.5).epsilon(0.05));
+    CHECK(fixture.physics->bodyState(fixture.world, overHole).transform.position.y < -5.0);
+}
