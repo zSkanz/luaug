@@ -18,8 +18,8 @@ using core::Vec3;
 
 // The eight corners of a lattice cell, indexed so that bit 0 is x, bit 1 is y
 // and bit 2 is z. Written as a table rather than computed inline because every
-// tetrahedron below indexes it, and one transposed literal here would be a
-// surface subtly in the wrong place everywhere.
+// cell's edges index it, and one transposed literal here would be a surface
+// subtly in the wrong place everywhere.
 constexpr std::array<std::array<i32, 3>, 8> CornerOffsets{{
     {0, 0, 0}, // 0
     {1, 0, 0}, // 1
@@ -31,32 +31,6 @@ constexpr std::array<std::array<i32, 3>, 8> CornerOffsets{{
     {1, 1, 1}, // 7
 }};
 
-// **Six tetrahedra sharing the cube's main diagonal 0-7.**
-//
-// The decomposition is the standard one and the property that matters is that
-// every neighbouring cell uses the SAME diagonal -- so two cells sharing a face
-// split that face along the same line, and their triangles meet exactly. A
-// decomposition that alternated by parity would be watertight inside a cell and
-// cracked between two.
-constexpr std::array<std::array<int, 4>, 6> Tetrahedra{{
-    {0, 7, 1, 3},
-    {0, 7, 3, 2},
-    {0, 7, 2, 6},
-    {0, 7, 6, 4},
-    {0, 7, 4, 5},
-    {0, 7, 5, 1},
-}};
-
-// The six edges of a tetrahedron, as index pairs into its four corners.
-constexpr std::array<std::array<int, 2>, 6> TetraEdges{{
-    {0, 1},
-    {0, 2},
-    {0, 3},
-    {1, 2},
-    {1, 3},
-    {2, 3},
-}};
-
 // One sampled lattice point.
 struct Corner
 {
@@ -66,54 +40,6 @@ struct Corner
     float distance = 0.0f;
     core::u8 material = 0;
 };
-
-// A vertex's identity: the two lattice points whose edge it sits on, in sorted
-// order. **Sorted so that the two tetrahedra sharing an edge agree**, which is
-// what makes the surface indexed and watertight rather than a soup of
-// coincident vertices.
-struct EdgeKey
-{
-    i32 ax = 0;
-    i32 ay = 0;
-    i32 az = 0;
-    i32 bx = 0;
-    i32 by = 0;
-    i32 bz = 0;
-
-    [[nodiscard]] constexpr bool operator==(const EdgeKey&) const noexcept = default;
-};
-
-// A mix over the six lattice coordinates. Splitmix64's finaliser on a packed
-// key, which is cheap and scatters the low bits a lattice walk is full of.
-struct EdgeKeyHash
-{
-    [[nodiscard]] usize operator()(const EdgeKey& key) const noexcept
-    {
-        core::u64 hash = 1469598103934665603ull;
-        const auto mix = [&hash](i32 value) noexcept {
-            hash ^= static_cast<core::u64>(static_cast<core::u32>(value));
-            hash *= 1099511628211ull;
-        };
-        mix(key.ax);
-        mix(key.ay);
-        mix(key.az);
-        mix(key.bx);
-        mix(key.by);
-        mix(key.bz);
-        hash ^= hash >> 33;
-        hash *= 0xff51afd7ed558ccdull;
-        hash ^= hash >> 33;
-        return static_cast<usize>(hash);
-    }
-};
-
-[[nodiscard]] EdgeKey edgeKeyOf(const Corner& a, const Corner& b) noexcept
-{
-    const bool aFirst = std::tie(a.x, a.y, a.z) < std::tie(b.x, b.y, b.z);
-    const Corner& first = aFirst ? a : b;
-    const Corner& second = aFirst ? b : a;
-    return EdgeKey{first.x, first.y, first.z, second.x, second.y, second.z};
-}
 
 // Where along the edge the surface crosses.
 //
@@ -142,27 +68,9 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     // The surface is INSIDE where distance is negative, so a corner is "solid"
     // when its distance is below zero. Zero counts as solid, which puts a sample
     // sitting exactly on the surface on the inside -- an arbitrary choice that
-    // has to be made consistently, because two tetrahedra disagreeing about a
+    // has to be made consistently, because two cells disagreeing about a
     // shared corner is a crack.
     const auto solid = [](const Corner& corner) noexcept { return corner.distance <= 0.0f; };
-
-    // Vertex identity, so an edge shared by several tetrahedra produces one
-    // vertex and one index.
-    //
-    // **A hash map, and the comment that used to be here was wrong.** It said a
-    // `std::map` was required by R10 because "this walk decides the order
-    // vertices are emitted in, and therefore the mesh's bytes" -- which is true
-    // of the WALK and says nothing about the container. This is only ever
-    // `find` and `emplace`; it is never iterated, and an index comes from
-    // `vertices.size()` at the moment of first encounter. The order is the
-    // nested loops' and nothing else's.
-    //
-    // The cost of being wrong about that was a red-black tree with a
-    // twenty-four-byte key, hit a million times for a 32-cubed region: meshing
-    // one tile took ten milliseconds, and the loader does two a frame against a
-    // sixteen-millisecond budget.
-    std::unordered_map<EdgeKey, u32, EdgeKeyHash> emitted;
-    emitted.reserve(static_cast<usize>(region.cellsX + 1) * (region.cellsZ + 1) * 4);
 
     // **The lattice, sampled once.**
     //
@@ -243,73 +151,6 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     // every machine.
     std::map<u8, std::vector<u32>> buckets;
 
-    const auto vertexOn = [&](const Corner& a, const Corner& b) -> u32 {
-        const EdgeKey key = edgeKeyOf(a, b);
-        if (const auto at = emitted.find(key); at != emitted.end()) {
-            return at->second;
-        }
-
-        const float t = crossingAt(a.distance, b.distance);
-        const auto lerp = [t](float from, float to) { return from + (to - from) * t; };
-        const Vec3 position{lerp(static_cast<float>(a.x), static_cast<float>(b.x)) * voxel,
-                            lerp(static_cast<float>(a.y), static_cast<float>(b.y)) * voxel,
-                            lerp(static_cast<float>(a.z), static_cast<float>(b.z)) * voxel};
-
-        // **The gradient interpolated to the vertex, not taken at the nearer
-        // corner.** The comment that used to be here called the two
-        // "indistinguishable at this resolution", and on a curved surface they
-        // are not: every vertex whose crossing sits past the edge's midpoint
-        // snaps to the other corner's normal, so a hill shades as a stack of
-        // terraces with a band wherever the snap flips. It was the first thing
-        // visible in the example's screenshot. Two gradients per vertex is
-        // twelve samples instead of six, on the vertices only, out of a lattice
-        // that is already cached.
-        const Vec3 ga = gradientAt(a.x, a.y, a.z);
-        const Vec3 gb = gradientAt(b.x, b.y, b.z);
-        Vec3 blended{ga.x + (gb.x - ga.x) * t, ga.y + (gb.y - ga.y) * t, ga.z + (gb.z - ga.z) * t};
-        const float blendedLength = std::sqrt(blended.x * blended.x + blended.y * blended.y + blended.z * blended.z);
-        const Vec3 normal = blendedLength < 1e-8f
-                                ? ga
-                                : Vec3{blended.x / blendedLength, blended.y / blendedLength, blended.z / blendedLength};
-
-        Vertex vertex;
-        vertex.position = position;
-        vertex.normal = normal;
-        // **Triplanar UVs are the terrain's business and not this function's.**
-        // A world-space UV is what a terrain shader wants -- a texture that does
-        // not swim when the ground is sculpted -- and picking the plane is a
-        // shading decision. What goes here is the world position on the two axes
-        // the normal is least aligned with, which is the same answer for the
-        // same point however it was reached.
-        const float ax = std::abs(normal.x);
-        const float ay = std::abs(normal.y);
-        const float az = std::abs(normal.z);
-        if (ay >= ax && ay >= az) {
-            vertex.uv[0] = position.x;
-            vertex.uv[1] = position.z;
-        }
-        else if (ax >= az) {
-            vertex.uv[0] = position.z;
-            vertex.uv[1] = position.y;
-        }
-        else {
-            vertex.uv[0] = position.x;
-            vertex.uv[1] = position.y;
-        }
-
-        const auto index = static_cast<u32>(out.mesh.vertices.size());
-        out.mesh.vertices.push_back(vertex);
-        out.colliderPoints.push_back(position);
-        // **A vertex is the surface of the SOLID end of its edge**, so that is
-        // the material it wears. The air end has whatever material the ground
-        // that used to be there had -- carving keeps it, deliberately, because
-        // the material of a point with no ground in it is not a question -- and
-        // reading it here would paint a hole's colour onto the wall around it.
-        vertexMaterial.push_back(a.distance <= 0.0f ? a.material : b.material);
-        emitted.emplace(key, index);
-        return index;
-    };
-
     // **Winding is derived from the field, not from a case table.** The triangle
     // is emitted, its geometric normal computed, and the order reversed when it
     // disagrees with the gradient -- so "which way does this face" stops being
@@ -362,103 +203,191 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         out.colliderIndices.push_back(third);
     };
 
-    for (u32 cellZ = 0; cellZ < region.cellsZ; ++cellZ) {
-        for (u32 cellY = 0; cellY < region.cellsY; ++cellY) {
-            for (u32 cellX = 0; cellX < region.cellsX; ++cellX) {
+    // **Surface nets: one vertex per cell the surface passes through, one quad
+    // per lattice edge it crosses.**
+    //
+    // This replaced marching tetrahedra, and a person looking at a cave wall is
+    // why. Six tetrahedra around each cube's main diagonal put that diagonal
+    // into the surface: every curved wall came out as a zig-zag of long thin
+    // triangles leaning the same way, and interpolated normals could soften the
+    // shading but not the silhouette. A surface net places each vertex at the
+    // average of the crossings on its cell's twelve edges -- the centre of the
+    // little patch of surface inside the cell -- and joins the four cells
+    // around every crossed edge with a quad. The result follows the field
+    // without a preferred direction, and has roughly a third of the triangles.
+    //
+    // What it gives up is exact vertices on the lattice's edges, which marching
+    // methods have: two regions meshed side by side do not share vertices along
+    // their seam. Nothing here needs them to -- a cave region overlaps the
+    // ground it replaces by a cell -- and the collider tolerates the overlap.
+    const usize cellsX = region.cellsX;
+    const usize cellsY = region.cellsY;
+    const usize cellsZ = region.cellsZ;
+    constexpr u32 NoVertex = 0xFFFFFFFFu;
+    std::vector<u32> cellVertex(cellsX * cellsY * cellsZ, NoVertex);
+    const auto cellIndex = [&](usize x, usize y, usize z) noexcept { return (z * cellsY + y) * cellsX + x; };
+    const auto latticeSolid = [&](usize x, usize y, usize z) noexcept {
+        return lattice[(z * gridY + y) * gridX + x].distance <= 0.0f;
+    };
+
+    // The twelve edges of a cell, as corner-index pairs (bit 0 x, bit 1 y,
+    // bit 2 z).
+    constexpr std::array<std::array<int, 2>, 12> CellEdges{{
+        {0, 1},
+        {2, 3},
+        {4, 5},
+        {6, 7}, // along x
+        {0, 2},
+        {1, 3},
+        {4, 6},
+        {5, 7}, // along y
+        {0, 4},
+        {1, 5},
+        {2, 6},
+        {3, 7}, // along z
+    }};
+
+    for (usize cellZ = 0; cellZ < cellsZ; ++cellZ) {
+        for (usize cellY = 0; cellY < cellsY; ++cellY) {
+            for (usize cellX = 0; cellX < cellsX; ++cellX) {
                 const i32 baseX = region.minX + static_cast<i32>(cellX) * stride;
                 const i32 baseY = region.minY + static_cast<i32>(cellY) * stride;
                 const i32 baseZ = region.minZ + static_cast<i32>(cellZ) * stride;
 
                 std::array<Corner, 8> corners{};
+                int inside = 0;
                 for (int at = 0; at < 8; ++at) {
                     corners[static_cast<usize>(at)] =
                         sampleAt(baseX + CornerOffsets[static_cast<usize>(at)][0] * stride,
                                  baseY + CornerOffsets[static_cast<usize>(at)][1] * stride,
                                  baseZ + CornerOffsets[static_cast<usize>(at)][2] * stride);
+                    if (solid(corners[static_cast<usize>(at)]))
+                        inside |= 1 << at;
+                }
+                if (inside == 0 || inside == 0xFF)
+                    continue; // Wholly solid or wholly air: no surface here.
+
+                // The vertex: the mean of the crossings, and the gradient
+                // interpolated to each crossing, summed.
+                float sumX = 0.0f;
+                float sumY = 0.0f;
+                float sumZ = 0.0f;
+                Vec3 normalSum{0.0f, 0.0f, 0.0f};
+                int crossings = 0;
+                for (const std::array<int, 2>& edge : CellEdges) {
+                    const Corner& a = corners[static_cast<usize>(edge[0])];
+                    const Corner& b = corners[static_cast<usize>(edge[1])];
+                    if (solid(a) == solid(b))
+                        continue;
+                    const float t = crossingAt(a.distance, b.distance);
+                    sumX += static_cast<float>(a.x) + (static_cast<float>(b.x) - static_cast<float>(a.x)) * t;
+                    sumY += static_cast<float>(a.y) + (static_cast<float>(b.y) - static_cast<float>(a.y)) * t;
+                    sumZ += static_cast<float>(a.z) + (static_cast<float>(b.z) - static_cast<float>(a.z)) * t;
+                    const Vec3 ga = gradientAt(a.x, a.y, a.z);
+                    const Vec3 gb = gradientAt(b.x, b.y, b.z);
+                    normalSum.x += ga.x + (gb.x - ga.x) * t;
+                    normalSum.y += ga.y + (gb.y - ga.y) * t;
+                    normalSum.z += ga.z + (gb.z - ga.z) * t;
+                    ++crossings;
+                }
+                const float inverse = 1.0f / static_cast<float>(crossings);
+                const Vec3 position{sumX * inverse * voxel, sumY * inverse * voxel, sumZ * inverse * voxel};
+                const float normalLength =
+                    std::sqrt(normalSum.x * normalSum.x + normalSum.y * normalSum.y + normalSum.z * normalSum.z);
+                const Vec3 normal = normalLength < 1e-8f ? Vec3{0.0f, 1.0f, 0.0f}
+                                                         : Vec3{normalSum.x / normalLength, normalSum.y / normalLength,
+                                                                normalSum.z / normalLength};
+
+                // **What the cell is made of: the commonest material among its
+                // SOLID corners**, lowest id on a tie. The air corners' material
+                // is whatever the ground there used to be, and a hole's colour on
+                // the wall around it is the mistake that rule avoids.
+                std::array<u8, 8> seen{};
+                std::array<int, 8> votes{};
+                int kinds = 0;
+                for (int at = 0; at < 8; ++at) {
+                    if ((inside & (1 << at)) == 0)
+                        continue;
+                    const u8 material = corners[static_cast<usize>(at)].material;
+                    int slot = 0;
+                    while (slot < kinds && seen[static_cast<usize>(slot)] != material)
+                        ++slot;
+                    if (slot == kinds) {
+                        seen[static_cast<usize>(kinds)] = material;
+                        ++kinds;
+                    }
+                    ++votes[static_cast<usize>(slot)];
+                }
+                u8 material = seen[0];
+                int best = votes[0];
+                for (int slot = 1; slot < kinds; ++slot) {
+                    const u8 candidate = seen[static_cast<usize>(slot)];
+                    const int count = votes[static_cast<usize>(slot)];
+                    if (count > best || (count == best && candidate < material)) {
+                        material = candidate;
+                        best = count;
+                    }
                 }
 
-                for (const std::array<int, 4>& tetra : Tetrahedra) {
-                    std::array<const Corner*, 4> points{};
-                    int inside = 0;
-                    for (int at = 0; at < 4; ++at) {
-                        points[static_cast<usize>(at)] = &corners[static_cast<usize>(tetra[static_cast<usize>(at)])];
-                        if (solid(*points[static_cast<usize>(at)])) {
-                            inside |= 1 << at;
-                        }
-                    }
-                    if (inside == 0 || inside == 0b1111) {
-                        continue; // Wholly solid or wholly air: no surface here.
-                    }
-
-                    // The crossings, in the fixed edge order above. A tetrahedron
-                    // with a 1-3 split has three of them and a 2-2 split has four,
-                    // and there is no other possibility -- which is the whole
-                    // reason a tetrahedron needs no table.
-                    std::array<u32, 6> crossing{};
-                    std::array<bool, 6> crosses{};
-                    int found = 0;
-                    for (int at = 0; at < 6; ++at) {
-                        const Corner& a = *points[static_cast<usize>(TetraEdges[static_cast<usize>(at)][0])];
-                        const Corner& b = *points[static_cast<usize>(TetraEdges[static_cast<usize>(at)][1])];
-                        if (solid(a) != solid(b)) {
-                            crossing[static_cast<usize>(at)] = vertexOn(a, b);
-                            crosses[static_cast<usize>(at)] = true;
-                            ++found;
-                        }
-                    }
-
-                    if (found == 3) {
-                        std::array<u32, 3> triangle{};
-                        int taken = 0;
-                        for (int at = 0; at < 6 && taken < 3; ++at) {
-                            if (crosses[static_cast<usize>(at)]) {
-                                triangle[static_cast<usize>(taken++)] = crossing[static_cast<usize>(at)];
-                            }
-                        }
-                        emitTriangle(triangle[0], triangle[1], triangle[2]);
-                    }
-                    else if (found == 4) {
-                        // **A quad, and its two triangles have to share a
-                        // diagonal that exists.** The four crossings are not in a
-                        // cycle in edge order, so they are ordered here by which
-                        // corner they touch: the two edges leaving the first
-                        // inside corner, then the two leaving the second. That
-                        // makes 0-1 and 2-3 opposite sides of the quad, so
-                        // `(0,1,3)` and `(0,3,2)` are its two halves.
-                        std::array<int, 2> insideCorners{-1, -1};
-                        std::array<int, 2> outsideCorners{-1, -1};
-                        int insideCount = 0;
-                        int outsideCount = 0;
-                        for (int at = 0; at < 4; ++at) {
-                            if ((inside & (1 << at)) != 0) {
-                                insideCorners[static_cast<usize>(insideCount++)] = at;
-                            }
-                            else {
-                                outsideCorners[static_cast<usize>(outsideCount++)] = at;
-                            }
-                        }
-
-                        const auto crossingBetween = [&](int cornerA, int cornerB) -> u32 {
-                            for (int at = 0; at < 6; ++at) {
-                                const int first = TetraEdges[static_cast<usize>(at)][0];
-                                const int second = TetraEdges[static_cast<usize>(at)][1];
-                                if ((first == cornerA && second == cornerB) ||
-                                    (first == cornerB && second == cornerA)) {
-                                    return crossing[static_cast<usize>(at)];
-                                }
-                            }
-                            return 0;
-                        };
-
-                        const u32 q0 = crossingBetween(insideCorners[0], outsideCorners[0]);
-                        const u32 q1 = crossingBetween(insideCorners[0], outsideCorners[1]);
-                        const u32 q2 = crossingBetween(insideCorners[1], outsideCorners[0]);
-                        const u32 q3 = crossingBetween(insideCorners[1], outsideCorners[1]);
-
-                        emitTriangle(q0, q1, q3);
-                        emitTriangle(q0, q3, q2);
-                    }
+                Vertex vertex;
+                vertex.position = position;
+                vertex.normal = normal;
+                // **Triplanar UVs are the terrain's business and not this
+                // function's.** What goes here is the world position on the two
+                // axes the normal is least aligned with, which is the same answer
+                // for the same point however it was reached.
+                const float ax = std::abs(normal.x);
+                const float ay = std::abs(normal.y);
+                const float az = std::abs(normal.z);
+                if (ay >= ax && ay >= az) {
+                    vertex.uv[0] = position.x;
+                    vertex.uv[1] = position.z;
                 }
+                else if (ax >= az) {
+                    vertex.uv[0] = position.z;
+                    vertex.uv[1] = position.y;
+                }
+                else {
+                    vertex.uv[0] = position.x;
+                    vertex.uv[1] = position.y;
+                }
+
+                cellVertex[cellIndex(cellX, cellY, cellZ)] = static_cast<u32>(out.mesh.vertices.size());
+                out.mesh.vertices.push_back(vertex);
+                out.colliderPoints.push_back(position);
+                vertexMaterial.push_back(material);
+            }
+        }
+    }
+
+    // The quads. A lattice edge the surface crosses is shared by four cells,
+    // and their four vertices are the quad around it -- emitted only where all
+    // four cells are inside the region. `emitTriangle` derives each triangle's
+    // winding from the field, so the order around the edge does not matter.
+    const auto quad = [&](usize x0, usize y0, usize z0, usize x1, usize y1, usize z1, usize x2, usize y2, usize z2,
+                          usize x3, usize y3, usize z3) {
+        const u32 a = cellVertex[cellIndex(x0, y0, z0)];
+        const u32 b = cellVertex[cellIndex(x1, y1, z1)];
+        const u32 c = cellVertex[cellIndex(x2, y2, z2)];
+        const u32 d = cellVertex[cellIndex(x3, y3, z3)];
+        if (a == NoVertex || b == NoVertex || c == NoVertex || d == NoVertex)
+            return;
+        emitTriangle(a, b, c);
+        emitTriangle(a, c, d);
+    };
+    for (usize z = 0; z < gridZ; ++z) {
+        for (usize y = 0; y < gridY; ++y) {
+            for (usize x = 0; x < gridX; ++x) {
+                const bool here = latticeSolid(x, y, z);
+                // Along x: the cells around it are y-1..y by z-1..z.
+                if (x < cellsX && y >= 1 && y < cellsY && z >= 1 && z < cellsZ && here != latticeSolid(x + 1, y, z))
+                    quad(x, y - 1, z - 1, x, y, z - 1, x, y, z, x, y - 1, z);
+                // Along y: x-1..x by z-1..z.
+                if (y < cellsY && x >= 1 && x < cellsX && z >= 1 && z < cellsZ && here != latticeSolid(x, y + 1, z))
+                    quad(x - 1, y, z - 1, x, y, z - 1, x, y, z, x - 1, y, z);
+                // Along z: x-1..x by y-1..y.
+                if (z < cellsZ && x >= 1 && x < cellsX && y >= 1 && y < cellsY && here != latticeSolid(x, y, z + 1))
+                    quad(x - 1, y - 1, z, x, y - 1, z, x, y, z, x - 1, y, z);
             }
         }
     }

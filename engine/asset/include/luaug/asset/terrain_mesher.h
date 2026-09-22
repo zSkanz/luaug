@@ -2,36 +2,26 @@
 
 // Turning a `TerrainField` into triangles (ADR 0067, F1 B2).
 //
-// **The isosurface is extracted by marching TETRAHEDRA, not marching cubes, and
-// that is a deviation from the plan with a reason.** Everything ADR 0067 claims
-// is preserved -- vertices land on edge crossings by linear interpolation, so
-// `sd(p) = p.y - H(x, z)` still puts the vertical crossing at exactly `y = H`,
-// and the boundary between the two encodings is still an equality rather than a
-// stitch. What changes is how a cell is subdivided before that happens.
+// **The isosurface is extracted as a SURFACE NET** (since 2026-09-22): one
+// vertex in each cell the surface passes through, at the mean of the crossings
+// on that cell's edges, and one quad around each lattice edge the surface
+// crosses, joining the four cells that share it.
 //
-// Three reasons, in the order they decided it:
+// It replaced marching tetrahedra, which the first version used for three good
+// reasons -- no 256-entry table to vendor or derive, no ambiguous faces, and
+// winding taken from the field -- and one bad result nobody weighed until a cave
+// was looked at: six tetrahedra around each cube's main diagonal put that
+// diagonal into the surface, and every curved wall became a zig-zag of long thin
+// triangles leaning one way. A surface net keeps all three good reasons (it has
+// no table, no ambiguous case, and its winding still comes from the gradient)
+// and has no preferred direction, with about a third of the triangles.
 //
-//   * **Marching cubes needs a 256-entry triangulation table**, and that table
-//     is somebody else's work to vendor -- which R5 and R6 make a decision with
-//     an ADR rather than an `#include`. Deriving it from the fifteen base cases
-//     under the cube's symmetry group is real work with a silent failure mode.
-//     A tetrahedron has sixteen cases and every one of them is derivable in a
-//     few lines, which is clean-room by construction.
-//   * **A tetrahedron has no ambiguous face.** Marching cubes' ambiguous cases
-//     are the reason two neighbouring cells can disagree about whether a surface
-//     connects, which is a crack -- and a crack in terrain is a hole somebody
-//     falls through. There is no such case here.
-//   * **The winding is derived from the field rather than from a table.** A
-//     triangle's normal is flipped to agree with the gradient, so "which way
-//     does this face" stops being a thing a table can get backwards. That class
-//     of bug already cost this milestone one failing test in the physics seam.
-//
-// **The cost is honest and recorded**: roughly twice the triangles of marching
-// cubes, and worse-shaped ones. The A3 bench puts a 32,000-triangle collider at
-// 12 ms to build, so this matters for a bricked cell and not for a
-// height-encoded one, whose collider is a height field. If the count becomes the
-// problem, the fix is the derived marching-cubes table, and it is a change to
-// this file alone.
+// **What it does not do is put vertices on lattice edges.** `sd = y - H` no
+// longer lands a vertex at exactly `y = H`; it lands at the mean of the heights
+// round the cell, which is the same surface to within the lattice's own
+// resolution. Nothing depends on the exact equality any more: the height layer
+// is drawn from its atlas on the GPU (ADR 0071), and this meshes caves, which
+// overlap the ground they replace by a cell.
 
 #include "luaug/asset/model.h"
 #include "luaug/asset/terrain.h"

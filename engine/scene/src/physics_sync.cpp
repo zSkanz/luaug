@@ -564,6 +564,12 @@ constexpr f32 HeightNoCollision = std::numeric_limits<f32>::max();
 // each side of it.
 constexpr i32 ColumnMargin = 2;
 
+// How many lattice cells a cave collider reaches past its column on every side.
+// The height field is open over the column and the quads either side of it, and
+// a surface net's vertices sit at cell centres -- so the mesh has to reach two
+// cells out to cover the opening, overlapping the height field beyond it.
+constexpr i32 CaveRim = 2;
+
 [[nodiscard]] i32 floorDivide(i32 value, i32 divisor) noexcept
 {
     const i32 quotient = value / divisor;
@@ -867,9 +873,9 @@ void PhysicsSync::applyTerrain()
 
             // The region: the column's footprint plus one lattice column on
             // every side, from below its lowest surface to above its highest.
-            const i32 minX = column.x * brickEdge - 1;
-            const i32 minZ = column.z * brickEdge - 1;
-            const i32 span = brickEdge + 2;
+            const i32 minX = column.x * brickEdge - CaveRim;
+            const i32 minZ = column.z * brickEdge - CaveRim;
+            const i32 span = brickEdge + 2 * CaveRim;
 
             u64 content = 0;
             for (i32 tz = floorDivide(minZ, edge); tz <= floorDivide(minZ + span, edge); ++tz) {

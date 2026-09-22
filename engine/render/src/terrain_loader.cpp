@@ -42,6 +42,18 @@ constexpr u32 CavesPerSync = 4;
 // crossing needs a cell on each side of it.
 constexpr i32 CaveMargin = 2;
 
+// How many lattice cells a cave's mesh reaches past its column on every side.
+// The ground's triangles are discarded wherever they touch the column, which
+// opens it one cell wider than the column; a surface net's vertices sit at cell
+// centres, so reaching one cell past would stop half a cell short of the edge
+// of that opening. Two reach past it, and the overlap is sunk out of sight --
+// see `sinkRim`.
+constexpr i32 CaveRim = 2;
+
+// How far the part of a cave mesh that overlaps the ground is lowered, so the
+// ground wins the depth test there instead of the two fighting over it.
+constexpr float CaveRimSink = 0.03f;
+
 // The flag in a material byte that opens the ground for a cave mesh.
 constexpr core::u8 CaveFlag = 0x80;
 
@@ -102,9 +114,9 @@ constexpr core::u8 CaveFlag = 0x80;
 {
     const auto edge = static_cast<i32>(asset::TileEdge);
     const auto brickEdge = static_cast<i32>(asset::BrickEdge);
-    const i32 minX = column.x * brickEdge - 1;
-    const i32 minZ = column.z * brickEdge - 1;
-    const i32 span = brickEdge + 2;
+    const i32 minX = column.x * brickEdge - CaveRim;
+    const i32 minZ = column.z * brickEdge - CaveRim;
+    const i32 span = brickEdge + 2 * CaveRim;
     u64 content = 0;
     for (i32 tz = floorDivide(minZ, edge); tz <= floorDivide(minZ + span, edge); ++tz) {
         for (i32 tx = floorDivide(minX, edge); tx <= floorDivide(minX + span, edge); ++tx)
@@ -131,9 +143,9 @@ constexpr core::u8 CaveFlag = 0x80;
     const auto edge = static_cast<i32>(asset::TileEdge);
     const auto brickEdge = static_cast<i32>(asset::BrickEdge);
     const float voxel = field.settings().voxelSize;
-    const i32 minX = column.x * brickEdge - 1;
-    const i32 minZ = column.z * brickEdge - 1;
-    const i32 span = brickEdge + 2;
+    const i32 minX = column.x * brickEdge - CaveRim;
+    const i32 minZ = column.z * brickEdge - CaveRim;
+    const i32 span = brickEdge + 2 * CaveRim;
 
     i32 bottom = std::numeric_limits<i32>::max();
     i32 top = std::numeric_limits<i32>::lowest();
@@ -299,7 +311,22 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
             const core::NameAtom urn = atoms.intern(terrainCaveUrn(id, column));
             asset::MeshRegion region;
             if (caveRegion(field, column, bricks, region)) {
-                const asset::TerrainMesh meshed = asset::meshField(field, region);
+                asset::TerrainMesh meshed = asset::meshField(field, region);
+                // Sink the rim: every vertex past the opening in the ground --
+                // more than a cell outside the column, where the ground is still
+                // drawn -- goes a few centimetres down, so the ground covers it.
+                {
+                    const auto brickEdge = static_cast<float>(asset::BrickEdge);
+                    const float lowX = (static_cast<float>(column.x) * brickEdge - 1.0f) * voxel;
+                    const float highX = (static_cast<float>(column.x + 1) * brickEdge) * voxel;
+                    const float lowZ = (static_cast<float>(column.z) * brickEdge - 1.0f) * voxel;
+                    const float highZ = (static_cast<float>(column.z + 1) * brickEdge) * voxel;
+                    for (asset::Vertex& vertex : meshed.mesh.vertices) {
+                        const core::Vec3& where = vertex.position;
+                        if (where.x < lowX || where.x > highX || where.z < lowZ || where.z > highZ)
+                            vertex.position.y -= CaveRimSink;
+                    }
+                }
                 if (!meshed.mesh.indices.empty()) {
                     core::EngineError uploadError;
                     handle = cache.create(device, cmd, meshed.mesh, MeshUsage::Static, &uploadError);
