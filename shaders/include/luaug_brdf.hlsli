@@ -355,30 +355,44 @@ float shadowTapPcf(Texture2D<float> atlas, SamplerState pointSampler, float2 uv,
     return lerp(bottom, top, 1.0f - fraction.y);
 }
 
-// One cascade, 3x3 taps of the above. Returns 1 where the sun reaches.
+// One cascade. Returns 1 where the sun reaches.
+//
+// **Rewritten after the Godot study (2026-09-22), for three defects a person
+// saw at once:** shadows soft and faint everywhere, lifted off the base of the
+// thing casting them, and gone altogether on thin casters at a distance. All
+// three came from one number: a filter that could never be narrower than six
+// texels of whatever cascade it was in. Six texels of the last cascade is most
+// of a metre, which erases a fence post; and the normal offset was scaled by
+// that filter, so it pushed every shadow half a filter away from its caster.
+//
+// What replaced it is what the reference renderers do:
+//   - the penumbra is a WORLD size (`ShadowParams.x`), so it is the same width
+//     in every cascade, floored at a texel and a half so an edge is never a
+//     single hard step;
+//   - sixteen taps on a Vogel disk, turned per pixel by interleaved gradient
+//     noise -- a disc rather than a square, and a third of the taps the 7x7 grid
+//     took, each still a bilinear four-texel comparison;
+//   - a normal offset of one and a half TEXELS, applied only sideways to the
+//     light, so it moves the lookup off the receiver's own texel without moving
+//     the shadow towards or away from its caster.
 float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint cascade, float3 position, float3 normal,
                     float nol, float2 atlasSize, float2 pixel)
 {
     const float texelWorld = CascadeTexelWorld[cascade];
     const float depthRange = max(CascadeDepthRange[cascade], 1e-3f);
 
-    // The kernel's reach, in texels and then in world metres. `ShadowParams.x` is
-    // a penumbra in METRES and this is where it meets the cascade it has to be
-    // drawn on; `shadow.h` carries the whole argument for why it is metres again
-    // and why the band is [2, 4].
-    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 6.0f, 8.0f);
-    const float filterWorld = texelWorld * radiusTexels;
+    // The kernel's reach in texels: the authored world penumbra over this
+    // cascade's texel, never under a texel and a half and never over six.
+    const float radiusTexels = clamp(ShadowParams.x / max(texelWorld, 1e-6f), 1.5f, 6.0f);
 
-    // Normal-offset bias, replacing a depth-only one: displacing the sample
-    // along the surface normal is what survives a grazing receiver, and it
-    // scales with the SINE of the light angle so it grows exactly where it is
-    // needed and vanishes where it is not.
-    //
-    // Measured against the FILTER rather than against one texel. A kernel that
-    // reads depths a texel away needs an offset that reaches as far as it does,
-    // or the widest taps land back on the surface that cast them.
-    const float slope = sqrt(saturate(1.0f - nol * nol));
-    const float3 offset = normal * (filterWorld * ShadowParams.y * slope);
+    // Normal offset, sideways to the light only (the reference renderers' form):
+    // the part of the normal that points along the light would move the lookup
+    // towards or away from the caster, which is peter-panning; the part across
+    // it moves the lookup off the texel the receiver itself wrote. Scaled by how
+    // grazing the light is, so a face-on receiver is not moved at all.
+    const float3 toLight = normalize(SunDirectionBrightness.xyz);
+    float3 offset = normal * ((1.0f - saturate(nol)) * ShadowParams.y * texelWorld);
+    offset -= toLight * dot(toLight, offset);
 
     const float4 lightClip = mul(CascadeViewProjection[cascade], float4(position + offset, 1.0f));
     const float3 ndc = lightClip.xyz / lightClip.w;
@@ -397,72 +411,44 @@ float sampleCascade(Texture2D<float> atlas, SamplerState pointSampler, uint casc
 
     // The residual depth bias is stated in METRES and converted here, because a
     // constant in depth units means a different distance in every cascade.
+    //
+    // **No slope term, and that was measured.** A receiver-side slope bias
+    // cures acne on a surface that has no far side to store -- terrain -- and
+    // lifts every mesh's shadow off its base, because meshes need none: the
+    // shadow pass culls their front faces (D051). The terrain carries its own
+    // push, on the caster side, where only it pays for it.
     const float reference = ndc.z - ShadowParams.w / depthRange;
 
-    // A cascade's tile spans half the atlas, and its own extent is
-    // `texelWorld * tile` metres across -- so a step of one texel is this much
-    // local uv, and half that much atlas uv. The 5x5 loop below reaches two
-    // steps out, so a step is half the radius.
-    const float2 step2 = ((radiusTexels / 3.0f) / (0.5f * atlasSize)) * 0.5f;
+    // One texel of this cascade, in atlas uv: the tile is half the atlas.
+    const float2 texelUv = 1.0f / atlasSize;
+    const float2 radiusUv = radiusTexels * texelUv;
 
     // The tile: cascade 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
     const float2 tile = float2(float(cascade & 1u), float(cascade >> 1u)) * 0.5f;
-
-    // The atlas's whole tax, and it is four lines: a tap that walks off a tile
-    // reads the NEIGHBOURING cascade's depth, which is a bright seam along the
-    // split. Clamping to the tile inset by the kernel is what stops it.
-    // A rotated grid reaches its own DIAGONAL, not its edge, so the inset that
-    // keeps a tap inside its own tile has to allow for the corner (D054).
-    const float2 inset = step2 * 4.25f + 0.5f / atlasSize;
+    // A tap that walks off its tile reads the NEIGHBOURING cascade's depth,
+    // which is a bright seam along the split. Clamped to the tile, inset by the
+    // disc's reach and the bilinear tap's own half texel.
+    const float2 inset = radiusUv + texelUv;
     const float2 lowest = tile + inset;
     const float2 highest = tile + float2(0.5f, 0.5f) - inset;
+    const float2 centre = tile + local * 0.5f;
 
-    // **Forty-nine taps rather than nine, and each of the two increases answered
-    // a different artifact.**
-    //
-    // Twenty-five over nine was about COVERAGE: a penumbra several texels wide
-    // cannot be drawn by a 3x3 grid without its own samples showing as bands.
-    // Forty-nine over twenty-five is about the SIZE OF A STEP (D054): this
-    // returns a count of taps, so the smallest change it can express is one
-    // tap, and one texel of the map flipping therefore moved a shadow edge by a
-    // twenty-fifth of the penumbra -- 3.6 pixels on a still scene at a low sun,
-    // which is a visible jump. A forty-ninth of the same penumbra is 0.75.
-    // A shadow edge is quantised onto the shadow map's texel grid, and
-    // what hides that quantisation is a penumbra several texels wide. A 3x3 grid
-    // cannot produce one: spread it far enough to cover the step and its own
-    // three samples become visible as bands, which is why the radius was clamped
-    // to three texels and why the edge stayed hard. Seven by seven covers the
-    // same reach with the spacing filled in, and quantises four times as finely.
-    //
-    // Each tap is itself a bilinear four-texel comparison, so the footprint is a
-    // little wider than the loop suggests and the corners of the grid carry less
-    // weight than a disc would give them. That is the trade a square kernel
-    // makes and it is invisible at this size.
-    // **Rotated per pixel, and D054 is why.** The grid below is what hides a
-    // shadow map's texel steps, and the wider it reaches the better it hides
-    // them -- but a fixed grid spread over six texels puts its twenty-five taps
-    // a texel and a half apart, and every pixel in a region then samples the
-    // same five rings. That is banding, and it is what the [2, 4] clamp this
-    // replaces existed to avoid. Turning each pixel's grid by its own angle
-    // costs two trig calls and spends the same taps on a different five rings
-    // per pixel, which reads as a soft edge instead.
-    float sine = 0.0f;
-    float cosine = 0.0f;
-    sincos(shadowKernelAngle(pixel), sine, cosine);
-
+    const float angle = shadowKernelAngle(pixel);
     float lit = 0.0f;
     [unroll]
-    for (int y = -3; y <= 3; ++y)
+    for (int i = 0; i < 16; ++i)
     {
-        [unroll]
-        for (int x = -3; x <= 3; ++x)
-        {
-            const float2 turned = float2(float(x) * cosine - float(y) * sine, float(x) * sine + float(y) * cosine);
-            const float2 uv = clamp(tile + local * 0.5f + turned * step2, lowest, highest);
-            lit += shadowTapPcf(atlas, pointSampler, uv, reference, atlasSize);
-        }
+        // Vogel's disc: radius sqrt((i + 0.5) / n), golden-angle turns. Even
+        // coverage with no rings for the eye to find.
+        const float r = sqrt((float(i) + 0.5f) / 16.0f);
+        const float theta = float(i) * 2.39996323f + angle;
+        float s = 0.0f;
+        float c = 0.0f;
+        sincos(theta, s, c);
+        const float2 uv = clamp(centre + float2(c, s) * r * radiusUv, lowest, highest);
+        lit += shadowTapPcf(atlas, pointSampler, uv, reference, atlasSize);
     }
-    return lit / 49.0f;
+    return lit / 16.0f;
 }
 
 // How much of the sun reaches this fragment: 1 lit, 0 fully occluded.

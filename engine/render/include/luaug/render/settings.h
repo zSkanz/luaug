@@ -48,8 +48,11 @@ struct GraphicsSettings
     f32 renderScale = 1.0f;
 
     // One cascade's tile, in texels. The atlas is always two tiles by two, so
-    // this squares: 512 costs 4 MiB, 1024 costs 16, 2048 costs 64.
-    u32 shadowTileResolution = 1024;
+    // this squares: 512 costs 4 MiB, 1024 costs 16, 2048 costs 64. 2048 is the
+    // default -- the High preset's, and the size a reference renderer gives its
+    // sun -- because at 1024 thin casters in the far cascades lost their
+    // shadows entirely (`shadow.h`, `kShadowTileResolution`).
+    u32 shadowTileResolution = 2048;
 
     // How many cascades the sun casts into, 0 through 4. Zero is "no sun
     // shadow", which is a real setting on a weak machine and not a bug: the

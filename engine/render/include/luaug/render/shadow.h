@@ -36,7 +36,11 @@ inline constexpr u32 kShadowCascadeCount = 4;
 // support, which is not a floor to build a default on (R16). The near cascade
 // still lands at about 1.2 cm per texel against M4's 5.9, and shadow resolution
 // becomes an engine setting at M8 (ADR 0038 §3).
-inline constexpr u32 kShadowTileResolution = 1024;
+// **2048 since 2026-09-22**, which is a 4096 atlas -- the reference renderers'
+// default for the sun (Godot's `directional_shadow/size` is 4096). At 1024 a
+// 0.4 m post in the last cascade was a texel and a half wide, and its shadow
+// was gone. Medium and Low keep the smaller tiles.
+inline constexpr u32 kShadowTileResolution = 2048;
 inline constexpr u32 kShadowAtlasResolution = kShadowTileResolution * 2;
 
 // How far from the camera the sun casts. Shorter than any example's far plane on
@@ -127,9 +131,17 @@ inline constexpr f32 kShadowRadius = 220.0f;
 // file authored. Contact was re-measured at three sun elevations on
 // `tests/screenshots/contact` after the change, because a wider filter scales
 // the normal offset with it and that is exactly what D051 was about.
+//
+// **The floor came down to a texel and a half on 2026-09-22**, and this is the
+// measurement that moved it. Six texels of the LAST cascade is most of a metre:
+// a 0.4 m fence post seventy metres away cast no shadow at all, because the
+// filter averaged it away, and every shadow in the frame read as a smear. The
+// stepping six was chosen to hide is now hidden the way the reference renderers
+// hide it -- a Vogel disc turned per pixel, each tap a bilinear comparison --
+// and not by blurring the far cascades until their content is gone.
 inline constexpr f32 kShadowFilterWorldRadius = 0.05f;
-inline constexpr f32 kShadowFilterMinTexels = 6.0f;
-inline constexpr f32 kShadowFilterMaxTexels = 8.0f;
+inline constexpr f32 kShadowFilterMinTexels = 1.5f;
+inline constexpr f32 kShadowFilterMaxTexels = 6.0f;
 
 // Normal-offset bias, replacing M4's depth-only one (ADR 0038). The sample is
 // displaced along the surface normal, scaled by the sine of the light angle --
@@ -155,7 +167,16 @@ inline constexpr f32 kShadowFilterMaxTexels = 8.0f;
 // it is attached at every hour with no speckle anywhere; and
 // `examples/02-meshes` at a 24-degree sun -- D044's own probe frame -- is clean
 // at both.
-inline constexpr f32 kShadowNormalOffsetFilters = 0.5f;
+//
+// **In TEXELS of the cascade since 2026-09-22, and applied only sideways to the
+// light.** Half a filter was a quarter of a metre in the far cascades once the
+// filter had a six-texel floor, and every shadow stood that far off its caster.
+// The reference renderers measure the offset in texels (Godot's default is two)
+// and strip the component along the light, which is the part that moves a
+// shadow towards or away from what casts it. One and a half, measured on the
+// same contact scene: attached at the base of a pillar and a crate at a low sun,
+// and no speckle on the lit faces.
+inline constexpr f32 kShadowNormalOffsetTexels = 1.5f;
 
 // The residual depth bias, in METRES rather than in depth units. Depth units
 // mean different things in different cascades, because `kShadowCasterMargin`

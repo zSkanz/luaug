@@ -361,8 +361,11 @@ private:
     void selectTerrain(const RenderWorld& world);
     // Draws the selected nodes. `cull` is a cascade's or a light's sphere;
     // without one, nodes are culled against the camera's frustum.
+    // `depthPush` is added to every vertex's clip-space depth: how far to push
+    // the terrain away from the light in a shadow pass. See the cascade loop.
     void drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, const Mat4& viewProjection,
-                     rhi::PipelineHandle pipeline, Selection selection, const CullSphere* cull = nullptr);
+                     rhi::PipelineHandle pipeline, Selection selection, const CullSphere* cull = nullptr,
+                     f32 depthPush = 0.0f);
 
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
@@ -1887,7 +1890,8 @@ void DefaultRenderer::selectTerrain(const RenderWorld& world)
 }
 
 void DefaultRenderer::drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, const Mat4& viewProjection,
-                                  rhi::PipelineHandle pipeline, Selection selection, const CullSphere* cull)
+                                  rhi::PipelineHandle pipeline, Selection selection, const CullSphere* cull,
+                                  f32 depthPush)
 {
     if (terrainDraws_.empty() || !terrainValid_ || !pipeline.valid())
         return;
@@ -1974,6 +1978,7 @@ void DefaultRenderer::drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, 
         uniforms.node.morph[0] = node.morphStart;
         uniforms.node.morph[1] = node.morphEnd;
         uniforms.node.morph[2] = node.morphEnd > node.morphStart ? 1.0f / (node.morphEnd - node.morphStart) : 0.0f;
+        uniforms.node.morph[3] = depthPush;
         for (u32 channel = 0; channel < 4; ++channel) {
             uniforms.node.atlas[channel] = terrain.atlas[channel];
             uniforms.node.atlasSize[channel] = terrain.atlasSize[channel];
@@ -2121,10 +2126,37 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     casterBounds_.reserve(world.draws.size());
     for (const DrawItem& draw : world.draws)
         casterBounds_.push_back(ShadowCasterBounds{draw.boundsCenter, draw.boundsRadius});
-    for (const TerrainDraw& draw : terrainDraws_) {
-        const Vec3 centre = (draw.node.boundsMin + draw.node.boundsMax) * 0.5f;
-        casterBounds_.push_back(
-            ShadowCasterBounds{centre, 0.5f * core::length(draw.node.boundsMax - draw.node.boundsMin)});
+    // **The terrain, as the tiles it is made of and only as far as shadows
+    // reach.** Handing the fit its quadtree nodes -- a coarse one is hundreds
+    // of metres across -- inflated every cascade's depth range to the size of
+    // the node, the depth bias is a fraction of that range, and thin casters'
+    // shadows vanished into it. A 16 m tile with its own height range is what
+    // the fit can size a cascade's depth by.
+    for (const RenderTerrain& terrain : world.terrains) {
+        const f64 tileMetres = static_cast<f64>(TerrainGridQuads) * static_cast<f64>(terrain.voxelSize);
+        const f64 reach = static_cast<f64>(settings_.shadowDistance) + tileMetres;
+        for (u32 z = 0; z < terrain.tilesZ; ++z) {
+            for (u32 x = 0; x < terrain.tilesX; ++x) {
+                const usize index = static_cast<usize>(z) * terrain.tilesX + x;
+                if (index >= terrain.tileMin.size() || terrain.tileMin[index] > terrain.tileMax[index])
+                    continue;
+                const f64 minX = terrain.origin.x - world.camera.origin.x +
+                                 static_cast<f64>(terrain.minTileX + static_cast<core::i32>(x)) * tileMetres;
+                const f64 minZ = terrain.origin.z - world.camera.origin.z +
+                                 static_cast<f64>(terrain.minTileZ + static_cast<core::i32>(z)) * tileMetres;
+                const f64 centreX = minX + tileMetres * 0.5;
+                const f64 centreZ = minZ + tileMetres * 0.5;
+                if (centreX * centreX + centreZ * centreZ > reach * reach)
+                    continue;
+                const f64 low = terrain.origin.y - world.camera.origin.y + static_cast<f64>(terrain.tileMin[index]);
+                const f64 high = terrain.origin.y - world.camera.origin.y + static_cast<f64>(terrain.tileMax[index]);
+                const f64 halfHeight = (high - low) * 0.5;
+                const f64 radius = std::sqrt(tileMetres * tileMetres * 0.5 + halfHeight * halfHeight);
+                casterBounds_.push_back(ShadowCasterBounds{
+                    Vec3{static_cast<f32>(centreX), static_cast<f32>(low + halfHeight), static_cast<f32>(centreZ)},
+                    static_cast<f32>(radius)});
+            }
+        }
     }
     fit.casters = casterBounds_;
     fit.distance = settings_.shadowDistance;
@@ -2188,7 +2220,23 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             const CullSphere cull{cascades.cullCentre[index], cascades.cullRadius[index] + filterReach};
             drawGeometry(cmd, world, meshes, cascades.viewProjection[index], shadowPipeline_, shadowSkinnedPipeline_,
                          Selection::Shadow, &cull);
-            drawTerrain(cmd, world, cascades.viewProjection[index], terrainShadowPipeline_, Selection::Shadow, &cull);
+            // **The terrain has no far side to store.** Every mesh here culls
+            // its front faces, so the depth in the map is the back of a solid
+            // and a lit surface never shadows itself (D051). A height field is
+            // one surface: drawn as it is, the map holds exactly the depth the
+            // ground is then compared against, and the whole terrain acnes into
+            // a dark rectangle the size of the cascade. So it is pushed away
+            // from the light -- in the light's clip depth, which for an
+            // orthographic cascade is linear in metres -- by as many texels as
+            // the filter can reach plus a margin for a low sun: the widest disc
+            // reads depths six texels off, and on ground tilted from the light
+            // those are deeper than the fragment by the slope. Two texels left
+            // concentric rings of self-shadow on open ground at a low sun.
+            const f32 push = cascades.depthRange[index] > 0.0f
+                                 ? 6.0f * cascades.texelWorld[index] / cascades.depthRange[index]
+                                 : 0.0f;
+            drawTerrain(cmd, world, cascades.viewProjection[index], terrainShadowPipeline_, Selection::Shadow, &cull,
+                        push);
         }
     }
     cmd.endRenderPass();
@@ -2400,7 +2448,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             frame.cascadeDepthRange[index] = cascades.depthRange[index];
         }
         frame.shadowParams[0] = kShadowFilterWorldRadius;
-        frame.shadowParams[1] = kShadowNormalOffsetFilters;
+        frame.shadowParams[1] = kShadowNormalOffsetTexels;
         frame.shadowParams[2] = kShadowCascadeBlend;
         frame.shadowParams[3] = kShadowDepthBiasMetres;
 

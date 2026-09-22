@@ -370,7 +370,8 @@ struct GpuTerrainParams
     f32 nodeRelative[4]{};
     // xy: the node's lattice corner in lattice steps; z: steps per grid step.
     f32 nodeLattice[4]{};
-    // x: morph start, y: morph end, z: 1 / (end - start).
+    // x: morph start, y: morph end, z: 1 / (end - start), w: clip-depth push
+    // (shadow passes only).
     f32 morph[4]{};
     // x: slots per atlas row, y: tile table edge, zw: the tile key at table
     // entry (0, 0).

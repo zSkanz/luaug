@@ -38,6 +38,10 @@ Interpolants VertexMain(VertexInput input)
                                                 VertexMaterials, VertexMaterialsSampler, Node, input.Grid);
     Interpolants output;
     output.Position = mul(ViewProjection, float4(vertex.Position, 1.0f));
+    // Away from the light, in a cascade (see the renderer's cascade loop); zero
+    // in the camera's prepass. Scaled by w so it is the same depth offset for a
+    // perspective projection as for an orthographic one.
+    output.Position.z += Node.Morph.w * output.Position.w;
     output.Hole = vertex.Hole;
     return output;
 }

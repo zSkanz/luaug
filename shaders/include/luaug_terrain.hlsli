@@ -39,7 +39,8 @@ struct TerrainParams
     // step (2^level). w: unused.
     float4 NodeLattice;
     // x: morph start, y: morph end (metres from the viewer), z: 1 / (end -
-    // start), w: unused.
+    // start), w: how far to push clip depth away from the light, in a shadow
+    // pass; zero everywhere else.
     float4 Morph;
     // x: slots per atlas row, y: the tile table's edge, zw: the tile key that
     // table entry (0, 0) holds.
