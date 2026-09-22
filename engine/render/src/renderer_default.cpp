@@ -38,6 +38,17 @@ constexpr rhi::TextureFormat kShadowFormat = rhi::TextureFormat::D32Float;
 // classic double-encode.
 constexpr rhi::TextureFormat kLdrFormat = rhi::TextureFormat::Rgba8Unorm;
 constexpr rhi::TextureFormat kOcclusionFormat = rhi::TextureFormat::R8Unorm;
+
+// Contact shadows: how far each pixel marches towards the sun, how thick a
+// surface is assumed to be behind what the depth buffer shows, and where the
+// effect has faded out. Sixty centimetres covers the gap a shadow map's biases
+// leave at the base of anything standing on the ground with room to spare; a
+// quarter of a metre of thickness stops a pole in front of the ray from
+// shadowing the wall a metre behind it; and past sixty metres the gap is
+// smaller than a pixel.
+constexpr f32 kContactRayMetres = 0.6f;
+constexpr f32 kContactThicknessMetres = 0.25f;
+constexpr f32 kContactFadeDistance = 60.0f;
 constexpr rhi::TextureFormat kLuminanceFormat = rhi::TextureFormat::R32Float;
 
 // Five levels, halving from half resolution: the coarsest is a thirty-second of
@@ -401,6 +412,7 @@ private:
     rhi::PipelineHandle skyPipeline_{};
     rhi::PipelineHandle ssaoPipeline_{};
     rhi::PipelineHandle ssaoBlurPipeline_{};
+    rhi::PipelineHandle contactPipeline_{};
     rhi::PipelineHandle bloomDownPipeline_{};
     rhi::PipelineHandle bloomUpPipeline_{};
     rhi::PipelineHandle luminanceDownPipeline_{};
@@ -436,6 +448,10 @@ private:
     // ever written when a draw carries `outlined`, which no game does.
     rhi::TextureHandle outlineMask_{};
     rhi::TextureHandle occlusionBlur_{};
+    // Full resolution, one channel: the sun's contact shadows. Full rather than
+    // half like the occlusion term, because what it carries is the sharp line
+    // where a caster meets the ground.
+    rhi::TextureHandle contact_{};
     // The bloom chain, each level its own texture because a `ColorAttachment`
     // names a texture and not a mip level.
     rhi::TextureHandle bloom_[kBloomLevels]{};
@@ -584,6 +600,8 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     const rhi::ShaderHandle ssaoFragment = load("ssao", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle ssaoBlurVertex = load("ssao_blur", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle ssaoBlurFragment = load("ssao_blur", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle contactVertex = load("contact_shadow", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle contactFragment = load("contact_shadow", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle bloomDownVertex = load("bloom_down", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle bloomDownFragment = load("bloom_down", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle bloomUpVertex = load("bloom_up", rhi::ShaderStage::Vertex);
@@ -613,6 +631,8 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
                                            ssaoFragment,
                                            ssaoBlurVertex,
                                            ssaoBlurFragment,
+                                           contactVertex,
+                                           contactFragment,
                                            bloomDownVertex,
                                            bloomDownFragment,
                                            bloomUpVertex,
@@ -913,6 +933,7 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
 
     ssaoPipeline_ = fullscreen(ssaoVertex, ssaoFragment, occlusionTarget, "ssao");
     ssaoBlurPipeline_ = fullscreen(ssaoBlurVertex, ssaoBlurFragment, occlusionTarget, "ssao_blur");
+    contactPipeline_ = fullscreen(contactVertex, contactFragment, occlusionTarget, "contact_shadow");
     bloomDownPipeline_ = fullscreen(bloomDownVertex, bloomDownFragment, hdrTarget, "bloom_down");
     bloomUpPipeline_ = fullscreen(bloomUpVertex, bloomUpFragment, bloomAddTarget, "bloom_up");
     luminanceDownPipeline_ = fullscreen(luminanceDownVertex, luminanceDownFragment, luminanceTarget, "luminance_down");
@@ -978,10 +999,11 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
     if (!shadowPipeline_.valid() || !pbrPipeline_.valid() || !pbrBlendPipeline_.valid() || !skyPipeline_.valid() ||
         !tonemapPipeline_.valid() || !shadowSkinnedPipeline_.valid() || !pbrSkinnedPipeline_.valid() ||
         !pbrSkinnedBlendPipeline_.valid() || !depthPrepassPipeline_.valid() || !depthPrepassSkinnedPipeline_.valid() ||
-        !ssaoPipeline_.valid() || !ssaoBlurPipeline_.valid() || !bloomDownPipeline_.valid() ||
-        !bloomUpPipeline_.valid() || !luminanceDownPipeline_.valid() || !luminanceReducePipeline_.valid() ||
-        !luminanceAdaptPipeline_.valid() || !fxaaPipeline_.valid() || !shadowInstancedPipeline_.valid() ||
-        !depthPrepassInstancedPipeline_.valid() || !pbrInstancedPipeline_.valid()) {
+        !ssaoPipeline_.valid() || !ssaoBlurPipeline_.valid() || !contactPipeline_.valid() ||
+        !bloomDownPipeline_.valid() || !bloomUpPipeline_.valid() || !luminanceDownPipeline_.valid() ||
+        !luminanceReducePipeline_.valid() || !luminanceAdaptPipeline_.valid() || !fxaaPipeline_.valid() ||
+        !shadowInstancedPipeline_.valid() || !depthPrepassInstancedPipeline_.valid() ||
+        !pbrInstancedPipeline_.valid()) {
         destroy(device);
         return core::makeError(LUAUG_TR("render.err.pipeline_create_failed"));
     }
@@ -1168,7 +1190,7 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
     // place the settings' render scale is applied, so that nothing downstream
     // has to remember to.
 
-    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &outlineMask_,
+    for (rhi::TextureHandle* texture : {&hdr_, &depth_, &ldr_, &occlusion_, &occlusionBlur_, &contact_, &outlineMask_,
                                         &luminance64_, &luminance8_, &exposure_[0], &exposure_[1]}) {
         if (texture->valid())
             device.destroy(*texture);
@@ -1224,6 +1246,13 @@ std::optional<core::EngineError> DefaultRenderer::ensureTargets(rhi::IDevice& de
         .width = width,
         .height = height,
         .debugName = "outline-mask",
+    });
+    contact_ = device.createTexture({
+        .format = kOcclusionFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = width,
+        .height = height,
+        .debugName = "contact-shadow",
     });
     occlusionBlur_ = device.createTexture({
         .format = kOcclusionFormat,
@@ -1304,6 +1333,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
                                           &depthPrepassSkinnedPipeline_,
                                           &ssaoPipeline_,
                                           &ssaoBlurPipeline_,
+                                          &contactPipeline_,
                                           &bloomDownPipeline_,
                                           &bloomUpPipeline_,
                                           &luminanceDownPipeline_,
@@ -1320,11 +1350,27 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
             device.destroy(*pipeline);
         *pipeline = {};
     }
-    for (rhi::TextureHandle* texture :
-         {&hdr_,          &depth_,           &ldr_,         &occlusion_,      &occlusionBlur_, &outlineMask_,
-          &luminance64_,  &luminance8_,      &exposure_[0], &exposure_[1],    &shadowMap_,     &localShadowMap_,
-          &whitePixel_,   &flatNormalPixel_, &blackPixel_,  &environmentMap_, &brdfLut_,       &clusterGrid_,
-          &lightIndices_, &lightData_}) {
+    for (rhi::TextureHandle* texture : {&hdr_,
+                                        &depth_,
+                                        &ldr_,
+                                        &occlusion_,
+                                        &occlusionBlur_,
+                                        &contact_,
+                                        &outlineMask_,
+                                        &luminance64_,
+                                        &luminance8_,
+                                        &exposure_[0],
+                                        &exposure_[1],
+                                        &shadowMap_,
+                                        &localShadowMap_,
+                                        &whitePixel_,
+                                        &flatNormalPixel_,
+                                        &blackPixel_,
+                                        &environmentMap_,
+                                        &brdfLut_,
+                                        &clusterGrid_,
+                                        &lightIndices_,
+                                        &lightData_}) {
         if (texture->valid())
             device.destroy(*texture);
         *texture = {};
@@ -1687,7 +1733,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 const auto orDefault = [](rhi::TextureHandle handle, rhi::TextureHandle fallback) {
                     return handle.valid() ? handle : fallback;
                 };
-                const std::array<rhi::TextureBinding, 12> textures{
+                const std::array<rhi::TextureBinding, 13> textures{
                     rhi::TextureBinding{orDefault(material.baseColor, whitePixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.normal, flatNormalPixel_), linearSampler_},
                     rhi::TextureBinding{orDefault(material.metallicRoughness, whitePixel_), linearSampler_},
@@ -1700,6 +1746,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                     rhi::TextureBinding{lightData_, pointSampler_},
                     rhi::TextureBinding{occlusion_, linearSampler_},
                     rhi::TextureBinding{localShadowMap_, shadowSampler_},
+                    rhi::TextureBinding{contact_, pointSampler_},
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
                 boundMaterial = draw.material;
@@ -1939,7 +1986,7 @@ void DefaultRenderer::drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, 
                 }
                 surface.field.nodeRelative[3] = terrain.voxelSize;
                 cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&surface, sizeof(surface)));
-                const std::array<rhi::TextureBinding, 15> textures{
+                const std::array<rhi::TextureBinding, 16> textures{
                     rhi::TextureBinding{whitePixel_, linearSampler_},
                     rhi::TextureBinding{flatNormalPixel_, linearSampler_},
                     rhi::TextureBinding{whitePixel_, linearSampler_},
@@ -1952,6 +1999,7 @@ void DefaultRenderer::drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, 
                     rhi::TextureBinding{lightData_, pointSampler_},
                     rhi::TextureBinding{occlusion_, linearSampler_},
                     rhi::TextureBinding{localShadowMap_, shadowSampler_},
+                    rhi::TextureBinding{contact_, pointSampler_},
                     rhi::TextureBinding{terrain.tileTable, pointSampler_},
                     rhi::TextureBinding{terrain.heights, pointSampler_},
                     rhi::TextureBinding{terrain.materials, pointSampler_},
@@ -2359,6 +2407,45 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
                                                           rhi::TextureBinding{depth_, pointSampler_}};
         fullscreenPass(cmd, ssaoBlurPipeline_, occlusion_, occlusionWidth, occlusionHeight, "ssao-blur-y", vertical,
                        asBytes(&blur, sizeof(blur)));
+    }
+    cmd.popDebugGroup();
+
+    // --- Contact shadows -----------------------------------------------------
+    //
+    // The sun's last few centimetres, from the prepass depth (contact_shadow.hlsl).
+    // After the occlusion pass because it reads the same depth, and before the
+    // forward pass because the forward pass samples what it writes. Off, it is
+    // a white clear, which the forward pass's `min` then ignores.
+    cmd.pushDebugGroup("contact-shadow");
+    if (!settings_.contactShadows || !world.camera.valid || settings_.shadowCascades == 0) {
+        clearPass(cmd, contact_, renderWidth_, renderHeight_, "contact-off", rhi::ColorRgba{1.0f, 1.0f, 1.0f, 1.0f});
+    }
+    else {
+        GpuContactUniforms contact;
+        contact.projection[0] = world.camera.projection.m[0][0] != 0.0f ? 1.0f / world.camera.projection.m[0][0] : 1.0f;
+        contact.projection[1] = world.camera.projection.m[1][1] != 0.0f ? 1.0f / world.camera.projection.m[1][1] : 1.0f;
+        contact.projection[2] = world.camera.nearPlane;
+        contact.projection[3] = world.camera.farPlane;
+        // Towards the sun, turned into the camera's view space: the view
+        // matrix's rotation, applied to a direction.
+        const Vec3 sun = world.environment.sunDirection;
+        const Mat4& view = world.camera.view;
+        const Vec3 viewSun{view.m[0][0] * sun.x + view.m[1][0] * sun.y + view.m[2][0] * sun.z,
+                           view.m[0][1] * sun.x + view.m[1][1] * sun.y + view.m[2][1] * sun.z,
+                           view.m[0][2] * sun.x + view.m[1][2] * sun.y + view.m[2][2] * sun.z};
+        const f32 sunLength = core::length(viewSun);
+        contact.sun[0] = sunLength > 0.0f ? viewSun.x / sunLength : 0.0f;
+        contact.sun[1] = sunLength > 0.0f ? viewSun.y / sunLength : 1.0f;
+        contact.sun[2] = sunLength > 0.0f ? viewSun.z / sunLength : 0.0f;
+        contact.sun[3] = kContactRayMetres;
+        contact.params[0] = kContactThicknessMetres;
+        // A sun below the horizon lights nothing, so it shadows nothing.
+        contact.params[1] = sky.dayFactor;
+        contact.params[2] = kContactFadeDistance;
+        contact.params[3] = 1.0f;
+        const std::array<rhi::TextureBinding, 1> depthBinding{rhi::TextureBinding{depth_, pointSampler_}};
+        fullscreenPass(cmd, contactPipeline_, contact_, renderWidth_, renderHeight_, "contact-shadow", depthBinding,
+                       asBytes(&contact, sizeof(contact)));
     }
     cmd.popDebugGroup();
 

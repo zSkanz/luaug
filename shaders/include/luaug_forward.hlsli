@@ -144,6 +144,12 @@ float localShadowFactor(Surface surface, GpuLight light)
 Texture2D<float> OcclusionTexture : register(t10, space2);
 SamplerState OcclusionSampler : register(s10, space2);
 
+// The contact-shadow mask (`contact_shadow.hlsl`): 1 lit, 0 where a short ray
+// towards the sun passed behind something the depth buffer holds. Screen
+// space, like the occlusion above; it darkens the SUN and nothing else.
+Texture2D<float> ContactShadowTexture : register(t12, space2);
+SamplerState ContactShadowSampler : register(s12, space2);
+
 // An exact texel fetch through a point sampler.
 float clusterFetch1(Texture2D<float> texture, SamplerState pointSampler, uint x, uint y, uint width, uint height)
 {
@@ -258,7 +264,12 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     const float sunNol = saturate(dot(normal, sunDirection));
     const float shadow =
         sampleSunShadow(ShadowMap, ShadowSampler, shadingPosition, normal, sunNol, viewDepth, pixel);
-    const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * shadow);
+    // The darker of the shadow map and the contact mask: the map knows what is
+    // off screen and loses the last few centimetres to its biases; the mask
+    // has those centimetres and knows nothing off screen.
+    const float contact = ContactShadowTexture.SampleLevel(ContactShadowSampler, pixel * ViewportParams.zw, 0.0f);
+    const float sunShadow = min(shadow, contact);
+    const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * sunShadow);
     float3 color = shadeDirect(surface, sunDirection, sunRadiance);
 
     color += evaluateClusteredLights(surface, pixel, viewDepth);

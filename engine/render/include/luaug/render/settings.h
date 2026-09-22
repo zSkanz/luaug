@@ -74,6 +74,10 @@ struct GraphicsSettings
 
     bool bloom = true;
     bool ambientOcclusion = true;
+    // Screen-space contact shadows for the sun (`contact_shadow.hlsl`): the few
+    // centimetres at the base of a caster that the shadow map's biases give
+    // away, recovered from the depth buffer.
+    bool contactShadows = true;
     bool antiAliasing = true;
 
     // False holds the exposure at the calibration key instead of metering the

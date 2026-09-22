@@ -229,6 +229,22 @@ cbuffer GpuSsaoUniforms : register(b0, space3)
 };
 #endif
 
+#if defined(LUAUG_UNIFORMS_CONTACT)
+// The contact-shadow pass (`contact_shadow.hlsl`). Mirrors `GpuContactUniforms`.
+cbuffer GpuContactUniforms : register(b0, space3)
+{
+    // x tan of half the horizontal field of view, y vertical, z near, w far --
+    // the same four numbers the occlusion pass reconstructs positions with.
+    float4 ContactProjection;
+    // xyz the direction TOWARDS the sun in view space; w the ray's length in
+    // metres at the camera.
+    float4 ContactSun;
+    // x the thickness a hit may be behind a surface, y the strength, z the
+    // distance past which contact shadows fade out, w 1 when enabled.
+    float4 ContactParams;
+};
+#endif
+
 #if defined(LUAUG_UNIFORMS_BLUR)
 // `render::GpuBlurUniforms`, 16 bytes.
 cbuffer GpuBlurUniforms : register(b0, space3)

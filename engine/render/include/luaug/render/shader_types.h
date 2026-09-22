@@ -360,6 +360,19 @@ struct GpuSkyUniforms
 
 static_assert(sizeof(GpuSkyUniforms) == 64 + 64, "GpuSkyUniforms is a cbuffer layout");
 
+// Fragment stage, `b0 space3`, for the contact-shadow pass.
+struct GpuContactUniforms
+{
+    // x tan(fovX / 2), y tan(fovY / 2), z near, w far.
+    f32 projection[4]{1.0f, 0.5f, 0.1f, 400.0f};
+    // xyz towards the sun in view space, w the ray length in metres.
+    f32 sun[4]{0.0f, 1.0f, 0.0f, 0.6f};
+    // x thickness, y strength, z fade distance, w enabled.
+    f32 params[4]{0.3f, 1.0f, 60.0f, 1.0f};
+};
+
+static_assert(sizeof(GpuContactUniforms) == 48, "GpuContactUniforms is a cbuffer layout");
+
 // --- GPU terrain (ADR 0071) ---------------------------------------------------
 
 // `TerrainParams` in `shaders/include/luaug_terrain.hlsli`, field for field.

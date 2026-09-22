@@ -36,13 +36,13 @@ cbuffer GpuTerrainUniforms : register(b0, space1)
     TerrainParams Node;
 };
 
-// Fragment resources, after the twelve `luaug_forward.hlsli` declares.
-Texture2D<float> TileTable : register(t12, space2);
-SamplerState TileTableSampler : register(s12, space2);
-Texture2D<float> Heights : register(t13, space2);
-SamplerState HeightsSampler : register(s13, space2);
-Texture2D<float> Materials : register(t14, space2);
-SamplerState MaterialsSampler : register(s14, space2);
+// Fragment resources, after the thirteen `luaug_forward.hlsli` declares.
+Texture2D<float> TileTable : register(t13, space2);
+SamplerState TileTableSampler : register(s13, space2);
+Texture2D<float> Heights : register(t14, space2);
+SamplerState HeightsSampler : register(s14, space2);
+Texture2D<float> Materials : register(t15, space2);
+SamplerState MaterialsSampler : register(s15, space2);
 
 // Per terrain rather than per node. Mirrors `GpuTerrainSurfaceUniforms`.
 cbuffer GpuTerrainSurfaceUniforms : register(b1, space3)

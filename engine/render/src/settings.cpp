@@ -25,6 +25,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.lightBudget = 32;
         settings.bloom = false;
         settings.ambientOcclusion = false;
+        settings.contactShadows = false;
         settings.antiAliasing = true;
         settings.autoExposure = true;
         break;
@@ -37,6 +38,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.lightBudget = 96;
         settings.bloom = true;
         settings.ambientOcclusion = false;
+        settings.contactShadows = true;
         settings.antiAliasing = true;
         settings.autoExposure = true;
         break;
@@ -51,6 +53,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.lightBudget = kMaxClusteredLights;
         settings.bloom = true;
         settings.ambientOcclusion = true;
+        settings.contactShadows = true;
         settings.antiAliasing = true;
         settings.autoExposure = true;
         break;
@@ -77,6 +80,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.lightBudget = kMaxClusteredLights;
         settings.bloom = true;
         settings.ambientOcclusion = true;
+        settings.contactShadows = true;
         settings.antiAliasing = true;
         settings.autoExposure = true;
         break;
