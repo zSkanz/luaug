@@ -255,11 +255,23 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                             lerp(static_cast<float>(a.y), static_cast<float>(b.y)) * voxel,
                             lerp(static_cast<float>(a.z), static_cast<float>(b.z)) * voxel};
 
-        // The gradient at whichever end the crossing is nearer, which is cheaper
-        // than interpolating two gradients and indistinguishable at this
-        // resolution.
-        const Corner& nearer = t < 0.5f ? a : b;
-        const Vec3 normal = gradientAt(nearer.x, nearer.y, nearer.z);
+        // **The gradient interpolated to the vertex, not taken at the nearer
+        // corner.** The comment that used to be here called the two
+        // "indistinguishable at this resolution", and on a curved surface they
+        // are not: every vertex whose crossing sits past the edge's midpoint
+        // snaps to the other corner's normal, so a hill shades as a stack of
+        // terraces with a band wherever the snap flips. It was the first thing
+        // visible in the example's screenshot. Two gradients per vertex is
+        // twelve samples instead of six, on the vertices only, out of a lattice
+        // that is already cached.
+        const Vec3 ga = gradientAt(a.x, a.y, a.z);
+        const Vec3 gb = gradientAt(b.x, b.y, b.z);
+        Vec3 blended{ga.x + (gb.x - ga.x) * t, ga.y + (gb.y - ga.y) * t, ga.z + (gb.z - ga.z) * t};
+        const float blendedLength =
+            std::sqrt(blended.x * blended.x + blended.y * blended.y + blended.z * blended.z);
+        const Vec3 normal = blendedLength < 1e-8f ? ga
+                                                  : Vec3{blended.x / blendedLength, blended.y / blendedLength,
+                                                         blended.z / blendedLength};
 
         Vertex vertex;
         vertex.position = position;
@@ -447,6 +459,105 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                         emitTriangle(q0, q1, q3);
                         emitTriangle(q0, q3, q2);
                     }
+                }
+            }
+        }
+    }
+
+    // **Skirts, hung from every edge the region's own side cuts.**
+    //
+    // A boundary edge is one exactly one triangle uses; in a surface cut by a
+    // box, those are the edges on the box's faces. Only the four SIDE faces
+    // matter -- a skirt on the top or bottom face would hang into the surface
+    // it belongs to -- so an edge counts only when both its ends lie on the same
+    // side plane.
+    //
+    // Emitted both windings, because which side of a skirt faces the camera
+    // depends on which neighbour is the coarse one, and a skirt culled from the
+    // side that matters is no skirt.
+    // The buckets and not `out.mesh.indices`: the index buffer is assembled
+    // from them further down, so at this point it is still empty.
+    if (region.skirt > 0.0f && !buckets.empty()) {
+        const auto step = static_cast<float>(stride) * voxel;
+        const float sideMinX = static_cast<float>(region.minX) * voxel;
+        const float sideMinZ = static_cast<float>(region.minZ) * voxel;
+        const float sideMaxX = sideMinX + static_cast<float>(region.cellsX) * step;
+        const float sideMaxZ = sideMinZ + static_cast<float>(region.cellsZ) * step;
+        const float tolerance = voxel * 1e-3f;
+
+        // Which side plane a point lies on, or -1.
+        const auto sideOf = [&](const Vec3& p) noexcept -> int {
+            if (std::abs(p.x - sideMinX) < tolerance)
+                return 0;
+            if (std::abs(p.x - sideMaxX) < tolerance)
+                return 1;
+            if (std::abs(p.z - sideMinZ) < tolerance)
+                return 2;
+            if (std::abs(p.z - sideMaxZ) < tolerance)
+                return 3;
+            return -1;
+        };
+
+        // Edge use counts, keyed by the ordered index pair. Only read by key
+        // and then walked in the ORDER THE TRIANGLES WERE EMITTED below, so the
+        // container's own order never reaches the mesh.
+        std::unordered_map<core::u64, u32> uses;
+        const auto edgeKey = [](u32 a, u32 b) noexcept {
+            const u32 lo = std::min(a, b);
+            const u32 hi = std::max(a, b);
+            return (static_cast<core::u64>(lo) << 32) | hi;
+        };
+        for (const auto& entry : buckets) {
+            const std::vector<u32>& list = entry.second;
+            for (usize at = 0; at + 2 < list.size(); at += 3) {
+                ++uses[edgeKey(list[at], list[at + 1])];
+                ++uses[edgeKey(list[at + 1], list[at + 2])];
+                ++uses[edgeKey(list[at + 2], list[at])];
+            }
+        }
+
+        // The lowered copy of a vertex, made once per vertex.
+        std::unordered_map<u32, u32> lowered;
+        const auto lowerOf = [&](u32 index) {
+            if (const auto at = lowered.find(index); at != lowered.end())
+                return at->second;
+            // **Against the surface normal, not straight down.** Straight down
+            // is the textbook skirt and it only covers the crack a HEIGHT FIELD
+            // has, which is a vertical gap under a horizontal edge. A volume
+            // has cliffs, and the crack between two levels on a cliff face is a
+            // horizontal gap that a skirt hanging downward runs parallel to and
+            // never fills -- the first render with levels on showed exactly that,
+            // a sliver of sky down the side of the example's plateau. Hung
+            // against the normal, the same strip goes down under flat ground and
+            // into the rock behind a cliff.
+            Vertex copy = out.mesh.vertices[index];
+            copy.position.x -= copy.normal.x * region.skirt;
+            copy.position.y -= copy.normal.y * region.skirt;
+            copy.position.z -= copy.normal.z * region.skirt;
+            const auto made = static_cast<u32>(out.mesh.vertices.size());
+            out.mesh.vertices.push_back(copy);
+            vertexMaterial.push_back(vertexMaterial[index]);
+            lowered.emplace(index, made);
+            return made;
+        };
+
+        for (auto& entry : buckets) {
+            std::vector<u32>& list = entry.second;
+            const usize triangles = list.size();
+            for (usize at = 0; at + 2 < triangles; at += 3) {
+                const u32 corners[3] = {list[at], list[at + 1], list[at + 2]};
+                for (int edge = 0; edge < 3; ++edge) {
+                    const u32 a = corners[edge];
+                    const u32 b = corners[(edge + 1) % 3];
+                    if (uses[edgeKey(a, b)] != 1)
+                        continue;
+                    const int side = sideOf(out.mesh.vertices[a].position);
+                    if (side < 0 || side != sideOf(out.mesh.vertices[b].position))
+                        continue;
+                    const u32 la = lowerOf(a);
+                    const u32 lb = lowerOf(b);
+                    list.insert(list.end(), {a, b, lb, a, lb, la});
+                    list.insert(list.end(), {a, lb, b, a, la, lb});
                 }
             }
         }

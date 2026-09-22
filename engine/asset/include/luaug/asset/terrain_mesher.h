@@ -61,6 +61,29 @@ struct MeshRegion
     // levels on different frames is a crack that appears and disappears. So the
     // level is baked into what was meshed.
     core::u32 stride = 1;
+
+    // **How far below the region's side edges to hang a skirt, in metres.**
+    // Zero, the default, hangs none.
+    //
+    // A skirt is the standard answer to the crack between two neighbouring
+    // chunks meshed at different strides -- chunked LOD, HTerrain and most voxel
+    // terrains ship it. The coarse chunk's edge vertices interpolate the field at
+    // half the density its fine neighbour does, so the two edges disagree by up
+    // to a fraction of a cell and daylight shows through the seam. A strip of
+    // wall hung straight down from every boundary edge fills that gap from
+    // below, and because it is vertical it is invisible from anywhere that can
+    // see the surface.
+    //
+    // The alternative that removes the crack rather than covering it is
+    // Transvoxel's transition cells, which stitch a half-resolution face to a
+    // full-resolution one exactly. It is the right answer for a pure voxel
+    // terrain and the expensive one; skirts cost two triangles an edge and work
+    // identically over the height layer and the bricks.
+    //
+    // **The collider never sees a skirt.** It is a rendering device, and a wall
+    // of collision hanging under every tile edge would be something a
+    // character could stand on inside a cave.
+    float skirt = 0.0f;
 };
 
 // The triangles, and what a collider needs from them.

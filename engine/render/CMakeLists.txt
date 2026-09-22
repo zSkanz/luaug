@@ -73,6 +73,7 @@ luaug_add_module_tests(render
         tests/shadow_tests.cpp
         tests/animation_tests.cpp
         tests/mesh_loader_tests.cpp
+        tests/terrain_loader_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)

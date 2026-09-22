@@ -2971,6 +2971,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // which is invisible standing still and wrong while walking.
             if (options.editor && snapshot.camera.valid)
                 editor.setCamera(snapshot.camera.projection, snapshot.camera.view, snapshot.camera.origin);
+            // **Where terrain is levelled from next frame.** The loader runs
+            // before `extract` has decided this frame's camera, so it is handed
+            // the one this frame was drawn through -- a frame of lag in a
+            // level-of-detail choice is invisible.
+            if (snapshot.camera.valid)
+                terrainLoader.setFocus(snapshot.camera.origin);
 
             const core::Vec2 uiViewport{static_cast<f32>(targetWidth), static_cast<f32>(targetHeight)};
             if (uiViewport != lastUiViewport) {

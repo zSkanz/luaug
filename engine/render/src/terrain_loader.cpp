@@ -14,15 +14,26 @@ namespace {
 using core::u32;
 using core::usize;
 
-// **How many tiles get meshed in one call.** A count and never a millisecond
-// budget: a tile that appears "when the machine got round to it" is a different
-// amount of missing ground on every machine, and the same rule keeps the
-// collider mirror honest one layer down.
+// **How much meshing one call may do, in lattice CELLS rather than tiles.**
 //
-// Two rather than one, because a tile's mesh and its neighbour's are what a
-// person sees as one edit -- a brush that straddles a tile boundary would
-// otherwise show half of itself for a frame.
-constexpr u32 TilesPerSync = 2;
+// A count and never a millisecond budget: a tile that appears "when the machine
+// got round to it" is a different amount of missing ground on every machine.
+// Cells rather than tiles because tiles stopped costing the same once they had
+// levels -- a tile at stride 8 is a sixty-fourth of one at stride 1, and a tile
+// budget would spend a whole slot on it. This is two full-detail tiles' worth,
+// which is what a brush straddling a tile boundary needs to show all of itself
+// in one frame, and it lets a camera move re-level dozens of distant tiles at
+// once.
+constexpr core::u64 CellsPerSync = 2ull * asset::TileEdge * asset::TileEdge * 16ull;
+
+// The skirt, in lattice steps of the tile's own stride. Two steps is deeper than
+// the largest disagreement two neighbouring levels can have at their seam.
+constexpr float SkirtSteps = 2.0f;
+
+// How much further a tile must be before it drops a level than it had to be to
+// gain one. Without it a tile at a boundary flips every frame the camera
+// breathes, and each flip is a rebuild.
+constexpr double Hysteresis = 1.1;
 
 // How far above and below a tile's own heights the mesher looks, in lattice
 // steps, when the tile carries NO bricks.
@@ -47,44 +58,128 @@ std::string terrainTileUrn(core::InstanceId terrain, asset::TileKey key)
     return "terrain://" + std::to_string(terrain.index) + "/" + std::to_string(key.x) + "," + std::to_string(key.z);
 }
 
+u32 TerrainLoader::strideFor(double distance) const noexcept
+{
+    if (!m_hasFocus)
+        return 1;
+    if (distance > m_distances.viewDistance)
+        return 0;
+    u32 stride = 1;
+    double reach = m_distances.nearDistance;
+    // Up to 8: a 32-column tile at stride 8 is four cells a side, and coarser
+    // than that the skirt is taller than the tile is wide.
+    while (distance > reach && stride < 8) {
+        stride *= 2;
+        reach *= 2.0;
+    }
+    return stride;
+}
+
 u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::AtomTable& atoms,
                         MeshCache& cache, MeshLibrary& library)
 {
     for (Resident& resident : m_tiles)
         resident.seen = false;
 
-    u32 rebuilt = 0;
+    // **Every tile that wants work, nearest first.**
+    //
+    // The first version walked tiles in key order and rebuilt the first two
+    // dirty ones, which was fine while "dirty" meant "edited". With levels of
+    // detail a camera move dirties every tile whose level changed, and walking
+    // them in key order would re-level a corner of the world nobody is looking
+    // at while the ground under the viewer waited. Sorted by distance, then by
+    // terrain and key so two tiles at the same distance cannot trade places
+    // between runs.
+    struct Want
+    {
+        double distance = 0.0;
+        core::InstanceId terrain;
+        asset::TileKey key;
+        u32 stride = 1;
+    };
+    std::vector<Want> wants;
+
+    const auto findResident = [this](core::InstanceId id, asset::TileKey key) {
+        return std::lower_bound(m_tiles.begin(), m_tiles.end(), key,
+                                [&id](const Resident& entry, const asset::TileKey& probe) {
+                                    if (entry.terrain.index != id.index)
+                                        return entry.terrain.index < id.index;
+                                    return entry.key < probe;
+                                });
+    };
 
     world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
         const float voxel = terrain.field.settings().voxelSize;
         if (!(voxel > 0.0f))
             return;
-        const auto edge = static_cast<core::i32>(asset::TileEdge);
+        const auto tileMetres = static_cast<double>(asset::TileEdge) * static_cast<double>(voxel);
 
         for (const asset::TileKey key : terrain.field.tileKeys()) {
-            const asset::HeightTile* tile = terrain.field.findTile(key);
-            if (tile == nullptr)
-                continue;
+            // Distance in the horizontal plane, to the tile's nearest point
+            // rather than its centre -- the viewer standing on a tile's edge is
+            // on the tile, and a centre distance would coarsen the ground under
+            // their feet.
+            const double minX = terrain.origin.x + static_cast<double>(key.x) * tileMetres;
+            const double minZ = terrain.origin.z + static_cast<double>(key.z) * tileMetres;
+            const double dx = std::max({minX - m_focus.x, 0.0, m_focus.x - (minX + tileMetres)});
+            const double dz = std::max({minZ - m_focus.z, 0.0, m_focus.z - (minZ + tileMetres)});
+            const double distance = std::sqrt(dx * dx + dz * dz);
 
-            const auto at = std::lower_bound(m_tiles.begin(), m_tiles.end(), key,
-                                             [&id](const Resident& entry, const asset::TileKey& probe) {
-                                                 if (entry.terrain.index != id.index)
-                                                     return entry.terrain.index < id.index;
-                                                 return entry.key < probe;
-                                             });
+            u32 stride = strideFor(distance);
+            const auto at = findResident(id, key);
             const bool exists = at != m_tiles.end() && at->terrain == id && at->key == key;
-            if (exists && at->revision == terrain.fieldRevision) {
+
+            // Hysteresis: keep a finer level until the tile is clearly past it.
+            if (exists && at->stride != 0 && stride > at->stride && strideFor(distance / Hysteresis) <= at->stride)
+                stride = at->stride;
+
+            if (stride == 0) {
+                // Beyond the view distance. Not marked seen, so the sweep below
+                // releases whatever was resident.
+                continue;
+            }
+            if (exists && at->revision == terrain.fieldRevision && at->stride == stride) {
                 at->seen = true;
                 continue;
             }
-            if (rebuilt >= TilesPerSync) {
-                // Over budget: keep what is there rather than dropping it. A
-                // tile that vanished while waiting for its rebuild is a hole in
-                // the ground somebody can see through.
-                if (exists)
-                    at->seen = true;
-                continue;
-            }
+            // Keep what is there while it waits: a tile that vanished during its
+            // rebuild is a hole in the ground somebody can see through.
+            if (exists)
+                at->seen = true;
+            wants.push_back(Want{distance, id, key, stride});
+        }
+    });
+
+    std::sort(wants.begin(), wants.end(), [](const Want& a, const Want& b) {
+        if (a.distance != b.distance)
+            return a.distance < b.distance;
+        if (a.terrain.index != b.terrain.index)
+            return a.terrain.index < b.terrain.index;
+        return a.key < b.key;
+    });
+
+    u32 rebuilt = 0;
+    core::u64 spent = 0;
+    for (const Want& want : wants) {
+        if (spent >= CellsPerSync)
+            break;
+
+        const scene::TerrainComponent* terrainPtr = world.terrains().find(want.terrain);
+        if (terrainPtr == nullptr)
+            continue;
+        const scene::TerrainComponent& terrain = *terrainPtr;
+        const core::InstanceId id = want.terrain;
+        const asset::TileKey key = want.key;
+        const float voxel = terrain.field.settings().voxelSize;
+        const auto edge = static_cast<core::i32>(asset::TileEdge);
+        const asset::HeightTile* tile = terrain.field.findTile(key);
+        if (tile == nullptr)
+            continue;
+
+        const auto at = findResident(id, key);
+        const bool exists = at != m_tiles.end() && at->terrain == id && at->key == key;
+        const auto stride = static_cast<core::i32>(want.stride);
+        {
 
             // The slab this tile's surface actually lives in, rather than the
             // terrain's whole legal range.
@@ -95,8 +190,8 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                 highest = std::max(highest, tile->height[sample]);
             }
 
-            auto bottom = static_cast<core::i32>(std::floor(lowest / voxel)) - SurfaceMargin;
-            auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + SurfaceMargin;
+            auto bottom = static_cast<core::i32>(std::floor(lowest / voxel)) - SurfaceMargin * stride;
+            auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + SurfaceMargin * stride;
 
             // **And whatever bricks this tile's columns actually carry**,
             // measured rather than assumed. A cave is voxels somewhere below the
@@ -119,14 +214,21 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                 top = std::max(top, (brick.y + 1) * brickEdge + SurfaceMargin);
             }
 
+            // Snapped down to the stride, so a coarse tile samples the same
+            // lattice points its fine neighbour does and their shared edge
+            // agrees wherever it can.
+            bottom = static_cast<core::i32>(std::floor(static_cast<double>(bottom) / stride)) * stride;
+
             asset::MeshRegion region;
             region.minX = firstColumn;
             region.minZ = firstRow;
             region.minY = bottom;
-            region.cellsX = asset::TileEdge;
-            region.cellsZ = asset::TileEdge;
-            region.cellsY = static_cast<u32>(std::max(top - region.minY, 1));
-            region.stride = 1;
+            region.cellsX = asset::TileEdge / static_cast<u32>(stride);
+            region.cellsZ = asset::TileEdge / static_cast<u32>(stride);
+            region.cellsY = static_cast<u32>(std::max((top - region.minY + stride - 1) / stride, 1));
+            region.stride = static_cast<u32>(stride);
+            region.skirt = SkirtSteps * static_cast<float>(stride) * voxel;
+            spent += static_cast<core::u64>(region.cellsX) * region.cellsY * region.cellsZ;
 
             const asset::TerrainMesh meshed = asset::meshField(terrain.field, region);
             // **Interned through the non-const table the caller owns.** A
@@ -202,15 +304,16 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                     cache.release(device, at->mesh);
                 at->mesh = handle;
                 at->revision = terrain.fieldRevision;
+                at->stride = want.stride;
                 at->seen = true;
             }
             else {
-                m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, true});
+                m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, want.stride, true});
             }
             library.set(urn, std::move(entry));
             rebuilt += 1;
         }
-    });
+    }
 
     // A tile the field no longer holds takes its mesh with it.
     for (usize at = m_tiles.size(); at > 0; --at) {
