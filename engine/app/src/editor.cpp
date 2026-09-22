@@ -3066,6 +3066,20 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     return true;
 }
 
+namespace {
+
+// How far one stamp of the round brush raises the centre of its disc, in
+// metres. Scaled by the radius, so a big brush builds a hill as fast relative
+// to its size as a small one builds a bump; with the default spacing a point
+// under a drag is stamped about eight times, so a full-strength pass lifts it
+// by roughly a third of the radius.
+[[nodiscard]] float raiseAmount(const Editor::Brush& brush) noexcept
+{
+    return std::clamp(brush.strength, 0.0f, 1.0f) * brush.radius * 0.12f;
+}
+
+} // namespace
+
 void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
 {
     // Back into the field's own space, for the reason the raycast above goes the
@@ -3083,17 +3097,25 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
     }
     else {
         switch (m_brush.op) {
+        // **The round brush raises and lowers heights; the box one carves
+        // volume.** A ball added to flat ground overhangs it at the rim, and
+        // an overhang is voxels -- so a round `fillBall` brush dragged across a
+        // field left a trail of bricks along both edges of every stroke, each
+        // one a cave to mesh on the CPU and a seam between two encodings. The
+        // heightmap editors all sculpt with a height brush for exactly that
+        // reason. The box keeps the volumetric fill, which is what carving a
+        // tunnel or building a ledge actually needs.
         case BrushOp::Add:
             if (box)
                 asset::fillBlock(terrain.field, at, extent, m_brush.material);
             else
-                asset::fillBall(terrain.field, at, radius, m_brush.material);
+                asset::raiseBall(terrain.field, at, radius, raiseAmount(m_brush), m_brush.material);
             break;
         case BrushOp::Subtract:
             if (box)
                 asset::fillBlock(terrain.field, at, extent, 0);
             else
-                asset::fillBall(terrain.field, at, radius, 0);
+                asset::raiseBall(terrain.field, at, radius, -raiseAmount(m_brush));
             break;
         case BrushOp::Smooth:
             // **Round whichever shape is selected.** Smoothing walks columns

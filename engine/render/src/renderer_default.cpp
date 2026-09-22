@@ -1,4 +1,5 @@
 #include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/render/clusters.h"
 #include "luaug/render/environment.h"
@@ -6,6 +7,7 @@
 #include "luaug/render/settings.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/render/shadow.h"
+#include "luaug/render/terrain_lod.h"
 
 #include <algorithm>
 #include <array>
@@ -347,6 +349,21 @@ private:
     // buffer. Runs before any render pass, because the upload has to.
     void buildInstanceBatches(const RenderWorld& world, const MeshCache& meshes);
 
+    // --- GPU terrain (ADR 0071) ----------------------------------------------
+    //
+    // **Created the first time a frame has terrain, and never before.** A
+    // renderer that made these in `create` would add three pipelines and two
+    // buffers to the command stream of every scene -- and to every capture
+    // golden of a scene that has no terrain at all. Deferred, a project that
+    // never touches terrain pays nothing and its goldens do not move.
+    [[nodiscard]] bool ensureTerrain(rhi::IDevice& device);
+    // Picks this frame's nodes for every terrain in `world`, from its camera.
+    void selectTerrain(const RenderWorld& world);
+    // Draws the selected nodes. `cull` is a cascade's or a light's sphere;
+    // without one, nodes are culled against the camera's frustum.
+    void drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, const Mat4& viewProjection,
+                     rhi::PipelineHandle pipeline, Selection selection, const CullSphere* cull = nullptr);
+
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
     // list and `create` has none.
@@ -399,7 +416,7 @@ private:
     // without a second list. Sized with room: `create` silently stops recording
     // once it is full and the overflow leaks at shutdown, which is a bug that
     // announces itself nowhere.
-    rhi::ShaderHandle shaders_[40]{};
+    rhi::ShaderHandle shaders_[48]{};
     core::usize shaderCount_ = 0;
 
     rhi::TextureHandle hdr_{};
@@ -505,6 +522,27 @@ private:
 
     bool defaultsUploaded_ = false;
     bool brdfUploaded_ = false;
+
+    // The GPU terrain's resources, all made by `ensureTerrain`.
+    const ShaderLibrary* shaderLibrary_ = nullptr;
+    bool terrainTried_ = false;
+    bool terrainValid_ = false;
+    bool terrainGridUploaded_ = false;
+    rhi::PipelineHandle terrainPipeline_{};
+    rhi::PipelineHandle terrainPrepassPipeline_{};
+    rhi::PipelineHandle terrainShadowPipeline_{};
+    // One grid for every node of every terrain: 33 by 33 lattice points.
+    rhi::BufferHandle terrainGridVertices_{};
+    rhi::BufferHandle terrainGridIndices_{};
+    u32 terrainGridIndexCount_ = 0;
+    // This frame's nodes, and which terrain each belongs to.
+    struct TerrainDraw
+    {
+        u32 terrain = 0;
+        TerrainNode node;
+    };
+    std::vector<TerrainDraw> terrainDraws_;
+    std::vector<TerrainNode> terrainScratch_;
 };
 
 } // namespace
@@ -513,6 +551,7 @@ std::optional<core::EngineError> DefaultRenderer::create(rhi::IDevice& device, c
                                                          rhi::TextureFormat colorFormat)
 {
     colorFormat_ = colorFormat;
+    shaderLibrary_ = &shaders;
 
     core::EngineError error;
     const auto load = [&](std::string_view name, rhi::ShaderStage stage) -> rhi::ShaderHandle {
@@ -1296,6 +1335,20 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(instanceBuffer_);
     instanceBuffer_ = {};
 
+    for (rhi::PipelineHandle* pipeline : {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_}) {
+        if (pipeline->valid())
+            device.destroy(*pipeline);
+        *pipeline = {};
+    }
+    for (rhi::BufferHandle* buffer : {&terrainGridVertices_, &terrainGridIndices_}) {
+        if (buffer->valid())
+            device.destroy(*buffer);
+        *buffer = {};
+    }
+    terrainTried_ = false;
+    terrainValid_ = false;
+    terrainGridUploaded_ = false;
+
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
         if (sampler->valid())
             device.destroy(*sampler);
@@ -1685,6 +1738,252 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
     }
 }
 
+namespace {
+
+// The one grid every terrain node is drawn with: 33 by 33 points, each its own
+// position in grid steps, and two triangles a quad, counter-clockwise seen from
+// above -- which is the front face.
+void uploadTerrainGrid(rhi::ICmdList& cmd, rhi::BufferHandle vertices, rhi::BufferHandle indices)
+{
+    constexpr u32 Points = TerrainGridQuads + 1;
+    std::vector<f32> grid;
+    grid.reserve(static_cast<usize>(Points) * Points * 2);
+    for (u32 z = 0; z < Points; ++z) {
+        for (u32 x = 0; x < Points; ++x) {
+            grid.push_back(static_cast<f32>(x));
+            grid.push_back(static_cast<f32>(z));
+        }
+    }
+    std::vector<u32> triangles;
+    triangles.reserve(static_cast<usize>(TerrainGridQuads) * TerrainGridQuads * 6);
+    for (u32 z = 0; z < TerrainGridQuads; ++z) {
+        for (u32 x = 0; x < TerrainGridQuads; ++x) {
+            const u32 a = z * Points + x;
+            const u32 b = a + 1;
+            const u32 c = a + Points;
+            const u32 d = c + 1;
+            triangles.insert(triangles.end(), {a, c, b, b, c, d});
+        }
+    }
+    cmd.upload(vertices, asBytes(grid.data(), grid.size() * sizeof(f32)), 0);
+    cmd.upload(indices, asBytes(triangles.data(), triangles.size() * sizeof(u32)), 0);
+}
+
+} // namespace
+
+bool DefaultRenderer::ensureTerrain(rhi::IDevice& device)
+{
+    if (terrainTried_)
+        return terrainValid_;
+    terrainTried_ = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+
+    core::EngineError error;
+    const auto load = [&](std::string_view name, rhi::ShaderStage stage) -> rhi::ShaderHandle {
+        const rhi::ShaderHandle handle = shaderLibrary_->create(device, name, stage, &error);
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+        return handle;
+    };
+    const rhi::ShaderHandle vertex = load("terrain", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle fragment = load("terrain", rhi::ShaderStage::Fragment);
+    const rhi::ShaderHandle depthVertex = load("terrain_depth", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle depthFragment = load("terrain_depth", rhi::ShaderStage::Fragment);
+    if (!vertex.valid() || !fragment.valid() || !depthVertex.valid() || !depthFragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+
+    // One float2 per vertex: its position in the grid, in grid steps.
+    const std::array<rhi::VertexAttribute, 1> attributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float2, .offsetBytes = 0},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> buffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = 8},
+    };
+    const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{.format = kHdrFormat}};
+
+    terrainPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "terrain",
+    });
+    terrainPrepassPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = depthVertex,
+        .fragmentShader = depthFragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "terrain_prepass",
+    });
+    // **No culling in the shadow pass**, unlike every mesh there. The meshes cull
+    // FRONT faces so the depth stored is a solid's far side (D051), and a
+    // height field has no far side: culling its front faces would cull all of
+    // it, and the sun would shine through the ground.
+    terrainShadowPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = depthVertex,
+        .fragmentShader = depthFragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = {},
+        .depthStencilFormat = kShadowFormat,
+        .debugName = "terrain_shadow",
+    });
+
+    constexpr u32 Points = TerrainGridQuads + 1;
+    terrainGridIndexCount_ = TerrainGridQuads * TerrainGridQuads * 6;
+    terrainGridVertices_ = device.createBuffer({
+        .usage = rhi::BufferUsage::Vertex,
+        .sizeBytes = Points * Points * 8,
+        .debugName = "terrain.grid",
+    });
+    terrainGridIndices_ = device.createBuffer({
+        .usage = rhi::BufferUsage::Index,
+        .sizeBytes = terrainGridIndexCount_ * 4,
+        .debugName = "terrain.grid.indices",
+    });
+
+    terrainValid_ = terrainPipeline_.valid() && terrainPrepassPipeline_.valid() && terrainShadowPipeline_.valid() &&
+                    terrainGridVertices_.valid() && terrainGridIndices_.valid();
+    return terrainValid_;
+}
+
+void DefaultRenderer::selectTerrain(const RenderWorld& world)
+{
+    terrainDraws_.clear();
+    if (!world.camera.valid)
+        return;
+    const TerrainLodSettings settings;
+    for (u32 index = 0; index < world.terrains.size(); ++index) {
+        const RenderTerrain& terrain = world.terrains[index];
+        TerrainLodSource source;
+        source.minTileX = terrain.minTileX;
+        source.minTileZ = terrain.minTileZ;
+        source.tilesX = terrain.tilesX;
+        source.tilesZ = terrain.tilesZ;
+        source.tileMin = terrain.tileMin;
+        source.tileMax = terrain.tileMax;
+        source.voxelSize = terrain.voxelSize;
+        source.originFromViewer =
+            DVec3{terrain.origin.x - world.camera.origin.x, terrain.origin.y - world.camera.origin.y,
+                  terrain.origin.z - world.camera.origin.z};
+        terrainScratch_.clear();
+        selectTerrainNodes(source, settings, terrainScratch_);
+        for (const TerrainNode& node : terrainScratch_)
+            terrainDraws_.push_back(TerrainDraw{index, node});
+    }
+}
+
+void DefaultRenderer::drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, const Mat4& viewProjection,
+                                  rhi::PipelineHandle pipeline, Selection selection, const CullSphere* cull)
+{
+    if (terrainDraws_.empty() || !terrainValid_ || !pipeline.valid())
+        return;
+    const bool forward = selection == Selection::Opaque;
+
+    cmd.setPipeline(pipeline);
+    const std::array<rhi::BufferHandle, 1> vertexBuffers{terrainGridVertices_};
+    cmd.bindVertexBuffers(0, vertexBuffers);
+    cmd.bindIndexBuffer(terrainGridIndices_, rhi::IndexType::U32);
+
+    u32 bound = 0xFFFFFFFFu;
+    for (const TerrainDraw& draw : terrainDraws_) {
+        const TerrainNode& node = draw.node;
+        const AABB box{node.boundsMin, node.boundsMax};
+        if (cull != nullptr) {
+            // Sphere against box: the distance from the centre to the box.
+            const Vec3 nearest{std::clamp(cull->centre.x, box.min.x, box.max.x),
+                               std::clamp(cull->centre.y, box.min.y, box.max.y),
+                               std::clamp(cull->centre.z, box.min.z, box.max.z)};
+            const Vec3 offset = nearest - cull->centre;
+            if (core::dot(offset, offset) > cull->radius * cull->radius)
+                continue;
+        }
+        else if (!core::intersects(world.camera.frustum, box)) {
+            continue;
+        }
+
+        const RenderTerrain& terrain = world.terrains[draw.terrain];
+        if (draw.terrain != bound) {
+            const std::array<rhi::TextureBinding, 3> vertexTextures{
+                rhi::TextureBinding{terrain.tileTable, pointSampler_},
+                rhi::TextureBinding{terrain.heights, pointSampler_},
+                rhi::TextureBinding{terrain.materials, pointSampler_},
+            };
+            cmd.bindTextures(rhi::ShaderStage::Vertex, 0, vertexTextures);
+            if (forward) {
+                GpuTerrainSurfaceUniforms surface;
+                for (u32 id = 0; id < kTerrainPaletteSize; ++id) {
+                    for (u32 channel = 0; channel < 4; ++channel)
+                        surface.palette[id][channel] = terrain.palette[id][channel];
+                }
+                for (u32 channel = 0; channel < 4; ++channel) {
+                    surface.field.atlas[channel] = terrain.atlas[channel];
+                    surface.field.atlasSize[channel] = terrain.atlasSize[channel];
+                }
+                surface.field.nodeRelative[3] = terrain.voxelSize;
+                cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&surface, sizeof(surface)));
+                const std::array<rhi::TextureBinding, 15> textures{
+                    rhi::TextureBinding{whitePixel_, linearSampler_},
+                    rhi::TextureBinding{flatNormalPixel_, linearSampler_},
+                    rhi::TextureBinding{whitePixel_, linearSampler_},
+                    rhi::TextureBinding{blackPixel_, linearSampler_},
+                    rhi::TextureBinding{shadowMap_, shadowSampler_},
+                    rhi::TextureBinding{environmentMap_, environmentSampler_},
+                    rhi::TextureBinding{brdfLut_, environmentSampler_},
+                    rhi::TextureBinding{clusterGrid_, pointSampler_},
+                    rhi::TextureBinding{lightIndices_, pointSampler_},
+                    rhi::TextureBinding{lightData_, pointSampler_},
+                    rhi::TextureBinding{occlusion_, linearSampler_},
+                    rhi::TextureBinding{localShadowMap_, shadowSampler_},
+                    rhi::TextureBinding{terrain.tileTable, pointSampler_},
+                    rhi::TextureBinding{terrain.heights, pointSampler_},
+                    rhi::TextureBinding{terrain.materials, pointSampler_},
+                };
+                cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+            }
+            bound = draw.terrain;
+        }
+
+        // The node's corner relative to the viewer, in f64 until the last
+        // moment: a lattice index times a step is a world coordinate (R9).
+        const auto voxel = static_cast<f64>(terrain.voxelSize);
+        const f64 cornerX = terrain.origin.x - world.camera.origin.x + static_cast<f64>(node.latticeX) * voxel;
+        const f64 cornerZ = terrain.origin.z - world.camera.origin.z + static_cast<f64>(node.latticeZ) * voxel;
+        GpuTerrainUniforms uniforms;
+        uniforms.viewProjection = viewProjection;
+        uniforms.node.nodeRelative[0] = static_cast<f32>(cornerX);
+        uniforms.node.nodeRelative[1] = static_cast<f32>(terrain.origin.y - world.camera.origin.y);
+        uniforms.node.nodeRelative[2] = static_cast<f32>(cornerZ);
+        uniforms.node.nodeRelative[3] = terrain.voxelSize;
+        uniforms.node.nodeLattice[0] = static_cast<f32>(node.latticeX);
+        uniforms.node.nodeLattice[1] = static_cast<f32>(node.latticeZ);
+        uniforms.node.nodeLattice[2] = static_cast<f32>(1u << node.level);
+        uniforms.node.morph[0] = node.morphStart;
+        uniforms.node.morph[1] = node.morphEnd;
+        uniforms.node.morph[2] = node.morphEnd > node.morphStart ? 1.0f / (node.morphEnd - node.morphStart) : 0.0f;
+        for (u32 channel = 0; channel < 4; ++channel) {
+            uniforms.node.atlas[channel] = terrain.atlas[channel];
+            uniforms.node.atlasSize[channel] = terrain.atlasSize[channel];
+        }
+        cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
+        cmd.drawIndexed(terrainGridIndexCount_, 1, 0, 0, 0);
+        ++stats_.drawCalls;
+    }
+}
+
 void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderTarget& target,
                              const RenderWorld& world, const MeshCache& meshes)
 {
@@ -1738,6 +2037,18 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     buildInstanceBatches(world, meshes);
     if (!instanceStaging_.empty()) {
         cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);
+    }
+
+    // The terrain's nodes for this frame, chosen from the camera once and used
+    // by every pass -- a shadow cast by different geometry than is drawn would
+    // not match its caster. The grid goes up the first time, before any pass.
+    terrainDraws_.clear();
+    if (!world.terrains.empty() && world.camera.valid && ensureTerrain(device)) {
+        if (!terrainGridUploaded_) {
+            uploadTerrainGrid(cmd, terrainGridVertices_, terrainGridIndices_);
+            terrainGridUploaded_ = true;
+        }
+        selectTerrain(world);
     }
 
     // The light budget, applied where the lights enter the frame. Truncation
@@ -1810,6 +2121,11 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     casterBounds_.reserve(world.draws.size());
     for (const DrawItem& draw : world.draws)
         casterBounds_.push_back(ShadowCasterBounds{draw.boundsCenter, draw.boundsRadius});
+    for (const TerrainDraw& draw : terrainDraws_) {
+        const Vec3 centre = (draw.node.boundsMin + draw.node.boundsMax) * 0.5f;
+        casterBounds_.push_back(
+            ShadowCasterBounds{centre, 0.5f * core::length(draw.node.boundsMax - draw.node.boundsMin)});
+    }
     fit.casters = casterBounds_;
     fit.distance = settings_.shadowDistance;
     fit.tileResolution = settings_.shadowTileResolution;
@@ -1872,6 +2188,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             const CullSphere cull{cascades.cullCentre[index], cascades.cullRadius[index] + filterReach};
             drawGeometry(cmd, world, meshes, cascades.viewProjection[index], shadowPipeline_, shadowSkinnedPipeline_,
                          Selection::Shadow, &cull);
+            drawTerrain(cmd, world, cascades.viewProjection[index], terrainShadowPipeline_, Selection::Shadow, &cull);
         }
     }
     cmd.endRenderPass();
@@ -1911,6 +2228,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             const CullSphere cull{candidate.position, candidate.range};
             drawGeometry(cmd, world, meshes, shadow.viewProjection[face], shadowPipeline_, shadowSkinnedPipeline_,
                          Selection::Shadow, &cull);
+            drawTerrain(cmd, world, shadow.viewProjection[face], terrainShadowPipeline_, Selection::Shadow, &cull);
         }
     }
     cmd.endRenderPass();
@@ -1939,6 +2257,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         cmd.setPipeline(depthPrepassPipeline_);
         drawGeometry(cmd, world, meshes, world.camera.viewProjection, depthPrepassPipeline_,
                      depthPrepassSkinnedPipeline_, Selection::Prepass);
+        drawTerrain(cmd, world, world.camera.viewProjection, terrainPrepassPipeline_, Selection::Prepass);
     }
     cmd.endRenderPass();
     cmd.popDebugGroup();
@@ -2125,6 +2444,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
         drawGeometry(cmd, world, meshes, world.camera.viewProjection, pbrPipeline_, pbrSkinnedPipeline_,
                      Selection::Opaque);
+        drawTerrain(cmd, world, world.camera.viewProjection, terrainPipeline_, Selection::Opaque);
 
         // Blended, after the opaque pass has filled depth, back to front. The
         // frame uniforms are still bound -- same block, same slot, same values

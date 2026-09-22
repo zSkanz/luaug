@@ -244,6 +244,59 @@ float3x3 tangentFrame(float3 normal, float4 tangent)
     return float3x3(t, b, normal);
 }
 
+// **Everything a lit surface receives**: the shadowed sun, the clustered
+// lights, the environment and the ambient -- everything `shadeForward` does
+// after it has decided what the surface IS, and before emission and fog.
+//
+// Split out so a shader that builds its surface some other way -- terrain,
+// whose normal and colour come from textures the vertex never carried -- is
+// lit by the same code rather than by a copy that will drift from it.
+// `pixel` is `SV_Position.xy`.
+float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, float viewDepth, float2 pixel)
+{
+    const float3 sunDirection = normalize(SunDirectionBrightness.xyz);
+    const float sunNol = saturate(dot(normal, sunDirection));
+    const float shadow =
+        sampleSunShadow(ShadowMap, ShadowSampler, shadingPosition, normal, sunNol, viewDepth, pixel);
+    const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * shadow);
+    float3 color = shadeDirect(surface, sunDirection, sunRadiance);
+
+    color += evaluateClusteredLights(surface, pixel, viewDepth);
+
+    // The environment, on both lobes, and this is what M7.5 exists for: until
+    // now `Lighting.Ambient` was applied flat to both, which `pbr.hlsl`'s own
+    // comment called "the degenerate case of the split-sum approximation where
+    // the environment is one colour". It is no longer one colour -- it is the
+    // sky, prefiltered by roughness, so a metal reflects the hour the script
+    // set instead of reflecting nothing.
+    //
+    // `Ambient` is ADDED to the irradiance rather than replaced by it, so the
+    // property keeps meaning what it documents: light reaching every surface
+    // from every direction, a stand-in for bounced light there is still none of.
+    // The occlusion term multiplies the environment and the ambient below, and
+    // NOTHING else. A surface's occlusion of the environment says nothing about
+    // whether the sun reaches it, and the sun has a shadow map that answers
+    // exactly that; applying it to direct light is the most common way an
+    // ambient-occlusion pass ends up looking like dirt.
+    const float2 screenUv = pixel * ViewportParams.zw;
+    const float rawOcclusion = OcclusionTexture.SampleLevel(OcclusionSampler, screenUv, 0.0f);
+    const float occlusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z);
+
+    color += evaluateEnvironment(surface, EnvironmentMap, EnvironmentSampler, BrdfLut, BrdfSampler, IrradianceSh,
+                                 EnvironmentParams.x, EnvironmentParams.y, occlusion);
+    // And `Ambient` on the DIFFUSE lobe only, which is a change of side rather
+    // than a change of mind. M4's comment argued for putting it on both, and the
+    // argument was right at the time: "a mirror in a uniformly lit white room is
+    // white, not black", so a specular lobe with no environment behind it had to
+    // get something or every metal rendered black. There is an environment
+    // behind it now, and it answers that case properly -- adding a flat term on
+    // top of a prefiltered one is counting the same light twice, and it shows up
+    // as metal that cannot be made dark.
+    color += Ambient.rgb * surface.DiffuseColor * occlusion;
+    return color;
+}
+
+#if defined(LUAUG_UNIFORMS_MATERIAL)
 // Linear HDR into an `Rgba16Float` target. Nothing here tonemaps and nothing
 // here encodes sRGB -- `tonemap.hlsl` does both, once, on the way out.
 float4 shadeForward(Interpolants input)
@@ -296,46 +349,7 @@ float4 shadeForward(Interpolants input)
     // dot against a normal needs no negation. Its COLOUR is new at M7.5: the
     // light it casts warms as it approaches the horizon, derived from its
     // elevation rather than authored (environment.h).
-    const float3 sunDirection = normalize(SunDirectionBrightness.xyz);
-    const float sunNol = saturate(dot(normal, sunDirection));
-    const float shadow =
-        sampleSunShadow(ShadowMap, ShadowSampler, input.ShadingPosition, normal, sunNol, input.ViewDepth,
-                        input.Position.xy);
-    const float3 sunRadiance = SunColorUnused.rgb * (SunDirectionBrightness.w * shadow);
-    float3 color = shadeDirect(surface, sunDirection, sunRadiance);
-
-    color += evaluateClusteredLights(surface, input.Position.xy, input.ViewDepth);
-
-    // The environment, on both lobes, and this is what M7.5 exists for: until
-    // now `Lighting.Ambient` was applied flat to both, which `pbr.hlsl`'s own
-    // comment called "the degenerate case of the split-sum approximation where
-    // the environment is one colour". It is no longer one colour -- it is the
-    // sky, prefiltered by roughness, so a metal reflects the hour the script
-    // set instead of reflecting nothing.
-    //
-    // `Ambient` is ADDED to the irradiance rather than replaced by it, so the
-    // property keeps meaning what it documents: light reaching every surface
-    // from every direction, a stand-in for bounced light there is still none of.
-    // The occlusion term multiplies the environment and the ambient below, and
-    // NOTHING else. A surface's occlusion of the environment says nothing about
-    // whether the sun reaches it, and the sun has a shadow map that answers
-    // exactly that; applying it to direct light is the most common way an
-    // ambient-occlusion pass ends up looking like dirt.
-    const float2 screenUv = input.Position.xy * ViewportParams.zw;
-    const float rawOcclusion = OcclusionTexture.SampleLevel(OcclusionSampler, screenUv, 0.0f);
-    const float occlusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z);
-
-    color += evaluateEnvironment(surface, EnvironmentMap, EnvironmentSampler, BrdfLut, BrdfSampler, IrradianceSh,
-                                 EnvironmentParams.x, EnvironmentParams.y, occlusion);
-    // And `Ambient` on the DIFFUSE lobe only, which is a change of side rather
-    // than a change of mind. M4's comment argued for putting it on both, and the
-    // argument was right at the time: "a mirror in a uniformly lit white room is
-    // white, not black", so a specular lobe with no environment behind it had to
-    // get something or every metal rendered black. There is an environment
-    // behind it now, and it answers that case properly -- adding a flat term on
-    // top of a prefiltered one is counting the same light twice, and it shows up
-    // as metal that cannot be made dark.
-    color += Ambient.rgb * surface.DiffuseColor * occlusion;
+    float3 color = lightSurface(surface, input.ShadingPosition, normal, input.ViewDepth, input.Position.xy);
 
     float3 emissive = EmissiveFactor.rgb;
     emissive *= lerp(float3(1.0f, 1.0f, 1.0f), EmissiveTexture.Sample(EmissiveSampler, input.Uv).rgb, TextureFlags.w);
@@ -348,5 +362,7 @@ float4 shadeForward(Interpolants input)
 
     return float4(color, baseColor.a);
 }
+
+#endif // LUAUG_UNIFORMS_MATERIAL
 
 #endif // LUAUG_FORWARD_HLSLI

@@ -1686,12 +1686,11 @@ public:
 
     // What the brush is, and every field of it is persisted.
     //
-    // **`spacing` is a fraction of the radius, not a strength.** A signed
-    // distance field is filled or it is not -- there is no half-full voxel to
-    // scale -- so for `Add` and `Subtract` the honest continuous knob is how
-    // densely a drag stamps. `strength` is a real strength and belongs to the
-    // two ops that have one: smoothing and flattening move a height PART of the
-    // way, and how far is the whole feel of the tool.
+    // **`spacing` is a fraction of the radius, not a strength.** It is how
+    // densely a drag stamps. `strength` is how much one stamp does: how far the
+    // round brush raises or lowers the ground, and how far smoothing and
+    // flattening move a height towards their target. The box brush fills volume,
+    // and a voxel is filled or it is not, so strength means nothing to it.
     struct Brush
     {
         BrushOp op = BrushOp::Add;
@@ -1700,8 +1699,9 @@ public:
         f32 radius = 4.0f;
         // Stamps every `spacing * radius` metres along a stroke.
         f32 spacing = 0.25f;
-        // How far towards the target one stamp moves a column, for `Smooth` and
-        // `Flatten`. Zero does nothing; one goes all the way in a single stamp.
+        // How much one stamp does: for `Smooth` and `Flatten`, how far towards
+        // the target it moves a column (one goes all the way); for the round
+        // `Add` and `Subtract`, how high it lifts the disc's centre.
         f32 strength = 0.35f;
         // What ground is made of. Never zero: erasing is `BrushOp::Subtract`,
         // because a material picker whose first entry deleted the world would be

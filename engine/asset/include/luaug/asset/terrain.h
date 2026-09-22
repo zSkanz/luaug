@@ -384,6 +384,24 @@ EditReport smoothBall(TerrainField& field, core::DVec3 center, double radius, fl
 // Height layer only, for the same reason `smoothBall` is.
 EditReport flattenBall(TerrainField& field, core::DVec3 center, double radius, float height, float strength);
 
+// Raises (or, with a negative `amount`, lowers) the ground under a disc, by
+// `amount` metres at the centre falling smoothly to nothing at the rim.
+//
+// **The sculpting brush every heightmap editor has, and the reason it is not
+// `fillBall`.** A ball added to flat ground is a ball: near its rim its
+// underside is above the ground, which is an overhang, which is voxels -- so a
+// sphere brush dragged across a field leaves a trail of bricks along both
+// edges of the stroke, every one of which is a cave the renderer has to mesh on
+// the CPU. This moves heights and nothing else. It creates no brick, promotes
+// no column, and leaves columns that already carry voxels alone, for the reason
+// `smoothBall` does.
+//
+// Where a column under the disc has no ground at all and `material` is not
+// zero, raising MAKES ground there with that material, from the disc's own
+// height up -- which is what the first stroke on an empty terrain needs.
+// Lowering never does.
+EditReport raiseBall(TerrainField& field, core::DVec3 center, double radius, float amount, core::u8 material = 0);
+
 // Changes what the ground is MADE OF without changing where it is.
 //
 // **The whole point is that it edits no distance.** A paint brush that nudged

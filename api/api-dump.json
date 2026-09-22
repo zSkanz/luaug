@@ -2129,6 +2129,25 @@
           ],
           "Returns": ["number"],
           "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "RaiseBall",
+          "Parameters": [
+            {
+              "Name": "center",
+              "Type": "vector"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            },
+            {
+              "Name": "amount",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
         }
       ],
       "Events": []

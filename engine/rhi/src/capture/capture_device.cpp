@@ -665,6 +665,25 @@ public:
                        .finish();
     }
 
+    void uploadTextureRegion(TextureHandle texture, u32 x, u32 y, u32 width, u32 height,
+                             std::span<const std::byte> data) override
+    {
+        const UploadSummary summary = summarize(data, kinds_.texture(texture.id));
+        stream_ += Line("uploadTextureRegion")
+                       .num("texture", static_cast<u64>(texture.id))
+                       .num("x", static_cast<u64>(x))
+                       .num("y", static_cast<u64>(y))
+                       .num("width", static_cast<u64>(width))
+                       .num("height", static_cast<u64>(height))
+                       .num("bytes", static_cast<u64>(data.size()))
+                       .num("words", summary.words)
+                       .num("packedWords", summary.packedWords)
+                       .str("packed", summary.packed)
+                       .real("mean", summary.mean)
+                       .real("flow", summary.flow)
+                       .finish();
+    }
+
     void pushDebugGroup(std::string_view groupName) override
     {
         stream_ += Line("pushDebugGroup").str("name", groupName).finish();

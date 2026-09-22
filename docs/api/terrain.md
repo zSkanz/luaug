@@ -63,3 +63,9 @@ Changes what the ground is MADE OF, without changing where it is. Returns how ma
 **It edits no distance at all**, which is the whole difference between this and `FillBall`. It writes material where there is already ground and nowhere else, creates no voxel brick and promotes no column -- so painting a hillside leaves the hillside exactly as cheap as it was.
 
 A `material` of zero is refused rather than treated as erase. Zero means erase to `FillBall`, and picking the first entry of a material list must not delete the ground you were about to paint.
+
+### `RaiseBall(center: vector, radius: number, amount: number): number`
+
+Raises the ground under a disc by `amount` metres at the centre, falling smoothly to nothing at the rim -- or lowers it, when `amount` is negative. Returns how many columns it changed.
+
+This is the heightmap sculpting brush, and it is what to reach for to shape hills and valleys: it only ever moves the surface, so it never creates an overhang. `FillBall` adds a real ball, which near its rim hangs over the ground below it -- the right verb for a boulder or a tunnel, and the wrong one for a hill.

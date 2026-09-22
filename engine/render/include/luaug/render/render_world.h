@@ -248,6 +248,34 @@ struct DrawItem
     bool outlined = false;
 };
 
+// One terrain the GPU draws from its height atlas (ADR 0071). Filled by
+// `TerrainLoader::appendRenderTerrains`, which owns the textures named here;
+// the renderer selects nodes from it with `selectTerrainNodes` and draws them.
+struct RenderTerrain
+{
+    core::InstanceId id;
+    rhi::TextureHandle tileTable;
+    rhi::TextureHandle heights;
+    rhi::TextureHandle materials;
+    // `GpuTerrainParams::atlas` and `atlasSize`, already filled.
+    f32 atlas[4]{};
+    f32 atlasSize[4]{};
+    f32 voxelSize = 0.5f;
+    // The terrain's origin in world space; the renderer makes it relative to
+    // the camera.
+    DVec3 origin;
+    // The tile grid `tileMin` and `tileMax` describe, for the selection.
+    core::i32 minTileX = 0;
+    core::i32 minTileZ = 0;
+    u32 tilesX = 0;
+    u32 tilesZ = 0;
+    std::vector<f32> tileMin;
+    std::vector<f32> tileMax;
+    // Linear colour per material id.
+    f32 palette[kTerrainPaletteSize][4]{};
+    bool outlined = false;
+};
+
 struct RenderWorld
 {
     RenderCamera camera;
@@ -260,6 +288,8 @@ struct RenderWorld
     // draw because it is uploaded per draw anyway and a vector of vectors would
     // be a heap allocation per character per frame.
     std::vector<Mat4> bones;
+    // The GPU terrains, drawn by node rather than by `DrawItem`.
+    std::vector<RenderTerrain> terrains;
 
     // Counters the perf table records beside frame time, because the roadmap
     // asks for the *why* next to the *what*. `culled` is the interesting one: a
@@ -279,6 +309,7 @@ struct RenderWorld
         materials.clear();
         draws.clear();
         bones.clear();
+        terrains.clear();
         candidateDraws = 0;
         culledDraws = 0;
     }

@@ -360,4 +360,48 @@ struct GpuSkyUniforms
 
 static_assert(sizeof(GpuSkyUniforms) == 64 + 64, "GpuSkyUniforms is a cbuffer layout");
 
+// --- GPU terrain (ADR 0071) ---------------------------------------------------
+
+// `TerrainParams` in `shaders/include/luaug_terrain.hlsli`, field for field.
+struct GpuTerrainParams
+{
+    // xyz: the node's lattice corner relative to the viewer, in metres (y is
+    // the terrain's origin height). w: the lattice step in metres.
+    f32 nodeRelative[4]{};
+    // xy: the node's lattice corner in lattice steps; z: steps per grid step.
+    f32 nodeLattice[4]{};
+    // x: morph start, y: morph end, z: 1 / (end - start).
+    f32 morph[4]{};
+    // x: slots per atlas row, y: tile table edge, zw: the tile key at table
+    // entry (0, 0).
+    f32 atlas[4]{};
+    // xy: atlas size in texels, zw: its reciprocal.
+    f32 atlasSize[4]{};
+};
+
+static_assert(sizeof(GpuTerrainParams) == 80, "GpuTerrainParams is a cbuffer layout");
+
+// Vertex stage, `b0 space1`, for `terrain` and `terrain_depth`. Per node.
+struct GpuTerrainUniforms
+{
+    core::Mat4 viewProjection;
+    GpuTerrainParams node;
+};
+
+static_assert(sizeof(GpuTerrainUniforms) == 64 + 80, "GpuTerrainUniforms is a cbuffer layout");
+
+// The number of palette entries the terrain shader carries. Material ids past
+// it wrap, which the palette's own size makes unreachable today.
+inline constexpr u32 kTerrainPaletteSize = 32;
+
+// Fragment stage, `b1 space3`, for `terrain`. Per terrain.
+struct GpuTerrainSurfaceUniforms
+{
+    f32 palette[kTerrainPaletteSize][4]{};
+    // Only `atlas`, `atlasSize` and `nodeRelative[3]` are read.
+    GpuTerrainParams field;
+};
+
+static_assert(sizeof(GpuTerrainSurfaceUniforms) == 32 * 16 + 80, "GpuTerrainSurfaceUniforms is a cbuffer layout");
+
 } // namespace luaug::render

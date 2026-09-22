@@ -110,3 +110,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0067](0067-terrain-is-one-field-with-two-encodings.md) | Terrain is one signed-distance field with two encodings, and the claim is what was measured |
 | [0069](0069-replication-reads-state-and-diffs-it.md) | Replication reads state and diffs it, against a declared wire schema; the change queue cannot serve |
 | [0070](0070-a-port-is-opened-by-a-posture-and-never-by-a-script.md) | A listening socket is opened by a command-line posture and by nothing else; ADR 0035 narrowed |
+| [0071](0071-terrain-ground-is-drawn-from-a-height-atlas.md) | Terrain ground is drawn from a height atlas by a CDLOD grid on the GPU; only caves are meshes; the RHI gains `uploadTextureRegion` |

@@ -2007,6 +2007,9 @@ TEST_CASE("a cave is a hole in the height field and a mesh in its place")
     (void)asset::fillBall(component->field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
     component->fieldRevision += 1;
     REQUIRE(component->field.brickCount() > 0);
+    // Something that moves, near the cave: collision is built where it can be
+    // reached and nowhere else.
+    (void)mirror.part("Crate", {4.0, 6.0, 4.0});
     mirror.step();
 
     // Every height tile first, then the cave: the order bodies are created in
@@ -2020,8 +2023,11 @@ TEST_CASE("a cave is a hole in the height field and a mesh in its place")
     CHECK(height.heights[8 * Samples + 8] > 1e30f);
     CHECK(height.heights[20 * Samples + 20] == doctest::Approx(0.0));
 
-    const auto& cave = mirror.backend.created.back();
-    CHECK(cave.desc.shape.type == physics::ShapeType::TriangleMesh);
+    const auto caveAt =
+        std::find_if(mirror.backend.created.begin(), mirror.backend.created.end(),
+                     [](const auto& made) { return made.desc.shape.type == physics::ShapeType::TriangleMesh; });
+    REQUIRE(caveAt != mirror.backend.created.end());
+    const auto& cave = *caveAt;
     CHECK(cave.desc.motion == physics::MotionType::Static);
     CHECK(cave.indexCount >= 3);
     CHECK_FALSE(cave.points.empty());
@@ -2030,6 +2036,28 @@ TEST_CASE("a cave is a hole in the height field and a mesh in its place")
     const core::usize before = mirror.backend.created.size();
     mirror.step();
     CHECK(mirror.backend.created.size() == before);
+}
+
+TEST_CASE("a cave nothing moving is near has no collider")
+{
+    // **Collision is built where it can be reached.** A cave's collider is a
+    // mesh built from the field, a millisecond or two apiece; a sculpting
+    // bench that dug a cave every tick in a world with no bodies was spending
+    // four milliseconds a tick on colliders nothing would ever touch.
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 0.0f);
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    (void)asset::fillBall(component->field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
+    component->fieldRevision += 1;
+    // Right above the cave, and anchored -- so it does not move and does not
+    // count.
+    const core::InstanceId post = mirror.part("Post", {4.0, 6.0, 4.0});
+    mirror.body(post).anchored = true;
+    mirror.step();
+
+    for (const auto& made : mirror.backend.created)
+        CHECK(made.desc.shape.type != physics::ShapeType::TriangleMesh);
 }
 
 TEST_CASE("two terrains with a tile at the same key each get their collider")

@@ -5754,21 +5754,24 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         const bool box = brush.shape == Editor::BrushShape::Box;
         if (ImGui::Button(box ? "box" : "sphere", ImVec2(76.0f, 0.0f)))
             editor.setBrushShape(box ? Editor::BrushShape::Sphere : Editor::BrushShape::Box);
-        ImGui::SetItemTooltip(box ? "square edges -- click for round" : "round edges -- click for square");
+        ImGui::SetItemTooltip(box ? "carves and fills volume, for tunnels and ledges -- click for the round brush"
+                                  : "raises and lowers the ground smoothly -- click for the box, which carves volume");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-FLT_MIN);
         f32 radius = brush.radius;
         if (ImGui::DragFloat("##radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "size %.2f m"))
             editor.setBrushRadius(radius);
 
-        // Only the two ops that have one. A slider that did nothing for
-        // half the tools would be a control that lies.
-        if (brush.op == Editor::BrushOp::Smooth || brush.op == Editor::BrushOp::Flatten) {
+        // Every op but the box's volume fill has a strength. A slider that did
+        // nothing for the tool in hand would be a control that lies.
+        if (brush.op == Editor::BrushOp::Smooth || brush.op == Editor::BrushOp::Flatten || !box) {
             ImGui::SetNextItemWidth(-FLT_MIN);
             f32 strength = brush.strength;
             if (ImGui::DragFloat("##strength", &strength, 0.01f, 0.02f, 1.0f, "strength %.2f"))
                 editor.setBrushStrength(strength);
-            ImGui::SetItemTooltip("how far towards the target one stamp moves a column");
+            ImGui::SetItemTooltip(brush.op == Editor::BrushOp::Add || brush.op == Editor::BrushOp::Subtract
+                                      ? "how much one stamp raises or lowers the ground"
+                                      : "how far towards the target one stamp moves a column");
         }
         else {
             ImGui::SetNextItemWidth(-FLT_MIN);

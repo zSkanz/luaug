@@ -93,6 +93,18 @@ public:
     virtual void upload(BufferHandle buffer, std::span<const std::byte> data, u32 offsetBytes) = 0;
     virtual void uploadTexture(TextureHandle texture, std::span<const std::byte> data, u32 mipLevel) = 0;
 
+    // A rectangle of mip 0, tightly packed rows of `width` texels (ADR 0071).
+    //
+    // **The one addition the GPU terrain needed**, and the reason it exists:
+    // terrain heights live in an atlas the size of the whole world, and a brush
+    // stroke changes a 32 by 32 tile of it. Re-uploading the atlas per stroke is
+    // megabytes a frame to change kilobytes; this changes the kilobytes. A
+    // rectangle that does not fit inside the texture is refused, silently, by
+    // every backend -- the caller computed it wrong and a partial write would
+    // hide that.
+    virtual void uploadTextureRegion(TextureHandle texture, u32 x, u32 y, u32 width, u32 height,
+                                     std::span<const std::byte> data) = 0;
+
     // Named regions in a GPU capture. Free in shipping builds, invaluable in
     // every other one.
     virtual void pushDebugGroup(std::string_view name) = 0;

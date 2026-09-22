@@ -636,6 +636,62 @@ EditReport flattenBall(TerrainField& field, DVec3 center, double radius, float h
     return report;
 }
 
+EditReport raiseBall(TerrainField& field, DVec3 center, double radius, float amount, u8 material)
+{
+    EditReport report;
+    const auto voxel = static_cast<double>(field.settings().voxelSize);
+    if (!(radius > 0.0) || !(voxel > 0.0) || amount == 0.0f || !std::isfinite(amount)) {
+        return report;
+    }
+
+    const float floorHeight = field.settings().minHeight;
+    const float ceilingHeight = field.settings().maxHeight;
+    const auto low = [voxel](double metres) { return static_cast<i32>(std::floor(metres / voxel)); };
+    const auto high = [voxel](double metres) { return static_cast<i32>(std::ceil(metres / voxel)); };
+    const auto edge = static_cast<i32>(TileEdge);
+
+    for (i32 z = low(center.z - radius); z <= high(center.z + radius); ++z) {
+        for (i32 x = low(center.x - radius); x <= high(center.x + radius); ++x) {
+            const double dx = static_cast<double>(x) * voxel - center.x;
+            const double dz = static_cast<double>(z) * voxel - center.z;
+            const double t = std::sqrt(dx * dx + dz * dz) / radius;
+            // Smoothstep from the rim in: full height at the centre, nothing at
+            // the edge, and no crease anywhere -- a linear cone leaves a ridge
+            // at the rim that every stamp of a drag would draw a line along.
+            const double weight = t >= 1.0 ? 0.0 : 1.0 - t * t * (3.0 - 2.0 * t);
+            if (!(weight > 0.0) || field.isBricked(x, z)) {
+                continue;
+            }
+            const float lift = static_cast<float>(static_cast<double>(amount) * weight);
+
+            const HeightTile* tile = field.findTile(TileKey{floorDiv(x, edge), floorDiv(z, edge)});
+            const u32 index =
+                tile == nullptr ? 0u
+                                : static_cast<u32>(floorMod(z, edge)) * TileEdge + static_cast<u32>(floorMod(x, edge));
+            const bool ground = tile != nullptr && tile->material[index] != 0;
+            if (ground) {
+                const float height = tile->height[index];
+                const float moved = std::clamp(height + lift, floorHeight, ceilingHeight);
+                if (moved == height) {
+                    continue;
+                }
+                writeHeight(field, x, z, moved, tile->material[index]);
+                report.touched += 1;
+            }
+            else if (material != 0 && amount > 0.0f) {
+                // **Raising where there is no ground makes some**, from the
+                // brush's own height up. It is what an empty terrain needs from
+                // the first stroke on it, and it is still a height: the new
+                // column is ground all the way down, never a slab in the air.
+                const float made = std::clamp(static_cast<float>(center.y) + lift, floorHeight, ceilingHeight);
+                writeHeight(field, x, z, made, material);
+                report.touched += 1;
+            }
+        }
+    }
+    return report;
+}
+
 EditReport paintBall(TerrainField& field, DVec3 center, double radius, u8 material)
 {
     EditReport report;

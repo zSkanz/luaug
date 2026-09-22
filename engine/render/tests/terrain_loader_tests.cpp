@@ -1,206 +1,294 @@
-// Terrain's level of detail and residency (F1, the streaming pass).
+// GPU terrain (ADR 0071): which nodes are drawn, and what reaches the GPU.
 //
-// **The level is a function of distance and nothing else**, which is what lets
-// it be asserted here with no device: which stride a tile is meshed at, where
-// the cascade doubles, and where a tile stops being meshed at all.
+// **Both halves are testable with no device worth the name.** The selection is
+// a pure function of the terrain's tile grid and where the viewer is, so its
+// guarantees -- the ground covered exactly once, neighbours never more than one
+// level apart, nothing drawn over missing ground -- are asserted directly. The
+// loader runs against the null device and is judged by what it uploaded.
 #include "luaug/asset/terrain.h"
-#include "luaug/asset/terrain_mesher.h"
-#include "luaug/jobs/jobs.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/render/terrain_loader.h"
+#include "luaug/render/terrain_lod.h"
 #include "luaug/rhi/backends.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
+#include <cstdlib>
 #include <doctest/doctest.h>
-#include <string>
+#include <map>
 #include <utility>
 #include <vector>
 
 using namespace luaug;
 using namespace luaug::render;
 
-TEST_CASE("with no viewer every tile is meshed at full detail")
-{
-    // A headless run with no camera, and the first frame of every run, have no
-    // focus yet. Coarsening ground nobody is looking at from nowhere would be a
-    // guess; full detail is the answer that is never wrong, only slower.
-    TerrainLoader loader;
-    CHECK(loader.strideFor(0.0) == 1);
-    CHECK(loader.strideFor(10000.0) == 1);
-}
-
-TEST_CASE("the stride doubles with each doubling of distance")
-{
-    TerrainLoader loader;
-    loader.setDistances(TerrainLoader::Distances{48.0, 768.0});
-    loader.setFocus(core::DVec3{0.0, 0.0, 0.0});
-
-    CHECK(loader.strideFor(0.0) == 1);
-    CHECK(loader.strideFor(47.0) == 1);
-    CHECK(loader.strideFor(49.0) == 2);
-    CHECK(loader.strideFor(95.0) == 2);
-    CHECK(loader.strideFor(97.0) == 4);
-    CHECK(loader.strideFor(193.0) == 8);
-    // Eight is the coarsest: a 32-column tile at stride 8 is four cells a side,
-    // and coarser than that the skirt is taller than the tile is wide.
-    CHECK(loader.strideFor(700.0) == 8);
-}
-
-TEST_CASE("beyond the view distance a tile is not meshed at all")
-{
-    // **This is what streaming means for the renderer.** An unbounded field
-    // must not cost an unbounded amount of video memory, so past the view
-    // distance a tile's GPU mesh is released rather than kept at the coarsest
-    // level for ever.
-    TerrainLoader loader;
-    loader.setDistances(TerrainLoader::Distances{48.0, 768.0});
-    loader.setFocus(core::DVec3{0.0, 0.0, 0.0});
-    CHECK(loader.strideFor(768.0) == 8);
-    CHECK(loader.strideFor(769.0) == 0);
-}
-
-TEST_CASE("a coarse tile carries skirts and the collider does not")
-{
-    // The crack between two neighbouring tiles meshed at different strides is
-    // filled from below by a strip of wall hung from every side edge. The
-    // collider must never see it: a wall of collision under every tile edge
-    // would be something a character could stand on inside a cave.
-    asset::TerrainField field(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    asset::fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
-
-    asset::MeshRegion region;
-    region.minX = 0;
-    region.minY = -8;
-    region.minZ = 0;
-    region.cellsX = asset::TileEdge / 4;
-    region.cellsY = 4;
-    region.cellsZ = asset::TileEdge / 4;
-    region.stride = 4;
-
-    const asset::TerrainMesh bare = asset::meshField(field, region);
-    region.skirt = 4.0f;
-    const asset::TerrainMesh skirted = asset::meshField(field, region);
-
-    REQUIRE_FALSE(bare.mesh.indices.empty());
-    CHECK(skirted.mesh.indices.size() > bare.mesh.indices.size());
-    CHECK(skirted.mesh.bounds.min.y < bare.mesh.bounds.min.y);
-    // The collider is identical with or without.
-    CHECK(skirted.colliderIndices == bare.colliderIndices);
-    CHECK(skirted.colliderPoints.size() == bare.colliderPoints.size());
-}
-
-TEST_CASE("a coarse tile has a sixteenth of the triangles or fewer")
-{
-    // What the level of detail buys, stated as a ratio rather than a timing.
-    asset::TerrainField field(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    asset::fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
-    asset::fillBall(field, core::DVec3{8.0, 0.0, 8.0}, 5.0, 1);
-
-    const auto meshAt = [&field](core::u32 stride) {
-        asset::MeshRegion region;
-        region.minX = 0;
-        region.minY = -8;
-        region.minZ = 0;
-        region.cellsX = asset::TileEdge / stride;
-        region.cellsY = 24 / stride;
-        region.cellsZ = asset::TileEdge / stride;
-        region.stride = stride;
-        return asset::meshField(field, region).mesh.indices.size() / 3;
-    };
-
-    const auto fine = meshAt(1);
-    const auto coarse = meshAt(4);
-    REQUIRE(fine > 0);
-    CHECK(coarse * 16 <= fine + fine / 4);
-}
-
 namespace {
 
-// What one run of the loader left in the library, per tile, in the order the
-// tiles were uploaded.
-struct Uploaded
+// A square of flat tiles, `tiles` a side, with the viewer at `viewer` in the
+// field's own space.
+struct Square
 {
-    std::string urn;
-    core::u32 meshIndex = 0;
-    core::u32 sectionCount = 0;
-    core::Vec3 min;
-    core::Vec3 max;
+    std::vector<float> lo;
+    std::vector<float> hi;
+    TerrainLodSource source;
+
+    Square(core::u32 tiles, core::DVec3 viewer)
+        : lo(static_cast<core::usize>(tiles) * tiles, 0.0f), hi(static_cast<core::usize>(tiles) * tiles, 1.0f)
+    {
+        source.minTileX = 0;
+        source.minTileZ = 0;
+        source.tilesX = tiles;
+        source.tilesZ = tiles;
+        source.tileMin = lo;
+        source.tileMax = hi;
+        source.voxelSize = 0.5f;
+        source.originFromViewer = core::DVec3{-viewer.x, -viewer.y, -viewer.z};
+    }
 };
 
-std::vector<Uploaded> syncToRest(scene::ClassRegistry& classes, scene::EnumRegistry& enums, core::AtomTable& atoms,
-                                 scene::ClassId terrainClass)
+// Which level covers each leaf tile; and whether any tile was covered twice.
+struct Coverage
 {
-    rhi::DeviceResult device = rhi::createNullDevice({.backend = rhi::BackendId::Null});
-    REQUIRE(device != nullptr);
-    rhi::ICmdList* cmd = device->beginFrame();
-    REQUIRE(cmd != nullptr);
+    std::map<std::pair<core::i32, core::i32>, core::i32> level;
+    bool overlap = false;
+};
 
-    scene::World world(classes, enums, atoms, 1234u);
-    const core::InstanceId id = world.create(terrainClass);
-    scene::TerrainComponent terrain;
-    terrain.field =
-        asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    asset::fillFlat(terrain.field, core::DVec3{0.0, 0.0, 0.0}, 96.0f, 0.0f, 1);
-    asset::fillBall(terrain.field, core::DVec3{20.0, 0.0, 20.0}, 6.0, 2);
-    world.terrains().add(id, std::move(terrain));
-
-    render::MeshCache cache;
-    render::MeshLibrary library;
-    TerrainLoader loader;
-    loader.setFocus(core::DVec3{0.0, 0.0, 0.0});
-    for (int call = 0; call < 64; ++call) {
-        if (loader.sync(*device, *cmd, world, atoms, cache, library) == 0)
-            break;
+Coverage coverageOf(const std::vector<TerrainNode>& nodes)
+{
+    Coverage coverage;
+    for (const TerrainNode& node : nodes) {
+        const auto tiles = static_cast<core::i32>(1u << node.level);
+        const core::i32 firstX = node.latticeX / static_cast<core::i32>(TerrainGridQuads);
+        const core::i32 firstZ = node.latticeZ / static_cast<core::i32>(TerrainGridQuads);
+        for (core::i32 z = 0; z < tiles; ++z) {
+            for (core::i32 x = 0; x < tiles; ++x) {
+                const auto key = std::make_pair(firstX + x, firstZ + z);
+                if (coverage.level.contains(key))
+                    coverage.overlap = true;
+                coverage.level[key] = static_cast<core::i32>(node.level);
+            }
+        }
     }
-
-    std::vector<Uploaded> out;
-    for (const asset::TileKey key : world.terrains().find(id)->field.tileKeys()) {
-        const std::string urn = terrainTileUrn(id, key);
-        const MeshLibrary::Entry* entry = library.find(atoms.intern(urn));
-        if (entry == nullptr)
-            continue;
-        out.push_back(Uploaded{urn, entry->mesh.index, entry->sectionCount, entry->bounds.min, entry->bounds.max});
-    }
-    loader.destroy(*device, cache, library);
-    cache.destroy(*device);
-    return out;
+    return coverage;
 }
 
 } // namespace
 
-TEST_CASE("tiles meshed across the job pool upload exactly what a serial run does")
+TEST_CASE("the selection covers every tile exactly once")
 {
-    // Meshing runs on however many workers the machine has; the order meshes
-    // reach the GPU, and so the handles `extract` sorts draws by, must not
-    // depend on that. A serial pool and a four-worker pool are run over the
-    // same field and compared tile by tile.
+    // A 512 m square with the viewer standing in one corner of it, so every
+    // level from the finest to the coarsest is in play.
+    const Square square(32, core::DVec3{20.0, 2.0, 20.0});
+    std::vector<TerrainNode> nodes;
+    selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
+    REQUIRE_FALSE(nodes.empty());
+
+    const Coverage coverage = coverageOf(nodes);
+    CHECK_FALSE(coverage.overlap);
+    CHECK(coverage.level.size() == 32u * 32u);
+}
+
+TEST_CASE("detail is finest under the viewer and coarsens with distance")
+{
+    const Square square(32, core::DVec3{20.0, 2.0, 20.0});
+    std::vector<TerrainNode> nodes;
+    selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
+    const Coverage coverage = coverageOf(nodes);
+
+    // The tile the viewer stands on is a leaf, drawn one vertex per lattice
+    // step; the far corner, 700 m off, is not.
+    CHECK(coverage.level.at({1, 1}) == 0);
+    CHECK(coverage.level.at({31, 31}) > 0);
+}
+
+TEST_CASE("neighbouring tiles are never more than one level apart")
+{
+    // **The condition the morph needs to be crack-free.** A vertex on the edge
+    // between a level-L node and a level-L+1 node is fully morphed onto the
+    // coarse grid, which lines up with the coarse node's edge -- one level. Two
+    // levels apart, the fine edge has vertices the coarse one does not, and
+    // daylight shows through.
+    for (const core::DVec3 viewer :
+         {core::DVec3{20.0, 2.0, 20.0}, core::DVec3{256.0, 40.0, 256.0}, core::DVec3{-100.0, 5.0, 300.0}}) {
+        CAPTURE(viewer.x);
+        const Square square(32, viewer);
+        std::vector<TerrainNode> nodes;
+        selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
+        const Coverage coverage = coverageOf(nodes);
+        for (const auto& [key, level] : coverage.level) {
+            for (const std::pair<core::i32, core::i32> step : {std::pair{1, 0}, std::pair{0, 1}}) {
+                const auto neighbour = coverage.level.find({key.first + step.first, key.second + step.second});
+                if (neighbour == coverage.level.end())
+                    continue;
+                CHECK(std::abs(neighbour->second - level) <= 1);
+            }
+        }
+    }
+}
+
+TEST_CASE("nothing is drawn over tiles the field does not hold")
+{
+    Square square(8, core::DVec3{0.0, 2.0, 0.0});
+    // A 2x2 block of tiles the field does not have.
+    for (const core::usize index : {18u, 19u, 26u, 27u}) {
+        square.lo[index] = 1.0f;
+        square.hi[index] = -1.0f;
+    }
+    std::vector<TerrainNode> nodes;
+    selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
+    const Coverage coverage = coverageOf(nodes);
+    CHECK_FALSE(coverage.level.contains({2, 2}));
+    CHECK_FALSE(coverage.level.contains({3, 3}));
+    CHECK(coverage.level.contains({0, 0}));
+}
+
+TEST_CASE("the selection is the same on every run")
+{
+    const Square square(16, core::DVec3{37.0, 3.0, 91.0});
+    std::vector<TerrainNode> first;
+    std::vector<TerrainNode> second;
+    selectTerrainNodes(square.source, TerrainLodSettings{}, first);
+    selectTerrainNodes(square.source, TerrainLodSettings{}, second);
+    REQUIRE(first.size() == second.size());
+    for (core::usize at = 0; at < first.size(); ++at) {
+        CHECK(first[at].latticeX == second[at].latticeX);
+        CHECK(first[at].latticeZ == second[at].latticeZ);
+        CHECK(first[at].level == second[at].level);
+    }
+}
+
+// --- The loader -------------------------------------------------------------
+
+namespace {
+
+struct LoaderFixture
+{
     core::AtomTable atoms;
     scene::ClassRegistry classes;
     scene::EnumRegistry enums;
-    const scene::ClassId terrainClass = classes.registerClass({
-        .name = atoms.intern("Terrain"),
-        .defaultName = atoms.intern("Terrain"),
-    });
+    scene::ClassId workspaceClass = scene::InvalidClass;
+    scene::ClassId terrainClass = scene::InvalidClass;
+    rhi::DeviceResult device = rhi::createNullDevice({.backend = rhi::BackendId::Null});
+    rhi::ICmdList* cmd = nullptr;
+    scene::World world;
+    core::InstanceId root;
+    core::InstanceId terrain;
+    MeshCache cache;
+    MeshLibrary library;
+    TerrainLoader loader;
 
-    REQUIRE_FALSE(jobs::initialized());
-    const std::vector<Uploaded> serial = syncToRest(classes, enums, atoms, terrainClass);
-    jobs::init(4);
-    const std::vector<Uploaded> pooled = syncToRest(classes, enums, atoms, terrainClass);
-    jobs::shutdown();
-
-    REQUIRE(serial.size() > 4);
-    REQUIRE(serial.size() == pooled.size());
-    for (core::usize at = 0; at < serial.size(); ++at) {
-        CAPTURE(serial[at].urn);
-        CHECK(serial[at].urn == pooled[at].urn);
-        CHECK(serial[at].meshIndex == pooled[at].meshIndex);
-        CHECK(serial[at].sectionCount == pooled[at].sectionCount);
-        CHECK(serial[at].min.x == pooled[at].min.x);
-        CHECK(serial[at].min.y == pooled[at].min.y);
-        CHECK(serial[at].max.y == pooled[at].max.y);
+    LoaderFixture()
+        : workspaceClass(
+              classes.registerClass({.name = atoms.intern("Workspace"), .defaultName = atoms.intern("Workspace")})),
+          terrainClass(
+              classes.registerClass({.name = atoms.intern("Terrain"), .defaultName = atoms.intern("Terrain")})),
+          world(classes, enums, atoms, 1234u)
+    {
+        REQUIRE(device != nullptr);
+        cmd = device->beginFrame();
+        REQUIRE(cmd != nullptr);
+        root = world.create(workspaceClass);
+        terrain = world.create(terrainClass);
+        scene::TerrainComponent component;
+        component.field =
+            asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+        asset::fillFlat(component.field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
+        world.terrains().add(terrain, std::move(component));
+        REQUIRE(world.setParent(terrain, root) == std::nullopt);
     }
+
+    ~LoaderFixture()
+    {
+        loader.destroy(*device, cache, library);
+        cache.destroy(*device);
+    }
+
+    LoaderFixture(const LoaderFixture&) = delete;
+    LoaderFixture& operator=(const LoaderFixture&) = delete;
+
+    scene::TerrainComponent& component() { return *world.terrains().find(terrain); }
+    core::u32 sync() { return loader.sync(*device, *cmd, world, atoms, cache, library); }
+};
+
+} // namespace
+
+TEST_CASE("every tile is uploaded once, and a quiet frame uploads nothing")
+{
+    LoaderFixture fixture;
+    (void)fixture.sync();
+    const core::usize tiles = fixture.component().field.tileCount();
+    REQUIRE(tiles > 0);
+    CHECK(fixture.loader.lastTileUploads() == tiles);
+    CHECK(fixture.loader.residentCount() == tiles);
+
+    (void)fixture.sync();
+    CHECK(fixture.loader.lastTileUploads() == 0);
+}
+
+TEST_CASE("a brush stroke uploads the tiles it touched and nothing else")
+{
+    // **This is the whole of what an edit costs now**: kilobytes to the GPU.
+    // There is no mesh to rebuild, so a stroke that stays inside one tile is
+    // one tile's upload however large the terrain is.
+    LoaderFixture fixture;
+    (void)fixture.sync();
+
+    (void)asset::raiseBall(fixture.component().field, core::DVec3{4.0, 0.0, 4.0}, 2.0, 1.0f);
+    fixture.component().fieldRevision += 1;
+    (void)fixture.sync();
+    CHECK(fixture.loader.lastTileUploads() == 1);
+}
+
+TEST_CASE("the render terrain names the atlas and bounds every tile")
+{
+    LoaderFixture fixture;
+    (void)asset::raiseBall(fixture.component().field, core::DVec3{4.0, 0.0, 4.0}, 2.0, 3.0f);
+    (void)fixture.sync();
+
+    RenderWorld snapshot;
+    fixture.loader.appendRenderTerrains(fixture.world, fixture.root, snapshot);
+    REQUIRE(snapshot.terrains.size() == 1);
+    const RenderTerrain& terrain = snapshot.terrains.front();
+    CHECK(terrain.heights.valid());
+    CHECK(terrain.materials.valid());
+    CHECK(terrain.tileTable.valid());
+    CHECK(terrain.tilesX * terrain.tilesZ == terrain.tileMin.size());
+    // The raised tile's bounds include the bump; a flat one's are flat.
+    float highest = 0.0f;
+    for (const float value : terrain.tileMax)
+        highest = std::max(highest, value);
+    CHECK(highest > 2.5f);
+
+    // A terrain outside the root is not in the world.
+    RenderWorld elsewhere;
+    fixture.loader.appendRenderTerrains(fixture.world, core::InstanceId{}, elsewhere);
+    CHECK(elsewhere.terrains.empty());
+}
+
+TEST_CASE("a cave near the viewer is meshed and opens the ground; far away it closes")
+{
+    LoaderFixture fixture;
+    (void)asset::fillBall(fixture.component().field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
+    fixture.component().fieldRevision += 1;
+    REQUIRE(fixture.component().field.brickCount() > 0);
+
+    // No viewer, no cave: a headless run has nobody to stand in one.
+    (void)fixture.sync();
+    CHECK(fixture.loader.caveCount() == 0);
+
+    fixture.loader.setFocus(core::DVec3{4.0, 2.0, 4.0});
+    (void)fixture.sync();
+    CHECK(fixture.loader.caveCount() == 1);
+    // The tile under it went back up with the cave flag in its materials.
+    CHECK(fixture.loader.lastTileUploads() == 1);
+    CHECK(fixture.library.size() == 1);
+
+    fixture.loader.setFocus(core::DVec3{400.0, 2.0, 400.0});
+    (void)fixture.sync();
+    CHECK(fixture.loader.caveCount() == 0);
+    CHECK(fixture.loader.lastTileUploads() == 1);
+    CHECK(fixture.library.size() == 0);
 }

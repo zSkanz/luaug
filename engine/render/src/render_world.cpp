@@ -679,26 +679,32 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         }
     });
 
-    // --- Terrain (F1, ADR 0067) ---------------------------------------------
+    // --- Terrain caves (F1, ADR 0067 and 0071) ------------------------------
+    //
+    // **The ground itself is not here.** It is drawn by the renderer from the
+    // terrain's height atlas (`RenderWorld::terrains`, filled by
+    // `TerrainLoader::appendRenderTerrains`), and nothing about it is a
+    // `DrawItem`. What IS a mesh is a cave: near the viewer, each column that
+    // carries voxel bricks is meshed on the CPU and filed under
+    // `terrainCaveUrn`, and the atlas opens the ground where it is.
     //
     // **Terrain is not made of `MeshPart`s**, and the reason is mechanical:
     // `attachPartComponents` adds a `RigidBodyComponent` to every `BasePart`
-    // with no condition and `applyScene` has no skip, so a few hundred generated
-    // terrain parts would be a few hundred phantom bodies in the broadphase, a
-    // few hundred more instances in every snapshot, and a few hundred rows in
-    // the Explorer. `TerrainLoader` files the meshes under a URN of their own
-    // and this emits their draws directly.
-    //
-    // **No LOD chain.** `MeshLodRange` picks a level per draw from projected
-    // error, and two neighbouring tiles picking different levels on different
-    // frames is a crack that appears and disappears. For terrain the level is a
-    // residency decision, baked into what was meshed.
+    // with no condition, so generated cave parts would be phantom bodies in the
+    // broadphase and rows in the Explorer. So the meshes are filed under a URN
+    // of their own and this emits their draws directly.
     world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
         if (!inWorld(world, id, root))
             return;
 
-        for (const asset::TileKey key : terrain.field.tileKeys()) {
-            const core::NameAtom urn = world.atoms().lookup(terrainTileUrn(id, key));
+        std::vector<asset::TileKey> columns;
+        for (const asset::BrickKey brick : terrain.field.brickKeys())
+            columns.push_back(asset::TileKey{brick.x, brick.z});
+        std::sort(columns.begin(), columns.end());
+        columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
+
+        for (const asset::TileKey column : columns) {
+            const core::NameAtom urn = world.atoms().lookup(terrainCaveUrn(id, column));
             if (!urn.valid())
                 continue;
             const MeshLibrary::Entry* entry = meshes.find(urn);

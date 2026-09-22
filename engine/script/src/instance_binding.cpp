@@ -1011,6 +1011,29 @@ int methodTerrainFillBall(lua_State* L)
     return 1;
 }
 
+int methodTerrainRaiseBall(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const auto radius = static_cast<double>(luaL_checknumber(L, 3));
+    const auto amount = static_cast<float>(luaL_checknumber(L, 4));
+
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+
+    // The field's own space; see `FillBall` above.
+    const core::DVec3 wide{static_cast<double>(center.x) - terrain->origin.x,
+                           static_cast<double>(center.y) - terrain->origin.y,
+                           static_cast<double>(center.z) - terrain->origin.z};
+    const asset::EditReport report = asset::raiseBall(terrain->field, wide, radius, amount);
+    terrain->fieldRevision += 1;
+    lua_pushinteger(L, static_cast<int>(report.touched));
+    return 1;
+}
+
 int methodTerrainFillBlock(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
@@ -1143,6 +1166,7 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"CharacterBody", "Jump", methodCharacterJump},
     {"Ragdoll", "Build", methodRagdollBuild},
     {"Terrain", "FillBall", methodTerrainFillBall},
+    {"Terrain", "RaiseBall", methodTerrainRaiseBall},
     {"Terrain", "FillBlock", methodTerrainFillBlock},
     {"Terrain", "PaintBall", methodTerrainPaintBall},
     {"Terrain", "HeightAt", methodTerrainHeightAt},

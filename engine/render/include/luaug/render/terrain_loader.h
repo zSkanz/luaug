@@ -1,58 +1,68 @@
 #pragma once
 
-// Terrain on the GPU (ADR 0067, F1 Part D).
+// Terrain on the GPU (ADR 0067, ADR 0071).
 //
-// **Terrain does not become `MeshPart`s, and the reason is mechanical rather
-// than aesthetic.** `attachPartComponents` adds a `RigidBodyComponent` to every
-// `BasePart` with no condition and `applyScene` has no skip -- `CanCollide` and
-// `CanQuery` are only flags on the resulting body -- so a few hundred generated
-// terrain parts would be a few hundred phantom bodies in the broadphase, a few
-// hundred more instances in every `World::snapshot`, and a few hundred rows in
-// the Explorer. So the meshes go straight into `MeshLibrary` under a URN of
-// their own and `extract` emits their draws directly.
+// **The ground is not a mesh.** Each terrain's height tiles are copied into an
+// `R32Float` atlas -- one 32 by 32 slot per tile -- with a second `R8Unorm`
+// atlas of material ids and a small table saying which slot each tile key has.
+// The renderer draws the terrain as a quadtree of one shared grid, lifted to the
+// atlas's heights in the vertex shader (`terrain_lod.h`,
+// `shaders/include/luaug_terrain.hlsli`). A brush stroke therefore costs the
+// upload of the tiles it touched -- a few kilobytes -- and nothing is meshed.
 //
-// This is the terrain half of what `MeshLoader` is for a `MeshPart`: it walks
-// the world, meshes what has changed, uploads it, and keeps `MeshLibrary`
-// current. It is separate from `MeshLoader` because nothing about it reads a
-// file -- the geometry is computed from a field that is already in memory.
+// This is the architecture the reference heightmap terrains converge on
+// (Terrain3D's clipmap over region textures, Strugar's CDLOD), and it replaced
+// an earlier one that meshed every tile on the CPU with marching tetrahedra,
+// hung skirts under every edge to hide the cracks between levels, and spent
+// most of a frame doing it during an edit.
+//
+// **Caves are the exception, and they are meshes.** A column carrying voxel
+// bricks is not a height function, so near the viewer each bricked column is
+// meshed from the field on the CPU, filed in `MeshLibrary` under
+// `terrainCaveUrn`, and drawn like any mesh; its material byte in the atlas
+// gets the cave flag, and the terrain shader discards the ground's triangles
+// there so the mesh shows through. Far away there is no cave mesh, no flag and
+// no hole -- a cave mouth two hundred metres off is drawn as the hillside
+// around it, which at that distance is what it looks like.
 
 #include "luaug/asset/terrain.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
+#include "luaug/render/terrain_lod.h"
 #include "luaug/rhi/device.h"
 #include "luaug/scene/world.h"
 
+#include <string>
 #include <vector>
 
 namespace luaug::render {
 
-// The URN a terrain tile's mesh is filed under, so `extract` and this agree
-// about one name. `terrain://<instance>/<x>,<z>`.
-[[nodiscard]] std::string terrainTileUrn(core::InstanceId terrain, asset::TileKey key);
+// The URN one bricked column's cave mesh is filed under, so `extract` and this
+// agree about one name. `terrain://<instance>/cave/<x>,<z>`, in brick keys.
+[[nodiscard]] std::string terrainCaveUrn(core::InstanceId terrain, asset::TileKey column);
 
 class TerrainLoader
 {
 public:
-    // Meshes and uploads whatever changed, and answers how many tiles it
-    // rebuilt.
+    // Brings the GPU copy of every terrain up to date: uploads the tiles whose
+    // content changed, and meshes the cave columns near the viewer. Answers how
+    // many tiles and caves it rebuilt.
     //
-    // **Budgeted by a COUNT rather than a clock**, the same rule the collider
-    // mirror follows and for a related reason: a tile that appears a frame late
-    // is a frame of missing ground, and one that appears "when the machine got
-    // round to it" is a different amount of missing ground on every machine.
+    // **Budgeted by a COUNT rather than a clock**, the rule the collider mirror
+    // follows: a tile that appears "when the machine got round to it" is a
+    // different amount of missing ground on every machine.
     core::u32 sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::AtomTable& atoms,
                    MeshCache& cache, MeshLibrary& library);
 
-    // **Where the viewer is**, which decides every tile's level of detail and
-    // whether it is meshed at all.
-    //
-    // Set once a frame from the camera the LAST frame was drawn through, because
-    // `sync` runs before `extract` decides this frame's. A frame of lag in a
-    // level-of-detail choice is invisible; a tile meshed at the wrong level for
-    // a frame is a tile at the level it had a moment ago.
-    //
-    // With no focus every tile is meshed at full detail, which is what a
-    // headless run with no camera and the first frame of every run both need.
+    // Appends one `RenderTerrain` per terrain in `world` under `root`, naming
+    // the textures this loader owns. Called after `extract`, into the same
+    // snapshot.
+    void appendRenderTerrains(const scene::World& world, core::InstanceId root, RenderWorld& out) const;
+
+    // **Where the viewer is**: which caves are meshed, and which tiles upload
+    // first. Set once a frame from the camera the last frame was drawn
+    // through. With no focus, no cave is meshed -- a headless run has nobody
+    // to stand in one.
     void setFocus(core::DVec3 focus) noexcept
     {
         m_focus = focus;
@@ -60,63 +70,75 @@ public:
     }
     void clearFocus() noexcept { m_hasFocus = false; }
 
-    // **The distances the levels change at, in metres from the viewer.**
-    //
-    // Level 0 (every lattice sample) inside `nearDistance`; each level after it
-    // halves the density and doubles the reach -- the cascade every reference
-    // engine converges on, whether it is spelled as a quadtree, a clipmap or
-    // godot_voxel's `lod_distance`. Beyond `viewDistance` a tile is not meshed
-    // and its GPU mesh is released: that is what streaming means for the
-    // renderer, and it is what keeps an unbounded field from costing an
-    // unbounded amount of video memory.
-    struct Distances
-    {
-        double nearDistance = 48.0;
-        double viewDistance = 768.0;
-    };
-    void setDistances(Distances distances) noexcept { m_distances = distances; }
-    [[nodiscard]] const Distances& distances() const noexcept { return m_distances; }
+    // The level-of-detail bands the renderer draws with. Caves are meshed only
+    // inside level 0's morph start, where the grid is one vertex per lattice
+    // step and a hole in it lines up with the cave mesh exactly.
+    void setLodSettings(const TerrainLodSettings& settings) noexcept { m_lod = settings; }
+    [[nodiscard]] const TerrainLodSettings& lodSettings() const noexcept { return m_lod; }
 
-    // The stride a tile at this distance is meshed with: 1, 2, 4 or 8, or 0 when
-    // it is beyond the view distance and should not be meshed at all. Public so
-    // the selection can be tested without a GPU.
-    [[nodiscard]] core::u32 strideFor(double distance) const noexcept;
-
-    // Releases every mesh this uploaded. Called once, by whoever owns it.
+    // Releases everything this uploaded. Called once, by whoever owns it.
     void destroy(rhi::IDevice& device, MeshCache& cache, MeshLibrary& library);
 
-    // How many tiles are meshed and resident.
-    [[nodiscard]] core::usize residentCount() const noexcept { return m_tiles.size(); }
+    // How many tiles have an atlas slot, across every terrain.
+    [[nodiscard]] core::usize residentCount() const noexcept;
+    // How many cave columns are meshed.
+    [[nodiscard]] core::usize caveCount() const noexcept { return m_caves.size(); }
+    // Tiles uploaded by the last `sync`, for tests and the perf overlay.
+    [[nodiscard]] core::u32 lastTileUploads() const noexcept { return m_lastTileUploads; }
 
 private:
-    struct Resident
+    struct Slot
     {
-        core::InstanceId terrain;
         asset::TileKey key;
-        core::NameAtom urn;
-        MeshHandle mesh;
-        core::u64 revision = 0;
-        // **What the mesh was built FROM**: the digests of the tile, its eight
-        // neighbours (the mesher reads one column past every edge, for the
-        // seam and for the normals) and every brick in reach. `fieldRevision` is
-        // one counter for the whole terrain, so on its own it said "every tile
-        // is stale" after any brush stroke, and the loader spent each frame
-        // re-meshing whichever tiles were nearest the camera while the one the
-        // brush touched waited its turn.
+        core::u32 slot = 0;
+        // What was uploaded: the tile's digest and its cave flags, folded.
         core::u64 content = 0;
-        // The stride the resident mesh was built at, so a change of level is a
-        // rebuild exactly as a change of field is.
-        core::u32 stride = 0;
+        float minHeight = 0.0f;
+        float maxHeight = 0.0f;
         bool seen = false;
     };
 
+    struct GpuTerrain
+    {
+        core::InstanceId terrain;
+        rhi::TextureHandle heights;
+        rhi::TextureHandle materials;
+        rhi::TextureHandle tileTable;
+        core::u32 rows = 0;
+        core::u32 tableEdge = 0;
+        core::i32 tableOriginX = 0;
+        core::i32 tableOriginZ = 0;
+        float voxelSize = 0.5f;
+        // Sorted by key (R10: never a hash map -- this decides upload order).
+        std::vector<Slot> slots;
+        std::vector<core::u32> freeSlots;
+        std::vector<float> table;
+        bool tableDirty = false;
+        bool seen = false;
+    };
+
+    struct Cave
+    {
+        core::InstanceId terrain;
+        asset::TileKey column;
+        core::NameAtom urn;
+        MeshHandle mesh;
+        core::u64 content = 0;
+        bool seen = false;
+    };
+
+    void releaseGpu(rhi::IDevice& device, GpuTerrain& gpu);
+    [[nodiscard]] bool caveResident(core::InstanceId terrain, asset::TileKey column) const noexcept;
+
     core::DVec3 m_focus;
     bool m_hasFocus = false;
-    Distances m_distances;
+    TerrainLodSettings m_lod;
+    core::u32 m_lastTileUploads = 0;
 
-    // Sorted by (terrain, key). Never a hash map: this decides the order meshes
-    // are uploaded in, and a mesh handle's index reaches a draw's sort key.
-    std::vector<Resident> m_tiles;
+    // Sorted by terrain index.
+    std::vector<GpuTerrain> m_terrains;
+    // Sorted by (terrain, column).
+    std::vector<Cave> m_caves;
 };
 
 } // namespace luaug::render

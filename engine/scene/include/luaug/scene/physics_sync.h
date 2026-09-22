@@ -400,6 +400,21 @@ private:
     // get rebuilt in a tick has to be a fact about the operation sequence rather
     // than about how fast the machine was that day. Shared by both kinds.
     static constexpr core::u32 TerrainRebuildsPerTick = 4;
+    // Cave colliders separately, and one a tick. A cave column is meshed from
+    // the field and handed to the backend as triangles -- a millisecond or two
+    // where a height tile's in-place edit is microseconds -- and a brush that
+    // digs every tick would otherwise spend four of them every tick. A cave
+    // whose collider is a few ticks late is a wall that solidifies a few ticks
+    // after it was carved; the old one stays until then.
+    static constexpr core::u32 CaveRebuildsPerTick = 1;
+    // How close, in metres horizontally, something that moves has to be to a
+    // cave column for the column to have a collider. Wide enough that a body
+    // arriving at running speed finds it built, at one a tick, before it gets
+    // there. **A raycast far from every moving body passes through a cave
+    // opening** -- the height field is open there and nothing fills it -- which
+    // is the price of not meshing every cave in the world every time one is
+    // dug.
+    static constexpr double CaveCollisionReach = 32.0;
 
     void applyTerrain();
     void retireUnseenTerrain();

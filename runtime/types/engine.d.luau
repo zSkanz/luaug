@@ -901,6 +901,13 @@ declare extern type Terrain extends Instance with
     --- changed. This is the verb a sculpting brush is made of, and it is the same one a script uses --
     --- an explosion crater is `FillBall(hit.Position, 4, 0)`.
     function FillBall(self, center: vector, radius: number, material: number): number
+    --- Raises the ground under a disc by `amount` metres at the centre, falling smoothly to nothing at
+    --- the rim -- or lowers it, when `amount` is negative. Returns how many columns it changed. This is
+    --- the heightmap sculpting brush, and it is what to reach for to shape hills and valleys: it only
+    --- ever moves the surface, so it never creates an overhang. `FillBall` adds a real ball, which near
+    --- its rim hangs over the ground below it -- the right verb for a boulder or a tunnel, and the
+    --- wrong one for a hill.
+    function RaiseBall(self, center: vector, radius: number, amount: number): number
     --- The same, as an axis-aligned box. Returns how many cells it changed.
     function FillBlock(self, center: vector, size: vector, material: number): number
     --- Changes what the ground is MADE OF, without changing where it is. Returns how many cells it

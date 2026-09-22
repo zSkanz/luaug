@@ -1177,6 +1177,23 @@ local Classes: { Schema.Class } = {
                     .. "uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.",
             },
             {
+                Name = "RaiseBall",
+                Parameters = {
+                    { Name = "center", Type = "vector" },
+                    { Name = "radius", Type = "number" },
+                    { Name = "amount", Type = "number" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Raises the ground under a disc by `amount` metres at the centre, falling smoothly to "
+                    .. "nothing at the rim -- or lowers it, when `amount` is negative. Returns how many "
+                    .. "columns it changed.\n\n"
+                    .. "This is the heightmap sculpting brush, and it is what to reach for to shape hills "
+                    .. "and valleys: it only ever moves the surface, so it never creates an overhang. "
+                    .. "`FillBall` adds a real ball, which near its rim hangs over the ground below it -- "
+                    .. "the right verb for a boulder or a tunnel, and the wrong one for a hill.",
+            },
+            {
                 Name = "FillBlock",
                 Parameters = {
                     { Name = "center", Type = "vector" },

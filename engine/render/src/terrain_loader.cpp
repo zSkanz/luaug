@@ -3,440 +3,648 @@
 #include "luaug/asset/terrain_mesher.h"
 #include "luaug/asset/terrain_palette.h"
 #include "luaug/core/log.h"
-#include "luaug/jobs/jobs.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <functional>
+#include <limits>
 #include <span>
 #include <string>
 
 namespace luaug::render {
 namespace {
 
+using core::i32;
 using core::u32;
+using core::u64;
 using core::usize;
 
-// **How much meshing one call may do, in lattice CELLS rather than tiles.**
-//
-// A count and never a millisecond budget: a tile that appears "when the machine
-// got round to it" is a different amount of missing ground on every machine.
-// Cells rather than tiles because tiles stopped costing the same once they had
-// levels -- a tile at stride 8 is a sixty-fourth of one at stride 1, and a tile
-// budget would spend a whole slot on it. This is four full-detail tiles' worth:
-// a brush on a tile corner touches four, and all four have to show the stroke
-// in the frame it was made. It was two while meshing ran on this thread; the
-// tiles now mesh in parallel, so four costs a four-core machine what two used
-// to cost, and a camera move re-levels dozens of distant tiles at once.
-constexpr core::u64 CellsPerSync = 4ull * asset::TileEdge * asset::TileEdge * 16ull;
+// Slots per atlas row. 64 slots of 32 texels is a 2048-texel row, which every
+// backend accepts; the atlas grows in rows.
+constexpr u32 SlotsPerRow = 64;
+constexpr u32 AtlasWidth = SlotsPerRow * asset::TileEdge;
+// The tallest atlas: 256 rows of slots is 16,384 tiles, which at half a metre is
+// a 2 km square of sculpted ground in one terrain.
+constexpr u32 MaxRows = 256;
 
-// The skirt, in lattice steps of the tile's own stride. Two steps is deeper than
-// the largest disagreement two neighbouring levels can have at their seam.
-constexpr float SkirtSteps = 2.0f;
+// How many tiles one `sync` may upload. A count, never a clock. A tile is five
+// kilobytes, so this is five megabytes -- a whole 256 m terrain appears in one
+// frame, and a 2 km one in a dozen.
+constexpr u32 TilesPerSync = 1024;
 
-// How much further a tile must be before it drops a level than it had to be to
-// gain one. Without it a tile at a boundary flips every frame the camera
-// breathes, and each flip is a rebuild.
-constexpr double Hysteresis = 1.1;
+// How many cave columns one `sync` may mesh. A column is 18 by 18 lattice
+// columns and as tall as its surface and its bricks, a few milliseconds at the
+// worst; four keeps a sculpting stroke inside one frame.
+constexpr u32 CavesPerSync = 4;
 
-// How far above and below a tile's own heights the mesher looks, in lattice
-// steps, when the tile carries NO bricks.
-//
-// **Two, and it used to be thirty-two.** The terrain's whole reservation would
-// be the honest answer and is far too tall -- `MinHeight` to `MaxHeight` at half
-// a metre is a thousand cells of empty air per column, meshed to find nothing --
-// so a tile is meshed around the heights it holds. The margin exists so the
-// surface has a cell of air above it and a cell of ground below it to cross
-// between; a height column has exactly one crossing and needs no more than that.
-//
-// Thirty-two was a guess standing in for "whatever bricks reach", and it cost
-// eight times the triangles on flat ground: sixty-four cells of Y where eight
-// would do, on every tile, twice a frame, against a sixteen-millisecond budget.
-// Bricks are now measured rather than guessed at -- see `brickRangeOf`.
-constexpr core::i32 SurfaceMargin = 2;
+// The margin above and below a cave column's surfaces, in lattice steps: a
+// crossing needs a cell on each side of it.
+constexpr i32 CaveMargin = 2;
+
+// The flag in a material byte that opens the ground for a cave mesh.
+constexpr core::u8 CaveFlag = 0x80;
+
+[[nodiscard]] i32 floorDivide(i32 value, i32 divisor) noexcept
+{
+    const i32 quotient = value / divisor;
+    return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient;
+}
 
 // Order-sensitive, which is what a key built from an ordered walk wants.
-[[nodiscard]] core::u64 combine(core::u64 seed, core::u64 value) noexcept
+[[nodiscard]] u64 combine(u64 seed, u64 value) noexcept
 {
-    core::u64 z = seed ^ (value + 0x9E3779B97F4A7C15ull + (seed << 6) + (seed >> 2));
+    u64 z = seed ^ (value + 0x9E3779B97F4A7C15ull + (seed << 6) + (seed >> 2));
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
     return z ^ (z >> 31);
 }
 
-[[nodiscard]] core::i32 floorDivide(core::i32 value, core::i32 divisor) noexcept
+[[nodiscard]] u64 tileDigestOr(const asset::TerrainField& field, asset::TileKey key) noexcept
 {
-    const core::i32 quotient = value / divisor;
-    return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient;
+    const asset::HeightTile* tile = field.findTile(key);
+    return tile == nullptr ? 0x6E6F74696C65ull : asset::digestOf(*tile);
 }
 
-// What one tile's mesh reads: itself and its eight neighbours, and every brick
-// whose footprint reaches within a column of it. `bricks` is the field's brick
-// keys, fetched once per terrain rather than once per tile.
-[[nodiscard]] core::u64 contentOf(const asset::TerrainField& field, asset::TileKey key,
-                                  std::span<const asset::BrickKey> bricks) noexcept
+[[nodiscard]] u32 nextPowerOfTwo(u32 value) noexcept
 {
-    core::u64 content = 0;
-    for (core::i32 dz = -1; dz <= 1; ++dz) {
-        for (core::i32 dx = -1; dx <= 1; ++dx) {
-            const asset::HeightTile* tile = field.findTile(asset::TileKey{key.x + dx, key.z + dz});
-            content = combine(content, tile == nullptr ? 0x6E6F74696C65ull : asset::digestOf(*tile));
-        }
+    u32 result = 1;
+    while (result < value)
+        result <<= 1;
+    return result;
+}
+
+[[nodiscard]] bool inWorld(const scene::World& world, core::InstanceId id, core::InstanceId root) noexcept
+{
+    for (core::InstanceId cursor = id; cursor.valid(); cursor = world.parentOf(cursor)) {
+        if (cursor == root)
+            return true;
     }
-    const auto edge = static_cast<core::i32>(asset::TileEdge);
-    const auto brickEdge = static_cast<core::i32>(asset::BrickEdge);
-    const core::i32 minX = floorDivide(key.x * edge - 1, brickEdge);
-    const core::i32 maxX = floorDivide(key.x * edge + edge + 1, brickEdge);
-    const core::i32 minZ = floorDivide(key.z * edge - 1, brickEdge);
-    const core::i32 maxZ = floorDivide(key.z * edge + edge + 1, brickEdge);
+    return false;
+}
+
+// Level 0's morph start, less a column's diagonal: inside it every vertex of
+// the grid is one lattice step apart and unmorphed, so a hole punched at a
+// column's lattice points is exactly the column.
+[[nodiscard]] double caveRange(const TerrainLodSettings& lod, float voxel) noexcept
+{
+    TerrainLodSource source;
+    source.voxelSize = voxel;
+    const double start = terrainLevelRange(source, lod, 0) * lod.morphStart;
+    const double column = static_cast<double>(asset::BrickEdge) * static_cast<double>(voxel) * 1.5;
+    return std::max(start - column, 0.0);
+}
+
+// What one cave column's mesh reads: the tiles and bricks within a column of
+// its footprint.
+[[nodiscard]] u64 caveContentOf(const asset::TerrainField& field, asset::TileKey column,
+                                std::span<const asset::BrickKey> bricks) noexcept
+{
+    const auto edge = static_cast<i32>(asset::TileEdge);
+    const auto brickEdge = static_cast<i32>(asset::BrickEdge);
+    const i32 minX = column.x * brickEdge - 1;
+    const i32 minZ = column.z * brickEdge - 1;
+    const i32 span = brickEdge + 2;
+    u64 content = 0;
+    for (i32 tz = floorDivide(minZ, edge); tz <= floorDivide(minZ + span, edge); ++tz) {
+        for (i32 tx = floorDivide(minX, edge); tx <= floorDivide(minX + span, edge); ++tx)
+            content = combine(content, tileDigestOr(field, asset::TileKey{tx, tz}));
+    }
     for (const asset::BrickKey brick : bricks) {
-        if (brick.x < minX || brick.x > maxX || brick.z < minZ || brick.z > maxZ)
+        if (brick.x < column.x - 1 || brick.x > column.x + 1 || brick.z < column.z - 1 || brick.z > column.z + 1)
             continue;
         const asset::Brick* found = field.findBrick(brick);
-        content = combine(content, (static_cast<core::u64>(static_cast<core::u32>(brick.x)) << 40) ^
-                                       (static_cast<core::u64>(static_cast<core::u32>(brick.y)) << 20) ^
-                                       static_cast<core::u32>(brick.z));
+        content = combine(content, (static_cast<u64>(static_cast<u32>(brick.x)) << 40) ^
+                                       (static_cast<u64>(static_cast<u32>(brick.y)) << 20) ^ static_cast<u32>(brick.z));
         content = combine(content, found == nullptr ? 0 : asset::digestOf(*found));
     }
     return content;
 }
 
-} // namespace
-
-std::string terrainTileUrn(core::InstanceId terrain, asset::TileKey key)
+// The region a cave column is meshed over: its footprint plus one lattice
+// column on every side -- the ground's triangles are discarded wherever they
+// touch the column, which takes the quads on both sides of its boundary --
+// and from below its lowest surface to above its highest.
+[[nodiscard]] bool caveRegion(const asset::TerrainField& field, asset::TileKey column,
+                              std::span<const asset::BrickKey> bricks, asset::MeshRegion& region) noexcept
 {
-    return "terrain://" + std::to_string(terrain.index) + "/" + std::to_string(key.x) + "," + std::to_string(key.z);
+    const auto edge = static_cast<i32>(asset::TileEdge);
+    const auto brickEdge = static_cast<i32>(asset::BrickEdge);
+    const float voxel = field.settings().voxelSize;
+    const i32 minX = column.x * brickEdge - 1;
+    const i32 minZ = column.z * brickEdge - 1;
+    const i32 span = brickEdge + 2;
+
+    i32 bottom = std::numeric_limits<i32>::max();
+    i32 top = std::numeric_limits<i32>::lowest();
+    for (i32 z = 0; z <= span; ++z) {
+        for (i32 x = 0; x <= span; ++x) {
+            const i32 lx = minX + x;
+            const i32 lz = minZ + z;
+            const asset::HeightTile* tile =
+                field.findTile(asset::TileKey{floorDivide(lx, edge), floorDivide(lz, edge)});
+            if (tile == nullptr)
+                continue;
+            const auto localX = static_cast<usize>(lx - floorDivide(lx, edge) * edge);
+            const auto localZ = static_cast<usize>(lz - floorDivide(lz, edge) * edge);
+            const float height = tile->height[localZ * asset::TileEdge + localX];
+            bottom = std::min(bottom, static_cast<i32>(std::floor(height / voxel)) - CaveMargin);
+            top = std::max(top, static_cast<i32>(std::ceil(height / voxel)) + CaveMargin);
+        }
+    }
+    for (const asset::BrickKey brick : bricks) {
+        if (brick.x != column.x || brick.z != column.z)
+            continue;
+        bottom = std::min(bottom, brick.y * brickEdge - CaveMargin);
+        top = std::max(top, (brick.y + 1) * brickEdge + CaveMargin);
+    }
+    if (bottom >= top)
+        return false;
+
+    region.minX = minX;
+    region.minZ = minZ;
+    region.minY = bottom;
+    region.cellsX = static_cast<u32>(span);
+    region.cellsZ = static_cast<u32>(span);
+    region.cellsY = static_cast<u32>(top - bottom);
+    region.stride = 1;
+    return true;
 }
 
-u32 TerrainLoader::strideFor(double distance) const noexcept
+[[nodiscard]] std::vector<asset::TileKey> brickColumnsOf(std::span<const asset::BrickKey> bricks)
 {
-    if (!m_hasFocus)
-        return 1;
-    if (distance > m_distances.viewDistance)
-        return 0;
-    u32 stride = 1;
-    double reach = m_distances.nearDistance;
-    // Up to 8: a 32-column tile at stride 8 is four cells a side, and coarser
-    // than that the skirt is taller than the tile is wide.
-    while (distance > reach && stride < 8) {
-        stride *= 2;
-        reach *= 2.0;
-    }
-    return stride;
+    std::vector<asset::TileKey> columns;
+    columns.reserve(bricks.size());
+    for (const asset::BrickKey brick : bricks)
+        columns.push_back(asset::TileKey{brick.x, brick.z});
+    std::sort(columns.begin(), columns.end());
+    columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
+    return columns;
+}
+
+} // namespace
+
+std::string terrainCaveUrn(core::InstanceId terrain, asset::TileKey column)
+{
+    return "terrain://" + std::to_string(terrain.index) + "/cave/" + std::to_string(column.x) + "," +
+           std::to_string(column.z);
+}
+
+usize TerrainLoader::residentCount() const noexcept
+{
+    usize count = 0;
+    for (const GpuTerrain& gpu : m_terrains)
+        count += gpu.slots.size();
+    return count;
+}
+
+bool TerrainLoader::caveResident(core::InstanceId terrain, asset::TileKey column) const noexcept
+{
+    const auto at =
+        std::lower_bound(m_caves.begin(), m_caves.end(), column, [&](const Cave& entry, asset::TileKey key) {
+            if (entry.terrain.index != terrain.index)
+                return entry.terrain.index < terrain.index;
+            return entry.column < key;
+        });
+    return at != m_caves.end() && at->terrain == terrain && at->column == column && at->mesh.valid();
+}
+
+void TerrainLoader::releaseGpu(rhi::IDevice& device, GpuTerrain& gpu)
+{
+    if (gpu.heights.valid())
+        device.destroy(gpu.heights);
+    if (gpu.materials.valid())
+        device.destroy(gpu.materials);
+    if (gpu.tileTable.valid())
+        device.destroy(gpu.tileTable);
+    gpu.heights = {};
+    gpu.materials = {};
+    gpu.tileTable = {};
+    gpu.rows = 0;
+    gpu.tableEdge = 0;
+    gpu.slots.clear();
+    gpu.freeSlots.clear();
+    gpu.table.clear();
 }
 
 u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::AtomTable& atoms,
                         MeshCache& cache, MeshLibrary& library)
 {
-    for (Resident& resident : m_tiles)
-        resident.seen = false;
-
-    // **Every tile that wants work, nearest first.**
-    //
-    // The first version walked tiles in key order and rebuilt the first two
-    // dirty ones, which was fine while "dirty" meant "edited". With levels of
-    // detail a camera move dirties every tile whose level changed, and walking
-    // them in key order would re-level a corner of the world nobody is looking
-    // at while the ground under the viewer waited. Sorted by distance, then by
-    // terrain and key so two tiles at the same distance cannot trade places
-    // between runs.
-    struct Want
-    {
-        double distance = 0.0;
-        core::InstanceId terrain;
-        asset::TileKey key;
-        u32 stride = 1;
-    };
-    std::vector<Want> wants;
-
-    const auto findResident = [this](core::InstanceId id, asset::TileKey key) {
-        return std::lower_bound(m_tiles.begin(), m_tiles.end(), key,
-                                [&id](const Resident& entry, const asset::TileKey& probe) {
-                                    if (entry.terrain.index != id.index)
-                                        return entry.terrain.index < id.index;
-                                    return entry.key < probe;
-                                });
-    };
-
-    world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
-        const float voxel = terrain.field.settings().voxelSize;
-        if (!(voxel > 0.0f))
-            return;
-        const auto tileMetres = static_cast<double>(asset::TileEdge) * static_cast<double>(voxel);
-        // Fetched lazily: a tick with nothing written never needs them.
-        std::vector<asset::BrickKey> bricks;
-        bool bricksFetched = false;
-
-        for (const asset::TileKey key : terrain.field.tileKeys()) {
-            // Distance in the horizontal plane, to the tile's nearest point
-            // rather than its centre -- the viewer standing on a tile's edge is
-            // on the tile, and a centre distance would coarsen the ground under
-            // their feet.
-            const double minX = terrain.origin.x + static_cast<double>(key.x) * tileMetres;
-            const double minZ = terrain.origin.z + static_cast<double>(key.z) * tileMetres;
-            const double dx = std::max({minX - m_focus.x, 0.0, m_focus.x - (minX + tileMetres)});
-            const double dz = std::max({minZ - m_focus.z, 0.0, m_focus.z - (minZ + tileMetres)});
-            const double distance = std::sqrt(dx * dx + dz * dz);
-
-            u32 stride = strideFor(distance);
-            const auto at = findResident(id, key);
-            const bool exists = at != m_tiles.end() && at->terrain == id && at->key == key;
-
-            // Hysteresis: keep a finer level until the tile is clearly past it.
-            if (exists && at->stride != 0 && stride > at->stride && strideFor(distance / Hysteresis) <= at->stride)
-                stride = at->stride;
-
-            if (stride == 0) {
-                // Beyond the view distance. Not marked seen, so the sweep below
-                // releases whatever was resident.
-                continue;
-            }
-            if (exists && at->revision == terrain.fieldRevision && at->stride == stride) {
-                at->seen = true;
-                continue;
-            }
-            // Something was written somewhere. Whether it was HERE is the
-            // content key's question, and a tile it did not reach keeps its mesh.
-            core::u64 content = 0;
-            if (exists && at->stride == stride) {
-                if (!bricksFetched) {
-                    bricks = terrain.field.brickKeys();
-                    bricksFetched = true;
-                }
-                content = contentOf(terrain.field, key, bricks);
-                if (content == at->content) {
-                    at->revision = terrain.fieldRevision;
-                    at->seen = true;
-                    continue;
-                }
-            }
-            // Keep what is there while it waits: a tile that vanished during its
-            // rebuild is a hole in the ground somebody can see through.
-            if (exists)
-                at->seen = true;
-            wants.push_back(Want{distance, id, key, stride});
-        }
-    });
-
-    std::sort(wants.begin(), wants.end(), [](const Want& a, const Want& b) {
-        if (a.distance != b.distance)
-            return a.distance < b.distance;
-        if (a.terrain.index != b.terrain.index)
-            return a.terrain.index < b.terrain.index;
-        return a.key < b.key;
-    });
-
-    // **Chosen in series, meshed in parallel, applied in series.**
-    //
-    // Meshing is the whole cost of a tile and reads nothing but a field `sync`
-    // holds by const reference, so the budgeted tiles are meshed at once across
-    // the job pool, each into its own slot. Everything that has an ORDER -- the
-    // atoms interned, the handles `MeshCache` hands out, the residency list --
-    // happens afterwards on this thread, walking the slots in the order the
-    // tiles were chosen. How many workers the machine has decides how soon the
-    // meshes are ready and nothing else, and a serial pool runs the same slots
-    // in the same order.
-    struct Work
-    {
-        core::InstanceId terrain;
-        asset::TileKey key;
-        u32 stride = 1;
-        const scene::TerrainComponent* component = nullptr;
-        asset::MeshRegion region;
-        asset::TerrainMesh meshed;
-    };
-    std::vector<Work> work;
-
-    core::u64 spent = 0;
-    for (const Want& want : wants) {
-        if (spent >= CellsPerSync)
-            break;
-
-        const scene::TerrainComponent* terrainPtr = world.terrains().find(want.terrain);
-        if (terrainPtr == nullptr)
-            continue;
-        const scene::TerrainComponent& terrain = *terrainPtr;
-        const asset::TileKey key = want.key;
-        const float voxel = terrain.field.settings().voxelSize;
-        const auto edge = static_cast<core::i32>(asset::TileEdge);
-        const asset::HeightTile* tile = terrain.field.findTile(key);
-        if (tile == nullptr)
-            continue;
-        const auto stride = static_cast<core::i32>(want.stride);
-
-        // The slab this tile's surface actually lives in, rather than the
-        // terrain's whole legal range.
-        float lowest = tile->height[0];
-        float highest = tile->height[0];
-        for (usize sample = 1; sample < asset::TileArea; ++sample) {
-            lowest = std::min(lowest, tile->height[sample]);
-            highest = std::max(highest, tile->height[sample]);
-        }
-
-        auto bottom = static_cast<core::i32>(std::floor(lowest / voxel)) - SurfaceMargin * stride;
-        auto top = static_cast<core::i32>(std::ceil(highest / voxel)) + SurfaceMargin * stride;
-
-        // **And whatever bricks this tile's columns actually carry**,
-        // measured rather than assumed. A cave is voxels somewhere below the
-        // surface, and a mesher that stopped at the height layer would leave
-        // its roof and its floor unmeshed -- a hole you can see through. The
-        // scan is over the brick keys, which is a handful even in a heavily
-        // sculpted world, and it runs once per tile rebuild rather than per
-        // cell.
-        const core::i32 firstColumn = key.x * edge;
-        const core::i32 firstRow = key.z * edge;
-        const auto brickEdge = static_cast<core::i32>(asset::BrickEdge);
-        for (const asset::BrickKey brick : terrain.field.brickKeys()) {
-            const core::i32 brickMinX = brick.x * brickEdge;
-            const core::i32 brickMinZ = brick.z * brickEdge;
-            if (brickMinX + brickEdge <= firstColumn || brickMinX >= firstColumn + edge)
-                continue;
-            if (brickMinZ + brickEdge <= firstRow || brickMinZ >= firstRow + edge)
-                continue;
-            bottom = std::min(bottom, brick.y * brickEdge - SurfaceMargin);
-            top = std::max(top, (brick.y + 1) * brickEdge + SurfaceMargin);
-        }
-
-        // Snapped down to the stride, so a coarse tile samples the same
-        // lattice points its fine neighbour does and their shared edge
-        // agrees wherever it can.
-        bottom = static_cast<core::i32>(std::floor(static_cast<double>(bottom) / stride)) * stride;
-
-        asset::MeshRegion region;
-        region.minX = firstColumn;
-        region.minZ = firstRow;
-        region.minY = bottom;
-        region.cellsX = asset::TileEdge / static_cast<u32>(stride);
-        region.cellsZ = asset::TileEdge / static_cast<u32>(stride);
-        region.cellsY = static_cast<u32>(std::max((top - region.minY + stride - 1) / stride, 1));
-        region.stride = static_cast<u32>(stride);
-        region.skirt = SkirtSteps * static_cast<float>(stride) * voxel;
-
-        spent += static_cast<core::u64>(region.cellsX) * region.cellsY * region.cellsZ;
-        work.push_back(Work{want.terrain, key, want.stride, terrainPtr, region, {}});
-    }
-
-    jobs::parallelFor("terrain.mesh", jobs::Domain::Render, 0, work.size(), 1,
-                      [&work](usize begin, usize end, u32) noexcept {
-                          for (usize at = begin; at < end; ++at)
-                              work[at].meshed = asset::meshField(work[at].component->field, work[at].region);
-                      });
+    m_lastTileUploads = 0;
+    for (GpuTerrain& gpu : m_terrains)
+        gpu.seen = false;
+    for (Cave& cave : m_caves)
+        cave.seen = false;
 
     u32 rebuilt = 0;
-    for (Work& job : work) {
-        const core::InstanceId id = job.terrain;
-        const asset::TileKey key = job.key;
-        const scene::TerrainComponent& terrain = *job.component;
-        const asset::TerrainMesh& meshed = job.meshed;
-        const core::u64 content = contentOf(terrain.field, key, terrain.field.brickKeys());
-        // Looked up again here rather than carried from the choice: an earlier
-        // slot's insert or erase has moved the list since.
-        const auto at = findResident(id, key);
-        const bool exists = at != m_tiles.end() && at->terrain == id && at->key == key;
-        // **Interned through the non-const table the caller owns.** A
-        // tile's URN has to exist as an atom for `extract` to look it up,
-        // and `sync` holds the world by const reference -- so the atom
-        // table is taken separately, which also makes it explicit that this
-        // is the one thing here that mutates anything shared.
-        const core::NameAtom urn = atoms.intern(terrainTileUrn(id, key));
+    u32 cavesBuilt = 0;
 
-        if (meshed.mesh.indices.empty()) {
-            // Nothing to draw here any more. The entry goes, and so does the
-            // GPU mesh -- an empty draw is cheaper than a stale one, and a
-            // stale one is ground that is not there.
+    world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
+        const asset::TerrainField& field = terrain.field;
+        const float voxel = field.settings().voxelSize;
+        if (!(voxel > 0.0f))
+            return;
+
+        auto gpuAt = std::lower_bound(m_terrains.begin(), m_terrains.end(), id.index,
+                                      [](const GpuTerrain& entry, u32 index) { return entry.terrain.index < index; });
+        if (gpuAt == m_terrains.end() || gpuAt->terrain != id) {
+            GpuTerrain fresh;
+            fresh.terrain = id;
+            gpuAt = m_terrains.insert(gpuAt, std::move(fresh));
+        }
+        GpuTerrain& gpu = *gpuAt;
+        gpu.seen = true;
+        if (gpu.voxelSize != voxel) {
+            // A different lattice is different ground: everything re-uploads.
+            releaseGpu(device, gpu);
+            gpu.voxelSize = voxel;
+        }
+
+        // --- Caves, first, because their flags are part of every tile ------
+        const std::vector<asset::BrickKey> bricks = field.brickKeys();
+        const std::vector<asset::TileKey> columns = brickColumnsOf(bricks);
+        const double reach = caveRange(m_lod, voxel);
+        const double columnMetres = static_cast<double>(asset::BrickEdge) * static_cast<double>(voxel);
+        for (const asset::TileKey column : columns) {
+            if (!m_hasFocus)
+                break;
+            const double minX = terrain.origin.x + static_cast<double>(column.x) * columnMetres;
+            const double minZ = terrain.origin.z + static_cast<double>(column.z) * columnMetres;
+            const double dx = std::max({minX - m_focus.x, 0.0, m_focus.x - (minX + columnMetres)});
+            const double dz = std::max({minZ - m_focus.z, 0.0, m_focus.z - (minZ + columnMetres)});
+            if (std::sqrt(dx * dx + dz * dz) > reach)
+                continue;
+
+            auto at =
+                std::lower_bound(m_caves.begin(), m_caves.end(), column, [&](const Cave& entry, asset::TileKey key) {
+                    if (entry.terrain.index != id.index)
+                        return entry.terrain.index < id.index;
+                    return entry.column < key;
+                });
+            const bool exists = at != m_caves.end() && at->terrain == id && at->column == column;
+            const u64 content = caveContentOf(field, column, bricks);
+            if (exists && at->content == content) {
+                at->seen = true;
+                continue;
+            }
+            if (cavesBuilt >= CavesPerSync) {
+                // Keep what is there while it waits; a column not yet meshed
+                // at all stays closed ground until its turn.
+                if (exists)
+                    at->seen = true;
+                continue;
+            }
+
+            MeshHandle handle;
+            const core::NameAtom urn = atoms.intern(terrainCaveUrn(id, column));
+            asset::MeshRegion region;
+            if (caveRegion(field, column, bricks, region)) {
+                const asset::TerrainMesh meshed = asset::meshField(field, region);
+                if (!meshed.mesh.indices.empty()) {
+                    core::EngineError uploadError;
+                    handle = cache.create(device, cmd, meshed.mesh, MeshUsage::Static, &uploadError);
+                    if (!handle.valid()) {
+                        core::logText(core::LogLevel::Warn, uploadError.message);
+                    }
+                    else {
+                        MeshLibrary::Entry entry;
+                        entry.mesh = handle;
+                        entry.bounds = meshed.mesh.bounds;
+                        entry.sectionCount = static_cast<u32>(meshed.mesh.submeshes.size());
+                        entry.sectionMaterial.resize(entry.sectionCount);
+                        entry.materials.reserve(entry.sectionCount);
+                        for (u32 section = 0; section < entry.sectionCount; ++section) {
+                            const core::u8 materialId =
+                                section < meshed.sectionMaterials.size() ? meshed.sectionMaterials[section] : 0;
+                            const core::Vec3 tint = asset::terrainColorOf(materialId);
+                            RenderMaterial material;
+                            material.uniforms.baseColor[0] = tint.x;
+                            material.uniforms.baseColor[1] = tint.y;
+                            material.uniforms.baseColor[2] = tint.z;
+                            material.uniforms.baseColor[3] = 1.0f;
+                            material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
+                            material.uniforms.metallicRoughnessNormalCutoff[1] = 0.92f;
+                            entry.sectionMaterial[section] = section;
+                            entry.materials.push_back(material);
+                        }
+                        library.set(urn, std::move(entry));
+                    }
+                }
+            }
+            if (!handle.valid())
+                library.remove(urn);
+
             if (exists) {
                 if (at->mesh.valid())
                     cache.release(device, at->mesh);
-                library.remove(urn);
-                m_tiles.erase(at);
+                at->mesh = handle;
+                at->content = content;
+                at->seen = true;
             }
+            else {
+                m_caves.insert(at, Cave{id, column, urn, handle, content, true});
+            }
+            cavesBuilt += 1;
             rebuilt += 1;
+        }
+        // This terrain's caves that were not wanted go now, before the tiles
+        // are uploaded -- their flags must leave the atlas in the same frame.
+        for (usize at = m_caves.size(); at > 0; --at) {
+            Cave& cave = m_caves[at - 1];
+            if (cave.terrain != id || cave.seen)
+                continue;
+            if (cave.mesh.valid())
+                cache.release(device, cave.mesh);
+            library.remove(cave.urn);
+            m_caves.erase(m_caves.begin() + static_cast<std::ptrdiff_t>(at - 1));
+        }
+
+        // --- The atlas --------------------------------------------------------
+        const std::vector<asset::TileKey> keys = field.tileKeys();
+        const u32 wanted = static_cast<u32>(std::min<usize>(keys.size(), static_cast<usize>(MaxRows) * SlotsPerRow));
+        const u32 rowsNeeded = std::max(1u, nextPowerOfTwo((wanted + SlotsPerRow - 1) / SlotsPerRow));
+        if (gpu.rows < rowsNeeded || !gpu.heights.valid()) {
+            // Grown by recreating: there is no texture copy in the RHI, and a
+            // re-upload of every tile from the field is the same bytes.
+            releaseGpu(device, gpu);
+            gpu.rows = std::min(rowsNeeded, MaxRows);
+            const u32 height = gpu.rows * asset::TileEdge;
+            gpu.heights = device.createTexture({.format = rhi::TextureFormat::R32Float,
+                                                .usage = rhi::TextureUsage::Sampled,
+                                                .width = AtlasWidth,
+                                                .height = height,
+                                                .debugName = "terrain.heights"});
+            gpu.materials = device.createTexture({.format = rhi::TextureFormat::R8Unorm,
+                                                  .usage = rhi::TextureUsage::Sampled,
+                                                  .width = AtlasWidth,
+                                                  .height = height,
+                                                  .debugName = "terrain.materials"});
+            gpu.tableDirty = true;
+        }
+
+        // The tile table: large enough for every key, recentred when a key
+        // falls outside it.
+        if (!keys.empty()) {
+            i32 minX = keys.front().x;
+            i32 maxX = keys.front().x;
+            i32 minZ = keys.front().z;
+            i32 maxZ = keys.front().z;
+            for (const asset::TileKey key : keys) {
+                minX = std::min(minX, key.x);
+                maxX = std::max(maxX, key.x);
+                minZ = std::min(minZ, key.z);
+                maxZ = std::max(maxZ, key.z);
+            }
+            const bool fits = gpu.tableEdge > 0 && minX >= gpu.tableOriginX && minZ >= gpu.tableOriginZ &&
+                              maxX < gpu.tableOriginX + static_cast<i32>(gpu.tableEdge) &&
+                              maxZ < gpu.tableOriginZ + static_cast<i32>(gpu.tableEdge);
+            if (!fits) {
+                const auto extent = static_cast<u32>(std::max(maxX - minX, maxZ - minZ) + 1);
+                const u32 edge = std::max(16u, nextPowerOfTwo(extent + 8));
+                if (gpu.tileTable.valid())
+                    device.destroy(gpu.tileTable);
+                gpu.tableEdge = edge;
+                gpu.tableOriginX = minX - static_cast<i32>((edge - static_cast<u32>(maxX - minX + 1)) / 2);
+                gpu.tableOriginZ = minZ - static_cast<i32>((edge - static_cast<u32>(maxZ - minZ + 1)) / 2);
+                gpu.tileTable = device.createTexture({.format = rhi::TextureFormat::R32Float,
+                                                      .usage = rhi::TextureUsage::Sampled,
+                                                      .width = edge,
+                                                      .height = edge,
+                                                      .debugName = "terrain.tiles"});
+                gpu.table.assign(static_cast<usize>(edge) * edge, -1.0f);
+                for (const Slot& slot : gpu.slots) {
+                    const i32 tx = slot.key.x - gpu.tableOriginX;
+                    const i32 tz = slot.key.z - gpu.tableOriginZ;
+                    if (tx >= 0 && tz >= 0 && tx < static_cast<i32>(edge) && tz < static_cast<i32>(edge))
+                        gpu.table[static_cast<usize>(tz) * edge + static_cast<usize>(tx)] =
+                            static_cast<float>(slot.slot);
+                }
+                gpu.tableDirty = true;
+            }
+        }
+        else if (gpu.tableEdge == 0) {
+            gpu.tableEdge = 16;
+            gpu.tileTable = device.createTexture({.format = rhi::TextureFormat::R32Float,
+                                                  .usage = rhi::TextureUsage::Sampled,
+                                                  .width = 16,
+                                                  .height = 16,
+                                                  .debugName = "terrain.tiles"});
+            gpu.table.assign(256, -1.0f);
+            gpu.tableDirty = true;
+        }
+
+        for (Slot& slot : gpu.slots)
+            slot.seen = false;
+
+        const auto tableIndex = [&gpu](asset::TileKey key) -> i32 {
+            const i32 tx = key.x - gpu.tableOriginX;
+            const i32 tz = key.z - gpu.tableOriginZ;
+            if (tx < 0 || tz < 0 || tx >= static_cast<i32>(gpu.tableEdge) || tz >= static_cast<i32>(gpu.tableEdge))
+                return -1;
+            return tz * static_cast<i32>(gpu.tableEdge) + tx;
+        };
+
+        std::vector<float> heights(asset::TileArea);
+        std::vector<core::u8> materials(asset::TileArea);
+        const auto brickEdge = static_cast<i32>(asset::BrickEdge);
+        const u32 perTile = asset::TileEdge / asset::BrickEdge;
+
+        for (const asset::TileKey key : keys) {
+            const asset::HeightTile* tile = field.findTile(key);
+            if (tile == nullptr)
+                continue;
+            auto at = std::lower_bound(gpu.slots.begin(), gpu.slots.end(), key,
+                                       [](const Slot& entry, asset::TileKey probe) { return entry.key < probe; });
+            const bool exists = at != gpu.slots.end() && at->key == key;
+
+            // The cave flags this tile's columns carry, folded into its content
+            // so a cave appearing or leaving re-uploads the tile.
+            u32 flags = 0;
+            for (u32 bz = 0; bz < perTile; ++bz) {
+                for (u32 bx = 0; bx < perTile; ++bx) {
+                    const asset::TileKey column{key.x * static_cast<i32>(perTile) + static_cast<i32>(bx),
+                                                key.z * static_cast<i32>(perTile) + static_cast<i32>(bz)};
+                    if (caveResident(id, column))
+                        flags |= 1u << (bz * perTile + bx);
+                }
+            }
+            const u64 content = combine(asset::digestOf(*tile), flags);
+            if (exists && at->content == content) {
+                at->seen = true;
+                continue;
+            }
+            if (m_lastTileUploads >= TilesPerSync) {
+                if (exists)
+                    at->seen = true;
+                continue;
+            }
+
+            u32 slotIndex = 0;
+            if (exists) {
+                slotIndex = at->slot;
+            }
+            else if (!gpu.freeSlots.empty()) {
+                slotIndex = gpu.freeSlots.back();
+                gpu.freeSlots.pop_back();
+            }
+            else {
+                slotIndex = static_cast<u32>(gpu.slots.size());
+                if (slotIndex >= gpu.rows * SlotsPerRow)
+                    continue; // past the atlas's ceiling: this tile is not drawn
+            }
+
+            float lowest = tile->height[0];
+            float highest = tile->height[0];
+            for (usize sample = 0; sample < asset::TileArea; ++sample) {
+                heights[sample] = tile->height[sample];
+                lowest = std::min(lowest, tile->height[sample]);
+                highest = std::max(highest, tile->height[sample]);
+                const auto x = static_cast<i32>(sample % asset::TileEdge);
+                const auto z = static_cast<i32>(sample / asset::TileEdge);
+                const u32 bit = static_cast<u32>(z / brickEdge) * perTile + static_cast<u32>(x / brickEdge);
+                materials[sample] = static_cast<core::u8>((tile->material[sample] & 0x7F) |
+                                                          (((flags >> bit) & 1u) != 0u ? CaveFlag : 0));
+            }
+
+            const u32 x = (slotIndex % SlotsPerRow) * asset::TileEdge;
+            const u32 y = (slotIndex / SlotsPerRow) * asset::TileEdge;
+            cmd.uploadTextureRegion(gpu.heights, x, y, asset::TileEdge, asset::TileEdge,
+                                    std::as_bytes(std::span<const float>(heights)));
+            cmd.uploadTextureRegion(gpu.materials, x, y, asset::TileEdge, asset::TileEdge,
+                                    std::as_bytes(std::span<const core::u8>(materials)));
+            m_lastTileUploads += 1;
+            rebuilt += 1;
+
+            if (exists) {
+                at->content = content;
+                at->minHeight = lowest;
+                at->maxHeight = highest;
+                at->seen = true;
+            }
+            else {
+                gpu.slots.insert(at, Slot{key, slotIndex, content, lowest, highest, true});
+                const i32 index = tableIndex(key);
+                if (index >= 0) {
+                    gpu.table[static_cast<usize>(index)] = static_cast<float>(slotIndex);
+                    gpu.tableDirty = true;
+                }
+            }
+        }
+
+        // Tiles the field no longer holds give their slot back.
+        for (usize at = gpu.slots.size(); at > 0; --at) {
+            const Slot& slot = gpu.slots[at - 1];
+            if (slot.seen)
+                continue;
+            gpu.freeSlots.push_back(slot.slot);
+            const i32 index = tableIndex(slot.key);
+            if (index >= 0) {
+                gpu.table[static_cast<usize>(index)] = -1.0f;
+                gpu.tableDirty = true;
+            }
+            gpu.slots.erase(gpu.slots.begin() + static_cast<std::ptrdiff_t>(at - 1));
+        }
+        // Deterministic reuse: the lowest free slot first.
+        std::sort(gpu.freeSlots.begin(), gpu.freeSlots.end(), std::greater<>());
+
+        if (gpu.tableDirty && gpu.tileTable.valid()) {
+            cmd.uploadTexture(gpu.tileTable, std::as_bytes(std::span<const float>(gpu.table)), 0);
+            gpu.tableDirty = false;
+        }
+    });
+
+    // Terrains that are gone take their textures and caves with them.
+    for (usize at = m_caves.size(); at > 0; --at) {
+        Cave& cave = m_caves[at - 1];
+        if (cave.seen)
             continue;
-        }
-
-        core::EngineError uploadError;
-        const MeshHandle handle = cache.create(device, cmd, meshed.mesh, MeshUsage::Static, &uploadError);
-        if (!handle.valid()) {
-            core::logText(core::LogLevel::Warn, uploadError.message);
-            continue;
-        }
-
-        MeshLibrary::Entry entry;
-        entry.mesh = handle;
-        entry.bounds = meshed.mesh.bounds;
-        entry.sectionCount = static_cast<u32>(meshed.mesh.submeshes.size());
-        // **One material per section, coloured from the palette**, which is
-        // what makes a painted hillside look painted rather than uniformly
-        // grey. The mesher buckets its triangles by material and hands over
-        // `sectionMaterials` parallel to `submeshes`; this turns each id into
-        // a colour and points the section at it.
-        //
-        // A colour and not a texture, deliberately and for now: a terrain
-        // texture set is per-material albedo, normal and roughness plus the
-        // triplanar blend the mesher's UVs are already laid out for, and
-        // that is a texture pipeline rather than a colour lookup. Shipping
-        // the colour first means painting is visible today and the textures
-        // land later without moving anything here.
-        entry.sectionMaterial.resize(entry.sectionCount);
-        entry.materials.reserve(entry.sectionCount);
-        for (u32 section = 0; section < entry.sectionCount; ++section) {
-            const core::u8 materialId = section < meshed.sectionMaterials.size() ? meshed.sectionMaterials[section] : 0;
-            const core::Vec3 tint = asset::terrainColorOf(materialId);
-            RenderMaterial material;
-            material.uniforms.baseColor[0] = tint.x;
-            material.uniforms.baseColor[1] = tint.y;
-            material.uniforms.baseColor[2] = tint.z;
-            material.uniforms.baseColor[3] = 1.0f;
-            // x metallic, y roughness. Ground is rough and not metal, and
-            // the defaults are the other way round.
-            material.uniforms.metallicRoughnessNormalCutoff[0] = 0.0f;
-            material.uniforms.metallicRoughnessNormalCutoff[1] = 0.92f;
-            entry.sectionMaterial[section] = section;
-            entry.materials.push_back(material);
-        }
-        // **`positions` is left empty deliberately.** It exists for whoever
-        // needs a collision hull off a `MeshPart`, and terrain's collider
-        // comes from the field through `PhysicsSync` rather than from this --
-        // filling it would be a second copy of the same surface with no
-        // reader.
-
-        if (exists) {
-            if (at->mesh.valid())
-                cache.release(device, at->mesh);
-            at->mesh = handle;
-            at->revision = terrain.fieldRevision;
-            at->content = content;
-            at->stride = job.stride;
-            at->seen = true;
-        }
-        else {
-            m_tiles.insert(at, Resident{id, key, urn, handle, terrain.fieldRevision, content, job.stride, true});
-        }
-        library.set(urn, std::move(entry));
-        rebuilt += 1;
+        if (cave.mesh.valid())
+            cache.release(device, cave.mesh);
+        library.remove(cave.urn);
+        m_caves.erase(m_caves.begin() + static_cast<std::ptrdiff_t>(at - 1));
     }
-
-    // A tile the field no longer holds takes its mesh with it.
-    for (usize at = m_tiles.size(); at > 0; --at) {
-        Resident& resident = m_tiles[at - 1];
-        if (resident.seen)
+    for (usize at = m_terrains.size(); at > 0; --at) {
+        GpuTerrain& gpu = m_terrains[at - 1];
+        if (gpu.seen)
             continue;
-        if (resident.mesh.valid())
-            cache.release(device, resident.mesh);
-        library.remove(resident.urn);
-        m_tiles.erase(m_tiles.begin() + static_cast<std::ptrdiff_t>(at - 1));
+        releaseGpu(device, gpu);
+        m_terrains.erase(m_terrains.begin() + static_cast<std::ptrdiff_t>(at - 1));
     }
 
     return rebuilt;
 }
 
+void TerrainLoader::appendRenderTerrains(const scene::World& world, core::InstanceId root, RenderWorld& out) const
+{
+    for (const GpuTerrain& gpu : m_terrains) {
+        const scene::TerrainComponent* terrain = world.terrains().find(gpu.terrain);
+        if (terrain == nullptr || gpu.slots.empty() || !gpu.heights.valid() || !gpu.tileTable.valid())
+            continue;
+        if (!inWorld(world, gpu.terrain, root))
+            continue;
+
+        RenderTerrain entry;
+        entry.id = gpu.terrain;
+        entry.tileTable = gpu.tileTable;
+        entry.heights = gpu.heights;
+        entry.materials = gpu.materials;
+        entry.atlas[0] = static_cast<f32>(SlotsPerRow);
+        entry.atlas[1] = static_cast<f32>(gpu.tableEdge);
+        entry.atlas[2] = static_cast<f32>(gpu.tableOriginX);
+        entry.atlas[3] = static_cast<f32>(gpu.tableOriginZ);
+        entry.atlasSize[0] = static_cast<f32>(AtlasWidth);
+        entry.atlasSize[1] = static_cast<f32>(gpu.rows * asset::TileEdge);
+        entry.atlasSize[2] = 1.0f / entry.atlasSize[0];
+        entry.atlasSize[3] = 1.0f / entry.atlasSize[1];
+        entry.voxelSize = gpu.voxelSize;
+        entry.origin = terrain->origin;
+
+        i32 minX = gpu.slots.front().key.x;
+        i32 maxX = minX;
+        i32 minZ = gpu.slots.front().key.z;
+        i32 maxZ = minZ;
+        for (const Slot& slot : gpu.slots) {
+            minX = std::min(minX, slot.key.x);
+            maxX = std::max(maxX, slot.key.x);
+            minZ = std::min(minZ, slot.key.z);
+            maxZ = std::max(maxZ, slot.key.z);
+        }
+        entry.minTileX = minX;
+        entry.minTileZ = minZ;
+        entry.tilesX = static_cast<u32>(maxX - minX + 1);
+        entry.tilesZ = static_cast<u32>(maxZ - minZ + 1);
+        const usize count = static_cast<usize>(entry.tilesX) * entry.tilesZ;
+        entry.tileMin.assign(count, 1.0f);
+        entry.tileMax.assign(count, -1.0f);
+        for (const Slot& slot : gpu.slots) {
+            const usize index =
+                static_cast<usize>(slot.key.z - minZ) * entry.tilesX + static_cast<usize>(slot.key.x - minX);
+            entry.tileMin[index] = slot.minHeight;
+            entry.tileMax[index] = slot.maxHeight;
+        }
+
+        for (u32 id = 0; id < kTerrainPaletteSize; ++id) {
+            const core::Vec3 color = asset::terrainColorOf(static_cast<core::u8>(id));
+            entry.palette[id][0] = color.x;
+            entry.palette[id][1] = color.y;
+            entry.palette[id][2] = color.z;
+            entry.palette[id][3] = 1.0f;
+        }
+        out.terrains.push_back(std::move(entry));
+    }
+}
+
 void TerrainLoader::destroy(rhi::IDevice& device, MeshCache& cache, MeshLibrary& library)
 {
-    for (Resident& resident : m_tiles) {
-        if (resident.mesh.valid())
-            cache.release(device, resident.mesh);
-        library.remove(resident.urn);
+    for (GpuTerrain& gpu : m_terrains)
+        releaseGpu(device, gpu);
+    m_terrains.clear();
+    for (Cave& cave : m_caves) {
+        if (cave.mesh.valid())
+            cache.release(device, cave.mesh);
+        library.remove(cave.urn);
     }
-    m_tiles.clear();
+    m_caves.clear();
 }
 
 } // namespace luaug::render

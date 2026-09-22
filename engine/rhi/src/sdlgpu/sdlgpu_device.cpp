@@ -99,6 +99,8 @@ public:
 
     void upload(BufferHandle buffer, std::span<const std::byte> data, u32 offsetBytes) override;
     void uploadTexture(TextureHandle texture, std::span<const std::byte> data, u32 mipLevel) override;
+    void uploadTextureRegion(TextureHandle texture, u32 x, u32 y, u32 width, u32 height,
+                             std::span<const std::byte> data) override;
 
     void pushDebugGroup(std::string_view name) override;
     void popDebugGroup() override;
@@ -843,6 +845,59 @@ void SdlGpuCmdList::uploadTexture(TextureHandle texture, std::span<const std::by
             .h = mipHeight,
             .d = 1,
         };
+        SDL_UploadToGPUTexture(pass, &source, &region, false);
+    }
+
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+}
+
+void SdlGpuCmdList::uploadTextureRegion(TextureHandle texture, u32 x, u32 y, u32 width, u32 height,
+                                        std::span<const std::byte> data)
+{
+    TextureEntry* entry = device_.texture(texture);
+    if (entry == nullptr || entry->texture == nullptr || data.empty() || width == 0 || height == 0)
+        return;
+    // Refused rather than clipped: a rectangle past the edge is a caller's
+    // arithmetic, and writing the part that fits would hide it.
+    if (x >= entry->width || y >= entry->height || width > entry->width - x || height > entry->height - y)
+        return;
+
+    SDL_GPUCopyPass* pass = ensureCopyPass();
+    if (pass == nullptr)
+        return;
+
+    SDL_GPUDevice* device = device_.handle();
+    const SDL_GPUTransferBufferCreateInfo info{
+        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = static_cast<Uint32>(data.size()),
+        .props = 0,
+    };
+    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &info);
+    if (transfer == nullptr)
+        return;
+
+    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr) {
+        std::memcpy(mapped, data.data(), data.size());
+        SDL_UnmapGPUTransferBuffer(device, transfer);
+
+        const SDL_GPUTextureTransferInfo source{
+            .transfer_buffer = transfer,
+            .offset = 0,
+            .pixels_per_row = width,
+            .rows_per_layer = height,
+        };
+        const SDL_GPUTextureRegion region{
+            .texture = entry->texture,
+            .mip_level = 0,
+            .layer = 0,
+            .x = x,
+            .y = y,
+            .z = 0,
+            .w = width,
+            .h = height,
+            .d = 1,
+        };
+        // Not cycling: the rest of the texture is live and has to survive.
         SDL_UploadToGPUTexture(pass, &source, &region, false);
     }
 

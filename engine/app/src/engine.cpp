@@ -2961,6 +2961,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             stageOf() != nullptr ? stageOf()->lighting() : host->lighting(), meshLibrary, aspect,
                             shadowRadius, host->animation(), renderAlpha, &transformHistory, snapshot,
                             useEditorView ? &editorView : nullptr, outlined, &textureLibrary);
+            // The GPU terrains (ADR 0071): not `DrawItem`s, so not `extract`'s --
+            // the loader owns their atlases and names them into the same
+            // snapshot, for the same world and the same root.
+            terrainLoader.appendRenderTerrains(
+                authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(), snapshot);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

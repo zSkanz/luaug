@@ -618,6 +618,7 @@ void PhysicsSync::applyTerrain()
     // machine was: streaming's wall-clock exemption says "nothing measured
     // reaches the world hash", and a collider is the world hash.
     u32 rebuilt = 0;
+    u32 caves = 0;
 
     // Sorted by (terrain, kind, key): the order the walk below meets them in,
     // which is the order bodies are created in, which decides the ids the
@@ -641,6 +642,27 @@ void PhysicsSync::applyTerrain()
     std::vector<f32> heights;
     std::vector<asset::TileKey> brickedColumns;
 
+    // **Where cave collision is wanted: near things that move.** A cave's
+    // collider is a triangle mesh built from the field, a millisecond or two
+    // apiece, and a column nothing can reach does not need one -- the same
+    // bargain the voxel engines strike by generating terrain collision lazily
+    // around bodies, and Terrain3D's "dynamic collision" strikes for its height
+    // fields. Gathered once per tick, and only when some terrain has bricks.
+    std::vector<core::DVec3> movers;
+    bool moversGathered = false;
+    const auto gatherMovers = [&] {
+        if (moversGathered)
+            return;
+        moversGathered = true;
+        m_scene.rigidBodies().forEach([&](core::InstanceId id, const RigidBodyComponent& body) {
+            if (body.anchored && m_scene.characterBodies().find(id) == nullptr)
+                return;
+            const PartComponent* part = m_scene.parts().find(id);
+            if (part != nullptr && inWorld(id))
+                movers.push_back(part->cframe.position);
+        });
+    };
+
     m_scene.terrains().forEach([&](core::InstanceId id, TerrainComponent& terrain) {
         if (!inWorld(id))
             return;
@@ -654,6 +676,27 @@ void PhysicsSync::applyTerrain()
                             std::bit_cast<u64>(terrain.origin.z)),
                     packKey(std::bit_cast<i32>(terrain.minHeight), std::bit_cast<i32>(terrain.maxHeight)));
         const std::vector<asset::BrickKey> bricks = field.brickKeys();
+        // The same bricks ordered by column, then height, so one column's are a
+        // contiguous run found by binary search.
+        std::vector<asset::BrickKey> byColumn = bricks;
+        std::sort(byColumn.begin(), byColumn.end(), [](const asset::BrickKey& a, const asset::BrickKey& b) {
+            if (a.x != b.x)
+                return a.x < b.x;
+            if (a.z != b.z)
+                return a.z < b.z;
+            return a.y < b.y;
+        });
+        const auto bricksOf = [&byColumn](i32 x, i32 z) {
+            const auto before = [](const asset::BrickKey& brick, std::pair<i32, i32> key) {
+                return brick.x != key.first ? brick.x < key.first : brick.z < key.second;
+            };
+            const auto after = [](std::pair<i32, i32> key, const asset::BrickKey& brick) {
+                return key.first != brick.x ? key.first < brick.x : key.second < brick.z;
+            };
+            const auto first = std::lower_bound(byColumn.begin(), byColumn.end(), std::pair{x, z}, before);
+            const auto last = std::upper_bound(first, byColumn.end(), std::pair{x, z}, after);
+            return std::span<const asset::BrickKey>(first, last);
+        };
 
         // The bricked columns, sorted and unique.
         brickedColumns.clear();
@@ -796,7 +839,26 @@ void PhysicsSync::applyTerrain()
         }
 
         // --- Bricked columns ------------------------------------------------
+        if (!brickedColumns.empty())
+            gatherMovers();
+        const double columnMetres = static_cast<double>(brickEdge) * static_cast<double>(voxel);
         for (const asset::TileKey column : brickedColumns) {
+            // Not near anything that moves: no collider, and one that was
+            // built while something was near is retired by not being seen.
+            const double columnX = terrain.origin.x + static_cast<double>(column.x) * columnMetres;
+            const double columnZ = terrain.origin.z + static_cast<double>(column.z) * columnMetres;
+            bool near = false;
+            for (const core::DVec3& mover : movers) {
+                const double dx = std::max({columnX - mover.x, 0.0, mover.x - (columnX + columnMetres)});
+                const double dz = std::max({columnZ - mover.z, 0.0, mover.z - (columnZ + columnMetres)});
+                if (dx * dx + dz * dz <= CaveCollisionReach * CaveCollisionReach) {
+                    near = true;
+                    break;
+                }
+            }
+            if (!near)
+                continue;
+
             auto [at, exists] = locate(id, true, column);
             if (exists && at->revision == terrain.fieldRevision && at->placement == placement) {
                 at->seen = true;
@@ -814,7 +876,36 @@ void PhysicsSync::applyTerrain()
                 for (i32 tx = floorDivide(minX, edge); tx <= floorDivide(minX + span, edge); ++tx)
                     content = combine(content, tileDigestOr(field, asset::TileKey{tx, tz}));
             }
+            // Every brick the region reaches -- its own column's and its
+            // neighbours' rims -- read through the per-column index rather than
+            // by walking every brick in the terrain for every column, which was
+            // quadratic and was most of a sculpting tick.
+            const i32 reachMinX = floorDivide(minX, brickEdge);
+            const i32 reachMaxX = floorDivide(minX + span, brickEdge);
+            const i32 reachMinZ = floorDivide(minZ, brickEdge);
+            const i32 reachMaxZ = floorDivide(minZ + span, brickEdge);
+            for (i32 bx = reachMinX; bx <= reachMaxX; ++bx) {
+                for (i32 bz = reachMinZ; bz <= reachMaxZ; ++bz) {
+                    for (const asset::BrickKey brick : bricksOf(bx, bz)) {
+                        if (const asset::Brick* found = field.findBrick(brick)) {
+                            content = combine(content, packKey(brick.x, brick.z));
+                            content = combine(content, static_cast<u64>(static_cast<u32>(brick.y)));
+                            content = combine(content, asset::digestOf(*found));
+                        }
+                    }
+                }
+            }
 
+            if (exists && current(*at, content))
+                continue;
+            if (caves >= CaveRebuildsPerTick) {
+                if (exists)
+                    at->seen = true;
+                continue;
+            }
+
+            // Only now, for a column that is actually being rebuilt: the slab
+            // its surfaces live in.
             f32 lowest = std::numeric_limits<f32>::max();
             f32 highest = std::numeric_limits<f32>::lowest();
             for (i32 z = 0; z <= span; ++z) {
@@ -830,33 +921,9 @@ void PhysicsSync::applyTerrain()
                                    : std::numeric_limits<i32>::max();
             i32 top = anyHeight ? static_cast<i32>(std::ceil(highest / voxel)) + ColumnMargin
                                 : std::numeric_limits<i32>::lowest();
-
-            // Every brick the region reaches -- its own and its neighbours' rims
-            // -- goes into the key; only its own decide the slab's height.
-            const i32 reachMinX = floorDivide(minX, brickEdge);
-            const i32 reachMaxX = floorDivide(minX + span, brickEdge);
-            const i32 reachMinZ = floorDivide(minZ, brickEdge);
-            const i32 reachMaxZ = floorDivide(minZ + span, brickEdge);
-            for (const asset::BrickKey brick : bricks) {
-                if (brick.x < reachMinX || brick.x > reachMaxX || brick.z < reachMinZ || brick.z > reachMaxZ)
-                    continue;
-                if (const asset::Brick* found = field.findBrick(brick)) {
-                    content = combine(content, packKey(brick.x, brick.z));
-                    content = combine(content, static_cast<u64>(static_cast<u32>(brick.y)));
-                    content = combine(content, asset::digestOf(*found));
-                }
-                if (brick.x != column.x || brick.z != column.z)
-                    continue;
+            for (const asset::BrickKey brick : bricksOf(column.x, column.z)) {
                 bottom = std::min(bottom, brick.y * brickEdge - ColumnMargin);
                 top = std::max(top, (brick.y + 1) * brickEdge + ColumnMargin);
-            }
-
-            if (exists && current(*at, content))
-                continue;
-            if (rebuilt >= TerrainRebuildsPerTick) {
-                if (exists)
-                    at->seen = true;
-                continue;
             }
 
             physics::BodyHandle handle{};
@@ -898,7 +965,7 @@ void PhysicsSync::applyTerrain()
                 m_terrainColliders.insert(
                     at, TerrainCollider{id, true, column, handle, terrain.fieldRevision, content, placement, true});
             }
-            rebuilt += 1;
+            caves += 1;
         }
     });
 

@@ -1076,13 +1076,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 6> terrainMethods;
+    static std::array<MethodDesc, 7> terrainMethods;
     terrainMethods = {{
         MethodDesc{
             .name = atoms.intern("FillBall"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it changed.\012\012This is the verb a sculpting brush is made of, and it is the same one a script uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.",
+        },
+        MethodDesc{
+            .name = atoms.intern("RaiseBall"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Raises the ground under a disc by `amount` metres at the centre, falling smoothly to nothing at the rim -- or lowers it, when `amount` is negative. Returns how many columns it changed.\012\012This is the heightmap sculpting brush, and it is what to reach for to shape hills and valleys: it only ever moves the surface, so it never creates an overhang. `FillBall` adds a real ball, which near its rim hangs over the ground below it -- the right verb for a boulder or a tunnel, and the wrong one for a hill.",
         },
         MethodDesc{
             .name = atoms.intern("FillBlock"),
