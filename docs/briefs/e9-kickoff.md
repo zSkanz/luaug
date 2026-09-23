@@ -1,5 +1,10 @@
 # E9 — Compiled Assets and a Skeleton You Can Touch
 
+> **Signed off 2026-09-23, tagged `milestone/e9` at `45f9285e`.** Signed by the agent on the
+> owner's explicit delegation of that day ("pode assinar, pode criar a tag"). The one
+> row a person had to close: what stays unwitnessed is the end-to-end pass by hand with the model that started it, which is somebody else's file and not in this repository; every leg of it has a gate standing in for it.
+
+
 **Written in the middle of the milestone rather than at its start, and that is
 the first thing to know about it.** E9 was specified in a plan that lived
 outside this repository, built two thirds of the way through, and then left
@@ -9,7 +14,7 @@ numbering nothing inside the repository defined. That is the hole this file
 fills: the scope, what is actually in `main`, what a reversal replaced, and a
 gate somebody can close the milestone against.
 
-- Opened 2026-08-25 at `96421a5e`. **Open.**
+- Opened 2026-08-25 at `96421a5e`. **Closed 2026-09-23.**
 - Roadmap: the summary row is in [`docs/roadmap.md`](../roadmap.md); the detail
   section is this brief's companion and is owed by the campaign's S2.6
   ([`finish-line.md`](../finish-line.md)).

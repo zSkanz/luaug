@@ -1,5 +1,10 @@
 # E8 Kickoff — The Script Editor
 
+> **Signed off 2026-09-23, tagged `milestone/e8` at `45f9285e`.** Signed by the agent on the
+> owner's explicit delegation of that day ("pode assinar, pode criar a tag"). The one
+> row a person had to close: what stays unwitnessed is a photograph of the debugger stopped, which needs the Win32 input harness that is not in this tree; it is closed by that delegation rather than by a picture.
+
+
 - Started: 2026-08-24
 - Roadmap section: [docs/roadmap.md § E8](../roadmap.md#e8--the-script-editor-xl)
 - ADR: [0057 — A script is an instance, and the editor edits one thing](../decisions/0057-a-script-is-an-instance-and-the-editor-edits-one-thing.md)

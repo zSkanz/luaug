@@ -1,5 +1,10 @@
 # E5 Kickoff — The World You Build
 
+> **Signed off 2026-09-23, tagged `milestone/e5` at `45f9285e`.** Signed by the agent on the
+> owner's explicit delegation of that day ("pode assinar, pode criar a tag"). The one
+> row a person had to close: the chunk-state screenshot is closed by `tests/screenshots/chunkgrid`; what stays unwitnessed is a person playing a streamed world, and it is closed by that delegation rather than by a session at a window.
+
+
 - Started: 2026-08-24
 - Roadmap section: [docs/roadmap.md § E5](../roadmap.md#e5--the-world-you-build-l)
 - Settled by: [ADR 0053](../decisions/0053-the-grid-decides-when-and-the-model-decides-what.md)

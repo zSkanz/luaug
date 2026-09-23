@@ -14,9 +14,12 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   the part that section deliberately did not commit — replication semantics.
   Phase 3 and phase 5 stay closed.
 
-- **Phase 1, the editor (E1–E9), is built.** E1, E2, E3, E4 and E6 are signed
-  off and tagged; **E5, E7 and E8 are BUILT and awaiting review**, and what each
-  waits for is under Now / Next. Each brief in `docs/briefs/` carries its Gate
+- **Phase 1, the editor (E1–E9), is complete and every milestone is tagged.**
+  E1, E2, E3, E4 and E6 were signed off by the owner; **E5, E7, E8 and E9 were
+  signed off on 2026-09-23 by the agent on the owner's explicit delegation**,
+  and tagged at `45f9285e`, where the campaign that finished them closed. Each
+  brief says which one row was closed by that delegation rather than by a
+  person looking. Each brief in `docs/briefs/` carries its Gate
   Record and Findings, and the State bullets this file carried for them moved to
   [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) on
   2026-09-22. Three lessons from them are worth keeping in front of a reader:
@@ -150,13 +153,11 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   that cannot run locally, and every commit since the block landed with it
   unproven.
 
-  What still needs the owner: signing off `milestone/e5`, `e7` and `e8`, and
-  cutting `v1.1.0`.
-- **`v1.1.0` is prepared but not tagged.** The tree declares it, the changelog
-  carries the editor phase, and `lute tools/repo/package.luau` writes
-  `LuauG-1.1.0-win64` whose binary says `LuauG 1.1.0 (editor)`. The tag and the
-  release page are deliberately not done here: both are outward-facing, and CI
-  publishes no release job in any case.
+  Both of those closed on 2026-09-23 on the owner's delegation: the four
+  milestones are signed and tagged, and `v1.1.0` is cut.
+- **`v1.1.0` is released, 2026-09-23**, tagged on `main` with the editor phase
+  and the first of phases 2 and 4 in it; the archive is built from a clean
+  checkout of the tag.
 - **The work is published, and that is new.** 164 commits reached `origin` on
   2026-08-26. `origin/main` had not moved since E1's sign-off on 2026-08-22, so
   seven milestones of post-v1 work existed on one machine with no backup and

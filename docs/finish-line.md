@@ -164,7 +164,10 @@ that sends the next session to the wrong place.
       S7.4), and `lavapipe` (three real-image goldens compared exactly on Mesa's
       software rasterizer — S7.6).
 - [x] **S1.6** Push. 164 commits and three tags exist on one machine.
-- [~] **S1.7** Create the five missing milestone tags. `milestone/e2` and
+- [x] **S1.7** Create the five missing milestone tags. **Closed 2026-09-23**:
+      the owner delegated the sign-off that day, and `milestone/e5`, `e7`,
+      `e8` and `e9` were created at `45f9285e`. The rest of this row is the
+      history of how it got there. `milestone/e2` and
       `milestone/e3` created and pushed 2026-08-26 — both were recorded
       COMPLETE and signed off. **`e5`, `e7` and `e8` are the owner's**, because
       a tag for a milestone still awaiting review would be a durable record of

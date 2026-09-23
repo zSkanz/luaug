@@ -1,5 +1,10 @@
 # E7 Kickoff — The Look
 
+> **Signed off 2026-09-23, tagged `milestone/e7` at `45f9285e`.** Signed by the agent on the
+> owner's explicit delegation of that day ("pode assinar, pode criar a tag"). The one
+> row a person had to close: every row of the Gate Record was already green, the four pictures included; this is the act and nothing else.
+
+
 - Started: 2026-08-24
 - Roadmap section: [docs/roadmap.md § E7](../roadmap.md#e7--the-look-m)
 - ADR: [0056 — The shell has one theme, it is data, and it is square](../decisions/0056-the-shell-has-one-theme-and-it-is-square.md)

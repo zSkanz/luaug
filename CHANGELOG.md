@@ -11,7 +11,7 @@ does not is engine work and belongs in the git history rather than in this file.
 
 Nothing yet.
 
-## [1.1.0] — unreleased
+## [1.1.0] — 2026-09-23
 
 **The editor.** v1.0.0 shipped an engine you wrote games for in a text editor;
 this is the phase that gave it a window. Nine milestones, E1 through E9.
@@ -76,16 +76,44 @@ New classes: `Attachment`, `Bone`, `Constraint`, `BallSocketConstraint`,
 - `PointLight.Enabled` and `SpotLight.Enabled` stop being inert and cast.
 - `StreamingService` gains separate structure and terrain radii.
 
+### Also in this release: the first of phases 2 and 4
+
+Built while the editor phase waited for its sign-off, and shipped with it
+rather than held back. Each works end to end and each has limits of its own,
+listed below.
+
+- **Terrain** (ADRs 0066, 0067, 0071): `workspace.Terrain`, one signed-distance
+  field stored as height tiles where the ground is a height and as voxel bricks
+  where it is not, so caves and overhangs cost only where they are. Sculpted
+  from a script or the editor's brush, drawn from a height atlas on the GPU,
+  collided, saved with the scene.
+- **Block worlds** — `VoxelService`, which is not the terrain: registered block
+  types with images per face, cutout and translucent blocks, place and break,
+  a raycast to the block under the crosshair, colliders, and a block tool in
+  the editor.
+- **Multiplayer on a LAN** (ADRs 0069, 0070): `--host`, `--serve` and `--join`,
+  snapshots diffed against acknowledged baselines, `NetworkService` and
+  `Player`, and what a player did reaching the authority as intent.
+- **Particles and decals** (ADR 0072): `ParticleEmitter` and `Decal`.
+- **Sharper shadows and contact shadows**, and **colour textures that are
+  finally drawn in the colours they were painted in** (ADR 0073): every
+  compiled colour texture had been uploaded as linear and drawn pale.
+
+New classes: `Terrain`, `VoxelService`, `NetworkService`, `Player`,
+`ParticleEmitter`, `Decal`. New enums: `NetworkTopology`, `ParticleShape`,
+`BlockOpacity`.
+
 ### Known limits, stated plainly
 
-Unchanged from 1.0.0 except where the list above closes a row. Still not built,
-each with an owner in the roadmap's post-v1 phases: particles, decals, terrain,
-`SurfaceGui`, rich text, navmesh pathfinding, a 2D workflow, multiplayer and
-replication, and mobile.
+Still not built, each with an owner in the roadmap's post-v1 phases: world-space
+UI (`SurfaceGui`, billboards), rich text, navmesh pathfinding, a 2D workflow and
+mobile. Terrain and block worlds do not stream from disk yet; multiplayer has no
+client prediction or interest management and its transport is unencrypted, so
+it is for a LAN; particles are not soft; a decal darkens and tints and cannot
+brighten.
 
-**E5, E7 and E8 are built and awaiting a human's review**, which is a person
-looking at pictures and using a script editor rather than anything a gate can
-answer. E9's own by-hand walkthrough is open for the same reason.
+**E5, E7, E8 and E9 were signed off on 2026-09-23 on the owner's delegation.**
+The one row each had that only a person could close is named in its brief.
 
 ## [1.0.0] — 2026-08-22
 
