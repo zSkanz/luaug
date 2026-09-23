@@ -77,6 +77,24 @@ enum class TerrainCellCompression : core::u32
 inline constexpr core::u32 MaxCellTiles = 4096;
 inline constexpr core::u32 MaxCellBricks = 32768;
 
+// **The whole field, as a scene carries it** (D159). A scene writes its terrain
+// as ONE cell at the origin holding everything, so held to a streamed cell's
+// ceilings any terrain past about a square kilometre saved and then refused to
+// load -- the work was on disk and the world came back empty. A scene's field is
+// held to these instead: room for a world sixteen kilometres across at half a
+// metre, and still a bound, because the size a corrupt count can ask for is
+// also bounded by the bytes that are actually there (see `decodeTerrainCell`).
+inline constexpr core::u32 MaxFieldTiles = 1u << 20;
+inline constexpr core::u32 MaxFieldBricks = 1u << 22;
+
+struct TerrainCellLimits
+{
+    core::u32 tiles = MaxCellTiles;
+    core::u32 bricks = MaxCellBricks;
+};
+
+inline constexpr TerrainCellLimits WholeFieldLimits{MaxFieldTiles, MaxFieldBricks};
+
 // One cell's worth of field, with the coordinates that place it.
 struct TerrainCell
 {
@@ -112,6 +130,9 @@ encodeTerrainCell(const TerrainCell& cell, TerrainCellCompression compression = 
 inline constexpr core::usize TerrainCellHeaderBytes = 12 * 4;
 
 // Decodes one, or says why not.
-[[nodiscard]] std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> bytes, TerrainCell& out);
+// `limits` is a streamed cell's by default; a scene's whole field passes
+// `WholeFieldLimits`.
+[[nodiscard]] std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> bytes, TerrainCell& out,
+                                                                 TerrainCellLimits limits = {});
 
 } // namespace luaug::asset

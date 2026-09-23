@@ -774,7 +774,8 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
             const bool decoded =
                 bytes.has_value() &&
                 !asset::decodeTerrainCell(
-                     std::span<const std::byte>{reinterpret_cast<const std::byte*>(bytes->data()), bytes->size()}, cell)
+                     std::span<const std::byte>{reinterpret_cast<const std::byte*>(bytes->data()), bytes->size()}, cell,
+                     asset::WholeFieldLimits)
                      .has_value();
             if (decoded) {
                 component->field = std::move(cell.field);

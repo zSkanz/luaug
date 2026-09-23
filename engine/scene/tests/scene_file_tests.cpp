@@ -14,6 +14,7 @@
 #include "luaug/scene/world.h"
 
 #include <luaug/asset/terrain.h>
+#include <luaug/asset/terrain_cell.h>
 
 #include <algorithm>
 #include <doctest/doctest.h>
@@ -1086,6 +1087,35 @@ core::InstanceId terrainUnder(Fixture& fixture, core::InstanceId parent)
 }
 
 } // namespace
+
+TEST_CASE("a terrain larger than a streamed cell survives a save and a load")
+{
+    // **D159**: a scene carries its whole field as one cell, and the reader held
+    // it to a STREAMED cell's ceiling of 4,096 tiles -- so a terrain past about a
+    // square kilometre saved, and reopened empty.
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId ground = terrainUnder(fixture, workspace);
+    scene::TerrainComponent* component = fixture.world.terrains().find(ground);
+    REQUIRE(component != nullptr);
+    (void)asset::fillBlock(component->field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{1100.0f, 40.0f, 1100.0f}, 1);
+    REQUIRE(component->field.tileCount() > asset::MaxCellTiles);
+    const core::u64 digest = component->field.digest();
+
+    const std::string text = scene::writeScene(fixture.world);
+    Fixture reloaded;
+    const core::InstanceId target = makeWorkspace(reloaded);
+    REQUIRE_FALSE(scene::readScene(reloaded.world, text).has_value());
+
+    const scene::TerrainComponent* after = nullptr;
+    for (core::InstanceId child = reloaded.world.firstChild(target); child.valid();
+         child = reloaded.world.nextSibling(child)) {
+        if (const scene::TerrainComponent* found = reloaded.world.terrains().find(child); found != nullptr)
+            after = found;
+    }
+    REQUIRE(after != nullptr);
+    CHECK(after->field.digest() == digest);
+}
 
 TEST_CASE("a sculpted world survives a save and a load")
 {

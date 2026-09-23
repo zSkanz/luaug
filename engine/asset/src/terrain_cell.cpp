@@ -254,7 +254,8 @@ std::vector<std::byte> encodeTerrainCell(const TerrainCell& cell, TerrainCellCom
     return out;
 }
 
-std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> bytes, TerrainCell& out)
+std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> bytes, TerrainCell& out,
+                                                   TerrainCellLimits limits)
 {
     Reader reader(bytes);
 
@@ -295,7 +296,7 @@ std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> by
     // **Counted before it is believed.** A corrupt `tileCount` of four billion
     // would otherwise reserve sixteen gigabytes before the first read failed,
     // which is the exact failure `chunk.cpp` documents.
-    if (tileCount > MaxCellTiles || brickCount > MaxCellBricks) {
+    if (tileCount > limits.tiles || brickCount > limits.bricks) {
         return core::makeError(LUAUG_TR("asset.terrain.err.too_large"));
     }
 
@@ -324,6 +325,12 @@ std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> by
     std::vector<std::byte> body;
     std::span<const std::byte> bodyBytes;
     if (compression == static_cast<u32>(TerrainCellCompression::RunLength)) {
+        // PackBits expands a byte into at most 128, so a body larger than that
+        // many times what is left in the file cannot be in it -- which bounds the
+        // allocation by the file whatever ceiling the counts were held to.
+        if (needed > static_cast<u64>(reader.remaining()) * 128u) {
+            return malformed();
+        }
         if (!unpackBits(bytes.subspan(reader.at()), static_cast<usize>(needed), body)) {
             return malformed();
         }
