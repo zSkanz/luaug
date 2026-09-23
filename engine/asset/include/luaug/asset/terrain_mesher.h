@@ -63,6 +63,13 @@ struct MeshRegion
     float skirt = 0.0f;
 };
 
+// **How many of a level's cells past a region's sides `meshField` reads**, on
+// x and z: the samples its cells and gradients need, or the column map its
+// openness rays march over, whichever reaches further. Whoever keys a mesh on
+// what it read, or prepares what it reads before meshing in parallel, asks
+// this rather than knowing it.
+[[nodiscard]] core::i32 meshReach(const FieldSettings& settings, core::u32 level) noexcept;
+
 // The triangles, and what a collider needs from them.
 struct TerrainMesh
 {

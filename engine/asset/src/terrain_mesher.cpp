@@ -256,6 +256,30 @@ void appendMesh(TerrainMesh& into, const TerrainMesh& from)
     into.mesh.bounds.max.z = std::max(into.mesh.bounds.max.z, from.mesh.bounds.max.z);
 }
 
+namespace {
+
+// How far an openness ray is followed across, and the columns it looks at along
+// the way: close together near the point, where a wall beside it decides most,
+// and further apart out where only a hill can.
+constexpr float SkyReach = 12.0f;
+constexpr std::array<float, 8> SkyStops{1.0f, 2.0f, 3.0f, 4.5f, 6.0f, 8.0f, 10.0f, SkyReach};
+
+// The column map's margin round a region, in cells of `step` metres: the
+// longest ray, the lift off the surface and a cell to spare.
+[[nodiscard]] i32 skyMargin(float step) noexcept
+{
+    return static_cast<i32>(std::ceil((SkyReach + 2.5f) / step)) + 1;
+}
+
+} // namespace
+
+i32 meshReach(const FieldSettings& settings, u32 level) noexcept
+{
+    // Samples run two cells below a region and three past it when its sides
+    // are closed (`meshField`).
+    return std::max(3, skyMargin(settings.voxelSize * static_cast<float>(1u << level)));
+}
+
 TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
 {
     TerrainMesh out;
@@ -306,11 +330,8 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     // a search per ray step per vertex would be most of a region's cost.
     //
     // A sky ray is followed `SkyReach` metres across, looking at the columns
-    // `SkyStops` along it: close together near the point, where a wall beside
-    // it decides most, and further apart out where only a hill can.
-    constexpr float SkyReach = 12.0f;
-    static constexpr std::array<float, 8> SkyStops{1.0f, 2.0f, 3.0f, 4.5f, 6.0f, 8.0f, 10.0f, SkyReach};
-    const i32 margin = static_cast<i32>(std::ceil((SkyReach + 2.5f) / step)) + 1;
+    // `SkyStops` along it.
+    const i32 margin = skyMargin(step);
     const i32 mapX0 = region.minX - margin;
     const i32 mapZ0 = region.minZ - margin;
     const i32 mapW = nx + 2 * margin;
@@ -798,15 +819,41 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                 ++uses[edgeKey(list[at + 2], list[at])];
             }
         }
+        // **How much ground is behind a vertex**, along its negative normal, to
+        // the air on the far side -- in steps of half a cell, over the samples
+        // already read, nearest sample to each step.
+        const auto localSample = [&](float metres, i32 min, i32 size) {
+            // Lattice point `k` is centred at `(k + 0.5) * step`.
+            return std::clamp(static_cast<i32>(std::floor(metres / step)) - (min - 2), 0, size - 1);
+        };
+        const auto groundBehind = [&](const Vertex& vertex, float limit) {
+            for (float d = 0.5f * step; d <= limit; d += 0.5f * step) {
+                const i32 sx = localSample(vertex.position.x - vertex.normal.x * d, region.minX, sizeX);
+                const i32 sy = localSample(vertex.position.y - vertex.normal.y * d, region.minY, sizeY);
+                const i32 sz = localSample(vertex.position.z - vertex.normal.z * d, region.minZ, sizeZ);
+                if (occupancy(sx, sy, sz) < 0.5f)
+                    return d;
+            }
+            return limit;
+        };
         // Lowered copies, made once per vertex and looked up by index only.
+        //
+        // **A skirt reaches at most half-way through the ground behind it.**
+        // Two coarse cells is 64 m at the top level, and ground laid on an empty
+        // world is a slab 32 m deep: the skirt hung from the slab's BOTTOM goes
+        // up, along its negative normal, and came out of the top 32 m into the
+        // air, along every side of every coarse node -- the owner's dark lines
+        // across a 5 km plain. Half-way, the skirts of a surface and of the one
+        // behind it can meet but never cross either.
         std::unordered_map<u32, u32> lowered;
         const auto lowerOf = [&](u32 index) {
             if (const auto at = lowered.find(index); at != lowered.end())
                 return at->second;
             Vertex copy = out.mesh.vertices[index];
-            copy.position.x -= copy.normal.x * region.skirt;
-            copy.position.y -= copy.normal.y * region.skirt;
-            copy.position.z -= copy.normal.z * region.skirt;
+            const float drop = std::min(region.skirt, 0.5f * groundBehind(copy, 2.0f * region.skirt));
+            copy.position.x -= copy.normal.x * drop;
+            copy.position.y -= copy.normal.y * drop;
+            copy.position.z -= copy.normal.z * drop;
             const auto made = static_cast<u32>(out.mesh.vertices.size());
             out.mesh.vertices.push_back(copy);
             vertexMaterial.push_back(vertexMaterial[index]);

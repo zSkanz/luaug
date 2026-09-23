@@ -194,6 +194,31 @@ TEST_CASE("the collider is the render surface, without the skirts")
     CHECK(plain.colliderIndices.size() == plain.mesh.indices.size());
 }
 
+TEST_CASE("a skirt stays inside the ground behind it, even where the ground is thinner than the skirt is long")
+{
+    // **The owner's dark lines across a 5 km plain.** At the top level a skirt
+    // is two 32 m cells long, and ground laid on an empty world is a slab 32 m
+    // deep, so the skirt hung from the slab's bottom -- which hangs UP, along
+    // the bottom's negative normal -- stood 32 m out of the plain along every
+    // side of every coarse node.
+    TerrainField field(FieldSettings{});
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 2048.0f, 0.0f, 1);
+    MeshRegion region = regionAt(-32, -8, -32, 32, 5);
+    region.cellsY = 16;
+    region.skirt = 64.0f;
+    const TerrainMesh meshed = meshField(field, region);
+    REQUIRE(meshed.mesh.indices.size() > meshed.colliderIndices.size());
+    float highest = -1e9f;
+    float lowest = 1e9f;
+    for (const core::u32 index : meshed.mesh.indices) {
+        highest = std::max(highest, meshed.mesh.vertices[index].position.y);
+        lowest = std::min(lowest, meshed.mesh.vertices[index].position.y);
+    }
+    // Nothing above the plain, and nothing under the slab's bottom.
+    CHECK(highest <= 0.01f);
+    CHECK(lowest >= -32.01f);
+}
+
 TEST_CASE("a coarser level is the same surface with fewer triangles")
 {
     TerrainField field = flatGround(4.0f);

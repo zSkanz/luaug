@@ -160,6 +160,12 @@ and vertex normals come from the density's gradient.
 - **Skirts hang from the outer ring, along the negative normal.** They cover
   the crack where two levels meet. A collider is always meshed at level 0 and
   never gets a skirt.
+  - **A skirt reaches at most half-way through the ground behind it**
+    (amended 2026-09-23, D174). It is two of its level's cells long, which is
+    64 m at the top level, and ground laid on an empty world is 32 m deep: the
+    skirt hung from the slab's bottom went up through the top and stood out of
+    the plain along every side of every coarse node. Half-way, the skirts of a
+    surface and of the one behind it can meet but never cross either.
 - **Openness is baked per vertex**, from rays over the whole sphere (amended
   the same day, twice).
   - Eight bearings at 60, 30 and 10 degrees above the horizon and below it,

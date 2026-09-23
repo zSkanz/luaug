@@ -6,6 +6,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
 
 namespace luaug::asset {
@@ -523,12 +524,17 @@ std::vector<std::byte> encodeTerrainCell(const TerrainCell& cell, TerrainCellCom
         writeU32(body, static_cast<u32>(entry.first.y));
         writeU32(body, static_cast<u32>(entry.first.z));
     }
-    std::vector<std::byte> payload;
+    // **A chunk the field shares is coded once**: flat ground laid on an empty
+    // world is one column shared by every column (`fillFlat`), and 5 km of it
+    // is fifty thousand entries and two chunks. What the file holds is the
+    // same either way, a payload per entry.
+    std::map<const TerrainChunk*, std::vector<std::byte>> coded;
     for (const TerrainField::Entry& entry : chunks) {
-        payload.clear();
-        encodeChunk(*entry.second, payload);
-        writeU32(body, static_cast<u32>(payload.size()));
-        body.insert(body.end(), payload.begin(), payload.end());
+        auto [at, fresh] = coded.try_emplace(entry.second.get());
+        if (fresh)
+            encodeChunk(*entry.second, at->second);
+        writeU32(body, static_cast<u32>(at->second.size()));
+        body.insert(body.end(), at->second.begin(), at->second.end());
     }
 
     // The header. `flags` and the last word must decode as exactly zero:
@@ -634,8 +640,13 @@ std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> by
     if (!reader.ok())
         return malformed();
 
+    // **Chunks with the same bytes come back as one chunk, shared**, as the
+    // field that was saved held them: a plain of 5 km reopened as fifty
+    // thousand copies of two chunks was a quarter of a gigabyte. Shared chunks
+    // are copied on the first write to one, so nothing can tell but the memory.
     TerrainField field(settings);
     std::vector<std::byte> payload;
+    std::map<std::vector<std::byte>, std::shared_ptr<TerrainChunk>> decoded;
     for (const ChunkKey key : keys) {
         const u32 size = reader.u32v();
         if (!reader.ok() || size > MaxChunkPayload || size > reader.remaining())
@@ -643,13 +654,15 @@ std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> by
         payload.resize(size);
         if (!reader.blob(payload.data(), size))
             return malformed();
-        std::shared_ptr<TerrainChunk> chunk;
-        if (!decodeChunk(payload, chunk))
-            return malformed();
-        // An empty chunk is never written; one in a file is a corrupt file.
-        if (chunk->empty())
-            return malformed();
-        field.setChunk(key, std::move(chunk));
+        auto [at, fresh] = decoded.try_emplace(payload);
+        if (fresh) {
+            if (!decodeChunk(payload, at->second))
+                return malformed();
+            // An empty chunk is never written; one in a file is a corrupt file.
+            if (at->second->empty())
+                return malformed();
+        }
+        field.setChunk(key, at->second);
     }
     if (reader.remaining() != 0)
         return malformed();

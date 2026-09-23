@@ -369,10 +369,53 @@ EditReport fillFlat(TerrainField& field, DVec3 center, float size, float height,
     const i32 lastZ = field.voxelIndex(center.z + half) - 1;
     if (lastX < firstX || lastZ < firstZ)
         return {};
-    const auto columns = static_cast<u32>(lastX - firstX + 1);
-    const auto rows = static_cast<u32>(lastZ - firstZ + 1);
-    std::vector<float> heights(static_cast<usize>(columns) * rows, height);
-    return writeHeights(field, firstX, firstZ, columns, heights, material);
+    // **Chunk column by chunk column, and every one that is whole and empty is
+    // the SAME column.** Flat ground over empty columns comes out identical in
+    // each (the slab's base and the slope are the same everywhere), so it is
+    // laid once and shared, as a snapshot shares it: the first edit to a chunk
+    // clones that chunk alone. Written column by column, 5 km of ground was
+    // thirty seconds and a quarter of a gigabyte before anybody touched it --
+    // the owner's "it froze". Every other column (at the square's edge, or
+    // holding ground already) goes through `writeHeights` on its own block,
+    // which for flat ground is the same result as one call over the square.
+    // Counted wide: 5 km of ground is more voxels than a `u32` holds, and the
+    // report says so by saturating rather than wrapping.
+    core::u64 touched = 0;
+    constexpr auto edge = static_cast<i32>(ChunkEdge);
+    std::vector<TerrainField::Entry> column;
+    const auto laidColumn = [&]() -> const std::vector<TerrainField::Entry>& {
+        if (column.empty()) {
+            TerrainField scratch(field.settings());
+            const std::vector<float> block(ChunkRows, height);
+            (void)writeHeights(scratch, 0, 0, ChunkEdge, block, material);
+            column.assign(scratch.chunks().begin(), scratch.chunks().end());
+        }
+        return column;
+    };
+    TerrainField shared(field.settings());
+    std::vector<float> block;
+    for (i32 chunkX = floorDiv(firstX, edge); chunkX <= floorDiv(lastX, edge); ++chunkX) {
+        for (i32 chunkZ = floorDiv(firstZ, edge); chunkZ <= floorDiv(lastZ, edge); ++chunkZ) {
+            const i32 lowX = std::max(firstX, chunkX * edge);
+            const i32 highX = std::min(lastX, chunkX * edge + edge - 1);
+            const i32 lowZ = std::max(firstZ, chunkZ * edge);
+            const i32 highZ = std::min(lastZ, chunkZ * edge + edge - 1);
+            const bool whole = highX - lowX + 1 == edge && highZ - lowZ + 1 == edge;
+            if (whole && field.column(chunkX, chunkZ).empty()) {
+                // In key order (x, then z, then y), so each lands at the end.
+                for (const TerrainField::Entry& laid : laidColumn()) {
+                    shared.setChunk(ChunkKey{chunkX, laid.first.y, chunkZ}, laid.second);
+                    touched += ChunkVolume;
+                }
+                continue;
+            }
+            const auto columns = static_cast<u32>(highX - lowX + 1);
+            block.assign(static_cast<usize>(columns) * static_cast<usize>(highZ - lowZ + 1), height);
+            touched += writeHeights(field, lowX, lowZ, columns, block, material).touched;
+        }
+    }
+    field.shareFrom(shared);
+    return EditReport{static_cast<u32>(std::min<core::u64>(touched, std::numeric_limits<u32>::max()))};
 }
 
 EditReport writeHeights(TerrainField& field, i32 firstX, i32 firstZ, u32 columns, std::span<const float> heights,

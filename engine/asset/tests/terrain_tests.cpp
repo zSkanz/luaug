@@ -139,6 +139,42 @@ TEST_CASE("flat ground is mostly rows of one value, and small")
     CHECK(under->value().occupancy == FullOccupancy);
 }
 
+TEST_CASE("flat ground over empty columns is one column shared, and the same ground as laid column by column")
+{
+    // **The owner's 5 km plain froze the editor**: laid column by column it
+    // was thirty seconds and a quarter of a gigabyte. Every whole empty column
+    // comes out the same, so it is laid once and shared.
+    TerrainField shared(settingsOf());
+    (void)fillFlat(shared, core::DVec3{3.0, 0.0, -5.0}, 200.0f, 1.3f, 2);
+
+    TerrainField laid(settingsOf());
+    const core::i32 first = shared.voxelIndex(3.0 - 100.0);
+    const core::i32 firstZ = shared.voxelIndex(-5.0 - 100.0);
+    const core::u32 columns = static_cast<core::u32>(shared.voxelIndex(3.0 + 100.0) - first);
+    const core::u32 rows = static_cast<core::u32>(shared.voxelIndex(-5.0 + 100.0) - firstZ);
+    const std::vector<float> heights(static_cast<std::size_t>(columns) * rows, 1.3f);
+    (void)writeHeights(laid, first, firstZ, columns, heights, 2);
+    CHECK(shared.digest() == laid.digest());
+
+    // Two whole columns hold one chunk between them...
+    const auto surfaceOf = [&](core::i32 x, core::i32 z) -> const TerrainChunk* {
+        for (const TerrainField::Entry& entry : shared.column(x, z)) {
+            if (entry.first.y == 0)
+                return entry.second.get();
+        }
+        return nullptr;
+    };
+    REQUIRE(surfaceOf(0, 0) != nullptr);
+    CHECK(surfaceOf(0, 0) == surfaceOf(1, 1));
+    // ...until one is dug, which leaves the other as it was.
+    const core::u64 before = surfaceOf(1, 1)->digest();
+    (void)fillBall(shared, core::DVec3{16.0, 1.0, 16.0}, 3.0, 0);
+    CHECK(surfaceOf(0, 0) != surfaceOf(1, 1));
+    CHECK(surfaceOf(1, 1)->digest() == before);
+    CHECK_FALSE(solidAt(shared, 16.5, 0.5, 16.5));
+    CHECK(solidAt(shared, 48.5, 0.5, 48.5));
+}
+
 TEST_CASE("equal voxels hash equal, however they were written")
 {
     TerrainField once = flatField(0.0f);

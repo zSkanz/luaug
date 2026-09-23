@@ -332,3 +332,25 @@ TEST_CASE("a hybrid-era cell is read and turned into voxels (ADR 0082)")
     REQUIRE_FALSE(decodeTerrainCell(rewritten, again).has_value());
     CHECK(again.field.digest() == back.field.digest());
 }
+
+TEST_CASE("chunks a field shares are saved once each, and come back shared")
+{
+    // **A plain laid on an empty world is one column shared by all of them**
+    // (`fillFlat`). Reopened chunk by chunk, 5 km of it was a quarter of a
+    // gigabyte of copies of two chunks.
+    TerrainCell cell;
+    cell.field = TerrainField(FieldSettings{});
+    cell.settings = cell.field.settings();
+    (void)fillFlat(cell.field, core::DVec3{0.0, 0.0, 0.0}, 256.0f, 0.4f, 1);
+    const std::vector<std::byte> bytes = encodeTerrainCell(cell);
+    TerrainCell back;
+    REQUIRE_FALSE(decodeTerrainCell(bytes, back, WholeFieldLimits).has_value());
+    CHECK(back.field.digest() == cell.field.digest());
+    const TerrainChunk* first = back.field.findChunk(ChunkKey{0, 0, 0});
+    REQUIRE(first != nullptr);
+    CHECK(back.field.findChunk(ChunkKey{1, 0, 2}) == first);
+    // And an edit to one reaches no other.
+    (void)fillBall(back.field, core::DVec3{16.0, 0.0, 16.0}, 3.0, 0);
+    CHECK(back.field.findChunk(ChunkKey{1, 0, 2}) == first);
+    CHECK(back.field.findChunk(ChunkKey{0, 0, 0}) != first);
+}

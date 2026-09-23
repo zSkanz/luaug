@@ -72,8 +72,27 @@ void forChunksIn(const asset::TerrainField& field, i32 x0, i32 x1, i32 z0, i32 z
     return found;
 }
 
-// What a node's mesh reads: every chunk in its footprint, and the ring of one
-// column round it, **whole**.
+// **The chunk columns a node's mesh reads**, on one axis, inclusive: its own,
+// and as far past each side as the mesher reaches (`asset::meshReach`) -- one
+// column at full detail, two at the coarsest, more for small voxels. The key a
+// node is rebuilt by, and what is prepared before meshing in parallel.
+struct ChunkSpan
+{
+    i32 low = 0;
+    i32 high = -1;
+};
+
+[[nodiscard]] ChunkSpan readSpan(const asset::TerrainField& field, TerrainNodeKey key, i32 index) noexcept
+{
+    const i32 reach = asset::meshReach(field.settings(), key.level);
+    const auto cells = static_cast<i32>(asset::ChunkEdge);
+    const auto scale = static_cast<i32>(1u << key.level);
+    const i32 first = index * cells - reach;
+    const i32 last = index * cells + cells - 1 + reach;
+    return ChunkSpan{asset::floorDiv(first * scale, cells), asset::floorDiv((last + 1) * scale - 1, cells)};
+}
+
+// What a node's mesh reads (`readSpan`), **whole**.
 //
 // The ring used to count at full detail only by the two layers of voxels that
 // face the node, which is all the triangles read. The openness baked into every
@@ -86,12 +105,11 @@ void forChunksIn(const asset::TerrainField& field, i32 x0, i32 x1, i32 z0, i32 z
 // parallel and in the same frame.
 [[nodiscard]] u64 contentOf(const asset::TerrainField& field, TerrainNodeKey key) noexcept
 {
-    const i32 n = across(key.level);
-    const i32 x0 = key.x * n;
-    const i32 z0 = key.z * n;
+    const ChunkSpan xs = readSpan(field, key, key.x);
+    const ChunkSpan zs = readSpan(field, key, key.z);
     u64 content = combine(combine(key.level, static_cast<u64>(static_cast<u32>(key.x))),
                           static_cast<u64>(static_cast<u32>(key.z)));
-    forChunksIn(field, x0 - 1, x0 + n, z0 - 1, z0 + n, [&](const asset::TerrainField::Entry& entry) {
+    forChunksIn(field, xs.low, xs.high, zs.low, zs.high, [&](const asset::TerrainField::Entry& entry) {
         content = combine(content, static_cast<u64>(static_cast<u32>(entry.first.x)));
         content = combine(content, static_cast<u64>(static_cast<u32>(entry.first.y)));
         content = combine(content, static_cast<u64>(static_cast<u32>(entry.first.z)));
@@ -468,8 +486,9 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
     for (const Build& build : builds) {
         if (build.key.level == 0)
             continue;
-        const i32 n = across(build.key.level);
-        forChunksIn(*build.field, build.key.x * n - 1, build.key.x * n + n, build.key.z * n - 1, build.key.z * n + n,
+        const ChunkSpan xs = readSpan(*build.field, build.key, build.key.x);
+        const ChunkSpan zs = readSpan(*build.field, build.key, build.key.z);
+        forChunksIn(*build.field, xs.low, xs.high, zs.low, zs.high,
                     [&](const asset::TerrainField::Entry& entry) { entry.second->prepareMip(build.key.level); });
     }
     jobs::parallelFor("terrain.mesh", jobs::Domain::Render, 0, builds.size(), 1,
