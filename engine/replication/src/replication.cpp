@@ -76,6 +76,14 @@ public:
             m_replica->sendIntent(world, tick);
     }
 
+    void sendMessages(scene::World& world) override
+    {
+        if (m_authority.has_value())
+            m_authority->sendMessages(world);
+        else if (m_replica.has_value())
+            m_replica->sendMessages(world);
+    }
+
     [[nodiscard]] Status status() const override
     {
         Status status;

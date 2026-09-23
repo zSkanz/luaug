@@ -155,13 +155,14 @@ local Sections: { Section } = {
     {
         Slug = "guides",
         Title = "Guides",
-        Summary = "Hot reload, testing, localization, the debug overlay, and shipping.",
+        Summary = "Hot reload, testing, localization, the debug overlay, shipping, and multiplayer.",
         Pages = {
             { Slug = "hot-reload", Title = "Hot reload" },
             { Slug = "testing", Title = "Testing" },
             { Slug = "i18n", Title = "Localization" },
             { Slug = "debug-overlay", Title = "The debug overlay" },
             { Slug = "shipping", Title = "Shipping a game" },
+            { Slug = "multiplayer", Title = "Multiplayer" },
             { Slug = "backend", Title = "Talking to a backend" },
         },
     },

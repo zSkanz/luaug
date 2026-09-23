@@ -163,7 +163,10 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   **N1's three named gaps closed on 2026-09-23** (ADR 0076): a replica
   predicts its own character from `Player.Character` and is corrected by the
   authority rather than overwritten, draws everyone else between snapshots, and
-  is sent only what is near its character. Losing interest is streaming out
+  is sent only what is near its character. **N2's first piece is built the
+  same day** (ADR 0077): `RemoteEvent` carries a game's messages both ways,
+  with the sender named by the connection, and `examples/15-multiplayer` has
+  a horn. Losing interest is streaming out
   since the same day (protocol 6): a copy a script holds becomes a husk and
   fires `InstanceStreamedOut`, and building it found D160 -- the chunk
   streamer's half of that contract had never been wired.

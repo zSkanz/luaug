@@ -58,6 +58,14 @@ inline constexpr NetId RootNetId{1};
 // for two seconds, which is a peer about to time out anyway.
 inline constexpr usize StateHistory = 64;
 
+// `RemoteEvent` limits (ADR 0077). A client is not trusted: an authority takes
+// this many messages a tick from one peer and drops the rest. A message waits
+// this many sends for its event to reach the network before it is dropped.
+inline constexpr u32 MaxRemoteMessagesPerTick = 256;
+inline constexpr u16 MaxRemoteHeldSends = 300;
+// The script module's own payload ceiling, plus the few bytes of its header.
+inline constexpr usize MaxRemoteWirePayload = 64u * 1024u + 16u;
+
 // Where the services whose properties travel are numbered from: one fixed id
 // per wire class, far above any instance's, so a service is never mistaken for
 // something to spawn.
@@ -108,6 +116,11 @@ public:
     // welcomed peer what it lacks: spawns, despawns, then the snapshot.
     void send(const scene::World& world, core::InstanceId root, u64 tick);
 
+    // The world's outbox of `RemoteEvent` messages, to the players they name.
+    // A peer that has not yet been told the event exists keeps its copy until
+    // it has, so a message never arrives before the spawn it names.
+    void sendMessages(scene::World& world);
+
     [[nodiscard]] Stats stats() const noexcept { return m_stats; }
     [[nodiscard]] u32 peerCount() const noexcept;
     // The network id an instance travels under, or an invalid id when it has
@@ -142,6 +155,18 @@ private:
         bool rosterSent = false;
         // What it held at each of the last `StateHistory` sends.
         std::deque<PeerInterest> interest;
+        // `RemoteEvent` messages this tick, against the flood limit.
+        u32 messagesThisTick = 0;
+        // Messages for it naming an event it has not been told about yet, in
+        // the order they were sent: the event's network id, how many sends it
+        // has waited, and the bytes.
+        struct Held
+        {
+            u32 remote = 0;
+            u16 sends = 0;
+            std::vector<u8> bytes;
+        };
+        std::deque<Held> held;
     };
 
     // One captured instance, in the walk's pre-order: its id, which instance
@@ -161,6 +186,8 @@ private:
     [[nodiscard]] std::vector<u32> interestOf(const scene::World& world, const Peer& peer) const;
     [[nodiscard]] const WorldState* historyAt(u64 tick) const noexcept;
     [[nodiscard]] Peer* peerFor(net::PeerId id) noexcept;
+    // The instance a network id names in the last capture, or an invalid id.
+    [[nodiscard]] core::InstanceId instanceOfNet(const scene::World& world, u32 netId) const noexcept;
 
     net::ITransport& m_transport;
     std::vector<Peer> m_peers;
@@ -203,6 +230,9 @@ public:
     // because a late intent is worse than a missing one -- the next tick's
     // says what the player is doing now.
     void sendIntent(const scene::World& world, u64 tick);
+
+    // The world's outbox of `FireServer` messages, to the authority.
+    void sendMessages(scene::World& world);
 
     [[nodiscard]] bool welcomed() const noexcept { return m_welcomed; }
     [[nodiscard]] bool connected() const noexcept { return m_connected; }

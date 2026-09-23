@@ -461,6 +461,13 @@ local Classes: { Schema.Class } = {
             .. "has to be there. Its `Name` and `Parent` come from the common set.",
         Fields = NoFields,
     },
+    {
+        Name = "RemoteEvent",
+        Doc = "Replicated so a message has something both ends agree it is for (ADR 0077): its "
+            .. "network id is the address a `RemoteToAuthority` or `RemoteToReplica` names. No fields "
+            .. "of its own; a message is not state.",
+        Fields = NoFields,
+    },
 }
 
 --- Recorded by name, because a class nobody decided about and a class
@@ -626,8 +633,9 @@ local ExcludedByTag: { Schema.ExcludedTag } = {
 }
 
 --- **Numbers are permanent for the reason field ids are**, and channel 3 is
---- reserved rather than left free so the numbering cannot shift when the first
---- of `RemoteEvent`, `NetworkOwnership` or `Team` arrives.
+--- reserved rather than left free so the numbering cannot shift when
+--- `NetworkOwnership` or `Team` arrives. `RemoteEvent` arrived without it: its
+--- messages ride the Control channel, after the spawns they may name (ADR 0077).
 local Channels: { Schema.Channel } = {
     {
         Name = "Control",
@@ -657,9 +665,10 @@ local Channels: { Schema.Channel } = {
         Name = "Reserved3",
         Id = 3,
         Delivery = "Reliable",
-        Doc = "Claimed and unused. `RemoteEvent`, `NetworkOwnership` and `Team` are all deliberately "
-            .. "out of N1, and a channel number that shifted when one of them arrived would break "
-            .. "every build that had already shipped.",
+        Doc = "Claimed and unused. `NetworkOwnership` and `Team` are deliberately not built, and a "
+            .. "channel number that shifted when one of them arrived would break every build that had "
+            .. "already shipped. `RemoteEvent` does not use it: a message on its own channel could "
+            .. "arrive before the spawn of the event it names.",
     },
 }
 
@@ -736,6 +745,24 @@ local Messages: { Schema.Message } = {
         Doc = "Who is taking part: every player's number, sent whole whenever the list changes and "
             .. "once on welcome. Whole rather than as joins and leaves, because a roster is a few "
             .. "numbers and a list a replica can only ever replace cannot drift from the authority's.",
+    },
+    {
+        Name = "RemoteToAuthority",
+        Id = 9,
+        Channel = "Control",
+        Direction = "ToAuthority",
+        Doc = "`RemoteEvent:FireServer` (protocol 7): the event's network id, the network ids of the "
+            .. "instances the arguments name, and the arguments as the script module encoded them. "
+            .. "The sender is the connection's player, never anything the message says.",
+    },
+    {
+        Name = "RemoteToReplica",
+        Id = 10,
+        Channel = "Control",
+        Direction = "ToReplica",
+        Doc = "`RemoteEvent:FireClient` and `FireAllClients`, laid out as `RemoteToAuthority` is. On "
+            .. "the Control channel, after the spawns of the same send, so an event created and fired "
+            .. "in one tick is never named before it exists.",
     },
 }
 

@@ -40,6 +40,14 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **`RemoteEvent`** (N2, ADR 0077): a game's own messages between machines.
+  `FireServer`, `FireClient` and `FireAllClients`, received as
+  `ServerReceived(player, ...)` and `ClientReceived(...)`. The authority names
+  the sender from the connection. Values, instances and tables travel,
+  reliably and in order. Solo and hosting, every call is delivered locally, so
+  one script runs in every posture. `examples/15-multiplayer` has a horn. The
+  wire protocol is version 7. A manual page, *Multiplayer*, covers the whole
+  networked surface.
 - **Buttons in the world are pressed** (F3): a `TextButton` on a `SurfaceGui`
   or `BillboardGui` fires `Activated` and the hover events like one on the
   screen. The pointer's ray finds it, anything solid in front hides it, and

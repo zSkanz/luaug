@@ -23,6 +23,7 @@ luaug_add_module(script
         src/debugger.cpp
         src/net_module.cpp
         src/services.cpp
+        src/remote.cpp
         src/signals.cpp
         src/tasks.cpp
         src/tweens.cpp

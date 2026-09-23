@@ -2445,8 +2445,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // now -- the two ends `render::extract` interpolates between (D047).
             transformHistory.capture(host->world());
             host->tick();
-            if (network != nullptr)
+            if (network != nullptr) {
                 network->send(host->world(), host->workspace(), host->world().engineState().tick);
+                network->sendMessages(host->world());
+            }
         }
         if (network != nullptr) {
             // A frame that ran no tick still services the connection: a paused

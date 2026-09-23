@@ -1,8 +1,10 @@
 # Talking to a backend
 
-There is no data store, no remote event and no replication in this release. A
-game that needs to persist something, authenticate somebody or share state
-between players talks to **a server you write**, over HTTP.
+A match between players is the engine's (see [Multiplayer](manual:guides/multiplayer)):
+the world replicates and a `RemoteEvent` carries a game's messages. What
+outlives a match is not. There is no data store, so a game that needs to
+persist something or authenticate somebody talks to **a server you write**,
+over HTTP.
 
 That is a smaller promise than a hosted platform makes, and it is a portable
 one: the backend is yours, in any language, and it outlives this engine.

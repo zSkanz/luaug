@@ -201,6 +201,12 @@ local function emitMembers(
         -- `Signal<>` -- an empty type pack has a spelling, and the analyzer
         -- rejects the other one.
         local pack = if #parts == 0 then "()" else table.concat(parts, ", ")
+        -- A variadic after other types is one pack, and a pack of several
+        -- things is spelled in parentheses: `Signal<(Player, ...any)>`, where
+        -- `Signal<Player, ...any>` would be two arguments to a one-pack type.
+        if #parts > 1 and string.sub(parts[#parts], 1, 3) == "..." then
+            pack = `({pack})`
+        end
         emitDoc(lines, "    ", event.Doc)
         table.insert(lines, `    read {event.Name}: Signal<{pack}>`)
     end
@@ -210,7 +216,11 @@ local function emitMembers(
                 table.insert(lines, `    function {method.Name}(self, name: "{serviceName}"): {serviceName}`)
             end
         end
-        local parameters = parameterList(method.Parameters)
+        -- A method in a `declare extern type` is a DECLARATION, so a variadic is
+        -- `...: any` there, as in `declare function` -- not the `...any` of a
+        -- function type. Nothing was variadic until `RemoteEvent:FireServer`,
+        -- which is how the two came to be told apart.
+        local parameters = declarationParameterList(method.Parameters)
         local separator = if parameters == "" then "" else ", "
         emitDoc(lines, "    ", method.Doc)
         table.insert(lines, `    function {method.Name}(self{separator}{parameters}): {returnList(method.Returns)}`)

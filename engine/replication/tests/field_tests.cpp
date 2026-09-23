@@ -133,9 +133,9 @@ TEST_CASE("the generated schema is what the module was built against")
     // compile and then disagree with its peer about what field three is.
     CHECK(generated::ProtocolVersion >= 1);
     CHECK(std::size(generated::CommonFields) == 2);
-    // BasePart, CharacterBody, Model, Lighting, Decal, ParticleEmitter and
-    // Folder.
-    CHECK(std::size(generated::Classes) == 7);
+    // BasePart, CharacterBody, Model, Lighting, Decal, ParticleEmitter, Folder
+    // and RemoteEvent.
+    CHECK(std::size(generated::Classes) == 8);
     CHECK(std::size(generated::Channels) == 4);
 
     // Channel 3 is claimed and unused on purpose, so the numbering cannot shift

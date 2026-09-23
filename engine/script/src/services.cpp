@@ -8,6 +8,7 @@
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/remote.h"
 #include "luaug/script/signals.h"
 #include "luaug/script/tweens.h"
 
@@ -1439,6 +1440,7 @@ void registerServices(lua_State* L, core::InstanceId adopt)
     state.postReload = atoms.intern("PostReload");
 
     bindInstanceMethods(L, ServiceMethods);
+    bindInstanceMethods(L, remoteMethodBindings());
 
     // **Adopted when there is one, created when there is not.** A `DataModel` is
     // the one instance a VM makes that outlives the VM: everything else under it

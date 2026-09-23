@@ -1692,6 +1692,25 @@ declare extern type NetworkService extends Instance with
     function GetPlayers(self): {Player}
 end
 
+declare extern type RemoteEvent extends Instance with
+    --- Fires on the authority when a player's machine calls `FireServer`, with the player who sent it
+    --- first. Trust nothing else in it: it is what a client says it did.
+    read ServerReceived: Signal<(Player, ...any)>
+    --- Fires on a player's machine when the authority calls `FireClient` for this player or
+    --- `FireAllClients`.
+    read ClientReceived: Signal<...any>
+    --- Sends the arguments to the authority, where `ServerReceived` fires with this machine's player
+    --- first. On an authority with a player of its own -- solo or hosting -- it is delivered there
+    --- directly; a dedicated server has no player to send as, and refuses.
+    function FireServer(self, ...: any): ()
+    --- Sends the arguments to one player's machine, where `ClientReceived` fires. Only the authority
+    --- speaks to clients: a replica calling this is refused.
+    function FireClient(self, player: Player, ...: any): ()
+    --- Sends the arguments to every player's machine, a host's own included. Only the authority speaks
+    --- to clients: a replica calling this is refused.
+    function FireAllClients(self, ...: any): ()
+end
+
 declare extern type Player extends Instance with
     --- The authority's number for this player: 1 for whoever sits at a solo or hosting machine, 2 and
     --- up for replicas in the order they joined. Never reused within a session, and not an account: a
@@ -2516,7 +2535,8 @@ declare Instance: {
         & (("UICorner") -> UICorner)
         & (("AudioGroup") -> AudioGroup)
         & (("Sound") -> Sound)
-        & (("AnimationPlayer") -> AnimationPlayer),
+        & (("AnimationPlayer") -> AnimationPlayer)
+        & (("RemoteEvent") -> RemoteEvent),
     stamp: (name: string, linked: boolean?) -> Instance,
 }
 

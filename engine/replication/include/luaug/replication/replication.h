@@ -61,6 +61,11 @@ public:
     // fast the machine was.
     virtual void send(const scene::World& world, core::InstanceId root, u64 tick) = 0;
 
+    // Sends the `RemoteEvent` messages scripts queued this tick, and takes them
+    // out of the world's outbox (ADR 0077). Right after `send`, so a message
+    // naming an event the same send spawned is behind its spawn on the wire.
+    virtual void sendMessages(scene::World& world) = 0;
+
     [[nodiscard]] virtual Status status() const = 0;
     [[nodiscard]] virtual Stats stats() const = 0;
 

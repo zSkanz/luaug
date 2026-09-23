@@ -1851,6 +1851,75 @@
       "Events": []
     },
     {
+      "Name": "RemoteEvent",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "FireAllClients",
+          "Parameters": [
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FireClient",
+          "Parameters": [
+            {
+              "Name": "player",
+              "Type": "Player"
+            },
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FireServer",
+          "Parameters": [
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "ClientReceived",
+          "Parameters": [
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ]
+        },
+        {
+          "Name": "ServerReceived",
+          "Parameters": [
+            {
+              "Name": "player",
+              "Type": "Player"
+            },
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "Name": "RunService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],

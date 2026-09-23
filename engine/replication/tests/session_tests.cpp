@@ -514,8 +514,10 @@ struct PlayedMatch
         tick += 1;
         authority->receive(server.world, server.workspace);
         authority->send(server.world, server.workspace, tick);
+        authority->sendMessages(server.world);
         replica->receive(client.world, client.workspace);
         replica->sendIntent(client.world, tick);
+        replica->sendMessages(client.world);
     }
 
     void run(int ticks)
@@ -812,4 +814,99 @@ TEST_CASE("an instance leaving interest that a script holds is a husk; one the a
     REQUIRE(match.copyOf(held).valid());
     CHECK(match.copyOf(held) != heldCopy);
     CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a replica's message reaches the authority from its own player, and an answer reaches only it")
+{
+    PlayedMatch match;
+    const core::InstanceId remote =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("RemoteEvent")));
+    REQUIRE(remote.valid());
+    REQUIRE_FALSE(match.server.world.setParent(remote, match.server.workspace).has_value());
+    const core::InstanceId crate = match.part("Crate", core::DVec3{0.0, 1.0, 0.0});
+    match.run(3);
+    const core::InstanceId remoteHere = match.copyOf(remote);
+    const core::InstanceId crateHere = match.copyOf(crate);
+    REQUIRE(remoteHere.valid());
+    REQUIRE(crateHere.valid());
+
+    // What `FireServer` queues on a replica: the payload is the script
+    // module's and the session never reads it, so any bytes will do.
+    scene::RemoteMessage up;
+    up.remote = remoteHere;
+    up.toServer = true;
+    up.payload = {1, 7, 9};
+    up.refs = {crateHere};
+    match.client.world.engineState().remoteOutbox.push_back(up);
+    match.run(2);
+
+    std::vector<scene::RemoteMessage>& arrived = match.server.world.engineState().remoteInbox;
+    REQUIRE(arrived.size() == 1);
+    CHECK(arrived[0].remote == remote);
+    CHECK(arrived[0].toServer);
+    // **The sender is the connection's player**, not anything it claimed.
+    CHECK(arrived[0].player == match.remote());
+    CHECK(arrived[0].payload == std::vector<core::u8>{1, 7, 9});
+    REQUIRE(arrived[0].refs.size() == 1);
+    CHECK(arrived[0].refs[0] == crate);
+    arrived.clear();
+
+    // `FireClient` to that player: its replica gets it, the instance it names
+    // as its own copy.
+    scene::RemoteMessage down;
+    down.remote = remote;
+    down.userId = match.server.world.players().find(match.remote())->userId;
+    down.payload = {1, 0};
+    down.refs = {crate};
+    match.server.world.engineState().remoteOutbox.push_back(down);
+    match.run(2);
+    std::vector<scene::RemoteMessage>& received = match.client.world.engineState().remoteInbox;
+    REQUIRE(received.size() == 1);
+    CHECK(received[0].remote == remoteHere);
+    CHECK_FALSE(received[0].toServer);
+    REQUIRE(received[0].refs.size() == 1);
+    CHECK(received[0].refs[0] == crateHere);
+    received.clear();
+
+    // To some other player, nothing arrives here.
+    down.userId = 99;
+    match.server.world.engineState().remoteOutbox.push_back(down);
+    match.run(2);
+    CHECK(match.client.world.engineState().remoteInbox.empty());
+
+    // **A client cannot fire into something that is not an event.**
+    scene::RemoteMessage stray = up;
+    stray.remote = crateHere;
+    match.client.world.engineState().remoteOutbox.push_back(stray);
+    const core::u64 droppedBefore = match.authority->stats().messagesDropped;
+    match.run(2);
+    CHECK(match.server.world.engineState().remoteInbox.empty());
+    CHECK(match.authority->stats().messagesDropped == droppedBefore + 1);
+
+    // **Nor flood it**: past the per-tick limit, the rest is dropped.
+    for (core::u32 at = 0; at < MaxRemoteMessagesPerTick + 44; ++at)
+        match.client.world.engineState().remoteOutbox.push_back(up);
+    // Sent at the end of one step, taken in at the start of the next.
+    match.run(2);
+    CHECK(match.server.world.engineState().remoteInbox.size() == MaxRemoteMessagesPerTick);
+    CHECK(match.authority->stats().messagesDropped == droppedBefore + 1 + 44);
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("an event created and fired in one tick is never named before the replica has it")
+{
+    PlayedMatch match;
+    const core::InstanceId remote =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("RemoteEvent")));
+    REQUIRE_FALSE(match.server.world.setParent(remote, match.server.workspace).has_value());
+    scene::RemoteMessage everyone;
+    everyone.remote = remote;
+    everyone.payload = {1, 2};
+    match.server.world.engineState().remoteOutbox.push_back(everyone);
+    match.run(2);
+
+    REQUIRE(match.copyOf(remote).valid());
+    const std::vector<scene::RemoteMessage>& received = match.client.world.engineState().remoteInbox;
+    REQUIRE(received.size() == 1);
+    CHECK(received[0].remote == match.copyOf(remote));
 }

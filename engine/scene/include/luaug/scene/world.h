@@ -124,6 +124,31 @@ enum class NetworkTopology : u8
     Replica = 3,
 };
 
+// A message a script sent through a `RemoteEvent` (N2, ADR 0077), on its way.
+//
+// **The payload is the script module's and nobody else's.** Only it can read a
+// Luau value, so it encodes the arguments and decodes them; everything between
+// -- this queue, the replication engine, the wire -- carries bytes it never
+// parses. The instances the arguments name ride beside them in `refs`, because
+// an instance id means nothing on another machine and the replication engine is
+// what translates it.
+struct RemoteMessage
+{
+    core::InstanceId remote;
+    // True for `FireServer` -- on its way to, or arrived at, the authority.
+    bool toServer = false;
+    // Leaving an authority: the user id it is for, 0 for every player.
+    u32 userId = 0;
+    // Arrived at an authority: the player who sent it.
+    core::InstanceId player;
+    std::vector<u8> payload;
+    std::vector<core::InstanceId> refs;
+    // How many sends it has waited through for its event to reach the network:
+    // an event created since the authority last captured has no network id
+    // yet, and a replica not yet welcomed has nobody to send to.
+    u16 held = 0;
+};
+
 struct EngineState
 {
     // Seconds, constant for the whole tick and advanced by the scheduler
@@ -208,6 +233,12 @@ struct EngineState
     NetworkTopology networkTopology = NetworkTopology::Solo;
     u64 networkServerTick = 0;
     u32 networkPeerCount = 0;
+
+    // `RemoteEvent` messages (N2): those a script sent, waiting for the
+    // replication engine, and those that arrived, waiting for the tick that
+    // fires them. Transport, not world state, so neither reaches the hash.
+    std::vector<RemoteMessage> remoteOutbox;
+    std::vector<RemoteMessage> remoteInbox;
 };
 
 // Per-parent name index. Held in its own pool rather than inline in the record

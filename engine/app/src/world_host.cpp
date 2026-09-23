@@ -15,6 +15,7 @@
 #include "luaug/scene/voxel_fluid.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/net_module.h"
+#include "luaug/script/remote.h"
 #include "luaug/ui/scene_types.h"
 
 #include <algorithm>
@@ -786,6 +787,11 @@ void WorldHost::tick()
     // from the OS -- so they sink like an action, replay like an action, and a
     // handler that writes to the world is deterministic.
     m_runtime->fireInputEvents(m_input.drainRawEvents());
+
+    // `RemoteEvent` messages that arrived since the last tick (ADR 0077):
+    // beside the input events, for the same reason -- arrival was a network
+    // event at a wall-clock moment, and this is where it becomes a tick.
+    script::fireRemoteMessages(m_runtime->state());
 
     // This tick's input, as the local player's intent (N1): after the dispatch
     // that resolved it, before any phase a script reads it in.

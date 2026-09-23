@@ -844,6 +844,13 @@ within half a percent of the frame -- and to have changed from its own first,
 empty frame, which refuses the vacuous pass. Break-verified: with component
 fields not applied it fails by 892,781 of 921,600 pixels.
 
+**N2's first piece, `RemoteEvent`, built 2026-09-23** (ADR 0077): the first
+thing N1 left out by name. A replicated instance carries a game's messages:
+`FireServer`, `FireClient`, `FireAllClients`, received as `ServerReceived` and
+`ClientReceived`. The script module encodes the values. The instance references
+ride beside them for the session to translate, reliably, on the Control channel
+after the spawns they may name. Channel 3 stays reserved.
+
 **Built since, on 2026-09-23** (ADR 0076): client prediction of a replica's own
 character from `Player.Character`, corrected by the authority rather than
 overwritten; interpolation of everything else between snapshots; and interest

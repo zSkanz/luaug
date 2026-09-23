@@ -193,6 +193,51 @@ void sendBytes(net::ITransport& transport, net::PeerId peer, const std::vector<u
         stats.bytesSent += bytes.size();
 }
 
+// **A `RemoteEvent` message on the wire** (ADR 0077): the event's network id,
+// the network ids of the instances its arguments name, then the payload exactly
+// as the script module wrote it. Nothing here parses the payload.
+void writeRemote(Writer& out, MessageType type, u32 remote, std::span<const u32> refs, std::span<const u8> payload)
+{
+    out.u8v(static_cast<u8>(type));
+    out.u32v(remote);
+    out.u16v(static_cast<u16>(refs.size()));
+    for (const u32 ref : refs)
+        out.u32v(ref);
+    out.u32v(static_cast<u32>(payload.size()));
+    out.bytes.insert(out.bytes.end(), payload.begin(), payload.end());
+}
+
+struct RemoteOnWire
+{
+    u32 remote = 0;
+    std::vector<u32> refs;
+    std::span<const u8> payload;
+};
+
+// Reads one, the type byte already consumed. False on anything short, long or
+// oversized -- a peer's bytes are not trusted to be what they claim.
+[[nodiscard]] bool readRemote(Reader& in, RemoteOnWire& out)
+{
+    out.remote = in.u32v();
+    const u16 count = in.u16v();
+    for (u16 at = 0; at < count && in.ok(); ++at)
+        out.refs.push_back(in.u32v());
+    const u32 size = in.u32v();
+    if (!in.ok() || size > MaxRemoteWirePayload || in.bytes().size() - in.at() != size)
+        return false;
+    out.payload = in.bytes().subspan(in.at(), size);
+    in.at() += size;
+    return true;
+}
+
+[[nodiscard]] bool isRemoteEvent(const scene::World& world, InstanceId id)
+{
+    if (!world.alive(id))
+        return false;
+    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    return descriptor != nullptr && world.atoms().text(descriptor->name) == "RemoteEvent";
+}
+
 } // namespace
 
 u64 checksumOf(const WorldState& state) noexcept
@@ -237,11 +282,83 @@ NetId AuthoritySession::netIdOf(InstanceId id) const noexcept
     return found != m_netIds.end() ? NetId{found->second} : NetId{};
 }
 
+InstanceId AuthoritySession::instanceOfNet(const scene::World& world, u32 netId) const noexcept
+{
+    for (const Captured& captured : m_order) {
+        if (captured.netId == netId)
+            return world.alive(captured.id) ? captured.id : InstanceId{};
+    }
+    return {};
+}
+
+void AuthoritySession::sendMessages(scene::World& world)
+{
+    std::vector<scene::RemoteMessage> outbox;
+    outbox.swap(world.engineState().remoteOutbox);
+
+    // What each peer was already waiting on goes first, in order, as far as
+    // it now knows the events named: a message never overtakes an earlier one.
+    const auto flush = [&](Peer& peer) {
+        while (!peer.held.empty()) {
+            Peer::Held& next = peer.held.front();
+            if (!std::binary_search(peer.known.begin(), peer.known.end(), next.remote)) {
+                if (++next.sends > MaxRemoteHeldSends) {
+                    peer.held.pop_front();
+                    m_stats.messagesDropped += 1;
+                    continue;
+                }
+                return;
+            }
+            sendBytes(m_transport, peer.id, next.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
+            m_stats.messagesSent += 1;
+            peer.held.pop_front();
+        }
+    };
+    for (Peer& peer : m_peers) {
+        if (peer.welcomed)
+            flush(peer);
+    }
+
+    for (scene::RemoteMessage& message : outbox) {
+        if (message.toServer)
+            continue; // an authority's own FireServer never left it
+        const NetId remote = netIdOf(message.remote);
+        if (!remote.valid()) {
+            // Created since the last capture: no network id yet. It waits for
+            // the next send that captures, a few ticks at most.
+            if (world.alive(message.remote) && ++message.held <= MaxRemoteHeldSends)
+                world.engineState().remoteOutbox.push_back(std::move(message));
+            else
+                m_stats.messagesDropped += 1;
+            continue;
+        }
+        std::vector<u32> refs;
+        refs.reserve(message.refs.size());
+        for (const InstanceId ref : message.refs)
+            refs.push_back(netIdOf(ref).value);
+        Writer out;
+        writeRemote(out, MessageType::RemoteToReplica, remote.value, refs, message.payload);
+        for (Peer& peer : m_peers) {
+            if (!peer.welcomed || (message.userId != 0 && peer.userId != message.userId))
+                continue;
+            if (peer.held.empty() && std::binary_search(peer.known.begin(), peer.known.end(), remote.value)) {
+                sendBytes(m_transport, peer.id, out.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
+                m_stats.messagesSent += 1;
+            }
+            else {
+                peer.held.push_back(Peer::Held{remote.value, 0, out.bytes});
+            }
+        }
+    }
+}
+
 void AuthoritySession::receive(scene::World& world, InstanceId root)
 {
     // Where players live. A world with no `NetworkService` -- a test's bare
     // tree -- still replicates; it just has nobody to name.
     const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
+    for (Peer& peer : m_peers)
+        peer.messagesThisTick = 0;
     std::vector<net::TransportEvent> events;
     (void)m_transport.poll(events, 0);
     for (const net::TransportEvent& event : events) {
@@ -321,6 +438,34 @@ void AuthoritySession::receive(scene::World& world, InstanceId root)
                 const u64 tick = reader.u64v();
                 if (reader.ok())
                     peer->acked = std::max(peer->acked, tick);
+            }
+            else if (type == MessageType::RemoteToAuthority && peer->welcomed && peer->player.valid()) {
+                // **The sender is the connection's player**, never anything
+                // the message says; and a client is not trusted to be polite.
+                if (peer->messagesThisTick >= MaxRemoteMessagesPerTick) {
+                    m_stats.messagesDropped += 1;
+                    break;
+                }
+                peer->messagesThisTick += 1;
+                RemoteOnWire wire;
+                if (!readRemote(reader, wire)) {
+                    m_stats.messagesDropped += 1;
+                    break;
+                }
+                const InstanceId remote = instanceOfNet(world, wire.remote);
+                if (!isRemoteEvent(world, remote)) {
+                    m_stats.messagesDropped += 1;
+                    break;
+                }
+                scene::RemoteMessage message;
+                message.remote = remote;
+                message.toServer = true;
+                message.player = peer->player;
+                message.payload.assign(wire.payload.begin(), wire.payload.end());
+                for (const u32 ref : wire.refs)
+                    message.refs.push_back(ref != 0 ? instanceOfNet(world, ref) : InstanceId{});
+                world.engineState().remoteInbox.push_back(std::move(message));
+                m_stats.messagesReceived += 1;
             }
             break;
         }
@@ -779,6 +924,31 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
         case MessageType::Players:
             onPlayers(world, root, event.payload);
             break;
+        case MessageType::RemoteToReplica: {
+            Reader reader(event.payload);
+            (void)reader.u8v();
+            RemoteOnWire wire;
+            if (!readRemote(reader, wire)) {
+                m_stats.messagesDropped += 1;
+                break;
+            }
+            const auto local = m_locals.find(wire.remote);
+            if (local == m_locals.end() || !isRemoteEvent(world, local->second)) {
+                m_stats.messagesDropped += 1;
+                break;
+            }
+            scene::RemoteMessage message;
+            message.remote = local->second;
+            message.payload.assign(wire.payload.begin(), wire.payload.end());
+            // An instance this machine was never sent arrives as nil.
+            for (const u32 ref : wire.refs) {
+                const auto found = m_locals.find(ref);
+                message.refs.push_back(found != m_locals.end() ? found->second : InstanceId{});
+            }
+            world.engineState().remoteInbox.push_back(std::move(message));
+            m_stats.messagesReceived += 1;
+            break;
+        }
         default:
             break;
         }
@@ -786,6 +956,47 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
     resolveCharacters(world, root);
     m_serverClock += 1;
     interpolate(world);
+}
+
+void ReplicaSession::sendMessages(scene::World& world)
+{
+    std::vector<scene::RemoteMessage> outbox;
+    outbox.swap(world.engineState().remoteOutbox);
+    // This machine's instance to the network id the authority knows it by.
+    const auto netIdOf = [this](InstanceId id) -> u32 {
+        for (const auto& [netId, local] : m_locals) {
+            if (local == id)
+                return netId;
+        }
+        return 0;
+    };
+    for (scene::RemoteMessage& message : outbox) {
+        if (!message.toServer)
+            continue;
+        // Not welcomed yet: nobody to send to, for a moment.
+        if (!m_welcomed) {
+            if (++message.held <= MaxRemoteHeldSends)
+                world.engineState().remoteOutbox.push_back(std::move(message));
+            else
+                m_stats.messagesDropped += 1;
+            continue;
+        }
+        // An event this replica made itself was never the authority's, and
+        // the authority has no idea what it is.
+        const u32 remote = netIdOf(message.remote);
+        if (remote == 0) {
+            m_stats.messagesDropped += 1;
+            continue;
+        }
+        std::vector<u32> refs;
+        refs.reserve(message.refs.size());
+        for (const InstanceId ref : message.refs)
+            refs.push_back(netIdOf(ref));
+        Writer out;
+        writeRemote(out, MessageType::RemoteToAuthority, remote, refs, message.payload);
+        sendBytes(m_transport, m_authority, out.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
+        m_stats.messagesSent += 1;
+    }
 }
 
 void ReplicaSession::interpolate(scene::World& world)

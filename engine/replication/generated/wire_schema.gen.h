@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 6;
+inline constexpr u32 ProtocolVersion = 7;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -155,6 +155,7 @@ inline constexpr ClassDesc Classes[] = {
     {"Decal", DecalFields, -1, false},
     {"ParticleEmitter", ParticleEmitterFields, -1, false},
     {"Folder", {}, -1, false},
+    {"RemoteEvent", {}, -1, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.
@@ -191,6 +192,8 @@ enum class MessageType : u8
     Ack = 6,
     Intent = 7,
     Players = 8,
+    RemoteToAuthority = 9,
+    RemoteToReplica = 10,
 };
 
 // Which direction a message may travel. A server that accepted a
@@ -219,6 +222,8 @@ inline constexpr MessageDesc Messages[] = {
     {"Ack", MessageType::Ack, 0, Direction::ToAuthority},
     {"Intent", MessageType::Intent, 2, Direction::ToAuthority},
     {"Players", MessageType::Players, 0, Direction::ToReplica},
+    {"RemoteToAuthority", MessageType::RemoteToAuthority, 0, Direction::ToAuthority},
+    {"RemoteToReplica", MessageType::RemoteToReplica, 0, Direction::ToReplica},
 };
 
 } // namespace luaug::replication::generated

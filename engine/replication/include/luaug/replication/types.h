@@ -127,6 +127,12 @@ struct Stats
     u64 corrections = 0;
     u32 spawned = 0;
     u32 despawned = 0;
+    // `RemoteEvent` messages (ADR 0077): sent, taken in, and refused -- a flood
+    // past the per-tick limit, or a message naming something that is not an
+    // event.
+    u64 messagesSent = 0;
+    u64 messagesReceived = 0;
+    u64 messagesDropped = 0;
 };
 
 } // namespace luaug::replication

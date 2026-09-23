@@ -18,6 +18,11 @@
 	replica's own copy of this script only points a camera at it -- and makes
 	the controls, because what its player presses travels to the authority as
 	intent, and the authority moves that player's racer. WASD or the left stick.
+
+	**Space honks**, and that is a message rather than intent (ADR 0077): a
+	`RemoteEvent` the authority made carries "I honked" to it, the authority
+	makes that player's racer hop -- which every window sees, because it is
+	the world -- and tells every machine who it was.
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -48,6 +53,13 @@ local stick = Instance.new("InputBinding")
 stick.KeyCode = Enum.KeyCode.LeftThumbstick
 stick.Parent = move
 move.Parent = controls
+local honkAction = Instance.new("InputAction")
+honkAction.Name = "Honk"
+honkAction.Type = Enum.InputActionType.Bool
+local space = Instance.new("InputBinding")
+space.KeyCode = Enum.KeyCode.Space
+space.Parent = honkAction
+honkAction.Parent = controls
 controls.Parent = Workspace
 
 local camera = Instance.new("Camera")
@@ -72,6 +84,24 @@ local function drive(player: Player, racer: BasePart, dt: number)
         racer.Position += vector.create(intent.X, 0, -intent.Y) * RacerSpeed * dt
     end
 end
+
+-- The honk, the same on every machine: the key sends a message to whoever
+-- decides, and every machine hears who honked. The authority makes the event;
+-- a replica waits for it to arrive.
+local honk: RemoteEvent
+if NetworkService.Authority then
+    honk = Instance.new("RemoteEvent")
+    honk.Name = "Honk"
+    honk.Parent = Workspace
+else
+    honk = Workspace:WaitForChild("Honk") :: RemoteEvent
+end
+honkAction.Pressed:Connect(function()
+    honk:FireServer()
+end)
+honk.ClientReceived:Connect(function(who: string)
+    print(`multiplayer: {who} honked`)
+end)
 
 if not NetworkService.Authority then
     RunService.Heartbeat:Connect(function(dt: number)
@@ -137,6 +167,17 @@ end
 for _, player in NetworkService:GetPlayers() do
     addRacer(player)
 end
+
+-- A honk makes the honker's racer hop: the SENDER is who the connection says
+-- it is, never anything the message claims.
+local hops: { [BasePart]: number } = {}
+honk.ServerReceived:Connect(function(player: Player)
+    local racer = racers[player]
+    if racer then
+        hops[racer] = RunService.SimTime
+    end
+    honk:FireAllClients(player.Name)
+end)
 NetworkService.PlayerAdded:Connect(addRacer)
 NetworkService.PlayerRemoving:Connect(function(player: Player)
     local racer = racers[player]
@@ -155,5 +196,18 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- them; the replicas see where it put them.
     for player, racer in racers do
         drive(player, racer, dt)
+        -- Half a second of hop, as an arc.
+        local started = hops[racer]
+        local height = 0
+        if started then
+            local t = (RunService.SimTime - started) / 0.5
+            if t < 1 then
+                height = 4 * t * (1 - t) * 1.5
+            else
+                hops[racer] = nil
+            end
+        end
+        local at = racer.Position
+        racer.Position = vector.create(at.x, 0.6 + height, at.z)
     end
 end)
