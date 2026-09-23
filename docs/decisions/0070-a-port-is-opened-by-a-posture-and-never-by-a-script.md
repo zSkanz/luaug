@@ -103,6 +103,22 @@ build refuses `--host` by key, and that the solo posture is what a world reports
 with no arguments at all. Those are three assertions rather than a promise, which
 is the difference between this ADR and a comment.
 
+## Which profiles compile it in (recorded 2026-09-22)
+
+The option's default stays `OFF`, and clause 3 holds for every profile that does
+not set it. The presets set it in two kinds of profile and no others:
+
+- **`debug`, `dev` and the sanitizer build**, because a module no gate compiles
+  is a module nobody knows is broken. It had landed with the option off in every
+  preset, so for its first commits no tier had built it or run its tests.
+- **`editor`**, because that is what a person making a game runs, and a
+  multiplayer game is tested by running it as a host and joining it — from the
+  same download, on the same machine or a second one.
+
+**`shipping` and `player` keep it off**, which is clause 5 unchanged: a game a
+person downloads binds nothing, and a game that wants to host is a build its
+author makes on purpose.
+
 ## Alternatives considered
 
 **Leave ADR 0035 alone and let N1 contradict it.** Rejected: an invariant that
