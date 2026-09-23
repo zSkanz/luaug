@@ -45,6 +45,13 @@ public:
 
     std::optional<core::EngineError> open(const TransportConfig& config) override
     {
+        // The ENet cap, so a test over this transport refuses what the real one
+        // would rather than passing where a game would fail.
+        if (config.maxPeers == 0 || config.maxPeers > EnetPeerCap) {
+            const core::I18nArg args[] = {{"count", static_cast<core::i64>(config.maxPeers)},
+                                          {"cap", static_cast<core::i64>(EnetPeerCap)}};
+            return core::makeError(LUAUG_TR("net.err.transport_peer_cap"), args);
+        }
         if (config.port != 0) {
             if (m_network->listeners.contains(config.port)) {
                 const core::I18nArg args[] = {{"port", static_cast<core::i64>(config.port)}};

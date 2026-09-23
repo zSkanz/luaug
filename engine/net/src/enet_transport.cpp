@@ -14,6 +14,8 @@
 #include <unordered_map>
 
 namespace luaug::net {
+
+static_assert(EnetPeerCap == static_cast<usize>(ENET_PROTOCOL_MAXIMUM_PEER_ID), "the published cap is ENet's own");
 namespace {
 
 using core::I18nArg;
@@ -113,6 +115,11 @@ public:
             bindTo = &address;
         }
 
+        if (config.maxPeers == 0 || config.maxPeers > EnetPeerCap) {
+            const I18nArg args[] = {{"count", static_cast<core::i64>(config.maxPeers)},
+                                    {"cap", static_cast<core::i64>(EnetPeerCap)}};
+            return core::makeError(LUAUG_TR("net.err.transport_peer_cap"), args);
+        }
         m_channels = std::max<u8>(1, config.channels);
         m_host = enet_host_create(bindTo, config.maxPeers, m_channels, 0, 0);
         if (m_host == nullptr) {

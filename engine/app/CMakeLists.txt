@@ -258,6 +258,13 @@ luaug_add_module_tests(app
         tests/script_complete_tests.cpp
 )
 
+# The wire and the world hash describe the same state: a gate that needs the
+# replication module's own field applier, so it is built where the module is.
+if(LUAUG_BUILD_TESTS AND LUAUG_ENABLE_REPLICATION)
+    target_sources(luaug_app_tests PRIVATE tests/wire_hash_tests.cpp)
+    target_link_libraries(luaug_app_tests PRIVATE luaug::replication)
+endif()
+
 if(LUAUG_BUILD_TESTS)
     # Point the tests at the real catalog rather than a fixture, so they also
     # prove every key the host raises exists in i18n/en.json.
@@ -350,6 +357,17 @@ if(LUAUG_BUILD_TESTS)
         COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/boot/boot.luau" --headless --frames=3 --exit --rhi=null)
     set_tests_properties(host_boot PROPERTIES
         PASS_REGULAR_EXPRESSION "engine initialized"
+        TIMEOUT 60)
+
+    # **A dedicated server ends on a match, not a frame count**: `--serve` runs
+    # with no budget, so the only ways out are the game's own `game:Shutdown()`
+    # and a stop from outside -- and either must run the close handlers, which
+    # is where a match's results are saved. Port 47913 so it cannot meet a
+    # developer's own server on the default.
+    add_test(NAME serve_ends_on_match
+        COMMAND luaug_host "${CMAKE_SOURCE_DIR}/tests/serve/match_over.luau" --serve=47913 --rhi=null)
+    set_tests_properties(serve_ends_on_match PROPERTIES
+        PASS_REGULAR_EXPRESSION "server closed after the match"
         TIMEOUT 60)
 
     # The frame loop terminates on its budget and says what it ran. Separate

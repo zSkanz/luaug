@@ -48,6 +48,7 @@
 #include "luaug/platform/event.h"
 #include "luaug/platform/file.h"
 #include "luaug/platform/platform.h"
+#include "luaug/platform/stop_signal.h"
 #include "luaug/platform/window.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/debug_renderer.h"
@@ -2796,6 +2797,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         if (host->shutdownRequested())
             quit = true;
+        // Asked from outside (Ctrl+C, SIGTERM): closed exactly as a script's
+        // `game:Shutdown()` closes it, so `BindToClose` runs on a server too.
+        if (platform::stopRequested() && !quit) {
+            core::log(core::LogLevel::Info, LUAUG_TR("engine.info.stop_requested"));
+            quit = true;
+        }
 
         // A dev session that has lost its dev server has nobody left to tell it
         // to stop -- and headless it has no window to close either, so it would

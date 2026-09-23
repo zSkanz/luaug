@@ -257,6 +257,13 @@ u64 World::worldHash() const
             hasher.vec3(action->axis);
             hasher.flag(action->pressed);
         }
+        // How many particles `Emit` has asked for: what a replica is sent so it
+        // bursts when the authority did, and what `Emit` writes -- so two runs
+        // whose scripts emitted differently hashed equal until this was here.
+        // Found by `wire_hash_tests.cpp`, which changes every field the wire
+        // carries that is not a property and requires this hash to notice.
+        if (const ParticleEmitterComponent* emitter = m_particleEmitters.find(id); emitter != nullptr)
+            hasher.pod(emitter->emitted);
 
         // **The terrain field, which no property can carry** (ADR 0082). It is
         // megabytes of samples, so it is not in the walk below and has to be

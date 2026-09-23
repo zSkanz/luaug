@@ -604,6 +604,31 @@ TEST_CASE("a replica is sent what is near its character, and nothing far from it
     CHECK(match.replica->checksumFailures() == 0);
 }
 
+TEST_CASE("interest is a sphere: a player deep under the world is not sent what is far above them")
+{
+    // **The vertical axis the unresolved list asked for** (the owner's mandate,
+    // S3). The streaming grid is columns of chunks, and a player in a cave
+    // was feared to be sent the whole column above them. Interest is measured
+    // per part in three dimensions, so height counts as much as distance
+    // across does.
+    PlayedMatch match;
+    match.server.world.engineState().streamingLoadRadius = 100.0;
+    const core::InstanceId caver = match.part("Caver", core::DVec3{0.0, -400.0, 0.0});
+    const core::InstanceId beside = match.part("Beside", core::DVec3{30.0, -390.0, 0.0});
+    const core::InstanceId overhead = match.part("Overhead", core::DVec3{0.0, 10.0, 0.0});
+    match.server.world.players().find(match.remote())->character = caver;
+    match.run(4);
+
+    CHECK(match.copyOf(caver).valid());
+    CHECK(match.copyOf(beside).valid());
+    CHECK_FALSE(match.copyOf(overhead).valid());
+
+    // Climbing up to it brings it in.
+    match.server.world.parts().find(caver)->cframe.position = core::DVec3{0.0, -50.0, 0.0};
+    match.run(3);
+    CHECK(match.copyOf(overhead).valid());
+}
+
 TEST_CASE("a replica moves its own character at once, and the snapshots only correct it")
 {
     PlayedMatch match;

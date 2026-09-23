@@ -856,10 +856,17 @@ character from `Player.Character`, corrected by the authority rather than
 overwritten; interpolation of everything else between snapshots; and interest
 management measured from each peer's character on the streaming radius.
 
-**Not built, and named so it is not mistaken for done:** despawn destroys rather
-than using the streaming husk contract (decision 6); and prediction corrects by
+**Not built, and named so it is not mistaken for done:** prediction corrects by
 the error rather than re-simulating the unanswered intents. Decals and
 `Lighting` replicate since protocol version 5.
+
+**Corrected 2026-09-23 (the owner's mandate, S3):** despawn DOES use the husk
+contract, for what decision 6 names -- an instance a replica stops being
+interested in is reparented to nil and reported as `InstanceStreamedOut` when a
+script still holds it (`ReplicaSession::onDespawn`, tested in
+`session_tests.cpp`). What the authority destroyed is destroyed on the replica
+too, which is `Destroy`'s meaning rather than a gap. The sentence above said
+otherwise after the husk had been wired (D160).
 
 ---
 

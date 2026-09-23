@@ -18,10 +18,6 @@ namespace {
 // later is not a peer this build refuses at the transport.
 constexpr u8 ChannelCount = static_cast<u8>(std::size(generated::Channels));
 
-// ENet refuses more than this and answers null from its host constructor, which
-// reads as "networking is broken" rather than "you asked for too many".
-constexpr u32 TransportPeerCap = 4095;
-
 class Replication final : public IReplication
 {
 public:
@@ -156,9 +152,11 @@ std::unique_ptr<IReplication> createReplicationOver(std::unique_ptr<net::ITransp
     error.reset();
     if (config.topology == Topology::Solo)
         return nullptr;
-    if (config.topology != Topology::Replica && (config.maxPeers == 0 || config.maxPeers > TransportPeerCap)) {
+    // Refused here as well as by the transport, in the players' terms rather
+    // than the transport's, and before a socket is opened.
+    if (config.topology != Topology::Replica && (config.maxPeers == 0 || config.maxPeers > net::EnetPeerCap)) {
         const core::I18nArg args[] = {{"count", static_cast<core::i64>(config.maxPeers)},
-                                      {"cap", static_cast<core::i64>(TransportPeerCap)}};
+                                      {"cap", static_cast<core::i64>(net::EnetPeerCap)}};
         error = core::makeError(LUAUG_TR("net.err.replication_peer_cap"), args);
         return nullptr;
     }

@@ -105,7 +105,9 @@ struct TransportConfig
 
     // How many peers this host will hold at once. A hard limit rather than a
     // hint: the memory is allocated up front, which is the property that makes
-    // a transport's footprint knowable.
+    // a transport's footprint knowable. **At least one, and at most what the
+    // transport can address** (`EnetPeerCap` for the one implementation): `open`
+    // refuses anything else by name rather than failing as a broken network.
     usize maxPeers = 32;
 
     // Independent ordered streams. Two channels means a reliable chat message
@@ -157,5 +159,12 @@ public:
 // channel is a LAN or an otherwise trusted link. Anything else waits for the
 // GameNetworkingSockets row in the manifest to be filled in.
 [[nodiscard]] std::unique_ptr<ITransport> createEnetTransport();
+
+// **The most peers `createEnetTransport` can hold**: its protocol addresses a
+// peer in twelve bits. Asked for more, ENet's host constructor answers null,
+// which read as "the port is in use" until `open` checked this first. A number
+// rather than an ENet constant, so no header outside `net_enet` sees ENet; the
+// implementation asserts the two agree.
+inline constexpr usize EnetPeerCap = 4095;
 
 } // namespace luaug::net

@@ -14,6 +14,7 @@
 #include "luaug/platform/console.h"
 #include "luaug/platform/crash.h"
 #include "luaug/platform/platform.h"
+#include "luaug/platform/stop_signal.h"
 
 #include <Luau/Bytecode.h>
 #include <lua.h>
@@ -482,7 +483,9 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // could tell you why, since there is no window to close. Saying so beats
     // hanging a CI job until its timeout.
     // **A server is the one headless run that is meant to run until stopped**,
-    // so it is the one exception: its end is a signal, not a frame count.
+    // so it is the one exception: it ends when its game calls `game:Shutdown()`
+    // -- a match over -- or when it is sent a stop (Ctrl+C, SIGTERM), which
+    // closes it the same way (`platform::installStopSignals`).
     if (options.headless && options.frames == 0 &&
         options.network.topology != luaug::replication::Topology::Dedicated) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.headless_needs_frames"));
@@ -520,6 +523,9 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
 int main(int argc, char** argv)
 {
     installConsoleLogSink();
+    // Before anything that can run for long: a stop asked for from outside
+    // closes the engine as `game:Shutdown()` would, close handlers and all.
+    luaug::platform::installStopSignals();
 
     const auto& paths = luaug::platform::paths();
     const auto catalogLoad = luaug::core::engineCatalog().loadFromFile(paths.contentDir / "i18n" / "en.json");

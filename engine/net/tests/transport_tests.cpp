@@ -218,6 +218,17 @@ TEST_CASE("the transport refuses what it cannot do instead of pretending")
     CHECK(transport->send(peer, bytesOf("x"), Delivery::Reliable, 2).has_value());
 
     CHECK(transport->connect("this-host-does-not-resolve.invalid", EchoPort, unused).has_value());
+
+    // More peers than the protocol can address, or none: refused by name, not
+    // reported as a port in use, which is what ENet's null host read as.
+    for (const core::usize count : {core::usize{0}, EnetPeerCap + 1}) {
+        auto refused = createEnetTransport();
+        const std::optional<core::EngineError> error = refused->open({.port = 0, .maxPeers = count, .channels = 2});
+        REQUIRE(error.has_value());
+        CHECK(error->key.hash == LUAUG_TR("net.err.transport_peer_cap").hash);
+    }
+    auto most = createEnetTransport();
+    CHECK_FALSE(most->open({.port = 0, .maxPeers = EnetPeerCap, .channels = 2}).has_value());
 }
 
 TEST_CASE("a payload larger than one MTU arrives whole, on every delivery mode")

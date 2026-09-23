@@ -16,6 +16,7 @@ luaug_add_module(platform
         src/events.cpp
         src/console.cpp
         src/crash.cpp
+        src/stop_signal.cpp
     DEPS
         core
     PRIVATE_DEPS
@@ -40,6 +41,7 @@ luaug_add_module_tests(platform
         tests/async_io_tests.cpp
         tests/console_tests.cpp
         tests/crash_tests.cpp
+        tests/stop_signal_tests.cpp
     DEPS
         SDL3::SDL3-static
 )
