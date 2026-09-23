@@ -280,6 +280,34 @@ void detachWorkspaceComponents(World& world, core::InstanceId id)
 
 // --- Attachment ---------------------------------------------------------------
 
+// --- Player (N1) ----------------------------------------------------------------
+
+void attachPlayerComponents(World& world, core::InstanceId id)
+{
+    world.players().add(id, PlayerComponent{});
+}
+
+void detachPlayerComponents(World& world, core::InstanceId id)
+{
+    world.players().remove(id);
+}
+
+Value getPlayerUserId(const World& world, core::InstanceId id)
+{
+    const PlayerComponent* player = world.players().find(id);
+    return player == nullptr ? Value{} : Value{static_cast<f64>(player->userId)};
+}
+
+Value getNetworkServiceLocalPlayer(const World& world, core::InstanceId id)
+{
+    for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+        const PlayerComponent* player = world.players().find(child);
+        if (player != nullptr && player->local)
+            return Value{child};
+    }
+    return Value{};
+}
+
 // --- VoxelService (V1) --------------------------------------------------------
 
 void attachVoxelComponents(World& world, core::InstanceId id)

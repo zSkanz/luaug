@@ -1448,7 +1448,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(workspaceDesc);
 
     // --- NetworkService ---
-    static std::array<PropertyDesc, 4> networkServiceProperties;
+    static std::array<PropertyDesc, 5> networkServiceProperties;
     networkServiceProperties = {{
         PropertyDesc{
             .name = atoms.intern("Authority"),
@@ -1499,6 +1499,40 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .get = native::getNetworkServicePeerCount,
             .set = nullptr,
         },
+        PropertyDesc{
+            .name = atoms.intern("LocalPlayer"),
+            .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Player"),
+            .threadSafety = ThreadSafety::Safe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "The player at this machine: there from boot solo, hosting or joining, and nil on a dedicated server, which has nobody at it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getNetworkServiceLocalPlayer,
+            .set = nullptr,
+        },
+    }};
+    static std::array<MethodDesc, 1> networkServiceMethods;
+    networkServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("GetPlayers"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Everybody taking part, in the order they joined. **The same call solo** -- one player -- so a game that loops over its players is already a multiplayer game.",
+        },
+    }};
+    static std::array<EventDesc, 2> networkServiceEvents;
+    networkServiceEvents = {{
+        EventDesc{
+            .name = atoms.intern("PlayerAdded"),
+            .slot = 7,
+            .doc = "Somebody joined. Deferred like every signal (ADR 0015), so a script that connects in its file scope and then walks `GetPlayers()` sees each player exactly once.",
+        },
+        EventDesc{
+            .name = atoms.intern("PlayerRemoving"),
+            .slot = 8,
+            .doc = "Somebody is leaving: the player still resolves inside the handler, for the reason `Destroying` does, so a game can save what it needs from them.",
+        },
     }};
     ClassDescriptor networkServiceDesc;
     networkServiceDesc.name = atoms.intern("NetworkService");
@@ -1507,7 +1541,45 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     networkServiceDesc.defaultName = atoms.intern("NetworkService");
     networkServiceDesc.doc = "What this process is in a networked game, and nothing it can change (ADR 0069, ADR 0070). **A script asks it a gameplay question -- do I decide this? -- and never a configuration one.** `if NetworkService.Authority then` is a branch that is present and TAKEN in a game nobody networked, because solo is an authority of one. No property, method or service opens a connection: the posture is chosen on the command line, before any script exists.";
     networkServiceDesc.properties = networkServiceProperties;
+    networkServiceDesc.methods = networkServiceMethods;
+    networkServiceDesc.events = networkServiceEvents;
     classes.registerClass(networkServiceDesc);
+
+    // --- Player ---
+    static std::array<PropertyDesc, 1> playerProperties;
+    playerProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("UserId"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Safe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "The authority's number for this player: 1 for whoever sits at a solo or hosting machine, 2 and up for replicas in the order they joined. Never reused within a session, and not an account: a reconnect is a new number.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getPlayerUserId,
+            .set = nullptr,
+        },
+    }};
+    static std::array<MethodDesc, 1> playerMethods;
+    playerMethods = {{
+        MethodDesc{
+            .name = atoms.intern("GetIntent"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "What this player's input action of that name reads this tick, in the currency `InputAction:GetState` uses: a boolean, a number, a `Vector2` or a `vector`. For the player at this machine it is this machine's own action; for a remote one it is what their machine sent. An action they never sent reads `false`, which is what an unpressed button reads.",
+        },
+    }};
+    ClassDescriptor playerDesc;
+    playerDesc.name = atoms.intern("Player");
+    playerDesc.super = instanceClass;
+    playerDesc.flags = ClassFlags::NotCreatable;
+    playerDesc.defaultName = atoms.intern("Player");
+    playerDesc.doc = "Somebody taking part in this world (N1). Players live under `NetworkService`, and the engine makes and removes them: one at a solo or hosting machine, one per replica on an authority. **What a player DID reaches the authority as intent** -- the values of their input actions, never the results -- so the authority decides what happened and a client that could assert an outcome does not exist.";
+    playerDesc.properties = playerProperties;
+    playerDesc.methods = playerMethods;
+    playerDesc.attachComponents = native::attachPlayerComponents;
+    playerDesc.detachComponents = native::detachPlayerComponents;
+    classes.registerClass(playerDesc);
 
     // --- RunService ---
     static std::array<PropertyDesc, 1> runServiceProperties;

@@ -27,6 +27,7 @@ luaug_add_module(scene
         src/partition.cpp
         src/pivot.cpp
         src/physics_sync.cpp
+        src/players.cpp
         src/ragdoll_build.cpp
         src/streaming_glue.cpp
         generated/class_descriptors.gen.cpp

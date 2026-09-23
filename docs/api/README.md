@@ -68,6 +68,7 @@ guided tour.
 | [`ModuleScript`](modulescript.md) | [`BaseScript`](basescript.md) | Luau that is REQUIRED rather than run. |
 | [`PVInstance`](pvinstance.md) | [`Instance`](instance.md) | The base of everything with a position and orientation in the world: a pivot to move it by, and an offset saying where that pivot sits. |
 | [`Part`](part.md) | [`BasePart`](basepart.md) | The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh. |
+| [`Player`](player.md) | [`Instance`](instance.md) | Somebody taking part in this world (N1). |
 | [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction from its parent's position. |
 | [`Ragdoll`](ragdoll.md) | [`Instance`](instance.md) | Makes a character's pose come from the simulation instead of from a clip. |
 | [`ScreenGui`](screengui.md) | [`Instance`](instance.md) | The root of one screen-space UI tree, parented to `UIService` (§2.2). |

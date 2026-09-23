@@ -1432,6 +1432,13 @@
           "Transient": true
         },
         {
+          "Name": "LocalPlayer",
+          "Type": "Player?",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe",
+          "Transient": true
+        },
+        {
           "Name": "PeerCount",
           "Type": "number",
           "ReadOnly": true,
@@ -1453,8 +1460,34 @@
           "Transient": true
         }
       ],
-      "Methods": [],
-      "Events": []
+      "Methods": [
+        {
+          "Name": "GetPlayers",
+          "Parameters": [],
+          "Returns": ["{Player}"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "PlayerAdded",
+          "Parameters": [
+            {
+              "Name": "player",
+              "Type": "Player"
+            }
+          ]
+        },
+        {
+          "Name": "PlayerRemoving",
+          "Parameters": [
+            {
+              "Name": "player",
+              "Type": "Player"
+            }
+          ]
+        }
+      ]
     },
     {
       "Name": "PVInstance",
@@ -1545,6 +1578,33 @@
             }
           ],
           "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
+      "Name": "Player",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable"],
+      "Properties": [
+        {
+          "Name": "UserId",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "GetIntent",
+          "Parameters": [
+            {
+              "Name": "action",
+              "Type": "string"
+            }
+          ],
+          "Returns": ["boolean | number | Vector2 | vector"],
           "ThreadSafety": "Unsafe"
         }
       ],

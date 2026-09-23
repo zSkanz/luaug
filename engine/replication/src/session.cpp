@@ -1,11 +1,14 @@
 #include "luaug/replication/session.h"
 
 #include "luaug/scene/class_registry.h"
+#include "luaug/scene/components.h"
+#include "luaug/scene/players.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <string>
 #include <string_view>
 
 #include "wire_schema.gen.h"
@@ -20,6 +23,7 @@ using generated::MessageType;
 // by a bare digit.
 constexpr u8 ControlChannel = 0;
 constexpr u8 StateChannel = 1;
+constexpr u8 IntentChannel = 2;
 
 // A snapshot record whose fields are the whole set rather than a diff.
 constexpr u8 FullRecord = 1;
@@ -165,6 +169,20 @@ private:
     return at != state.entities.end() && at->id.value == id ? &*at : nullptr;
 }
 
+[[nodiscard]] u32 bitsOf(float value) noexcept
+{
+    u32 bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+[[nodiscard]] float floatOf(u32 bits) noexcept
+{
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 void sendBytes(net::ITransport& transport, net::PeerId peer, const std::vector<u8>& bytes, net::Delivery delivery,
                u8 channel, Stats& stats)
 {
@@ -216,29 +234,66 @@ NetId AuthoritySession::netIdOf(InstanceId id) const noexcept
     return found != m_netIds.end() ? NetId{found->second} : NetId{};
 }
 
-void AuthoritySession::receive()
+void AuthoritySession::receive(scene::World& world, InstanceId root)
 {
+    // Where players live. A world with no `NetworkService` -- a test's bare
+    // tree -- still replicates; it just has nobody to name.
+    const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
     std::vector<net::TransportEvent> events;
     (void)m_transport.poll(events, 0);
     for (const net::TransportEvent& event : events) {
         switch (event.kind) {
         case net::TransportEvent::Kind::Connected:
             if (peerFor(event.peer) == nullptr) {
-                m_peers.push_back(Peer{event.peer, false, 0, {}});
+                Peer peer;
+                peer.id = event.peer;
+                m_peers.push_back(std::move(peer));
                 std::sort(m_peers.begin(), m_peers.end(),
                           [](const Peer& a, const Peer& b) { return a.id.value < b.id.value; });
             }
             break;
         case net::TransportEvent::Kind::Disconnected:
+            if (Peer* gone = peerFor(event.peer); gone != nullptr && gone->player.valid())
+                scene::removePlayer(world, network, gone->player);
             std::erase_if(m_peers, [&](const Peer& peer) { return peer.id == event.peer; });
             break;
         case net::TransportEvent::Kind::Message: {
             Peer* peer = peerFor(event.peer);
-            if (peer == nullptr || event.channel != ControlChannel)
+            if (peer == nullptr)
                 break;
             m_stats.bytesReceived += event.payload.size();
             Reader reader(event.payload);
             const auto type = static_cast<MessageType>(reader.u8v());
+            if (event.channel == IntentChannel && type == MessageType::Intent && peer->welcomed) {
+                const u64 tick = reader.u64v();
+                scene::PlayerComponent* player = peer->player.valid() ? world.players().find(peer->player) : nullptr;
+                if (!reader.ok() || tick <= peer->intentTick || player == nullptr)
+                    break;
+                std::vector<scene::PlayerIntent> intents;
+                const u16 count = reader.u16v();
+                for (u16 at = 0; at < count && reader.ok(); ++at) {
+                    const std::string_view name = reader.text();
+                    scene::PlayerIntent intent;
+                    intent.type = static_cast<core::i32>(reader.u8v());
+                    intent.axis.x = floatOf(reader.u32v());
+                    intent.axis.y = floatOf(reader.u32v());
+                    intent.axis.z = floatOf(reader.u32v());
+                    intent.pressed = reader.u8v() != 0;
+                    if (!reader.ok())
+                        break;
+                    intent.action = world.atoms().intern(name);
+                    intents.push_back(intent);
+                }
+                // Whole or not at all: half an intent is a player whose second
+                // key was released by a truncated packet.
+                if (reader.ok() && reader.done()) {
+                    player->intents = std::move(intents);
+                    peer->intentTick = tick;
+                }
+                break;
+            }
+            if (event.channel != ControlChannel)
+                break;
             if (type == MessageType::Hello) {
                 const u32 version = reader.u32v();
                 // **Version first, and a mismatch is a refusal rather than a
@@ -249,10 +304,13 @@ void AuthoritySession::receive()
                     break;
                 }
                 peer->welcomed = true;
+                peer->userId = m_nextUserId++;
+                if (network.valid())
+                    peer->player = scene::createPlayer(world, network, peer->userId, false);
                 Writer welcome;
                 welcome.u8v(static_cast<u8>(MessageType::Welcome));
                 welcome.u32v(generated::ProtocolVersion);
-                welcome.u32v(peer->id.value);
+                welcome.u32v(peer->userId);
                 welcome.u64v(m_tick);
                 sendBytes(m_transport, peer->id, welcome.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
             }
@@ -499,6 +557,14 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
             }
             m_welcomed = true;
             m_playerId = player;
+            // The player at this machine takes the number the authority gave
+            // it, so `LocalPlayer.UserId` on a replica is the same number the
+            // authority's copy of that player has.
+            if (const InstanceId local = scene::localPlayerOf(world); local.valid()) {
+                if (scene::PlayerComponent* component = world.players().find(local); component != nullptr)
+                    component->userId = player;
+                world.setName(local, world.atoms().intern("Player" + std::to_string(player)));
+            }
             break;
         }
         case MessageType::Spawn:
@@ -514,6 +580,32 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
             break;
         }
     }
+}
+
+void ReplicaSession::sendIntent(const scene::World& world, u64 tick)
+{
+    if (!m_welcomed)
+        return;
+    const InstanceId local = scene::localPlayerOf(world);
+    const scene::PlayerComponent* player = local.valid() ? world.players().find(local) : nullptr;
+    if (player == nullptr)
+        return;
+    Writer intent;
+    intent.u8v(static_cast<u8>(MessageType::Intent));
+    intent.u64v(tick);
+    intent.u16v(static_cast<u16>(std::min<usize>(player->intents.size(), 0xFFFF)));
+    for (usize at = 0; at < player->intents.size() && at < 0xFFFF; ++at) {
+        const scene::PlayerIntent& one = player->intents[at];
+        // **By name**: the authority's atom numbers are not this world's, and
+        // an action is what both ends' scripts call it.
+        intent.text(world.atoms().text(one.action));
+        intent.u8v(static_cast<u8>(one.type));
+        intent.u32v(bitsOf(one.axis.x));
+        intent.u32v(bitsOf(one.axis.y));
+        intent.u32v(bitsOf(one.axis.z));
+        intent.u8v(one.pressed ? 1 : 0);
+    }
+    sendBytes(m_transport, m_authority, intent.bytes, net::Delivery::UnreliableSequenced, IntentChannel, m_stats);
 }
 
 void ReplicaSession::onSpawn(scene::World& world, std::span<const u8> bytes)

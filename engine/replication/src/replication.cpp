@@ -55,7 +55,7 @@ public:
     void receive(scene::World& world, core::InstanceId root) override
     {
         if (m_authority.has_value())
-            m_authority->receive();
+            m_authority->receive(world, root);
         else if (m_replica.has_value())
             m_replica->receive(world, root);
     }
@@ -67,6 +67,10 @@ public:
         // is a function of the simulation, not of how fast this machine ran it.
         if (m_authority.has_value() && tick % std::max<u32>(1, m_config.ticksPerSnapshot) == 0)
             m_authority->send(world, root, tick);
+        // Intent every tick: it is small, and a snapshot rate is a choice about
+        // the world while an input rate is a choice about how a game feels.
+        if (m_replica.has_value())
+            m_replica->sendIntent(world, tick);
     }
 
     [[nodiscard]] Status status() const override

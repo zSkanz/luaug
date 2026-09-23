@@ -315,6 +315,21 @@ u64 World::worldHash() const
 
         // **The block world (V1)**, on the terrain's rules: the block size and
         // the registry, then each chunk's key beside its digest, in key order.
+        // A player's number and this tick's intents are what the simulation
+        // reads, so they are hashed like any input the tick consumes.
+        if (const PlayerComponent* player = m_players.find(id); player != nullptr) {
+            hasher.pod(static_cast<core::u64>(player->userId));
+            hasher.pod(static_cast<core::u64>(player->local ? 1 : 0));
+            hasher.pod(static_cast<core::u64>(player->intents.size()));
+            for (const PlayerIntent& intent : player->intents) {
+                hasher.pod(static_cast<core::u64>(intent.action.id));
+                hasher.pod(static_cast<core::u64>(static_cast<core::u32>(intent.type)));
+                hasher.number(static_cast<f64>(intent.axis.x));
+                hasher.number(static_cast<f64>(intent.axis.y));
+                hasher.number(static_cast<f64>(intent.axis.z));
+                hasher.pod(static_cast<core::u64>(intent.pressed ? 1 : 0));
+            }
+        }
         if (const VoxelComponent* voxels = m_voxels.find(id); voxels != nullptr) {
             hasher.number(static_cast<f64>(voxels->blockSize));
             hasher.pod(static_cast<core::u64>(voxels->types.size()));

@@ -200,6 +200,12 @@ local Excluded: { Schema.Excluded } = {
             .. "does not have to work out whether it was considered.",
     },
     {
+        Name = "Player",
+        Reason = "Lives under `NetworkService`, which is not replicated, and each end makes its own: an "
+            .. "authority one per peer, a replica one for itself. A replica does not yet see the OTHER "
+            .. "players -- a player list is its own message, owed after N1's first playable build.",
+    },
+    {
         Name = "DataModel",
         Reason = "The root. Every world has exactly one and it is created at boot on both sides, so "
             .. "there is nothing to spawn and nothing to reference by id.",

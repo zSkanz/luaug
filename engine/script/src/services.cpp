@@ -2,6 +2,7 @@
 
 #include "luaug/input/input.h"
 #include "luaug/platform/event.h"
+#include "luaug/scene/players.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
@@ -832,6 +833,61 @@ int inputActionGetState(lua_State* L)
     return 1;
 }
 
+// --- NetworkService and Player (N1) -------------------------------------------
+
+int networkServiceGetPlayers(lua_State* L)
+{
+    const core::InstanceId self = checkInstance(L, 1);
+    const World& w = world(L);
+    std::vector<core::InstanceId> players;
+    // Child order is join order: the engine parents each player as it arrives.
+    for (core::InstanceId child = w.firstChild(self); child.valid(); child = w.nextSibling(child)) {
+        if (w.players().find(child) != nullptr && !w.destroyed(child))
+            players.push_back(child);
+    }
+    lua_createtable(L, static_cast<int>(players.size()), 0);
+    for (usize index = 0; index < players.size(); ++index) {
+        pushInstance(L, players[index]);
+        lua_rawseti(L, -2, static_cast<int>(index) + 1);
+    }
+    return 1;
+}
+
+int playerGetIntent(lua_State* L)
+{
+    const core::InstanceId self = checkInstance(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+    const World& w = world(L);
+    const scene::PlayerComponent* player = w.players().find(self);
+    const core::NameAtom name = w.atoms().lookup(std::string_view{text, length});
+    if (player != nullptr && name.id != 0) {
+        for (const scene::PlayerIntent& intent : player->intents) {
+            if (!(intent.action == name))
+                continue;
+            // The same switch `InputAction:GetState` answers through, so the
+            // two can never disagree about what a value looks like.
+            switch (static_cast<input::ActionType>(intent.type)) {
+            case input::ActionType::Bool:
+                lua_pushboolean(L, intent.pressed ? 1 : 0);
+                return 1;
+            case input::ActionType::Direction1D:
+                lua_pushnumber(L, static_cast<f64>(intent.axis.x));
+                return 1;
+            case input::ActionType::Direction2D:
+            case input::ActionType::ViewportPosition:
+                pushVector2(L, core::Vec2{intent.axis.x, intent.axis.y});
+                return 1;
+            case input::ActionType::Direction3D:
+                pushVector3(L, intent.axis);
+                return 1;
+            }
+        }
+    }
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
 int inputActionGetPreferredBinding(lua_State* L)
 {
     const core::InstanceId id = checkInstance(L, 1);
@@ -1188,6 +1244,8 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"HotReloadService", "IsReload", hotReloadIsReload},
 
     {"InputAction", "GetState", inputActionGetState},
+    {"NetworkService", "GetPlayers", networkServiceGetPlayers},
+    {"Player", "GetIntent", playerGetIntent},
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
     {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
     {"InputService", "IsKeyDown", inputServiceIsKeyDown},

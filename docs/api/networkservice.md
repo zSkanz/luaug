@@ -17,6 +17,26 @@ offers is on the base's page, which is what keeps one added member on
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
 | `Authority` | `boolean` | — | read-only | Whether this process decides the world: true solo, hosting or serving; false on a replica, which shows what it is sent. |
+| `LocalPlayer` | `Player?` | — | read-only | The player at this machine: there from boot solo, hosting or joining, and nil on a dedicated server, which has nobody at it. |
 | `PeerCount` | `number` | — | read-only | Connected peers, not counting this process: the replicas an authority is serving, or 1 on a replica that is connected to its authority. |
 | `ServerTick` | `number` | — | read-only | The authority's tick: its own on an authority, the newest one applied on a replica. Zero solo. **A count of ticks and never a time**, because two machines agree on the first and never on the second. |
 | `Topology` | `Enum.NetworkTopology` | — | read-only | Which posture this process runs in. Branch on `Authority` for gameplay; this is for a menu that wants to say which one it is. |
+
+## Methods
+
+### `GetPlayers(): {Player}`
+
+Everybody taking part, in the order they joined. **The same call solo** -- one player -- so a game that loops over its players is already a multiplayer game.
+
+## Events
+
+Every signal here is **deferred** (ADR 0015): a handler runs at the next
+drain point, never inside the call that fired it.
+
+### `PlayerAdded(player: Player)`
+
+Somebody joined. Deferred like every signal (ADR 0015), so a script that connects in its file scope and then walks `GetPlayers()` sees each player exactly once.
+
+### `PlayerRemoving(player: Player)`
+
+Somebody is leaving: the player still resolves inside the handler, for the reason `Destroying` does, so a game can save what it needs from them.

@@ -271,6 +271,12 @@ Value getNetworkServiceAuthority(const World& world, core::InstanceId id);
 Value getNetworkServiceTopology(const World& world, core::InstanceId id);
 Value getNetworkServiceServerTick(const World& world, core::InstanceId id);
 Value getNetworkServicePeerCount(const World& world, core::InstanceId id);
+Value getNetworkServiceLocalPlayer(const World& world, core::InstanceId id);
+
+// Player
+Value getPlayerUserId(const World& world, core::InstanceId id);
+void attachPlayerComponents(World& world, core::InstanceId id);
+void detachPlayerComponents(World& world, core::InstanceId id);
 
 // RunService
 Value getRunServiceSimTime(const World& world, core::InstanceId id);

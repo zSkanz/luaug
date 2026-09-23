@@ -225,4 +225,46 @@ describe("NetworkService", function()
             instanceLibrary.new("NetworkService")
         end):ToThrow()
     end)
+
+    -- **Solo is a match of one**, so a game that loops over its players is
+    -- already a multiplayer game, and the player at this machine is there from
+    -- boot for the file scope that reaches for it.
+    it("has one player solo, and it is the local one, numbered 1", function()
+        local network = game:GetService("NetworkService")
+        local players = network:GetPlayers()
+        expect(#players):ToBe(1)
+        expect(players[1]):ToBe(network.LocalPlayer)
+        expect((network.LocalPlayer :: Player).UserId):ToBe(1)
+        expect((network.LocalPlayer :: Player).Parent):ToBe(network)
+        expect(typeof(network.PlayerAdded)):ToBe("Signal")
+        expect(typeof(network.PlayerRemoving)):ToBe("Signal")
+    end)
+
+    it("reads a player's intent in the currency their action has, after the tick that captured it", function()
+        local network = game:GetService("NetworkService")
+        local me = network.LocalPlayer :: Player
+        local context = Instance.new("InputContext")
+        local jump = Instance.new("InputAction")
+        jump.Name = "SpecIntentJump"
+        jump.Parent = context
+        local move = Instance.new("InputAction")
+        move.Name = "SpecIntentMove"
+        move.Type = Enum.InputActionType.Direction2D
+        move.Parent = context
+        context.Parent = workspace
+
+        task.wait()
+        expect(me:GetIntent("SpecIntentJump")):ToBe(false)
+        expect(me:GetIntent("SpecIntentMove")):ToBe(Vector2.zero)
+        -- An action nobody has reads as an unpressed button.
+        expect(me:GetIntent("SpecIntentNobodyHasThis")):ToBe(false)
+        context:Destroy()
+    end)
+
+    it("will not let a script make a player", function()
+        local instanceLibrary = Instance :: any
+        expect(function()
+            instanceLibrary.new("Player")
+        end):ToThrow()
+    end)
 end)

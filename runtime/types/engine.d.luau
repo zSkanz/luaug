@@ -1548,6 +1548,30 @@ declare extern type NetworkService extends Instance with
     --- Connected peers, not counting this process: the replicas an authority is serving, or 1 on a
     --- replica that is connected to its authority.
     read PeerCount: number
+    --- The player at this machine: there from boot solo, hosting or joining, and nil on a dedicated
+    --- server, which has nobody at it.
+    read LocalPlayer: Player?
+    --- Somebody joined. Deferred like every signal (ADR 0015), so a script that connects in its file
+    --- scope and then walks `GetPlayers()` sees each player exactly once.
+    read PlayerAdded: Signal<Player>
+    --- Somebody is leaving: the player still resolves inside the handler, for the reason `Destroying`
+    --- does, so a game can save what it needs from them.
+    read PlayerRemoving: Signal<Player>
+    --- Everybody taking part, in the order they joined. **The same call solo** -- one player -- so a
+    --- game that loops over its players is already a multiplayer game.
+    function GetPlayers(self): {Player}
+end
+
+declare extern type Player extends Instance with
+    --- The authority's number for this player: 1 for whoever sits at a solo or hosting machine, 2 and
+    --- up for replicas in the order they joined. Never reused within a session, and not an account: a
+    --- reconnect is a new number.
+    read UserId: number
+    --- What this player's input action of that name reads this tick, in the currency
+    --- `InputAction:GetState` uses: a boolean, a number, a `Vector2` or a `vector`. For the player at
+    --- this machine it is this machine's own action; for a remote one it is what their machine sent. An
+    --- action they never sent reads `false`, which is what an unpressed button reads.
+    function GetIntent(self, action: string): boolean | number | Vector2 | vector
 end
 
 declare extern type RunService extends Instance with

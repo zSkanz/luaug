@@ -26,10 +26,17 @@ takes an address and an optional port (`--join=192.168.0.10:7777`).
 - **No script opens a port.** The posture is chosen on the command line, before
   any script exists, and `NetworkService` only reports it.
 
+- **Every player drives a racer with WASD.** A replica's keys travel to the
+  authority as *intent* — the value of its `Move` action, never a position —
+  and the authority moves that player's racer. `player:GetIntent("Move")` reads
+  the player at this machine and a remote one the same way, which is why the
+  same loop drives one racer solo and one per window when hosting.
+
 ## What it does not show yet
 
-Players: a replica sees the world and cannot act in it. Intent — what a player
-did, sent to the authority — is the next piece of N1.
+A replica does not see the list of other players, and there is no prediction:
+a replica's own racer moves when the authority's snapshot says so, a round trip
+after the key.
 
 The transport is ENet, which is **unencrypted and unauthenticated**: a LAN or an
 otherwise trusted link.

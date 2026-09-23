@@ -517,6 +517,36 @@ struct VoxelBlockType
     core::Color3 bottom{1.0f, 1.0f, 1.0f};
 };
 
+// One thing a player did this tick: an input action's name and its value (N1).
+//
+// **In the currency `InputActionComponent` uses**, so `Player:GetIntent`
+// answers exactly what `InputAction:GetState` answered on the machine where the
+// key was pressed -- and a game reads its own player and a remote one through
+// the same call.
+struct PlayerIntent
+{
+    core::NameAtom action;
+    // `Enum.InputActionType`: 0 Bool, 1 Direction1D, 2 Direction2D,
+    // 3 Direction3D, 4 ViewportPosition.
+    i32 type = 0;
+    core::Vec3 axis;
+    bool pressed = false;
+};
+
+// `Player` (N1): somebody taking part in this world, local or not.
+struct PlayerComponent
+{
+    // The authority's number for them: 1 for whoever sits at a solo or hosting
+    // machine, 2 and up for replicas in the order they joined, and 0 on a
+    // replica until the authority's welcome names it.
+    u32 userId = 0;
+    // Whether this player is the one at this machine, whose intents are this
+    // machine's own input actions, copied each tick.
+    bool local = false;
+    // This tick's intents, in the order the sending machine's actions are.
+    std::vector<PlayerIntent> intents;
+};
+
 // The block world `VoxelService` owns. **Not the terrain** -- see
 // `luaug/asset/voxel.h`. One per `VoxelService`, which is one per DataModel.
 struct VoxelComponent

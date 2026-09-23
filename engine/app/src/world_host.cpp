@@ -11,6 +11,7 @@
 #include "luaug/platform/platform.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
+#include "luaug/scene/players.h"
 #include "luaug/script/net_module.h"
 #include "luaug/ui/scene_types.h"
 
@@ -226,6 +227,17 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     m_runtime.emplace(*m_world);
     if (std::optional<core::EngineError> error = m_runtime->boot(); error.has_value())
         return error;
+
+    // **The player at this machine, before any script runs** (N1). A script's
+    // file scope reaches for `NetworkService.LocalPlayer`, so it has to be
+    // there by the boot drain. Everybody but a dedicated server has one: solo
+    // and a host are player 1, and a replica is numbered by its authority's
+    // welcome, which has not arrived yet.
+    if (options.networkTopology != scene::NetworkTopology::Dedicated) {
+        const core::InstanceId network = scene::networkServiceOf(*m_world, m_runtime->dataModel());
+        const bool replica = options.networkTopology == scene::NetworkTopology::Replica;
+        (void)scene::createPlayer(*m_world, network, replica ? 0u : 1u, true);
+    }
 
     m_runtime->setModuleLoader(script::ModuleLoader{
         .user = this,
@@ -772,6 +784,10 @@ void WorldHost::tick()
     // from the OS -- so they sink like an action, replay like an action, and a
     // handler that writes to the world is deterministic.
     m_runtime->fireInputEvents(m_input.drainRawEvents());
+
+    // This tick's input, as the local player's intent (N1): after the dispatch
+    // that resolved it, before any phase a script reads it in.
+    scene::captureLocalIntents(*m_world);
 
     // The sound timeline, beside the input dispatch and for the same reason:
     // both are simulation state advanced by the tick, and both raise their

@@ -8,13 +8,17 @@
 #include "luaug/net/memory_transport.h"
 #include "luaug/replication/replication.h"
 #include "luaug/replication/session.h"
+#include "luaug/scene/class_registry.h"
 #include "luaug/scene/components.h"
+#include "luaug/scene/enum_registry.h"
+#include "luaug/scene/players.h"
 #include "luaug/scene/world.h"
 
 #include <doctest/doctest.h>
 #include <string>
 
 #include "../../scene/tests/scene_fixture.h"
+#include "class_descriptors.gen.h"
 
 using namespace luaug;
 using namespace luaug::replication;
@@ -93,7 +97,7 @@ struct Match
     void step()
     {
         tick += 1;
-        authority->receive();
+        authority->receive(server.world(), server.root);
         authority->send(server.world(), server.root, tick);
         replica->receive(client.world(), client.root);
     }
@@ -223,11 +227,12 @@ TEST_CASE("a peer speaking another protocol is refused before anything is parsed
     REQUIRE_FALSE(rogue->connect("memory", Port, toServer).has_value());
 
     AuthoritySession authority(*serverTransport);
-    authority.receive();
+    Side server;
+    authority.receive(server.world(), server.root);
     // A hello claiming protocol 999.
     const core::u8 hello[] = {1, 0xE7, 0x03, 0x00, 0x00};
     REQUIRE_FALSE(rogue->send(toServer, hello, net::Delivery::Reliable, 0).has_value());
-    authority.receive();
+    authority.receive(server.world(), server.root);
     CHECK(authority.peerCount() == 0);
     CHECK(serverTransport->peerCount() == 0);
 }
@@ -278,4 +283,100 @@ TEST_CASE("createReplicationOver drives both postures through the seam")
     CHECK_FALSE(join->status().authority);
     CHECK(join->status().serverTick > 0);
     CHECK(client.child(client.root, "Beacon").valid());
+}
+
+namespace {
+
+// A world with the engine's real classes: a data model, its `NetworkService`
+// and a `Workspace`, which is the shape players need and the hand-built
+// fixture does not have.
+struct RealSide
+{
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    scene::World world{classes, enums, atoms, 99u};
+    core::InstanceId dataModel;
+    core::InstanceId network;
+    core::InstanceId workspace;
+
+    RealSide()
+    {
+        scene::generated::registerClasses(classes, atoms);
+        scene::generated::registerEnums(enums, atoms);
+        const auto make = [this](std::string_view name) {
+            const core::InstanceId id = world.create(classes.findId(atoms.intern(name)));
+            REQUIRE(id.valid());
+            world.setName(id, atoms.intern(name));
+            return id;
+        };
+        dataModel = make("DataModel");
+        network = make("NetworkService");
+        workspace = make("Workspace");
+        REQUIRE_FALSE(world.setParent(network, dataModel).has_value());
+        REQUIRE_FALSE(world.setParent(workspace, dataModel).has_value());
+    }
+};
+
+} // namespace
+
+TEST_CASE("a joined replica is a player on the authority, and what it does arrives as intent")
+{
+    seedCatalog();
+    auto network = net::createMemoryNetwork();
+    auto serverTransport = net::createMemoryTransport(network);
+    auto clientTransport = net::createMemoryTransport(network);
+    REQUIRE_FALSE(serverTransport->open(net::TransportConfig{.port = Port, .maxPeers = 4, .channels = 4}).has_value());
+    REQUIRE_FALSE(clientTransport->open(net::TransportConfig{.port = 0, .maxPeers = 1, .channels = 4}).has_value());
+    net::PeerId toServer;
+    REQUIRE_FALSE(clientTransport->connect("memory", Port, toServer).has_value());
+
+    RealSide server;
+    RealSide client;
+    // What the host does at boot for everybody but a dedicated server.
+    const core::InstanceId host = scene::createPlayer(server.world, server.network, 1, true);
+    const core::InstanceId me = scene::createPlayer(client.world, client.network, 0, true);
+    REQUIRE(host.valid());
+    REQUIRE(me.valid());
+
+    AuthoritySession authority(*serverTransport);
+    ReplicaSession replica(*clientTransport, toServer);
+    const auto step = [&](core::u64 tick) {
+        authority.receive(server.world, server.workspace);
+        authority.send(server.world, server.workspace, tick);
+        replica.receive(client.world, client.workspace);
+        replica.sendIntent(client.world, tick);
+    };
+    for (core::u64 tick = 1; tick <= 3; ++tick)
+        step(tick);
+
+    // The authority has two players now, and the replica knows which it is.
+    const core::InstanceId remote = scene::playerByUserId(server.world, 2);
+    REQUIRE(remote.valid());
+    CHECK(server.world.parentOf(remote) == server.network);
+    CHECK(client.world.players().find(me)->userId == 2);
+    CHECK(scene::localPlayerOf(server.world) == host);
+
+    // The replica's player jumps and walks; the authority's copy of that player
+    // reads it, by action NAME, in its own atoms.
+    client.world.players().find(me)->intents = {
+        scene::PlayerIntent{client.atoms.intern("Jump"), 0, core::Vec3{}, true},
+        scene::PlayerIntent{client.atoms.intern("Move"), 2, core::Vec3{0.5f, -1.0f, 0.0f}, false},
+    };
+    step(4);
+    step(5);
+    const scene::PlayerComponent* seen = server.world.players().find(remote);
+    REQUIRE(seen != nullptr);
+    REQUIRE(seen->intents.size() == 2);
+    CHECK(server.atoms.text(seen->intents[0].action) == "Jump");
+    CHECK(seen->intents[0].pressed);
+    CHECK(server.atoms.text(seen->intents[1].action) == "Move");
+    CHECK(static_cast<double>(seen->intents[1].axis.y) == doctest::Approx(-1.0));
+
+    // Leaving is a player removed, not a player left behind.
+    clientTransport.reset();
+    authority.receive(server.world, server.workspace);
+    server.world.retireDestroyed();
+    CHECK_FALSE(scene::playerByUserId(server.world, 2).valid());
+    CHECK(scene::localPlayerOf(server.world) == host);
 }

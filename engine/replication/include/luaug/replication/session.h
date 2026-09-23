@@ -84,8 +84,12 @@ class AuthoritySession
 public:
     explicit AuthoritySession(net::ITransport& transport) noexcept : m_transport(transport) {}
 
-    // Handshakes, acknowledgements and departures. Touches no world.
-    void receive();
+    // Handshakes, acknowledgements, departures and intent. A welcomed peer
+    // becomes a `Player` under the world's `NetworkService` and a departed one
+    // stops being one, so this is where the authority's world gains and loses
+    // players -- and where what they did lands, before the tick that reads it.
+    // `root`'s parent is the data model the players are found under.
+    void receive(scene::World& world, core::InstanceId root);
 
     // Captures `root`'s subtree as it stands at `tick` and sends every
     // welcomed peer what it lacks: spawns, despawns, then the snapshot.
@@ -106,6 +110,12 @@ private:
         u64 acked = 0;
         // Network ids this peer has been told exist, sorted.
         std::vector<u32> known;
+        // Its player, and the newest intent applied from it -- older ones
+        // arriving late are dropped, because what a player did last tick is
+        // superseded by what they did this one.
+        u32 userId = 0;
+        core::InstanceId player;
+        u64 intentTick = 0;
     };
 
     // The subtree as it stands, and the class name each new id is spawned as.
@@ -121,6 +131,10 @@ private:
     // leaves and a new one in its slot are two ids.
     std::map<u64, u32> m_netIds;
     u32 m_nextNetId = RootNetId.value + 1;
+    // Player numbers. 1 is whoever sits at a solo or hosting machine, so peers
+    // start at 2 -- on a dedicated server too, so a number means the same kind
+    // of player whichever way the match is served.
+    u32 m_nextUserId = 2;
     // What each id is spawned as, by the authority's class name atom.
     std::map<u32, core::NameAtom> m_classNames;
     std::deque<std::shared_ptr<const WorldState>> m_history;
@@ -143,6 +157,12 @@ public:
     // Applies everything that arrived, in arrival order, under `root`, and
     // acknowledges what it reconstructed.
     void receive(scene::World& world, core::InstanceId root);
+
+    // Sends what the player at this machine did this tick: their intents, as
+    // this world's `captureLocalIntents` left them. Unreliable and sequenced,
+    // because a late intent is worse than a missing one -- the next tick's
+    // says what the player is doing now.
+    void sendIntent(const scene::World& world, u64 tick);
 
     [[nodiscard]] bool welcomed() const noexcept { return m_welcomed; }
     [[nodiscard]] bool connected() const noexcept { return m_connected; }
