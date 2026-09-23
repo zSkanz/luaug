@@ -42,17 +42,14 @@ constexpr u32 CavesPerSync = 4;
 // crossing needs a cell on each side of it.
 constexpr i32 CaveMargin = 2;
 
-// How many lattice cells a cave's mesh reaches past its column on every side.
-// The ground's triangles are discarded wherever they touch the column, which
-// opens it one cell wider than the column; a surface net's vertices sit at cell
-// centres, so reaching one cell past would stop half a cell short of the edge
-// of that opening. Two reach past it, and the overlap is sunk out of sight --
-// see `sinkRim`.
+// How many lattice cells a cave's mesh reaches past the LOW side of its column
+// when that side borders ground drawn from the atlas. The ground's opening runs
+// from the lattice point before the column to the one after it: on the low side
+// the ground's last vertex is one step outside the column, so the mesh needs a
+// ring of cells beyond that to put a vertex on it; on the high side the ground
+// resumes on the very next lattice point, which a single rim cell's inner corner
+// already is. See `CaveRims` and `MeshRegion::snapSides`.
 constexpr i32 CaveRim = 2;
-
-// How far the part of a cave mesh that overlaps the ground is lowered, so the
-// ground wins the depth test there instead of the two fighting over it.
-constexpr float CaveRimSink = 0.03f;
 
 // The flag in a material byte that opens the ground for a cave mesh.
 constexpr core::u8 CaveFlag = 0x80;
@@ -133,22 +130,27 @@ constexpr core::u8 CaveFlag = 0x80;
     return content;
 }
 
-// How far a cave column's mesh reaches past each of its four sides, in cells.
+// How far a cave column's mesh reaches past each of its four sides, in cells,
+// and which of those sides meet ground drawn from the atlas.
 //
-// **It depends on what is on the other side.** Where the neighbour is ground
-// drawn from the atlas, the ground's opening is a cell wider than the column
-// and a surface net stops half a cell short of any region's edge, so the mesh
-// reaches two cells out and the overlap is sunk out of sight. Where the
-// neighbour is another cave, it reaches ONE cell out and nothing is sunk: the
-// two meshes then share a strip of identical geometry from the same field, which
-// closes the seam between them -- and sinking it, as both used to, left a step
-// down the middle of every cave wall that crossed two columns.
+// **Next to atlas ground, the mesh ends ON the ground's last vertex**: the
+// outer ring of cells snaps to the lattice point where the height field's
+// boundary vertex is (`MeshRegion::snapSides`), two cells out on the low side
+// and one on the high side, so the cave and the ground meet vertex for vertex.
+// It used to overlap the ground by a cell and sink the overlap a few
+// centimetres, which could not hide a steep wall -- a pit that was part height
+// field and part cave showed a step where the two walls disagreed.
+//
+// **Next to another cave, the mesh reaches one cell into it and nothing
+// snaps**: both meshes then carry an identical strip from the same field, which
+// closes the seam between them.
 struct CaveRims
 {
     i32 lowX = CaveRim;
-    i32 highX = CaveRim;
+    i32 highX = 1;
     i32 lowZ = CaveRim;
-    i32 highZ = CaveRim;
+    i32 highZ = 1;
+    core::u8 snapSides = 0;
 };
 
 [[nodiscard]] CaveRims caveRimsOf(asset::TileKey column, std::span<const asset::TileKey> columns) noexcept
@@ -157,10 +159,14 @@ struct CaveRims
         return std::binary_search(columns.begin(), columns.end(), asset::TileKey{x, z});
     };
     CaveRims rims;
-    rims.lowX = isCave(column.x - 1, column.z) ? 1 : CaveRim;
-    rims.highX = isCave(column.x + 1, column.z) ? 1 : CaveRim;
-    rims.lowZ = isCave(column.x, column.z - 1) ? 1 : CaveRim;
-    rims.highZ = isCave(column.x, column.z + 1) ? 1 : CaveRim;
+    const bool caveLowX = isCave(column.x - 1, column.z);
+    const bool caveHighX = isCave(column.x + 1, column.z);
+    const bool caveLowZ = isCave(column.x, column.z - 1);
+    const bool caveHighZ = isCave(column.x, column.z + 1);
+    rims.lowX = caveLowX ? 1 : CaveRim;
+    rims.lowZ = caveLowZ ? 1 : CaveRim;
+    rims.snapSides = static_cast<core::u8>((caveLowX ? 0u : 1u) | (caveHighX ? 0u : 2u) | (caveLowZ ? 0u : 4u) |
+                                           (caveHighZ ? 0u : 8u));
     return rims;
 }
 
@@ -212,6 +218,7 @@ struct CaveRims
     region.cellsZ = static_cast<u32>(spanZ);
     region.cellsY = static_cast<u32>(top - bottom);
     region.stride = 1;
+    region.snapSides = rims.snapSides;
     return true;
 }
 
@@ -344,27 +351,7 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
             asset::MeshRegion region;
             const CaveRims rims = caveRimsOf(column, columns);
             if (caveRegion(field, column, rims, bricks, region)) {
-                asset::TerrainMesh meshed = asset::meshField(field, region);
-                // Sink the rim where it overlaps ground drawn from the atlas:
-                // every vertex more than a cell outside the column, on a side
-                // whose neighbour is not a cave, goes a few centimetres down so
-                // the ground covers it. A side shared with another cave is left
-                // exactly where the field puts it (see `CaveRims`).
-                {
-                    const auto brickEdge = static_cast<float>(asset::BrickEdge);
-                    const float lowX = (static_cast<float>(column.x) * brickEdge - 1.0f) * voxel;
-                    const float highX = (static_cast<float>(column.x + 1) * brickEdge) * voxel;
-                    const float lowZ = (static_cast<float>(column.z) * brickEdge - 1.0f) * voxel;
-                    const float highZ = (static_cast<float>(column.z + 1) * brickEdge) * voxel;
-                    for (asset::Vertex& vertex : meshed.mesh.vertices) {
-                        const core::Vec3& where = vertex.position;
-                        const bool outside =
-                            (rims.lowX == CaveRim && where.x < lowX) || (rims.highX == CaveRim && where.x > highX) ||
-                            (rims.lowZ == CaveRim && where.z < lowZ) || (rims.highZ == CaveRim && where.z > highZ);
-                        if (outside)
-                            vertex.position.y -= CaveRimSink;
-                    }
-                }
+                const asset::TerrainMesh meshed = asset::meshField(field, region);
                 if (!meshed.mesh.indices.empty()) {
                     core::EngineError uploadError;
                     handle = cache.create(device, cmd, meshed.mesh, MeshUsage::Static, &uploadError);

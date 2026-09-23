@@ -842,3 +842,21 @@ TEST_CASE("the mesher gives each material its own section")
     }
     CHECK(covered == meshed.mesh.indices.size());
 }
+
+TEST_CASE("a bowl carved from the top of flat ground is still a height function")
+{
+    // **Carving down into ground makes a pit, and a pit is solid below and air
+    // above in every column** -- a height function, which the cheap encoding
+    // holds. Promoting any of its columns to voxels meshes part of the pit on
+    // the CPU and leaves the rest to the height field, and the two walls meet
+    // in a crease down the side of every crater.
+    asset::TerrainField field(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
+    asset::fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
+    REQUIRE(field.brickCount() == 0);
+
+    (void)asset::fillBall(field, core::DVec3{4.0, 0.0, 4.0}, 4.0, 0);
+    CHECK(field.brickCount() == 0);
+    const std::optional<float> bottom = asset::heightAt(field, 4.0, 4.0);
+    REQUIRE(bottom.has_value());
+    CHECK(*bottom < -3.0f);
+}

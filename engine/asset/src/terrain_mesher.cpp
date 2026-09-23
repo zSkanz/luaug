@@ -291,7 +291,33 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                     ++crossings;
                 }
                 const float inverse = 1.0f / static_cast<float>(crossings);
-                const Vec3 position{sumX * inverse * voxel, sumY * inverse * voxel, sumZ * inverse * voxel};
+                Vec3 position{sumX * inverse * voxel, sumY * inverse * voxel, sumZ * inverse * voxel};
+
+                // On a side that meets a height field, the outer ring snaps to
+                // the lattice point where that field's last vertex is: the
+                // cell's inner corner on the snapped axis, and on the other axis
+                // its far corner, so a row of ring cells lands on every lattice
+                // point along the side exactly once -- the height field's own
+                // vertices, one for one.
+                {
+                    const bool lowX = cellX == 0 && (region.snapSides & 1u) != 0;
+                    const bool highX = cellX + 1 == cellsX && (region.snapSides & 2u) != 0;
+                    const bool lowZ = cellZ == 0 && (region.snapSides & 4u) != 0;
+                    const bool highZ = cellZ + 1 == cellsZ && (region.snapSides & 8u) != 0;
+                    if (lowX || highX || lowZ || highZ) {
+                        const i32 atX = highX ? baseX : baseX + stride;
+                        const i32 atZ = highZ ? baseZ : baseZ + stride;
+                        // The height layer's height there, read back from its own
+                        // identity `sd = y - H`. A column with no ground in it
+                        // has no height to meet, and keeps its own vertex.
+                        const FieldSample there = sampleOf(atX, baseY, atZ);
+                        if (there.material != 0) {
+                            position = Vec3{static_cast<float>(atX) * voxel,
+                                            static_cast<float>(baseY) * voxel - there.distance,
+                                            static_cast<float>(atZ) * voxel};
+                        }
+                    }
+                }
                 const float normalLength =
                     std::sqrt(normalSum.x * normalSum.x + normalSum.y * normalSum.y + normalSum.z * normalSum.z);
                 const Vec3 normal = normalLength < 1e-8f ? Vec3{0.0f, 1.0f, 0.0f}

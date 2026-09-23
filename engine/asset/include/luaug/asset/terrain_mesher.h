@@ -74,6 +74,16 @@ struct MeshRegion
     // of collision hanging under every tile edge would be something a
     // character could stand on inside a cave.
     float skirt = 0.0f;
+
+    // **Which of the region's four sides meet a height field drawn elsewhere**,
+    // as bits: 1 low x, 2 high x, 4 low z, 8 high z. On such a side the
+    // outermost ring of cells puts its vertex ON the lattice point just inside
+    // the region's edge, at the height layer's own height there -- exactly where
+    // the height field's last vertex is. The two surfaces then meet vertex for
+    // vertex instead of overlapping, which a surface net (whose vertices sit at
+    // cell centres) cannot do on its own. A cave's mesh uses this on every side
+    // that borders ground drawn from the atlas (ADR 0071).
+    core::u8 snapSides = 0;
 };
 
 // The triangles, and what a collider needs from them.
