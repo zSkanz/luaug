@@ -84,6 +84,10 @@ Gives a block type images, by content URN -- `asset://textures/grass_top.png` --
 
 Every image fills one block face and repeats block by block, sampled without smoothing: a sixteen-pixel image stays sixteen crisp pixels however close the camera is. The side image stands upright on every side and is never mirrored.
 
+### `SetFluidReaction(from: number, touching: number, result: number)`
+
+Says what fluid `from` becomes where it touches fluid `touching`: lava meeting water sets as stone, and the water stays water. A block of `from` that touches `touching` on any of its six sides turns into `result` on the next step, a source included. Both types must be fluids. A `result` of 0 removes the reaction; give the pair the other way round a reaction of its own if the other fluid should change too.
+
 ### `WorldToBlock(position: vector): vector`
 
 The block coordinate a world position falls in.

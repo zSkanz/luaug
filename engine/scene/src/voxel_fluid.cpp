@@ -38,9 +38,9 @@ void wakeAround(VoxelComponent& voxels, const Position& at, u64 due)
         schedule(voxels, Position{at[0] + step[0], at[1] + step[1], at[2] + step[2]}, due);
 }
 
-// What the block at `at` should be, from the grid as it stands. Pure: the step
-// decides every block it visits this way before writing any of them.
-[[nodiscard]] BlockId decide(const VoxelComponent& voxels, const Position& at)
+// What the block at `at` should be by the flow rules alone, from the grid as it
+// stands.
+[[nodiscard]] BlockId decideFlow(const VoxelComponent& voxels, const Position& at)
 {
     const asset::VoxelGrid& grid = voxels.grid;
     const BlockId here = grid.get(at[0], at[1], at[2]);
@@ -110,11 +110,70 @@ void wakeAround(VoxelComponent& voxels, const Position& at, u64 due)
     return asset::AirBlock;
 }
 
+// What `fluid` at `at` turns into because of what it touches, or air when it
+// touches nothing it reacts with. The six neighbours in a fixed order, and the
+// first reaction found wins -- the same one on every machine.
+[[nodiscard]] BlockId reactionAt(const VoxelComponent& voxels, const Position& at, BlockId fluid)
+{
+    if (voxels.fluidReactions.empty())
+        return asset::AirBlock;
+    for (const Position& step : Neighbours) {
+        const BlockId next = voxels.grid.get(at[0] + step[0], at[1] + step[1], at[2] + step[2]);
+        const BlockId touching = asset::blockTypeOf(next);
+        if (next == asset::AirBlock || touching == fluid)
+            continue;
+        const auto found =
+            std::lower_bound(voxels.fluidReactions.begin(), voxels.fluidReactions.end(), std::pair{fluid, touching},
+                             [](const VoxelComponent::FluidReaction& entry, const std::pair<BlockId, BlockId>& key) {
+                                 return std::pair{entry.from, entry.touching} < key;
+                             });
+        if (found != voxels.fluidReactions.end() && found->from == fluid && found->touching == touching)
+            return found->result;
+    }
+    return asset::AirBlock;
+}
+
+// What the block at `at` should be, from the grid as it stands. Pure: the step
+// decides every block it visits this way before writing any of them.
+[[nodiscard]] BlockId decide(const VoxelComponent& voxels, const Position& at)
+{
+    const BlockId flowed = decideFlow(voxels, at);
+    // **A fluid that touches one it reacts with becomes the reaction's block**,
+    // whether it was already here or has just flowed in: lava reaching water
+    // sets as stone where the two meet, and the water stays water.
+    const BlockId type = asset::blockTypeOf(flowed);
+    if (flowed != asset::AirBlock && isFluidType(voxels, type)) {
+        if (const BlockId result = reactionAt(voxels, at, type); result != asset::AirBlock)
+            return result;
+    }
+    return flowed;
+}
+
 } // namespace
 
 bool isFluidType(const VoxelComponent& voxels, asset::BlockId type) noexcept
 {
     return type != asset::AirBlock && type <= voxels.types.size() && voxels.types[type - 1u].fluidReach > 0;
+}
+
+void setFluidReaction(VoxelComponent& voxels, asset::BlockId from, asset::BlockId touching, asset::BlockId result)
+{
+    std::vector<VoxelComponent::FluidReaction>& list = voxels.fluidReactions;
+    const auto at =
+        std::lower_bound(list.begin(), list.end(), std::pair{from, touching},
+                         [](const VoxelComponent::FluidReaction& entry, const std::pair<BlockId, BlockId>& key) {
+                             return std::pair{entry.from, entry.touching} < key;
+                         });
+    const bool exists = at != list.end() && at->from == from && at->touching == touching;
+    if (result == asset::AirBlock) {
+        if (exists)
+            list.erase(at);
+        return;
+    }
+    if (exists)
+        at->result = result;
+    else
+        list.insert(at, VoxelComponent::FluidReaction{from, touching, result});
 }
 
 void wakeFluids(VoxelComponent& voxels, i32 x, i32 y, i32 z)

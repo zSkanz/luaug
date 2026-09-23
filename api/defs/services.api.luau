@@ -1377,6 +1377,21 @@ local Classes: { Schema.Class } = {
                     .. "`GetFluidDepth` says how full it is.",
             },
             {
+                Name = "SetFluidReaction",
+                Parameters = {
+                    { Name = "from", Type = "number" },
+                    { Name = "touching", Type = "number" },
+                    { Name = "result", Type = "number" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Says what fluid `from` becomes where it touches fluid `touching`: lava meeting water "
+                    .. "sets as stone, and the water stays water. A block of `from` that touches `touching` on "
+                    .. "any of its six sides turns into `result` on the next step, a source included. Both "
+                    .. "types must be fluids. A `result` of 0 removes the reaction; give the pair the other way "
+                    .. "round a reaction of its own if the other fluid should change too.",
+            },
+            {
                 Name = "GetFluidDepth",
                 Parameters = {
                     { Name = "block", Type = "vector" },

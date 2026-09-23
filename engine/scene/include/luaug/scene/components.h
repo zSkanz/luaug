@@ -642,6 +642,17 @@ struct VoxelComponent
     // machine (R10), and copied with the component, so a world restored from
     // a snapshot resumes its water where it was.
     std::map<std::array<i32, 3>, core::u64> fluidWakes;
+    // **What a fluid becomes where it touches another** (`SetFluidReaction`):
+    // `from` touching `touching` turns into `result` -- lava meeting water is
+    // stone, and the water stays water. Sorted by (`from`, `touching`), one
+    // entry per pair.
+    struct FluidReaction
+    {
+        asset::BlockId from = asset::AirBlock;
+        asset::BlockId touching = asset::AirBlock;
+        asset::BlockId result = asset::AirBlock;
+    };
+    std::vector<FluidReaction> fluidReactions;
 };
 
 // `PVInstance`'s own state, and therefore attached to every `BasePart`, `Model`

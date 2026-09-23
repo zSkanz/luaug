@@ -88,6 +88,16 @@ voxels:SetBlockFluid(Water, 5)
 voxels:SetBlock(vector.create(10, 11, 0), Water) -- a spring on a hilltop
 ```
 
+**Two fluids can react.** `SetFluidReaction(from, touching, result)` says what
+a block of one fluid becomes where it touches another:
+
+```luau
+voxels:SetFluidReaction(Lava, Water, Stone) -- lava meeting water sets as stone
+```
+
+The reaction goes one way: the water stays water. Give the pair the other way
+round a reaction of its own if both should change.
+
 The water moves with the simulation, so the same world and the same ticks make
 the same water on every machine.
 

@@ -125,8 +125,8 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   it but a word; [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md)
   says why. Since then it has gained an editor tool, see-through blocks, cells
   streamed from disk and fluids (below). What it does not have yet: a block
-  type's images and opacity set from the editor's panel, and fluids that react
-  with each other.
+  type's images and opacity set from the editor's panel. Fluids react with each
+  other through `SetFluidReaction`.
 
   **Water is a fluid since 2026-09-23**: `SetBlockFluid` makes a type pour,
   spread and drain on the simulation clock, deterministically, and never

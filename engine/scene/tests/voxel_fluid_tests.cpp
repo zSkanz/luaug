@@ -2,6 +2,7 @@
 #include "luaug/scene/voxel_fluid.h"
 
 #include <doctest/doctest.h>
+#include <utility>
 
 using namespace luaug;
 using asset::BlockId;
@@ -177,4 +178,45 @@ TEST_CASE("water that arrives in a streamed cell is woken, and nothing else is")
     pond.run(10);
     CHECK(pond.at(11, 0, 10) == asset::blockWithState(Water, 1));
     CHECK(pond.at(-9, 0, -10) == asset::AirBlock);
+}
+
+TEST_CASE("lava that reaches water sets as stone where they meet, and the water stays water")
+{
+    Pond pond;
+    constexpr BlockId Lava = 3;
+    scene::VoxelBlockType lava;
+    lava.fluidReach = 3;
+    lava.fluidTicks = 1;
+    pond.voxels.types.push_back(lava);
+    scene::setFluidReaction(pond.voxels, Lava, Water, Stone);
+    REQUIRE(pond.voxels.fluidReactions.size() == 1);
+
+    // Water spreading from the left, lava from the right: they meet between.
+    pond.place(-4, 0, 0, Water);
+    pond.place(4, 0, 0, Lava);
+    pond.run(20);
+
+    // Where lava would have touched water, there is stone instead, and the
+    // water around it is still water.
+    bool setStone = false;
+    for (core::i32 x = -3; x <= 3; ++x) {
+        if (pond.at(x, 0, 0) == Stone)
+            setStone = true;
+    }
+    CHECK(setStone);
+    CHECK(asset::blockTypeOf(pond.at(-3, 0, 0)) == Water);
+    CHECK(pond.at(4, 0, 0) == Lava);
+    // No lava block anywhere touches water.
+    for (core::i32 x = -8; x <= 8; ++x) {
+        for (core::i32 z = -8; z <= 8; ++z) {
+            if (asset::blockTypeOf(pond.at(x, 0, z)) != Lava)
+                continue;
+            for (const auto& [dx, dz] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}})
+                CHECK(asset::blockTypeOf(pond.at(x + dx, 0, z + dz)) != Water);
+        }
+    }
+
+    // Removed, it is gone.
+    scene::setFluidReaction(pond.voxels, Lava, Water, asset::AirBlock);
+    CHECK(pond.voxels.fluidReactions.empty());
 }

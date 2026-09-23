@@ -1226,6 +1226,25 @@ int voxelSetBlockFluid(lua_State* L)
     return 0;
 }
 
+int voxelSetFluidReaction(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    const asset::BlockId from = checkBlockId(L, 2, voxels);
+    const asset::BlockId touching = checkBlockId(L, 3, voxels);
+    const asset::BlockId result = checkBlockId(L, 4, voxels);
+    // Both sides have to be fluids: a reaction is what moving fluid does, and
+    // one on a solid would never be looked at.
+    if (!scene::isFluidType(voxels, from) || !scene::isFluidType(voxels, touching)) {
+        const core::I18nArg args[] = {{"from", static_cast<core::i64>(from)},
+                                      {"touching", static_cast<core::i64>(touching)}};
+        raise(L, LUAUG_TR("scene.err.voxel_reaction_not_fluid"), args);
+    }
+    scene::setFluidReaction(voxels, from, touching, result);
+    // Fluids already touching are due to react.
+    scene::wakeAllFluids(voxels);
+    return 0;
+}
+
 int voxelSetBlock(lua_State* L)
 {
     scene::VoxelComponent& voxels = voxelsOf(L);
@@ -1408,6 +1427,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"VoxelService", "SetBlockTextures", voxelSetBlockTextures},
     {"VoxelService", "SetBlockOpacity", voxelSetBlockOpacity},
     {"VoxelService", "SetBlockFluid", voxelSetBlockFluid},
+    {"VoxelService", "SetFluidReaction", voxelSetFluidReaction},
     {"VoxelService", "GetFluidDepth", voxelGetFluidDepth},
     {"VoxelService", "SetBlock", voxelSetBlock},
     {"VoxelService", "GetBlock", voxelGetBlock},

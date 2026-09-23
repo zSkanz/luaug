@@ -179,6 +179,7 @@
   "scene.err.voxel_unknown_block": "No block type has id {id}: {count} are registered, and 0 is air.",
   "scene.err.terrain_heights_shape": "WriteHeights needs whole rows: {count} height(s) do not make rows of {columns} column(s). The table holds one height per column, row after row.",
   "scene.err.voxel_fluid_reach": "A fluid spreads 0 to {max} blocks sideways, not {reach}. 0 makes it an ordinary block again.",
+  "scene.err.voxel_reaction_not_fluid": "A reaction is between two fluids, and block types {from} and {touching} are not both one: SetBlockFluid them first.",
   "scene.err.voxel_fluid_ticks": "A fluid moves once every 1 to 65535 ticks, not {ticks}.",
   "scene.err.voxel_not_empty": "BlockSize can only be set while the block world is empty. Clear it first.",
   "asset.terrain.err.malformed": "The terrain cell is malformed: a count, an offset or a key points outside it.",

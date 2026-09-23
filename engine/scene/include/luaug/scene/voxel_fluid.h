@@ -36,6 +36,10 @@ inline constexpr core::u32 MaxFluidUpdatesPerTick = 8192;
 // Whether a block TYPE is a fluid in this registry.
 [[nodiscard]] bool isFluidType(const VoxelComponent& voxels, asset::BlockId type) noexcept;
 
+// Sets what fluid `from` becomes where it touches fluid `touching`, or removes
+// the reaction when `result` is air. Keeps the list sorted and one per pair.
+void setFluidReaction(VoxelComponent& voxels, asset::BlockId from, asset::BlockId touching, asset::BlockId result);
+
 // Asks the next step to look at a block and its six neighbours, because one of
 // them changed. What a script or a tool calls after writing the grid; a world
 // with no fluid type registered does nothing here.

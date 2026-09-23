@@ -1037,6 +1037,20 @@ void writeVoxels(JsonWriter& writer, const World& world)
         writer.endObject();
     }
     writer.endArray();
+    // Written only when there are any, so a block world with none reads back
+    // byte for byte.
+    if (!voxels->fluidReactions.empty()) {
+        writer.key("fluidReactions");
+        writer.beginArray();
+        for (const VoxelComponent::FluidReaction& reaction : voxels->fluidReactions) {
+            writer.beginArray();
+            writer.value(static_cast<f64>(reaction.from));
+            writer.value(static_cast<f64>(reaction.touching));
+            writer.value(static_cast<f64>(reaction.result));
+            writer.endArray();
+        }
+        writer.endArray();
+    }
     writer.key("chunks");
     writer.beginArray();
     for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
@@ -1066,6 +1080,7 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
     voxels->grid.clear();
     voxels->types.clear();
     voxels->fluidWakes.clear();
+    voxels->fluidReactions.clear();
     voxels->blockSize = 1.0f;
     voxels->revision += 1;
 
@@ -1107,6 +1122,16 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
                 std::clamp(type["fluidReach"].asNumber(0.0), 0.0, static_cast<f64>(asset::MaxFluidReach)));
             read.fluidTicks = static_cast<core::u32>(std::clamp(type["fluidTicks"].asNumber(5.0), 1.0, 65535.0));
             voxels->types.push_back(read);
+        }
+    }
+    if (const JsonValue reactions = node["fluidReactions"]; reactions.type() == core::JsonType::Array) {
+        const auto id = [](const JsonValue& value) {
+            return static_cast<asset::BlockId>(
+                std::clamp(value.asNumber(0.0), 0.0, static_cast<f64>(asset::MaxBlockType)));
+        };
+        for (core::usize at = 0; at < reactions.size(); ++at) {
+            const JsonValue reaction = reactions.at(at);
+            setFluidReaction(*voxels, id(reaction.at(0)), id(reaction.at(1)), id(reaction.at(2)));
         }
     }
     if (const JsonValue chunks = node["chunks"]; chunks.type() == core::JsonType::Array) {

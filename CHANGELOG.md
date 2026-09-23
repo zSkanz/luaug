@@ -62,7 +62,9 @@ does not is engine work and belongs in the git history rather than in this file.
   sideways (shallower with each one), and drains when its source is taken. It
   does not collide, `Raycast` passes through it, and `GetFluidDepth` says how
   full a block is. A world now holds up to 4,095 block types: the rest of a
-  stored id is the block's state.
+  stored id is the block's state. `SetFluidReaction(from, touching, result)`
+  says what one fluid becomes where it touches another: lava meeting water
+  sets as stone.
 - **The flagship stands on terrain** (F1, H3): the middle 512 m of
   `examples/10-open-world` is one streamed `Terrain`, with a hill and a tunnel
   through it, in place of 1,024 16-metre boxes. `tools/sculpt-ground` and

@@ -3094,6 +3094,25 @@
           "ThreadSafety": "Unsafe"
         },
         {
+          "Name": "SetFluidReaction",
+          "Parameters": [
+            {
+              "Name": "from",
+              "Type": "number"
+            },
+            {
+              "Name": "touching",
+              "Type": "number"
+            },
+            {
+              "Name": "result",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
           "Name": "WorldToBlock",
           "Parameters": [
             {

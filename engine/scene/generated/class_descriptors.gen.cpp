@@ -2134,7 +2134,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 13> voxelServiceMethods;
+    static std::array<MethodDesc, 14> voxelServiceMethods;
     voxelServiceMethods = {{
         MethodDesc{
             .name = atoms.intern("RegisterBlock"),
@@ -2159,6 +2159,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "Makes a block type a fluid -- water, lava, oil -- or, with a `reach` of 0, an ordinary block again.\012\012A fluid block placed with `SetBlock` or `FillBlocks` is a SOURCE, and stays. From it the fluid flows DOWN first, filling every block below it that is empty; where it cannot fall it spreads SIDEWAYS, one level shallower per block, for `reach` blocks (1 to 7). Take the source away and what it fed drains. It moves once every `ticksPerStep` simulation ticks (default 5, a quarter of a second): a slower fluid is a larger number.\012\012A fluid is drawn see-through whatever its opacity, as deep as it is full, and it does not collide and does not stop `Raycast`: a character wades into a lake, and a pickaxe swung at the lake bed hits the bed. `GetBlock` answers its type at every level; `GetFluidDepth` says how full it is.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetFluidReaction"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Says what fluid `from` becomes where it touches fluid `touching`: lava meeting water sets as stone, and the water stays water. A block of `from` that touches `touching` on any of its six sides turns into `result` on the next step, a source included. Both types must be fluids. A `result` of 0 removes the reaction; give the pair the other way round a reaction of its own if the other fluid should change too.",
         },
         MethodDesc{
             .name = atoms.intern("GetFluidDepth"),

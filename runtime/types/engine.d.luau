@@ -2091,6 +2091,12 @@ declare extern type VoxelService extends Instance with
     --- character wades into a lake, and a pickaxe swung at the lake bed hits the bed. `GetBlock`
     --- answers its type at every level; `GetFluidDepth` says how full it is.
     function SetBlockFluid(self, id: number, reach: number, ticksPerStep: number?): ()
+    --- Says what fluid `from` becomes where it touches fluid `touching`: lava meeting water sets as
+    --- stone, and the water stays water. A block of `from` that touches `touching` on any of its six
+    --- sides turns into `result` on the next step, a source included. Both types must be fluids. A
+    --- `result` of 0 removes the reaction; give the pair the other way round a reaction of its own if
+    --- the other fluid should change too.
+    function SetFluidReaction(self, from: number, touching: number, result: number): ()
     --- How full a block is with fluid, from 0 to 1: 1 where the fluid is falling or has more of itself
     --- above, a little under 1 at a source, and shallower with every block it has spread. 0 for a block
     --- that is not a fluid.

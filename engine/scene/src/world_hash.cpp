@@ -356,6 +356,11 @@ u64 World::worldHash() const
                     hasher.pod(static_cast<core::u64>(type.fluidTicks));
                 }
             }
+            for (const VoxelComponent::FluidReaction& reaction : voxels->fluidReactions) {
+                hasher.pod(static_cast<core::u64>(reaction.from));
+                hasher.pod(static_cast<core::u64>(reaction.touching));
+                hasher.pod(static_cast<core::u64>(reaction.result));
+            }
             // The steps water is still due to take are part of what the world
             // will become, so they are part of what it is.
             if (!voxels->fluidWakes.empty()) {
