@@ -11,8 +11,10 @@
 #include "luaug/core/id.h"
 #include "luaug/replication/types.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace luaug::core {
 struct EngineError;
@@ -61,6 +63,14 @@ public:
 
     [[nodiscard]] virtual Status status() const = 0;
     [[nodiscard]] virtual Stats stats() const = 0;
+
+    // **Losing interest is streaming out** (ADR 0069 decision 6). On a replica,
+    // an instance the authority stopped sending is kept as a husk, reparented to
+    // nil, when `probe` says a script holds it, and destroyed when not. The
+    // husks are drained here for the host to fire `InstanceStreamedOut` for,
+    // exactly as it does for an evicted chunk. An authority has none.
+    virtual void setReferenceProbe(std::function<bool(core::InstanceId)> probe) = 0;
+    [[nodiscard]] virtual std::vector<core::InstanceId> drainStreamedOut() = 0;
 
     // Closes every connection and stops listening. Idempotent.
     virtual void shutdown() = 0;

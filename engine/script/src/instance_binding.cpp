@@ -1209,6 +1209,19 @@ void pushInstance(lua_State* L, core::InstanceId id)
     lua_replace(L, cache);
 }
 
+bool instanceHeld(lua_State* L, core::InstanceId id)
+{
+    if (!id.valid())
+        return false;
+    const VmContext& ctx = context(L);
+    lua_getref(L, ctx.instanceCacheRef);
+    lua_rawgeti(L, -1, static_cast<int>(id.index) + 1);
+    const core::InstanceId* cached = toInstance(L, -1);
+    const bool held = cached != nullptr && *cached == id;
+    lua_pop(L, 2);
+    return held;
+}
+
 const core::InstanceId* toInstance(lua_State* L, int index) noexcept
 {
     const void* payload = lua_touserdatatagged(L, index, static_cast<int>(UserdataTag::Instance));

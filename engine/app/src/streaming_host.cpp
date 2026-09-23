@@ -159,7 +159,16 @@ void StreamingHost::setWorld(scene::World* world, core::InstanceId streamRoot)
     m_world = world;
     m_streamRoot = streamRoot;
     m_glue = world != nullptr ? std::make_unique<scene::StreamingGlue>(*world, streamRoot) : nullptr;
+    if (m_glue != nullptr && m_probe)
+        m_glue->setReferenceProbe(m_probe);
     m_manager.forgetResidency();
+}
+
+void StreamingHost::setReferenceProbe(std::function<bool(core::InstanceId)> probe)
+{
+    m_probe = std::move(probe);
+    if (m_glue != nullptr)
+        m_glue->setReferenceProbe(m_probe);
 }
 
 void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& entry)

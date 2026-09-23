@@ -16,6 +16,7 @@
 #include <string>
 #include <variant>
 
+#include "lua.h"
 #include "luaug_test_nearly.h"
 #include "project_fixture.h"
 
@@ -1263,4 +1264,73 @@ TEST_CASE("a rebuilt runtime adopts the services it found rather than making mor
     // The mount table is a fact about the project and survives the VM that held
     // it -- without it every chunk name and every `Ctrl+S` forgets its file.
     CHECK(host.mountedScriptCount() == 1);
+}
+
+TEST_CASE("a husk lives while a script holds it, and is swept once nothing does")
+{
+    Captured log;
+    Project project;
+    project.write("main.luau", R"(
+        local streaming = game:GetService("StreamingService")
+        local run = game:GetService("RunService")
+        local held = Instance.new("Part")
+        held.Name = "Held"
+        held.Parent = workspace
+        do
+            local loose = Instance.new("Part")
+            loose.Name = "Loose"
+            loose.Parent = workspace
+        end
+        local seen = 0
+        streaming.InstanceStreamedOut:Connect(function(instance)
+            if instance == held then
+                seen += 1
+            end
+        end)
+        run.Heartbeat:Connect(function()
+            held.Name = if seen > 0 then "Seen" else "Held"
+        end)
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root / "main.luau")).has_value());
+    scene::World& world = host.world();
+    const core::InstanceId held = world.findFirstChild(host.workspace(), world.atoms().intern("Held"));
+    const core::InstanceId loose = world.findFirstChild(host.workspace(), world.atoms().intern("Loose"));
+    REQUIRE(held.valid());
+    REQUIRE(loose.valid());
+
+    // **Held is what the VM still has a handle to**, once the collector has
+    // taken what nothing references.
+    lua_gc(host.runtime().state(), LUA_GCCOLLECT, 0);
+    CHECK(host.instanceHeld(held));
+    CHECK_FALSE(host.instanceHeld(loose));
+
+    // Both reported as husks, the way the glue reports what it kept: the
+    // signal's own argument holds each until its handlers have run.
+    REQUIRE_FALSE(world.setParent(held, core::InstanceId{}).has_value());
+    REQUIRE_FALSE(world.setParent(loose, core::InstanceId{}).has_value());
+    const auto resident = [](core::DVec3, core::f64) { return true; };
+    host.publishStreamingResults({held, loose}, resident);
+    CHECK(host.huskCount() == 2);
+    host.tick();
+
+    // The handler saw its instance, and the handle still resolves on a husk.
+    CHECK(world.atoms().text(world.name(held)) == "Seen");
+    CHECK_FALSE(world.parentOf(held).valid());
+
+    // Nothing holds the other one now, and the next publish sweeps it.
+    lua_gc(host.runtime().state(), LUA_GCCOLLECT, 0);
+    host.publishStreamingResults({}, resident);
+    CHECK(host.huskCount() == 1);
+    host.tick();
+    CHECK(world.alive(held));
+    CHECK_FALSE(world.alive(loose));
+
+    // Parented back into the world by a script, it is not a husk any more.
+    REQUIRE_FALSE(world.setParent(held, host.workspace()).has_value());
+    host.publishStreamingResults({}, resident);
+    CHECK(host.huskCount() == 0);
+    CHECK(world.alive(held));
+    CHECK_FALSE(log.contains("[script.err."));
 }

@@ -1023,6 +1023,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 #endif
     }
 
+    // **The husk contract's one question**, asked of whichever world is live
+    // when something leaves (architecture.md §4): through the reference to
+    // `host` rather than the object, because a reload replaces the host.
+    const auto held = [&host](core::InstanceId id) { return host != nullptr && host->instanceHeld(id); };
+    streaming.setReferenceProbe(held);
+    if (network != nullptr)
+        network->setReferenceProbe(held);
+
     // The editor is told which scene the world holds, so its save writes back
     // to that one rather than refusing for want of an open scene.
     if (options.editor && host->bootSceneApplied())
@@ -2230,7 +2238,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // to wait for, so the honest answer is "loaded" on the next pump -- and
         // it has to be given, because a call that hangs forever is worse than
         // one that refuses.
-        host->publishStreamingResults(streaming.drainStreamedOut(), [&streaming](core::DVec3 position, f64 radius) {
+        // A chunk evicted and an instance out of a replica's interest are one
+        // event to a script (ADR 0069 decision 6), so both land in one list.
+        std::vector<core::InstanceId> streamedOut = streaming.drainStreamedOut();
+        if (network != nullptr) {
+            for (const core::InstanceId husk : network->drainStreamedOut())
+                streamedOut.push_back(husk);
+        }
+        host->publishStreamingResults(streamedOut, [&streaming](core::DVec3 position, f64 radius) {
             return streaming.areaResident(position, radius);
         });
 

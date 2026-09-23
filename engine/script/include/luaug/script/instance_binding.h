@@ -72,6 +72,14 @@ struct MethodCoverage
 // it.
 void pushInstance(lua_State* L, core::InstanceId id);
 
+// Whether the VM still holds a handle to `id`: its userdata is in the weak
+// instance cache and the collector has not taken it. **Conservative on
+// purpose.** A handle a script dropped still counts until the collector reaches
+// it. That is the side the husk contract (architecture.md §4) must err on: a
+// husk nobody holds is swept a little later, but an instance destroyed under a
+// live handle leaves the script holding nothing.
+[[nodiscard]] bool instanceHeld(lua_State* L, core::InstanceId id);
+
 // Null when the value is not an Instance. Does not check whether the instance
 // is still alive: a destroyed handle is a legitimate thing to hold and to
 // compare, and only *using* one raises (api-design.md divergence #25).

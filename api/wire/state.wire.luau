@@ -696,9 +696,11 @@ local Messages: { Schema.Message } = {
         Id = 4,
         Channel = "Control",
         Direction = "ToReplica",
-        Doc = "An instance leaving interest. **The same event as a chunk being evicted**, reported "
-            .. "through the same `InstanceStreamedOut` a script already handles -- a second spelling "
-            .. "of one thing would mean every game handles both.",
+        Doc = "Instances a replica no longer has, in two lists: those the authority destroyed, then "
+            .. "those that only left this peer's interest (protocol 6). **Leaving interest is the same "
+            .. "event as a chunk being evicted**: one a script holds becomes a husk, reparented to nil, "
+            .. "and is reported through the same `InstanceStreamedOut` a script already handles -- a "
+            .. "second spelling of one thing would mean every game handles both.",
     },
     {
         Name = "Snapshot",

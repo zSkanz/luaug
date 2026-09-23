@@ -12,6 +12,7 @@
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
 #include "luaug/scene/players.h"
+#include "luaug/script/instance_binding.h"
 #include "luaug/script/net_module.h"
 #include "luaug/ui/scene_types.h"
 
@@ -870,8 +871,42 @@ void WorldHost::publishStreamingResults(const std::vector<core::InstanceId>& str
 {
     for (const core::InstanceId instance : streamedOut) {
         script::fireStreamedOut(m_runtime->state(), instance);
+        m_husks.push_back(instance);
     }
+
+    // **A husk lives as long as a script holds it, and no longer.** Without
+    // this sweep a streamed world would keep every husk it ever made, and a
+    // player walking back and forth past something a script once looked at
+    // would grow the world by one instance per pass.
+    scene::World& world = *m_world;
+    const auto heldBelow = [&](core::InstanceId top) {
+        std::vector<core::InstanceId> stack{top};
+        while (!stack.empty()) {
+            const core::InstanceId at = stack.back();
+            stack.pop_back();
+            if (instanceHeld(at))
+                return true;
+            for (core::InstanceId child = world.firstChild(at); child.valid(); child = world.nextSibling(child))
+                stack.push_back(child);
+        }
+        return false;
+    };
+    std::erase_if(m_husks, [&](core::InstanceId husk) {
+        if (!world.alive(husk) || world.parentOf(husk).valid())
+            return true;
+        // A husk's subtree came with it, and a child a script holds keeps the
+        // husk above it, since destroying the husk would destroy the child.
+        if (heldBelow(husk))
+            return false;
+        (void)world.destroy(husk);
+        return true;
+    });
     script::resumeAreaWaiters(m_runtime->state(), areaResident);
+}
+
+bool WorldHost::instanceHeld(core::InstanceId id)
+{
+    return script::instanceHeld(m_runtime->state(), id);
 }
 
 void WorldHost::preRender(f64 renderDt)

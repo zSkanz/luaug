@@ -94,8 +94,12 @@ own brief. Each is a thing a person playing notices:
 
 ## Not decided here
 
-- **Leaving interest still destroys the replica's copy**, rather than using
-  the husk-and-`InstanceStreamedOut` contract of ADR 0069 decision 6.
+- ~~**Leaving interest still destroys the replica's copy**~~ -- built the same
+  day (protocol 6). A despawn now carries two lists, destroyed and streamed
+  out, since only the authority knows which is which. A streamed-out copy
+  that a script holds becomes a husk, reparented to nil, and fires
+  `InstanceStreamedOut`, as ADR 0069 decision 6 says. Building it found D160:
+  the chunk streamer's half of the same contract had never been wired.
 - **The vertical axis:** the radius is a sphere around the character, so this
   does not have the column problem the plan warned about. Chunked interest is
   still not built.

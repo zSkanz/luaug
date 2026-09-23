@@ -34,6 +34,7 @@
 #include "luaug/replication/types.h"
 
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -219,6 +220,9 @@ private:
     void onSnapshot(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void onSpawn(scene::World& world, std::span<const u8> bytes);
     void onDespawn(scene::World& world, std::span<const u8> bytes);
+    // Every record of `id` this session keeps, gone: the local mapping, what
+    // was written, the samples, and the id in every remembered state.
+    void forget(u32 id);
     void onPlayers(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
     void resolveCharacters(scene::World& world, core::InstanceId root);
@@ -242,6 +246,9 @@ private:
     // Ids that have left. Never reused, so this only grows, by one id per
     // despawn: a filter a reconstructed state must pass.
     std::set<u32> m_departed;
+    std::function<bool(core::InstanceId)> m_probe;
+    // Husks made since the host last drained them.
+    std::vector<core::InstanceId> m_streamedOut;
     std::deque<std::shared_ptr<const WorldState>> m_states;
     u64 m_checksumFailures = 0;
     Stats m_stats;
@@ -271,6 +278,18 @@ public:
     // applies each snapshot as it arrives, which is what a test comparing two
     // worlds pixel for pixel wants.
     void setInterpolationDelay(u32 ticks) noexcept { m_interpolationDelay = ticks; }
+
+    // Whether a script holds an instance, asked before one that left interest
+    // is removed: held, it becomes a husk (reparented to nil) and is reported
+    // through `drainStreamedOut`; not held, it is destroyed. Unset, everything
+    // is destroyed, which is what a test with no VM wants.
+    void setReferenceProbe(std::function<bool(core::InstanceId)> probe) { m_probe = std::move(probe); }
+    [[nodiscard]] std::vector<core::InstanceId> drainStreamedOut()
+    {
+        std::vector<core::InstanceId> drained;
+        drained.swap(m_streamedOut);
+        return drained;
+    }
 };
 
 } // namespace luaug::replication

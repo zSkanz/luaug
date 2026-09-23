@@ -80,6 +80,10 @@ public:
     void setWorld(scene::World* world, core::InstanceId streamRoot);
     void setPhysics(scene::PhysicsSync* physics) noexcept { m_physics = physics; }
 
+    // Asked before an instance is evicted: true keeps it as a husk. Kept here
+    // and handed to every glue this host builds, since a reload builds a new one.
+    void setReferenceProbe(std::function<bool(core::InstanceId)> probe);
+
     // Where the world is being watched from this frame: every focus a script
     // registered, or the current camera when it registered none (D098).
     //
@@ -149,6 +153,7 @@ private:
     // no longer the stream root.
     core::InstanceId m_streamRoot;
     scene::PhysicsSync* m_physics = nullptr;
+    std::function<bool(core::InstanceId)> m_probe;
     bool m_active = false;
     u64 m_rebases = 0;
     f64 m_lastPumpMs = 0.0;

@@ -14,6 +14,7 @@
 #include "luaug/scene/players.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <string>
 
@@ -749,5 +750,66 @@ TEST_CASE("night on the authority is night on the replica: Lighting's properties
     match.run(3);
     CHECK(static_cast<double>(match.client.world.lighting().find(match.client.lighting)->clockTime) ==
           doctest::Approx(6.0));
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("an instance leaving interest that a script holds is a husk; one the authority destroyed is gone")
+{
+    PlayedMatch match;
+    match.server.world.engineState().streamingLoadRadius = 100.0;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId held = match.part("Held", core::DVec3{40.0, 1.0, 0.0});
+    const core::InstanceId loose = match.part("Loose", core::DVec3{50.0, 1.0, 0.0});
+    // Held, under a part nobody holds: it must survive its parent leaving.
+    const core::InstanceId heldChild = match.part("HeldChild", core::DVec3{50.0, 2.0, 0.0});
+    REQUIRE_FALSE(match.server.world.setParent(heldChild, loose).has_value());
+    const core::InstanceId doomed = match.part("Doomed", core::DVec3{30.0, 1.0, 0.0});
+    match.server.world.players().find(match.remote())->character = racer;
+    match.run(4);
+
+    const core::InstanceId heldCopy = match.copyOf(held);
+    const core::InstanceId looseCopy = match.copyOf(loose);
+    const core::InstanceId childCopy = match.copyOf(heldChild);
+    const core::InstanceId doomedCopy = match.copyOf(doomed);
+    REQUIRE(heldCopy.valid());
+    REQUIRE(looseCopy.valid());
+    REQUIRE(childCopy.valid());
+    REQUIRE(doomedCopy.valid());
+    const std::vector<core::InstanceId> scriptHolds{heldCopy, childCopy, doomedCopy};
+    match.replica->setReferenceProbe([&scriptHolds](core::InstanceId id) {
+        return std::find(scriptHolds.begin(), scriptHolds.end(), id) != scriptHolds.end();
+    });
+
+    match.server.world.parts().find(held)->cframe.position = core::DVec3{500.0, 1.0, 0.0};
+    match.server.world.parts().find(loose)->cframe.position = core::DVec3{600.0, 1.0, 0.0};
+    match.server.world.parts().find(heldChild)->cframe.position = core::DVec3{600.0, 2.0, 0.0};
+    REQUIRE(match.server.world.destroy(doomed));
+    match.server.world.retireDestroyed();
+    match.run(4);
+    match.client.world.retireDestroyed();
+
+    // **Streamed out, and held: a husk** -- alive, parented to nil, reported.
+    CHECK(match.client.world.alive(heldCopy));
+    CHECK_FALSE(match.client.world.parentOf(heldCopy).valid());
+    CHECK(match.client.world.alive(childCopy));
+    CHECK_FALSE(match.client.world.parentOf(childCopy).valid());
+    // Streamed out and not held, or destroyed by the authority whoever holds
+    // it: gone.
+    CHECK_FALSE(match.client.world.alive(looseCopy));
+    CHECK_FALSE(match.client.world.alive(doomedCopy));
+    std::vector<core::InstanceId> husks = match.replica->drainStreamedOut();
+    std::sort(husks.begin(), husks.end(), [](core::InstanceId a, core::InstanceId b) { return a.index < b.index; });
+    std::vector<core::InstanceId> expected{heldCopy, childCopy};
+    std::sort(expected.begin(), expected.end(),
+              [](core::InstanceId a, core::InstanceId b) { return a.index < b.index; });
+    CHECK(husks == expected);
+    CHECK(match.replica->drainStreamedOut().empty());
+
+    // Walking back in is a fresh copy, whole, and the husk is left to the
+    // script that holds it.
+    match.server.world.parts().find(held)->cframe.position = core::DVec3{20.0, 1.0, 0.0};
+    match.run(4);
+    REQUIRE(match.copyOf(held).valid());
+    CHECK(match.copyOf(held) != heldCopy);
     CHECK(match.replica->checksumFailures() == 0);
 }

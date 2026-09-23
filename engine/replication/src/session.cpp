@@ -590,11 +590,22 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const st
     std::erase_if(leaving, [](u32 id) { return id >= ServiceNetIdBase; });
 
     if (!leaving.empty()) {
+        // **Two lists: destroyed, then streamed out.** The replica treats them
+        // differently -- a destroyed instance is gone, one that only left this
+        // peer's interest is kept as a husk for a script that holds it -- and
+        // only the authority knows which is which: a streamed-out id is still in
+        // the whole world's state and only missing from this peer's.
+        std::vector<u32> destroyed;
+        std::vector<u32> streamed;
+        for (const u32 id : leaving)
+            (findEntity(everything, id) != nullptr ? streamed : destroyed).push_back(id);
         Writer despawn;
         despawn.u8v(static_cast<u8>(MessageType::Despawn));
-        despawn.u32v(static_cast<u32>(leaving.size()));
-        for (const u32 id : leaving)
-            despawn.u32v(id);
+        for (const std::vector<u32>* list : {&destroyed, &streamed}) {
+            despawn.u32v(static_cast<u32>(list->size()));
+            for (const u32 id : *list)
+                despawn.u32v(id);
+        }
         sendBytes(m_transport, peer.id, despawn.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
         m_stats.despawned += static_cast<u32>(leaving.size());
     }
@@ -950,28 +961,64 @@ void ReplicaSession::onDespawn(scene::World& world, std::span<const u8> bytes)
 {
     Reader reader(bytes);
     (void)reader.u8v();
-    const u32 count = reader.u32v();
-    for (u32 at = 0; at < count && reader.ok(); ++at) {
-        const u32 id = reader.u32v();
-        if (!reader.ok())
-            break;
-        m_departed.insert(id);
-        m_samples.erase(id);
-        if (const auto found = m_locals.find(id); found != m_locals.end()) {
-            if (world.alive(found->second))
-                (void)world.destroy(found->second);
-            m_locals.erase(found);
+    std::vector<u32> destroyed;
+    std::vector<u32> streamed;
+    for (std::vector<u32>* list : {&destroyed, &streamed}) {
+        const u32 count = reader.u32v();
+        for (u32 at = 0; at < count && reader.ok(); ++at) {
+            const u32 id = reader.u32v();
+            if (reader.ok())
+                list->push_back(id);
         }
-        m_written.erase(id);
-        // Out of every remembered state too, so a diff against one of them
-        // reconstructs what the authority has -- which no longer includes it.
-        for (std::shared_ptr<const WorldState>& state : m_states) {
-            if (findEntity(*state, id) == nullptr)
-                continue;
-            auto copy = std::make_shared<WorldState>(*state);
-            std::erase_if(copy->entities, [id](const EntityState& entity) { return entity.id.value == id; });
-            state = std::move(copy);
+    }
+    if (!reader.ok())
+        return;
+
+    // **Held ones first, then the rest.** A husk is taken out of the tree
+    // before anything is destroyed, so a part a script holds survives its
+    // parent leaving with it -- `destroy` takes the whole subtree.
+    std::vector<InstanceId> removed;
+    for (const u32 id : streamed) {
+        const auto found = m_locals.find(id);
+        if (found == m_locals.end() || !world.alive(found->second))
+            continue;
+        if (m_probe && m_probe(found->second)) {
+            (void)world.setParent(found->second, InstanceId{});
+            m_streamedOut.push_back(found->second);
         }
+        else {
+            removed.push_back(found->second);
+        }
+    }
+    for (const u32 id : destroyed) {
+        if (const auto found = m_locals.find(id); found != m_locals.end() && world.alive(found->second))
+            removed.push_back(found->second);
+    }
+    for (const InstanceId gone : removed) {
+        if (world.alive(gone))
+            (void)world.destroy(gone);
+    }
+
+    for (const std::vector<u32>* list : {&destroyed, &streamed}) {
+        for (const u32 id : *list)
+            forget(id);
+    }
+}
+
+void ReplicaSession::forget(u32 id)
+{
+    m_departed.insert(id);
+    m_samples.erase(id);
+    m_locals.erase(id);
+    m_written.erase(id);
+    // Out of every remembered state too, so a diff against one of them
+    // reconstructs what the authority has -- which no longer includes it.
+    for (std::shared_ptr<const WorldState>& state : m_states) {
+        if (findEntity(*state, id) == nullptr)
+            continue;
+        auto copy = std::make_shared<WorldState>(*state);
+        std::erase_if(copy->entities, [id](const EntityState& entity) { return entity.id.value == id; });
+        state = std::move(copy);
     }
 }
 

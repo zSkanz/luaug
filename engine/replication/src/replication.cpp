@@ -43,6 +43,8 @@ public:
                 return error;
             m_replica.emplace(*m_transport, authority);
             m_replica->setInterpolationDelay(m_config.interpolationDelayTicks);
+            if (m_probe)
+                m_replica->setReferenceProbe(m_probe);
             return std::nullopt;
         }
         transport.port = m_config.port;
@@ -90,6 +92,18 @@ public:
         return status;
     }
 
+    void setReferenceProbe(std::function<bool(core::InstanceId)> probe) override
+    {
+        m_probe = std::move(probe);
+        if (m_replica.has_value())
+            m_replica->setReferenceProbe(m_probe);
+    }
+
+    [[nodiscard]] std::vector<core::InstanceId> drainStreamedOut() override
+    {
+        return m_replica.has_value() ? m_replica->drainStreamedOut() : std::vector<core::InstanceId>{};
+    }
+
     [[nodiscard]] Stats stats() const override
     {
         if (m_authority.has_value())
@@ -117,6 +131,7 @@ private:
     Config m_config;
     std::optional<AuthoritySession> m_authority;
     std::optional<ReplicaSession> m_replica;
+    std::function<bool(core::InstanceId)> m_probe;
     u64 m_tick = 0;
 };
 

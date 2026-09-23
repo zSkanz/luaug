@@ -19,8 +19,7 @@ does not is engine work and belongs in the git history rather than in this file.
   `Player.Character` names a player's part; a replica moves its own at once and
   the authority's snapshots correct it, draws everyone else between snapshots
   instead of stepping, and is sent only what is near its character. Decals and
-  `Lighting` (the time of day, the light and the fog) replicate too. The wire
-  protocol is version 5.
+  `Lighting` (the time of day, the light and the fog) replicate too.
 - **`SurfaceGui` and `BillboardGui`** (F3): UI drawn in the world -- on a face of
   a part (`Enum.Face`, `PixelsPerMetre`) or over a point and facing the camera,
   sized in metres, in pixels, or both. The children are the screen's own
@@ -35,6 +34,10 @@ does not is engine work and belongs in the git history rather than in this file.
 - `examples/17-cave`: a tunnel into a mountain, dark inside and lit by its lamps.
 - **Soft particles**: smoke and fire fade where they meet a surface instead of
   showing a hard line along it.
+- **A replica keeps what a script holds.** An instance that leaves a replica's
+  interest becomes a husk, reparented to nil, and fires
+  `StreamingService.InstanceStreamedOut`, exactly as an evicted chunk's does.
+  One the authority destroyed is destroyed. The wire protocol is version 6.
 
 ### Fixed
 
@@ -43,6 +46,8 @@ does not is engine work and belongs in the git history rather than in this file.
   curtains to the floor as the level of detail changed.
 - A tree of `Cutout` leaf blocks casts its leaves, holes and all, rather than a
   solid square.
+- A script holding a streamed instance keeps a working handle when its chunk is
+  evicted, and a husk nothing holds any more is destroyed (D160).
 
 ## [1.1.0] — 2026-09-23
 

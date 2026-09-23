@@ -212,6 +212,16 @@ public:
     void publishStreamingResults(const std::vector<core::InstanceId>& streamedOut,
                                  const std::function<bool(core::DVec3, f64)>& areaResident);
 
+    // Whether a script still holds `id` -- the question the husk contract asks
+    // before anything leaves the world (architecture.md §4). Asked by the
+    // streaming glue and by a replica losing interest, which are the same event.
+    [[nodiscard]] bool instanceHeld(core::InstanceId id);
+
+    // Husks this world is keeping for a script, swept at every publish: one no
+    // script holds any more is destroyed, and one a script parented back into
+    // the world is not a husk any more and is left alone.
+    [[nodiscard]] core::usize huskCount() const noexcept { return m_husks.size(); }
+
     // The render-rate phase. Never fires headless -- headless is the same
     // scheduler minus the render steps, and this is one of them.
     void preRender(f64 renderDt);
@@ -403,6 +413,9 @@ private:
     // and a `World` holds references to them.
     std::optional<scene::World> m_world;
     std::optional<script::ScriptRuntime> m_runtime;
+    // Instances reparented to nil because a script held them when they
+    // streamed out, in the order they left.
+    std::vector<core::InstanceId> m_husks;
     // Declared before the mirror, and destroyed after it: the mirror holds a
     // reference to this and tears its world down in its own destructor.
     physics::PhysicsResult m_backend;
