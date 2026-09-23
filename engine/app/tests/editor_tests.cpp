@@ -4673,11 +4673,10 @@ TEST_CASE("a stroke stamps by distance, not by frame count")
     // ten times as often -- that was the defect this test was written for,
     // when a high framerate stamped once for the whole drag.
     //
-    // Not identical any more, and on purpose: a brush aims at the ground as it
-    // now is (the owner, 2026-09-23), so each frame's ray lands a little lower
-    // in the trench it is digging, and where the frames fall moves the stamps
-    // by a few centimetres. Identical ground needed a brush aimed at the field
-    // as the stroke began, which could not see its own work while held.
+    // A Subtract's drag aims at the ground the stroke began on
+    // (`Stroke::aimField`): aimed at the live ground, each frame's ball landed
+    // in the hole the last one left, and the faster drag tunnelled four metres
+    // deeper than the slower one.
     CHECK(std::abs(static_cast<int>(slow.stamps) - static_cast<int>(fast.stamps)) <= 1);
     CHECK(slow.stamps > 1);
     for (core::usize at = 0; at < slow.heights.size(); ++at) {
@@ -4706,14 +4705,57 @@ TEST_CASE("a brush held still keeps working the ground under it, as it now is")
         return std::pair{rig.editor.lastStrokeStamps(),
                          static_cast<double>(asset::heightAt(rig.field().field, 0.0, 0.0).value_or(0.0f))};
     };
-    const auto [raised, top] = hold(Editor::BrushOp::Add);
-    // A second at full strength: twenty stamps, and a hill several times one
-    // stamp's height -- each stamp climbed the last one.
-    CHECK(raised >= 15);
+    // Grow and Erode: a second at full strength is twenty stamps, and a hill
+    // several times one stamp's height -- each stamp climbed the last one.
+    const auto [grown, top] = hold(Editor::BrushOp::Grow);
+    CHECK(grown >= 15);
     CHECK(top > 4.0);
-    const auto [dug, bottom] = hold(Editor::BrushOp::Subtract);
-    CHECK(dug >= 15);
+    const auto [eroded, bottom] = hold(Editor::BrushOp::Erode);
+    CHECK(eroded >= 15);
     CHECK(bottom < -4.0);
+    // Add and Subtract: a ball of the brush's radius a stamp, each centred
+    // where the one before it left the ground -- so a held Add builds towards
+    // the camera and a held Subtract tunnels away from it, at the brush's
+    // speed rather than the framerate's.
+    const auto [built, peak] = hold(Editor::BrushOp::Add);
+    CHECK(built >= 2);
+    CHECK(peak > 6.0);
+    const auto [bored, floor] = hold(Editor::BrushOp::Subtract);
+    CHECK(bored >= 2);
+    CHECK(floor < -6.0);
+}
+
+TEST_CASE("Add clicked on the side of the terrain builds out from it, and stands no column under it")
+{
+    // **The owner's picture**: Add clicked on the side of the terrain stood
+    // pillars under the click, because the round Add raised columns, and a
+    // column with no ground in it was laid as a slab from far below. It is a
+    // ball now, centred on the aim, as the reference editor's is.
+    BrushRig rig;
+    rig.editor.setViewport(rig.rect);
+    // Looking along -x at the terrain's side wall, which stands at x = 32.
+    rig.editor.setCamera(
+        core::perspective(60.0f * 3.14159265f / 180.0f, rig.rect.width / rig.rect.height, 0.1f, 5000.0f),
+        core::lookAt(core::Vec3{}, core::Vec3{-1.0f, 0.0f, 0.0f}, core::Vec3{0.0f, 1.0f, 0.0f}),
+        core::DVec3{80.0, -5.0, 0.0});
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Add);
+    rig.editor.setBrushRadius(4.0f);
+    const core::Vec2 pixel = rig.pixelOf(core::DVec3{32.0, -5.0, 0.0});
+    rig.frame(pixel, true, true);
+    rig.frame(pixel, false, false);
+
+    const asset::TerrainField& field = rig.field().field;
+    const auto solid = [&](double x, double y) {
+        return asset::sampleField(field, core::DVec3{x, y, 0.0}).distance < 0.0f;
+    };
+    // Out from the wall, round: as far out as the radius at the aim's height,
+    // and nothing past it.
+    CHECK(solid(35.0, -5.0));
+    CHECK_FALSE(solid(37.5, -5.0));
+    // And nothing under it: the ball's bottom is a radius below the aim.
+    CHECK_FALSE(solid(34.0, -11.0));
+    CHECK_FALSE(solid(34.0, -25.0));
 }
 
 TEST_CASE("painting through the editor changes material and not height")

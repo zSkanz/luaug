@@ -121,17 +121,26 @@ Material 0 is not ground: it is what digging writes.
 
 ## In the editor
 
-The terrain tools sculpt, dig and paint with a brush, one undo step per stroke.
+The terrain tools sculpt and paint with a brush, one undo step per stroke.
+
+| Tool | What it does |
+|---|---|
+| Add | A ball (or box) of ground, centred where you aim. On a field it is a mound; on the side of a cliff it builds out from the cliff. |
+| Subtract | The same ball taken away. Aimed at a cliff face, it is how a cave is started. |
+| Grow | Moves the surface outwards along its own slope: a field rises, a cliff comes forward, an overhang grows down. |
+| Erode | Moves the surface inwards: the ground wears away. |
+| Smooth | Blurs the ground towards the average of its neighbours. |
+| Flatten | Pulls the ground towards the height where the stroke began. |
+
+None of them moves a column of ground, so a click on the side of the terrain
+never stands a pillar under it.
 
 - **Dragging** stamps the brush every step of the way.
 - **Holding it still** keeps working the ground under it, as that ground now
   is:
-  - Add piles up towards you;
-  - a raise keeps climbing;
-  - a dig keeps going down;
+  - Add builds towards you and Subtract tunnels away from you;
+  - Grow keeps climbing and Erode keeps wearing;
   - the brush's strength sets how fast.
-- **Aimed at steep ground, dig carves into the wall** and bores forward while
-  the button is held. That is how a cave is started from a cliff face.
 
 **Heightmap** lays an image over the ground:
 

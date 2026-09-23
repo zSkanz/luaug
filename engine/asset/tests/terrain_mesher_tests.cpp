@@ -293,3 +293,43 @@ TEST_CASE("ground laid on empty terrain has walls and a bottom all round, and th
     // Shade, not the black of a cave's roof.
     CHECK(bottomSky > 0.25f);
 }
+
+TEST_CASE("a ball on the side of the terrain shades the wall near it, not all the way down")
+{
+    // **The owner's picture**: a ball added to the side of the terrain stood a
+    // dark stripe down the whole wall under it, because a point below any of a
+    // column's ground counted as under a roof. The sky term marches rays now:
+    // the wall just under the ball is in its shade, and the wall twenty metres
+    // down sees the sky as the open wall beside it does.
+    TerrainField field(settingsOf());
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
+    (void)fillBall(field, core::DVec3{32.0, -4.0, 16.0}, 4.0, 1);
+    const std::vector<std::pair<core::i32, core::i32>> runs = activeRuns(field, 1, 0, 1);
+    REQUIRE_FALSE(runs.empty());
+    // The region past the wall, which owns the ball's outer half and the
+    // cells either side of the wall.
+    MeshRegion region = regionAt(32, runs.front().first, 0);
+    region.cellsY = static_cast<core::u32>(runs.back().second - runs.front().first + 1);
+    const TerrainMesh meshed = meshField(field, region);
+    float deepUnder = 1.0f;
+    float deepAside = 1.0f;
+    float underBall = 1.0f;
+    for (const Vertex& vertex : meshed.mesh.vertices) {
+        // Where the ball meets the wall, under it: the crease between them.
+        if (vertex.position.x < 34.0f && vertex.position.y < -5.0f && vertex.position.y > -10.0f &&
+            std::abs(vertex.position.z - 16.0f) < 3.0f)
+            underBall = std::min(underBall, vertex.tangent[1]);
+        if (vertex.normal.x < 0.9f || std::abs(vertex.position.x - 32.0f) > 1.0f)
+            continue;
+        const float sky = vertex.tangent[1];
+        if (vertex.position.y < -20.0f && vertex.position.y > -26.0f) {
+            if (std::abs(vertex.position.z - 16.0f) < 1.0f)
+                deepUnder = std::min(deepUnder, sky);
+            if (std::abs(vertex.position.z - 28.0f) < 1.0f)
+                deepAside = std::min(deepAside, sky);
+        }
+    }
+    CHECK(deepUnder > 0.9f);
+    CHECK(static_cast<double>(deepUnder) == doctest::Approx(static_cast<double>(deepAside)).epsilon(0.05));
+    CHECK(underBall < deepUnder);
+}

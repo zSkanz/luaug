@@ -399,6 +399,10 @@ namespace {
     switch (op) {
     case Editor::BrushOp::Subtract:
         return "subtract";
+    case Editor::BrushOp::Grow:
+        return "grow";
+    case Editor::BrushOp::Erode:
+        return "erode";
     case Editor::BrushOp::Smooth:
         return "smooth";
     case Editor::BrushOp::Flatten:
@@ -413,6 +417,10 @@ namespace {
 {
     if (name == "subtract")
         return Editor::BrushOp::Subtract;
+    if (name == "grow")
+        return Editor::BrushOp::Grow;
+    if (name == "erode")
+        return Editor::BrushOp::Erode;
     if (name == "smooth")
         return Editor::BrushOp::Smooth;
     if (name == "flatten")
@@ -436,7 +444,7 @@ namespace {
 }
 
 // What one stroke is called in the undo menu. A person reading "Undo Smooth"
-// knows what is about to come back; "Undo Sculpt" for four different tools does
+// knows what is about to come back; "Undo Sculpt" for six different tools does
 // not.
 [[nodiscard]] const char* strokeLabel(Editor::Tool tool, Editor::BrushOp op) noexcept
 {
@@ -445,7 +453,11 @@ namespace {
     }
     switch (op) {
     case Editor::BrushOp::Subtract:
-        return "Dig";
+        return "Subtract";
+    case Editor::BrushOp::Grow:
+        return "Grow";
+    case Editor::BrushOp::Erode:
+        return "Erode";
     case Editor::BrushOp::Smooth:
         return "Smooth";
     case Editor::BrushOp::Flatten:
@@ -453,7 +465,7 @@ namespace {
     case Editor::BrushOp::Add:
         break;
     }
-    return "Sculpt";
+    return "Add";
 }
 
 [[nodiscard]] Editor::Tool toolFrom(std::string_view name) noexcept
@@ -3070,7 +3082,9 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         // hillside levels it to where the stroke began rather than chasing its
         // own result downhill.
         stroke.plane = static_cast<f32>(m_brushAim->position.y);
-        stroke.carve = carves(m_tool, m_brush, m_brushAim->normal);
+        stroke.carve = carves(m_tool, m_brush);
+        if (stroke.carve)
+            stroke.aimField = terrain->field;
         m_history.record(world, strokeLabel(m_tool, m_brush.op), stroke.gesture);
         m_stroke = stroke;
 
@@ -3085,25 +3099,17 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     // way from the last stamp, so it is a function of where the pointer went
     // rather than of how many frames it took, and a pointer held still keeps
     // working the ground under it, as it now is.
-    holdStroke(*terrain, ray.direction, dt);
+    holdStroke(*terrain, ray, dt);
     m_pending.reset();
     return true;
 }
 
 namespace {
 
-// **Steeper than this, a dig carves into the ground instead of lowering it.**
-// The normal's upward part: 0.7 is a slope of about 45 degrees. Lowering a
-// column is what digging a flat field means, and the only thing it can mean on
-// a height map -- but aimed at a cliff it digs a pit in the ground ABOVE the
-// cliff, and the wall the person pointed at does not move. A hole into a wall
-// is volume, so it is carved as volume.
-constexpr float CarveSteepness = 0.7f;
-
-// How fast a carving stroke held still bores into the ground, in metres per
-// second, from the weakest brush to the strongest. A speed rather than a stamp
-// count per frame, so the tunnel does not depend on the framerate -- and slow
-// enough to stop where the person meant to.
+// How fast an Add or Subtract held still builds out of the ground or bores into
+// it, in metres per second, from the weakest brush to the strongest. A speed
+// rather than a stamp count per frame, so the result does not depend on the
+// framerate -- and slow enough to stop where the person meant to.
 constexpr double CarveSpeedMin = 1.5;
 constexpr double CarveSpeedMax = 8.0;
 
@@ -3112,30 +3118,28 @@ constexpr double CarveSpeedMax = 8.0;
 constexpr int CarveStampsPerFrame = 4;
 
 // How often a brush held still stamps, from the weakest brush to the
-// strongest: every tool but a carve, which paces itself by boring speed.
+// strongest: every tool but Add and Subtract, which pace themselves by speed.
 constexpr double HeldStampsMin = 4.0;
 constexpr double HeldStampsMax = 20.0;
 
-// How far one stamp of the round brush raises the centre of its disc, in
-// metres. Scaled by the radius, so a big brush builds a hill as fast relative
+// How far one stamp of Grow or Erode moves the surface at the brush's centre,
+// in metres. Scaled by the radius, so a big brush builds a hill as fast relative
 // to its size as a small one builds a bump; with the default spacing a point
-// under a drag is stamped about eight times, so a full-strength pass lifts it
+// under a drag is stamped about eight times, so a full-strength pass moves it
 // by roughly a third of the radius.
-[[nodiscard]] float raiseAmount(const Editor::Brush& brush) noexcept
+[[nodiscard]] float growAmount(const Editor::Brush& brush) noexcept
 {
     return std::clamp(brush.strength, 0.0f, 1.0f) * brush.radius * 0.12f;
 }
 
 } // namespace
 
-bool Editor::carves(Tool tool, const Brush& brush, core::Vec3 normal) noexcept
+bool Editor::carves(Tool tool, const Brush& brush) noexcept
 {
-    if (tool != Tool::Sculpt || brush.op != BrushOp::Subtract)
-        return false;
-    return brush.shape == BrushShape::Box || normal.y < CarveSteepness;
+    return tool == Tool::Sculpt && (brush.op == BrushOp::Add || brush.op == BrushOp::Subtract);
 }
 
-void Editor::holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt)
+void Editor::holdStroke(scene::TerrainComponent& terrain, const PickRay& ray, double dt)
 {
     // **Two motions, told apart by direction.** The live aim moves ALONG the
     // ray when the stamp before it opened the wall up -- that is boring, and it
@@ -3145,14 +3149,26 @@ void Editor::holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirectio
     const auto radius = static_cast<double>(m_brush.radius);
     const auto spacing = static_cast<double>(m_brush.spacing);
     const core::DVec3 aim = m_brushAim->position;
-    const core::DVec3 moved{aim.x - m_stroke->last.x, aim.y - m_stroke->last.y, aim.z - m_stroke->last.z};
-    const core::DVec3 along{static_cast<double>(rayDirection.x), static_cast<double>(rayDirection.y),
-                            static_cast<double>(rayDirection.z)};
+    // Where a drag goes: for a volume stroke, the ground it began on
+    // (`Stroke::aimField`); for every other, the ground as it now is.
+    core::DVec3 target = aim;
+    if (m_stroke->carve) {
+        const core::DVec3 local{ray.origin.x - terrain.origin.x, ray.origin.y - terrain.origin.y,
+                                ray.origin.z - terrain.origin.z};
+        if (const std::optional<asset::TerrainHit> hit =
+                asset::raycastField(m_stroke->aimField, local, ray.direction, BrushReach)) {
+            target = core::DVec3{hit->position.x + terrain.origin.x, hit->position.y + terrain.origin.y,
+                                 hit->position.z + terrain.origin.z};
+        }
+    }
+    const core::DVec3 moved{target.x - m_stroke->last.x, target.y - m_stroke->last.y, target.z - m_stroke->last.z};
+    const core::DVec3 along{static_cast<double>(ray.direction.x), static_cast<double>(ray.direction.y),
+                            static_cast<double>(ray.direction.z)};
     const double depth = moved.x * along.x + moved.y * along.y + moved.z * along.z;
     const core::DVec3 across{moved.x - along.x * depth, moved.y - along.y * depth, moved.z - along.z * depth};
     const double lateral = std::sqrt(across.x * across.x + across.y * across.y + across.z * across.z);
     if (lateral >= radius * spacing) {
-        const std::vector<core::DVec3> stamps = strokeStamps(m_stroke->last, aim, radius, spacing);
+        const std::vector<core::DVec3> stamps = strokeStamps(m_stroke->last, target, radius, spacing);
         for (core::usize at = 1; at < stamps.size(); ++at) {
             applyBrushAt(terrain, stamps[at]);
             m_stroke->stamps += 1;
@@ -3163,9 +3179,10 @@ void Editor::holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirectio
     }
 
     // Held still: a stamp on the clock, each where the ray now meets the ground
-    // -- which the stamp before it moved. A carve bores a ball every
-    // `radius / speed` seconds; every other tool stamps at a rate the strength
-    // sets, so a held Add piles up and a held raise keeps climbing.
+    // -- which the stamp before it moved. Add and Subtract build or bore a ball
+    // every `radius / speed` seconds, so a held Add grows towards the camera
+    // and a held Subtract tunnels away from it; every other tool stamps at a
+    // rate the strength sets.
     const double strength = static_cast<double>(std::clamp(m_brush.strength, 0.0f, 1.0f));
     const double interval = m_stroke->carve
                                 ? std::max(radius, 0.1) / (CarveSpeedMin + (CarveSpeedMax - CarveSpeedMin) * strength)
@@ -3175,7 +3192,10 @@ void Editor::holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirectio
         m_stroke->carveClock -= interval;
         applyBrushAt(terrain, aim);
         m_stroke->stamps += 1;
-        m_stroke->last = aim;
+        // A volume stroke's drag stays on the ground it began on, so the
+        // bored point is not where the next drag stamp is walked from.
+        if (!m_stroke->carve)
+            m_stroke->last = aim;
     }
 }
 
@@ -3196,27 +3216,31 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
     }
     else {
         switch (m_brush.op) {
-        // **The round brush grows and erodes the surface; the box one adds
-        // and takes away volume.** A ball added to flat ground overhangs it at
-        // the rim, so a round `fillBall` dragged across a field leaves a ridge
-        // of overhang along both edges of every stroke -- which is why the
-        // sculpting editors grow the surface instead. The box keeps the plain
-        // fill, which is what building a ledge or cutting a doorway needs.
+        // **Add and Subtract are volume, centred on the aim** -- the reference
+        // editor's, and the owner's words for it: "it models the terrain in
+        // circles". Clicked on a field, a ball half in the ground; clicked on
+        // the side of a cliff, a ball half in the cliff, never a column down
+        // from it. The ground-shaped verb is Grow.
         case BrushOp::Add:
             if (box)
                 asset::fillBlock(terrain.field, at, extent, m_brush.material);
             else
-                asset::raiseBall(terrain.field, at, radius, raiseAmount(m_brush), m_brush.material);
+                asset::fillBall(terrain.field, at, radius, m_brush.material);
             break;
         case BrushOp::Subtract:
-            // A carving stroke with the round brush takes a ball OUT: the
-            // wall it was aimed at is what moves (`CarveSteepness`).
             if (box)
                 asset::fillBlock(terrain.field, at, extent, 0);
-            else if (m_stroke.has_value() && m_stroke->carve)
-                asset::fillBall(terrain.field, at, radius, 0);
             else
-                asset::raiseBall(terrain.field, at, radius, -raiseAmount(m_brush));
+                asset::fillBall(terrain.field, at, radius, 0);
+            break;
+        // **Round whichever shape is selected**, as Smooth is: the surface
+        // moves along its normal by a falloff, and a square falloff would
+        // leave corners on it.
+        case BrushOp::Grow:
+            asset::growBall(terrain.field, at, radius, growAmount(m_brush), m_brush.material);
+            break;
+        case BrushOp::Erode:
+            asset::growBall(terrain.field, at, radius, -growAmount(m_brush));
             break;
         case BrushOp::Smooth:
             // **Round whichever shape is selected.** A square blur leaves

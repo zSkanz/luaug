@@ -1667,21 +1667,28 @@ public:
     // **What the brush DOES**, which is a different question from which tool is
     // selected.
     //
-    // The four are what every editor in this shape offers, under whatever names
-    // -- one adds, one takes away, one softens, one levels. They converge
-    // because they are the four things a person does to ground, not because
-    // anybody copied a list.
+    // The six are what the reference editor offers (the owner, 2026-09-23:
+    // "it has to be faithful"): two that stamp volume where the brush is aimed,
+    // two that move the surface it is aimed at, one that softens and one that
+    // levels. **None of them moves a column** -- a click on the side of a cliff
+    // builds out from the cliff, never a pillar down from it.
     enum class BrushOp : core::u8
     {
-        // Union with the brush: ground appears.
+        // A ball (or box) of ground, centred where the brush is aimed: held
+        // down, it builds towards the camera.
         Add,
-        // Subtract it: ground goes. **Not "material zero"** -- that is the
+        // The same, taken away. **Not "material zero"** -- that is the
         // encoding's spelling and a person choosing the first entry of a
         // palette must never mean it.
         Subtract,
-        // Pull each column towards the average of its neighbours.
+        // The surface moves out along its own normal (`asset::growBall`):
+        // a field rises, a cliff comes forward.
+        Grow,
+        // The surface moves in along its normal: the ground wears away.
+        Erode,
+        // Blur the ground towards the average of its neighbours.
         Smooth,
-        // Pull each column towards one height, captured where the stroke began.
+        // Pull the ground towards one height, captured where the stroke began.
         Flatten,
     };
 
@@ -1700,10 +1707,10 @@ public:
     // What the brush is, and every field of it is persisted.
     //
     // **`spacing` is a fraction of the radius, not a strength.** It is how
-    // densely a drag stamps. `strength` is how much one stamp does: how far the
-    // round brush raises or lowers the ground, and how far smoothing and
-    // flattening move a height towards their target. The box brush fills volume,
-    // and a voxel is filled or it is not, so strength means nothing to it.
+    // densely a drag stamps. `strength` is how hard the brush works: how fast a
+    // held Add or Subtract builds or bores, how far one stamp of Grow or Erode
+    // moves the surface, and how far smoothing and flattening move the ground
+    // towards their target.
     struct Brush
     {
         BrushOp op = BrushOp::Add;
@@ -1712,9 +1719,10 @@ public:
         f32 radius = 4.0f;
         // Stamps every `spacing * radius` metres along a stroke.
         f32 spacing = 0.25f;
-        // How much one stamp does: for `Smooth` and `Flatten`, how far towards
-        // the target it moves a column (one goes all the way); for the round
-        // `Add` and `Subtract`, how high it lifts the disc's centre.
+        // How hard the brush works: for `Smooth` and `Flatten`, how far
+        // towards the target one stamp moves the ground (one goes all the way);
+        // for `Grow` and `Erode`, how far it moves the surface; for `Add` and
+        // `Subtract`, how fast a held brush builds or bores.
         f32 strength = 0.35f;
         // What ground is made of. Never zero: erasing is `BrushOp::Subtract`,
         // because a material picker whose first entry deleted the world would be
@@ -2238,12 +2246,19 @@ private:
         // you first clicked rather than to wherever the pointer happens to be,
         // which would chase its own result downhill.
         f32 plane = 0.0f;
-        // **A carving stroke: digging INTO the ground rather than lowering
-        // it.** Decided once, where the stroke began: a dig with the box, or
-        // with the round brush aimed at ground steeper than it is flat. Held
-        // still, it bores a ball every `radius / speed` seconds, so a tunnel is
-        // as deep after a second at 30 Hz as at 144.
+        // **A stroke that stamps volume at the aim**: `Add` or `Subtract`.
+        // Held still, it builds or bores a ball every `radius / speed` seconds,
+        // so a tunnel is as deep after a second at 30 Hz as at 144.
         bool carve = false;
+        // **The ground as it was when a volume stroke began**, which its DRAG
+        // aims at. A ball centred on the aim, dragged over the ground it is
+        // digging, lands each frame in the hole the last one left and digs a
+        // radius deeper -- so a drag tunnelled towards the floor, and deeper
+        // the higher the framerate. Dragged, a stroke follows the ground it
+        // started on and cuts an even trench or builds an even ridge; held
+        // still, it aims at the ground as it now is and bores or builds. A
+        // vector of shared pointers, not a copy of the ground (ADR 0082).
+        asset::TerrainField aimField;
         // Seconds banked toward the next stamp of a brush held still.
         double carveClock = 0.0;
     };
@@ -2256,13 +2271,14 @@ private:
     // One stamp, in WORLD space. Converted to the field's own inside, because a
     // terrain can be moved and the field does not know it.
     void applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt);
-    // Whether a stroke begun with this tool and brush, on ground with this
-    // normal, carves into it (`Stroke::carve`).
-    [[nodiscard]] static bool carves(Tool tool, const Brush& brush, core::Vec3 normal) noexcept;
+    // Whether a stroke with this tool and brush stamps volume at the aim
+    // (`Stroke::carve`).
+    [[nodiscard]] static bool carves(Tool tool, const Brush& brush) noexcept;
     // One frame of a stroke, aimed at the ground as it now is: a drag stamps
-    // by distance, and a pointer held still stamps on the clock -- a carve at
-    // its boring speed, every other tool at a rate its strength sets.
-    void holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt);
+    // by distance, and a pointer held still stamps on the clock -- Add and
+    // Subtract at their building speed, every other tool at a rate its strength
+    // sets.
+    void holdStroke(scene::TerrainComponent& terrain, const PickRay& ray, double dt);
 
     // A block stroke: the grid it aims against, frozen while the button is
     // held so a drag does not climb the blocks it has just placed, and the last

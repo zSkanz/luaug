@@ -141,12 +141,20 @@ does not is engine work and belongs in the git history rather than in this file.
   held.** A held Add piles up, a held raise keeps climbing and a held dig goes
   deeper, at a rate the brush's strength sets. It used to aim at the ground as
   the stroke began, and could not see its own work.
+- **The terrain brush has six tools, and none of them moves a column.** Add and
+  Subtract stamp a ball (or box) centred where you aim, so a click on the side
+  of a cliff builds out from it rather than standing a pillar under it. The new
+  Grow and Erode move the surface along its own slope (`growBall`). Smooth and
+  Flatten are unchanged.
 - Ground laid where there was none -- `WriteHeights`, Generate Flat Ground, a
   first raise on empty terrain -- is a slab 32 m deep rather than a column to
   `MinHeight`. A terrain's edges show walls and a bottom, all the same way.
 
 ### Fixed
 
+- A ball of terrain on the side of a cliff no longer stands a dark stripe down
+  the wall under it. The terrain's sky term marches rays, so an overhang shades
+  what is near it, not everything below it.
 - **Digging caves no longer lags, and a cave no longer breaks where it meets the
   ground** (D164): terrain is one grid of voxels, so there is no join between
   two encodings to fault. A dig rebuilds only the mesh and the collider of the

@@ -442,6 +442,42 @@ TEST_CASE("raising empty ground lays ground when there is a material to lay")
     CHECK(top(field, 0.0, 0.0) == doctest::Approx(2.0).epsilon(0.05));
 }
 
+TEST_CASE("growing moves flat ground up by the amount, and eroding moves it down")
+{
+    TerrainField field = flatField(0.0f);
+    (void)growBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 1.0f);
+    CHECK(top(field, 0.0, 0.0) == doctest::Approx(1.0).epsilon(0.1));
+    CHECK(top(field, 7.5, 0.5) == doctest::Approx(0.0).epsilon(0.01));
+
+    (void)growBall(field, core::DVec3{20.0, 0.0, 0.0}, 6.0, -1.0f);
+    CHECK(top(field, 20.0, 0.0) == doctest::Approx(-1.0).epsilon(0.1));
+}
+
+TEST_CASE("growing a wall brings it forward, and stands nothing under it")
+{
+    // **The owner's picture**: Add clicked on the side of the terrain stood
+    // pillars under the click, because it raised columns. Grown, a wall comes
+    // out towards the brush and the air below the brush stays air.
+    TerrainField field(settingsOf());
+    (void)fillBlock(field, core::DVec3{-10.0, 0.0, 0.0}, core::Vec3{20.0f, 20.0f, 20.0f}, 1);
+    CHECK_FALSE(solidAt(field, 0.5, 0.0, 0.0));
+    const std::vector<Voxel> below = voxelsIn(field, 0, -9, -4, 6, -6, 4);
+
+    for (int stamp = 0; stamp < 2; ++stamp)
+        (void)growBall(field, core::DVec3{0.0, 0.0, 0.0}, 5.0, 1.0f);
+    CHECK(solidAt(field, 1.0, 0.0, 0.0));
+    CHECK_FALSE(solidAt(field, 2.6, 0.0, 0.0));
+    CHECK(voxelsIn(field, 0, -9, -4, 6, -6, 4) == below);
+    CHECK(top(field, -5.0, 0.0) == doctest::Approx(10.0).epsilon(0.01));
+}
+
+TEST_CASE("growing over nothing does nothing")
+{
+    TerrainField field(settingsOf());
+    CHECK(growBall(field, core::DVec3{0.0, 0.0, 0.0}, 5.0, 1.0f, 1).touched == 0);
+    CHECK(field.empty());
+}
+
 TEST_CASE("smoothing takes the edge off a step")
 {
     TerrainField field(settingsOf());

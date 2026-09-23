@@ -5826,12 +5826,17 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
                 ImGui::PopStyleColor();
             ImGui::SetItemTooltip("%s", tip);
         };
-        opButton(Editor::BrushOp::Add, "add", "raise ground where you drag");
+        opButton(Editor::BrushOp::Add, "add", "add a ball of ground where you aim -- hold it to build towards you");
         ImGui::SameLine();
-        opButton(Editor::BrushOp::Subtract, "dig", "take ground away -- this is what carves a cave");
+        opButton(Editor::BrushOp::Subtract, "subtract",
+                 "take a ball of ground away where you aim -- hold it to tunnel in");
+        ImGui::SameLine();
+        opButton(Editor::BrushOp::Grow, "grow", "move the surface outwards: a field rises, a cliff comes forward");
+        ImGui::SameLine();
+        opButton(Editor::BrushOp::Erode, "erode", "move the surface inwards: the ground wears away");
         ImGui::SameLine();
         opButton(Editor::BrushOp::Smooth, "smooth",
-                 "soften what is there, pulling each column towards its "
+                 "soften what is there, pulling the ground towards its "
                  "neighbours");
         ImGui::SameLine();
         opButton(Editor::BrushOp::Flatten, "flatten",
@@ -5842,32 +5847,27 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         const bool box = brush.shape == Editor::BrushShape::Box;
         if (ImGui::Button(box ? "box" : "sphere", ImVec2(76.0f, 0.0f)))
             editor.setBrushShape(box ? Editor::BrushShape::Sphere : Editor::BrushShape::Box);
-        ImGui::SetItemTooltip(box ? "carves and fills volume, for tunnels and ledges -- click for the round brush"
-                                  : "raises and lowers the ground smoothly -- click for the box, which carves volume");
+        ImGui::SetItemTooltip(box ? "Add and Subtract stamp a box -- click for the ball"
+                                  : "Add and Subtract stamp a ball -- click for the box");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-FLT_MIN);
         f32 radius = brush.radius;
         if (ImGui::DragFloat("##radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "size %.2f m"))
             editor.setBrushRadius(radius);
 
-        // Every op but the box's volume fill has a strength. A slider that did
-        // nothing for the tool in hand would be a control that lies.
-        if (brush.op == Editor::BrushOp::Smooth || brush.op == Editor::BrushOp::Flatten || !box) {
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            f32 strength = brush.strength;
-            if (ImGui::DragFloat("##strength", &strength, 0.01f, 0.02f, 1.0f, "strength %.2f"))
-                editor.setBrushStrength(strength);
-            ImGui::SetItemTooltip(brush.op == Editor::BrushOp::Add || brush.op == Editor::BrushOp::Subtract
-                                      ? "how much one stamp raises or lowers the ground"
-                                      : "how far towards the target one stamp moves a column");
-        }
-        else {
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            f32 spacing = brush.spacing;
-            if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "spacing %.2f x size"))
-                editor.setBrushSpacing(spacing);
-            ImGui::SetItemTooltip("how far a drag travels between stamps. Smaller overlaps more");
-        }
+        // Every op has a strength, and every drag a spacing.
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        f32 strength = brush.strength;
+        if (ImGui::DragFloat("##strength", &strength, 0.01f, 0.02f, 1.0f, "strength %.2f"))
+            editor.setBrushStrength(strength);
+        ImGui::SetItemTooltip(brush.op == Editor::BrushOp::Add || brush.op == Editor::BrushOp::Subtract
+                                  ? "how fast the brush builds or bores while you hold it"
+                                  : "how far one stamp moves the ground");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        f32 spacing = brush.spacing;
+        if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "spacing %.2f x size"))
+            editor.setBrushSpacing(spacing);
+        ImGui::SetItemTooltip("how far a drag travels between stamps. Smaller overlaps more");
     }
 
     // --- Paint ----------------------------------------------------

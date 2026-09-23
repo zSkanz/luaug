@@ -735,6 +735,112 @@ EditReport raiseBall(TerrainField& field, DVec3 center, double radius, float amo
     return report;
 }
 
+EditReport growBall(TerrainField& field, DVec3 center, double radius, float amount, u8 material)
+{
+    EditReport report;
+    if (!(radius > 0.0) || amount == 0.0f || std::isnan(amount))
+        return report;
+    const Box box = boxOf(field, DVec3{center.x - radius, center.y - radius, center.z - radius},
+                          DVec3{center.x + radius, center.y + radius, center.z + radius});
+    if (box.empty())
+        return report;
+    const double voxel = static_cast<double>(field.settings().voxelSize);
+    const bool growing = amount > 0.0f;
+    // **Capped at the ramp's outer half.** Past it the air holds no occupancy
+    // to grow from, so a bigger step would only stop at the same place.
+    const double step = std::min(std::abs(static_cast<double>(amount)), voxel * static_cast<double>(RampVoxels) * 0.5);
+
+    // Read once, a voxel wider than the box, so every voxel sees its six
+    // neighbours as they were before the stamp.
+    const i32 x0 = box.minX - 1;
+    const i32 y0 = box.minY - 1;
+    const i32 z0 = box.minZ - 1;
+    const i32 sizeX = box.maxX - box.minX + 3;
+    const i32 sizeY = box.maxY - box.minY + 3;
+    const i32 sizeZ = box.maxZ - box.minZ + 3;
+    const auto index = [&](i32 x, i32 y, i32 z) {
+        return (static_cast<usize>(z - z0) * static_cast<usize>(sizeY) + static_cast<usize>(y - y0)) *
+                   static_cast<usize>(sizeX) +
+               static_cast<usize>(x - x0);
+    };
+    std::vector<Voxel> copy(static_cast<usize>(sizeX) * static_cast<usize>(sizeY) * static_cast<usize>(sizeZ));
+    for (i32 z = z0; z < z0 + sizeZ; ++z) {
+        for (i32 y = y0; y < y0 + sizeY; ++y) {
+            for (i32 x = x0; x < x0 + sizeX; ++x)
+                copy[index(x, y, z)] = field.voxel(x, y, z);
+        }
+    }
+
+    static constexpr std::array<std::array<i32, 3>, 6> Faces{{
+        {-1, 0, 0},
+        {1, 0, 0},
+        {0, -1, 0},
+        {0, 1, 0},
+        {0, 0, -1},
+        {0, 0, 1},
+    }};
+    // One voxel's worth of ramp: how much a voxel's occupancy may differ from
+    // its neighbour's where the surface is square to the axis between them.
+    const float slope = 1.0f / RampVoxels;
+
+    FieldWriter writer(field);
+    walk(box, [&](i32 x, i32 y, i32 z) {
+        const double distance =
+            length(field.voxelCenter(x) - center.x, field.voxelCenter(y) - center.y, field.voxelCenter(z) - center.z);
+        const float weight = falloff(distance, radius);
+        if (weight <= 0.0f)
+            return;
+        // **The surface moves along its own normal, by `step` at the centre.**
+        // Inside the ramp, occupancy is distance, so adding `step / (4 v)` moves
+        // the half crossing out by `step` whichever way the ground faces -- up
+        // on a field, sideways on a cliff, down under an overhang. A voxel is
+        // first raised to its fullest neighbour less one voxel of ramp, so air
+        // next to ground has something to grow from and ground next to air
+        // something to wear from; in a ramp already whole, that changes nothing.
+        const Voxel old = copy[index(x, y, z)];
+        const float before = occupancyOf(old);
+        const float delta = static_cast<float>(step / (voxel * static_cast<double>(RampVoxels))) * weight;
+        float base = before;
+        Voxel fullest{};
+        for (const std::array<i32, 3>& face : Faces) {
+            const Voxel near = copy[index(x + face[0], y + face[1], z + face[2])];
+            if (growing) {
+                base = std::max(base, occupancyOf(near) - slope);
+                if (near.occupancy > fullest.occupancy)
+                    fullest = near;
+            }
+            else {
+                base = std::min(base, occupancyOf(near) + slope);
+            }
+        }
+        if (growing) {
+            // Nothing to grow from: air with no ground within a voxel of it.
+            if (base <= 0.0f)
+                return;
+            const u8 occupancy = quantiseOccupancy(base + delta);
+            if (occupancy <= old.occupancy)
+                return;
+            // New ground is made of what it grew from: growing grass grows
+            // grass.
+            u8 made = old.material != 0 ? old.material : fullest.material;
+            if (made == 0)
+                made = material != 0 ? material : 1;
+            writer.set(x, y, z, Voxel{occupancy, made});
+        }
+        else {
+            if (base >= 1.0f)
+                return;
+            const u8 occupancy = quantiseOccupancy(base - delta);
+            if (occupancy >= old.occupancy)
+                return;
+            writer.set(x, y, z, Voxel{occupancy, old.material});
+        }
+    });
+    writer.finish();
+    report.touched = writer.changed();
+    return report;
+}
+
 EditReport paintBall(TerrainField& field, DVec3 center, double radius, u8 material)
 {
     EditReport report;

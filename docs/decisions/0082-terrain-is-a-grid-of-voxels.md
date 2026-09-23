@@ -115,6 +115,17 @@ at the boundary so the surface lands exactly on it.
 - **Raise** shifts each column up inside the brush's cylinder by the falloff,
   and keeps the larger of the old and shifted occupancy. **Lower** is the
   mirror. So a cave under the brush's reach is not moved.
+- **Grow** (`growBall`) moves the surface along its own normal: each voxel is
+  first lifted to its fullest face neighbour less one voxel of ramp, then
+  gains the step. Inside the ramp occupancy is distance, so the half crossing
+  moves out by the step whichever way the ground faces. **Erode** is the
+  mirror.
+- **The editor's brush never moves a column** (amended the same day). The
+  owner clicked the side of the terrain with Add and got pillars standing
+  under it, because the round Add was Raise. The editor's six tools are now
+  the reference editor's: Add and Subtract stamp a ball or box centred on the
+  aim, Grow and Erode are `growBall`, and Smooth and Flatten are unchanged.
+  `RaiseBall` stays a script verb.
 - **Smooth** blends each voxel toward a separable box blur one to four voxels
   wide, growing with the brush. The mean of a linear ramp is the ramp, so a
   three-voxel blur only rounded a step's edges.
@@ -149,8 +160,16 @@ and vertex normals come from the density's gradient.
 - **Skirts hang from the outer ring, along the negative normal.** They cover
   the crack where two levels meet. A collider is always meshed at level 0 and
   never gets a skirt.
-- **Sky visibility is still baked per vertex.** It is read from a column-top
-  map built once per region, not from `heightAt` per tap.
+- **Sky visibility is still baked per vertex**, from rays (amended the same
+  day). Eight bearings at 60, 30 and 10 degrees, plus the zenith, are marched
+  up to 12 m across a map of each column's bottom and top, built once per
+  region. A ray is blocked where it passes between the two. Each ray is
+  weighed by how squarely the surface faces it.
+  - The first version asked only whether a point was under its column's
+    ground. A ball added to the side of the terrain then stood a dark stripe
+    down the whole wall under it (the owner's picture).
+  - A point above every top within reach skips the rays, and that is most of
+    open ground. The rays cost about 0.6 ms of a node's 3.5 ms.
 
 ### Drawing
 

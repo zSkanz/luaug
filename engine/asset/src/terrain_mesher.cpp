@@ -302,9 +302,15 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     };
 
     // **The column tops the sky term reads**, one per level column over the
-    // region and far enough round it for the widest tap. Built once, where a
-    // search per tap per vertex was most of a region's cost.
-    const i32 margin = static_cast<i32>(std::ceil(6.5f / step)) + 1;
+    // region and far enough round it for the longest sky ray. Built once, where
+    // a search per ray step per vertex would be most of a region's cost.
+    //
+    // A sky ray is followed `SkyReach` metres across, looking at the columns
+    // `SkyStops` along it: close together near the point, where a wall beside
+    // it decides most, and further apart out where only a hill can.
+    constexpr float SkyReach = 12.0f;
+    static constexpr std::array<float, 8> SkyStops{1.0f, 2.0f, 3.0f, 4.5f, 6.0f, 8.0f, 10.0f, SkyReach};
+    const i32 margin = static_cast<i32>(std::ceil((SkyReach + 2.5f) / step)) + 1;
     const i32 mapX0 = region.minX - margin;
     const i32 mapZ0 = region.minZ - margin;
     const i32 mapW = nx + 2 * margin;
@@ -330,61 +336,178 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         return static_cast<usize>(kz) * static_cast<usize>(mapW) + static_cast<usize>(kx);
     };
     const auto topAt = [&](float x, float z) { return tops[slotAt(x, z)]; };
+    // Each column's bottom and top side by side, for the sky rays' march.
+    std::vector<std::array<float, 2>> spans(tops.size());
+    for (usize at = 0; at < tops.size(); ++at)
+        spans[at] = {bottoms[at], tops[at]};
     const auto bottomAt = [&](float x, float z) { return bottoms[slotAt(x, z)]; };
 
-    // **How much of the sky a vertex sees**, from 0 to 1: the column tops on a
-    // fixed disc round it, each counted as blocking by how far it stands above
-    // the point, measured from a point lifted off the surface along its normal.
-    // Deep in a tunnel every tap is roof, at its mouth the plain outside is not.
-    // A fixed pattern, so the same field meshes to the same bytes.
+    // **The highest top within a sky ray's reach of each column** -- a max
+    // filter over the tops, one axis at a time. A point above it sees the whole
+    // sky without marching a ray, and that is almost every point of open
+    // ground: the rays are paid for on walls and in caves, where they matter.
+    std::vector<float> nearTops(tops.size(), -std::numeric_limits<float>::infinity());
+    {
+        const i32 reach = static_cast<i32>(std::ceil(SkyReach / step)) + 1;
+        std::vector<float> across(tops.size(), -std::numeric_limits<float>::infinity());
+        for (i32 z = 0; z < mapD; ++z) {
+            for (i32 x = 0; x < mapW; ++x) {
+                float highest = -std::numeric_limits<float>::infinity();
+                for (i32 k = std::max(x - reach, 0); k <= std::min(x + reach, mapW - 1); ++k) {
+                    const float top = tops[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(k)];
+                    if (!std::isnan(top))
+                        highest = std::max(highest, top);
+                }
+                across[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x)] = highest;
+            }
+        }
+        for (i32 z = 0; z < mapD; ++z) {
+            for (i32 x = 0; x < mapW; ++x) {
+                float highest = -std::numeric_limits<float>::infinity();
+                for (i32 k = std::max(z - reach, 0); k <= std::min(z + reach, mapD - 1); ++k)
+                    highest = std::max(
+                        highest, across[static_cast<usize>(k) * static_cast<usize>(mapW) + static_cast<usize>(x)]);
+                nearTops[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x)] = highest;
+            }
+        }
+    }
+
+    // **How much of the sky a vertex sees**, from 0 to 1: a fixed fan of rays
+    // over the sky, from a point lifted off the surface along its normal, each
+    // marched across the column map and blocked where it passes between a
+    // column's bottom and its top. Weighted by how squarely each faces the
+    // normal, so an open wall sees all of the sky it can face, as open ground
+    // does. Deep in a tunnel every ray meets roof; at its mouth the ones that
+    // leave by it do not.
+    //
+    // **Rays, not the ground straight above**, and the owner's picture is why:
+    // a ball added to the side of the terrain stood a dark stripe down the
+    // whole wall under it, because every point below a column's ground counted
+    // as under a roof -- however far below, and however small the roof. A ray
+    // from twenty metres down the wall leaves past a four-metre ball.
+    //
+    // A fixed pattern with written-out constants (no `std::cos`), so the same
+    // field meshes to the same bytes on every platform.
     const auto skyVisibility = [&](Vec3 position, Vec3 normal) {
-        struct Tap
+        // Eight bearings, and three rings up from the horizon: 60, 30 and 10
+        // degrees -- cosine, sine and rise per metre across. Plus the zenith.
+        struct Bearing
         {
             float x;
             float z;
         };
-        static constexpr std::array<Tap, 15> Taps{{
-            {0.0f, 0.0f},
-            {2.5f, 0.0f},
-            {1.25f, 2.165f},
-            {-1.25f, 2.165f},
-            {-2.5f, 0.0f},
-            {-1.25f, -2.165f},
-            {1.25f, -2.165f},
-            {4.619f, 1.913f},
-            {1.913f, 4.619f},
-            {-1.913f, 4.619f},
-            {-4.619f, 1.913f},
-            {-4.619f, -1.913f},
-            {-1.913f, -4.619f},
-            {1.913f, -4.619f},
-            {4.619f, -1.913f},
+        static constexpr float D = 0.70710678f;
+        static constexpr std::array<Bearing, 8> Bearings{{
+            {1.0f, 0.0f},
+            {D, D},
+            {0.0f, 1.0f},
+            {-D, D},
+            {-1.0f, 0.0f},
+            {-D, -D},
+            {0.0f, -1.0f},
+            {D, -D},
         }};
-        constexpr float Clear = 0.5f;
-        constexpr float Solid = 3.0f;
+        struct Ring
+        {
+            float across;
+            float up;
+            float rise;
+        };
+        static constexpr std::array<Ring, 3> Rings{{
+            {0.5f, 0.8660254f, 1.7320508f},
+            {0.8660254f, 0.5f, 0.5773503f},
+            {0.9848078f, 0.1736482f, 0.1763270f},
+        }};
         constexpr float Lift = 1.5f;
         const Vec3 from{position.x + normal.x * Lift, position.y + normal.y * Lift, position.z + normal.z * Lift};
-        // A point with no ground over it sees the sky, full stop.
-        const float own = topAt(from.x, from.z);
-        if (std::isnan(own) || own <= from.y)
+        // A point with no ground above it anywhere in reach sees the sky.
+        const float highest = nearTops[slotAt(from.x, from.z)];
+        if (highest <= from.y)
             return 1.0f;
-        // **Nor does one under all the ground in its column** -- the underside
-        // of the terrain, not the roof of a cave, which has a floor under it.
-        // It sees the world below and the horizon rather than the sky: half,
-        // which draws it as shade rather than as a black hole. Counted as a
-        // roof, the terrain's bottom and every ledge's underside went black.
-        constexpr float Underside = 0.5f;
-        const float bottom = bottomAt(from.x, from.z);
-        if (!std::isnan(bottom) && from.y < bottom)
-            return Underside;
-        float blocked = 0.0f;
-        for (const Tap& tap : Taps) {
-            const float top = topAt(from.x + tap.x, from.z + tap.z);
-            if (std::isnan(top))
-                continue;
-            blocked += std::clamp((top - from.y - Clear) / (Solid - Clear), 0.0f, 1.0f);
+        const float own = topAt(from.x, from.z);
+        const float ownBottom = bottomAt(from.x, from.z);
+
+        // Each ray weighed by how squarely the surface faces it; a surface
+        // that faces down faces none of the sky, and is weighed over it as
+        // ground is.
+        const auto facingOf = [&](Bearing bearing, Ring ring) {
+            return std::max(
+                bearing.x * ring.across * normal.x + ring.up * normal.y + bearing.z * ring.across * normal.z, 0.0f);
+        };
+        float facing = std::max(normal.y, 0.0f);
+        for (const Bearing& bearing : Bearings) {
+            for (const Ring& ring : Rings)
+                facing += facingOf(bearing, ring);
         }
-        return 1.0f - blocked / static_cast<float>(Taps.size());
+        const bool down = facing < 0.25f;
+
+        float seen = 0.0f;
+        float total = 0.0f;
+        // The zenith: open where nothing in this column is above the point.
+        const float zenith = down ? 1.0f : std::max(normal.y, 0.0f);
+        if (zenith > 0.0f) {
+            total += zenith;
+            if (std::isnan(own) || own <= from.y)
+                seen += zenith;
+        }
+        // **One march per bearing, all three rings at once**: a column is
+        // looked up once per stop, and each ring still unsettled is checked
+        // against it -- blocked where it passes between the column's bottom and
+        // top, free once it is above every top in reach, since it only rises.
+        // In map cells, so a stop is an add and a truncation rather than a
+        // division and a floor: the margin keeps every stop inside the map
+        // and on its positive side.
+        const float cellX = from.x / step - static_cast<float>(mapX0);
+        const float cellZ = from.z / step - static_cast<float>(mapZ0);
+        const float perCell = 1.0f / step;
+        for (const Bearing& bearing : Bearings) {
+            std::array<float, 3> weight{};
+            std::array<bool, 3> settled{};
+            int open = 0;
+            for (usize r = 0; r < Rings.size(); ++r) {
+                weight[r] = down ? Rings[r].up : facingOf(bearing, Rings[r]);
+                settled[r] = weight[r] <= 0.0f;
+                open += settled[r] ? 0 : 1;
+                total += weight[r];
+            }
+            for (usize at = 0; at < SkyStops.size() && open > 0; ++at) {
+                const float d = SkyStops[at];
+                const i32 kx = std::clamp(static_cast<i32>(cellX + bearing.x * d * perCell), 0, mapW - 1);
+                const i32 kz = std::clamp(static_cast<i32>(cellZ + bearing.z * d * perCell), 0, mapD - 1);
+                const std::array<float, 2>& span =
+                    spans[static_cast<usize>(kz) * static_cast<usize>(mapW) + static_cast<usize>(kx)];
+                const float top = span[1];
+                const float bottom = span[0];
+                for (usize r = 0; r < Rings.size(); ++r) {
+                    if (settled[r])
+                        continue;
+                    const float y = from.y + Rings[r].rise * d;
+                    if (y > highest) {
+                        settled[r] = true;
+                        seen += weight[r];
+                        open -= 1;
+                    }
+                    else if (!std::isnan(top) && y <= top && y >= bottom) {
+                        settled[r] = true;
+                        open -= 1;
+                    }
+                }
+            }
+            // A ray that met nothing within reach leaves.
+            for (usize r = 0; r < Rings.size(); ++r) {
+                if (!settled[r])
+                    seen += weight[r];
+            }
+        }
+        const float visible = total > 0.0f ? seen / total : 1.0f;
+        // **Under all the ground in its column** -- the underside of the
+        // terrain or of a ledge, not the roof of a cave, which has a floor under
+        // it -- a point sees the world below and the horizon: at least half,
+        // which draws it as shade rather than as a black hole.
+        constexpr float Underside = 0.5f;
+        if (!std::isnan(ownBottom) && from.y < ownBottom)
+            return std::max(visible, Underside);
+        return visible;
     };
 
     // --- Vertices: one per cell the surface passes through ---------------

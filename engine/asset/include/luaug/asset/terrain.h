@@ -409,7 +409,7 @@ private:
 
 // --- Editing -----------------------------------------------------------------
 //
-// Every verb writes occupancies over its brush's box with a one-voxel ramp at
+// Every verb writes occupancies over its brush's box with the ramp (`RampVoxels`) at
 // the boundary, so the surface lands where the brush says to within the
 // interpolation, not on a lattice line. **Additions take the larger occupancy
 // and removals the smaller**, so a brush never undoes ground it did not reach.
@@ -468,6 +468,16 @@ EditReport flattenBall(TerrainField& field, core::DVec3 center, double radius, f
 // the reach stays where it is. Where a column in reach holds no ground and
 // `material` is not zero, raising lays ground from `center`'s height up.
 EditReport raiseBall(TerrainField& field, core::DVec3 center, double radius, float amount, core::u8 material = 0);
+
+// Grows the ground in a ball outwards by `amount` metres at the centre, falling
+// smoothly to nothing at the rim -- or wears it away, when `amount` is negative.
+//
+// **Along the surface's own normal, not up**: a field rises, a cliff comes out
+// sideways and an overhang grows down, which is what `raiseBall` cannot do. It
+// grows from ground that is there, so over nothing it does nothing, and one call
+// moves the surface at most half the ramp (two voxels). New ground takes its
+// neighbour's material, or `material` where there is none (1 if that is zero).
+EditReport growBall(TerrainField& field, core::DVec3 center, double radius, float amount, core::u8 material = 0);
 
 // Changes what the ground is made of in a ball, without moving it. Zero is
 // refused rather than treated as erase.
