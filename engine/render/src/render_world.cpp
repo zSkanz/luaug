@@ -775,7 +775,13 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                     .inCameraFrustum = visible,
                     .firstBone = 0,
                     .boneCount = 0,
-                    .outlined = isOutlined(id),
+                    // **Never outlined, selected or not.** The outline draws
+                    // through what is in front of it, and a cave mesh's sides
+                    // and skirt are buried under the height layer: outlined,
+                    // they showed through a dug crater as a tinted lid and a
+                    // row of boxes. The ground itself was never outlined, and
+                    // a line around the whole world would say nothing anyway.
+                    .outlined = false,
                     .terrainCave = true,
                     .voxelBlock = false,
                 });

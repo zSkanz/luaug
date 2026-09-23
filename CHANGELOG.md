@@ -40,6 +40,9 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **Digging into a selected terrain no longer draws a lid and boxes over the
+  hole** (D161): the selection outline, which shows through everything, drew
+  the cave meshes' buried sides. A cave draw is never outlined now.
 - **A terrain larger than the atlas draws what is near the camera** (ADR
   0081). Past 16,384 tiles, a 2 km square at half a metre, the loader kept the
   first tiles in key order, and the editor drew a strip along one edge of the

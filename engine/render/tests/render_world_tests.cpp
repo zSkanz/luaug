@@ -1324,6 +1324,19 @@ TEST_CASE("a terrain cave draws once its mesh is in the library")
     // And it produced no `parts` entry, which is the whole reason terrain is not
     // made of `MeshPart`s: no phantom body, no Explorer row, no snapshot cost.
     CHECK(after.parts.empty());
+
+    // **A selected terrain outlines nothing.** The outline pass draws through
+    // everything in front of it, and a cave mesh is the part of the ground
+    // that is NOT the ground: its sides and skirt sit buried under the height
+    // layer. Outlined, they showed through a dug crater as a tinted lid and a
+    // row of boxes -- which is what selecting a terrain looked like, and
+    // `Create Terrain` selects the terrain it makes.
+    const std::array<core::InstanceId, 1> selection{terrain};
+    render::RenderWorld selected;
+    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, selected,
+                    nullptr, selection);
+    REQUIRE(selected.draws.size() == 1);
+    CHECK_FALSE(selected.draws[0].outlined);
 }
 
 TEST_CASE("terrain outside the root is not in the world")
