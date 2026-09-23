@@ -7,7 +7,7 @@
 
 A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in front of it, in the same light as the picture around it -- rather than over it.
 
-It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. Nothing on it can be clicked yet: the pointer reaches the screen's UI and the world, and a billboard is neither.
+It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. Its buttons are pressed like the screen's: the pointer's ray finds them in the world, and something solid in front hides them unless `AlwaysOnTop` is set. A screen element over the same pixel wins.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

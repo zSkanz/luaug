@@ -424,3 +424,35 @@ TEST_CASE("a script assigning Text puts the caret at the end")
             scene::World::SetResult::Changed);
     CHECK(fixture.world->textInputs().find(field)->caret == 19);
 }
+
+TEST_CASE("a button in the world is pressed like one on the screen, and the screen covers it")
+{
+    Fixture fixture;
+    // A world canvas's element, as the host would have found it with the
+    // pointer's ray -- the screen has nothing under the pointer here.
+    const InstanceId sign = fixture.child("TextButton", fixture.make("Folder"));
+    fixture.run();
+
+    ui::InteractionInput press;
+    press.pointer = Vec2{400.0f, 300.0f};
+    press.pressed = true;
+    press.worldOver = sign;
+    CHECK(fixture.send(press).pointerOverUi);
+    (void)fixture.events();
+    ui::InteractionInput release = press;
+    release.pressed = false;
+    release.released = true;
+    (void)fixture.send(release);
+    const std::vector<std::string> fired = fixture.events();
+    CHECK(std::ranges::find(fired, "Activated") != fired.end());
+
+    // A screen button over the same pixel takes the press instead.
+    const InstanceId hud = fixture.box(fixture.screen, 300.0f, 200.0f, 200.0f, 200.0f);
+    fixture.world->screenGuis().find(fixture.screen)->layoutDirty = true;
+    fixture.run();
+    CHECK(ui::hitTest(*fixture.world, fixture.service, press.pointer) == hud);
+    (void)fixture.send(press);
+    (void)fixture.events();
+    (void)fixture.send(release);
+    CHECK(fixture.events() == std::vector<std::string>{"Activated"});
+}

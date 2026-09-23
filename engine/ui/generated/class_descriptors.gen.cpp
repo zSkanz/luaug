@@ -179,7 +179,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     billboardGuiDesc.super = instanceClass;
     billboardGuiDesc.flags = scene::ClassFlags::None;
     billboardGuiDesc.defaultName = atoms.intern("BillboardGui");
-    billboardGuiDesc.doc = "A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in front of it, in the same light as the picture around it -- rather than over it.\012\012It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. Nothing on it can be clicked yet: the pointer reaches the screen's UI and the world, and a billboard is neither.";
+    billboardGuiDesc.doc = "A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in front of it, in the same light as the picture around it -- rather than over it.\012\012It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. Its buttons are pressed like the screen's: the pointer's ray finds them in the world, and something solid in front hides them unless `AlwaysOnTop` is set. A screen element over the same pixel wins.";
     billboardGuiDesc.properties = billboardGuiProperties;
     billboardGuiDesc.attachComponents = native::attachBillboardGuiComponents;
     billboardGuiDesc.detachComponents = native::detachBillboardGuiComponents;
@@ -262,7 +262,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     surfaceGuiDesc.super = instanceClass;
     surfaceGuiDesc.flags = scene::ClassFlags::None;
     surfaceGuiDesc.defaultName = atoms.intern("SurfaceGui");
-    surfaceGuiDesc.doc = "A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the part.\012\012It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Nothing on it can be clicked yet.";
+    surfaceGuiDesc.doc = "A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the part.\012\012It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Its buttons are pressed like the screen's, from in front of the face: the pointer's ray finds them in the world, and something solid in front hides them unless `AlwaysOnTop` is set.";
     surfaceGuiDesc.properties = surfaceGuiProperties;
     surfaceGuiDesc.attachComponents = native::attachSurfaceGuiComponents;
     surfaceGuiDesc.detachComponents = native::detachSurfaceGuiComponents;

@@ -145,7 +145,9 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 
   **F3 is built (2026-09-23)**: `TextLabel.RichText`, and `SurfaceGui` and
   `BillboardGui` drawing the screen's own UI classes in the world, with
-  `examples/18-world-ui`. Not clickable yet.
+  `examples/18-world-ui`. Their buttons are pressed like the screen's since
+  the same day: the pointer's ray finds them in the world, and what stands in
+  front hides them.
 
   **N1, multiplayer, is playable over a LAN** (2026-09-22 and 23). One project
   runs solo, as a host (`--host`), as a dedicated server (`--serve`) or as a

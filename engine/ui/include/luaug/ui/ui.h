@@ -315,6 +315,11 @@ struct InteractionInput
     bool caretHome = false;
     bool caretEnd = false;
     bool submit = false;
+    // The element of a world canvas -- a `SurfaceGui` or a `BillboardGui` --
+    // under the pointer, as the host found it by casting the pointer's ray into
+    // the world. A screen element under the pointer wins over it: the screen is
+    // drawn in front of the world.
+    core::InstanceId worldOver;
 };
 
 // The answer the host needs back: whether the UI took the pointer.
@@ -351,6 +356,11 @@ struct InteractionResult
 // tests, which is the only reason it is not private: a hit test is easier to
 // believe as a case than as a consequence.
 [[nodiscard]] core::InstanceId hitTest(const scene::World& world, core::InstanceId uiService, core::Vec2 point);
+
+// The topmost visible element of one canvas tree under a point in the canvas's
+// own pixels, as `layoutCanvas` laid it out -- a world canvas's answer to the
+// same question.
+[[nodiscard]] core::InstanceId hitTestCanvas(const scene::World& world, core::InstanceId root, core::Vec2 point);
 
 // Walks every enabled `ScreenGui` in `DisplayOrder` and emits its quads in
 // draw order -- `ZIndex`, then document order. Reads the rectangles the layout

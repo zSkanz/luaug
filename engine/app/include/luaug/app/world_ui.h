@@ -19,6 +19,7 @@
 #include "luaug/rhi/types.h"
 #include "luaug/ui/ui.h"
 
+#include <functional>
 #include <optional>
 #include <span>
 
@@ -64,5 +65,33 @@ inline constexpr core::f32 BillboardPixelsPerMetre = 50.0f;
 // the glyph atlas and the images -- which world UI shares.
 void buildWorldUi(scene::World& world, core::InstanceId workspace, core::InstanceId uiService, core::Vec2 viewport,
                   std::span<const rhi::TextureHandle> textures, ui::DrawList& scratch, render::RenderWorld& out);
+
+// What the pointer's ray met in the world's UI: the element, and how far along
+// the ray it is.
+struct WorldUiPick
+{
+    core::InstanceId element;
+    core::f32 distance = 0.0f;
+};
+
+// How far along a camera-relative ray (unit direction) the nearest solid thing
+// is, leaving `adornee` out -- the part a canvas is printed on or floats over
+// never hides it. Nothing when nothing is in the way. The host answers it from
+// the physics world; a test answers it with a lambda.
+using SolidAlong =
+    std::function<std::optional<core::f32>(core::Vec3 origin, core::Vec3 direction, core::InstanceId adornee)>;
+
+// **The element of a `SurfaceGui` or `BillboardGui` under the pointer** (F3).
+// The pointer's ray, through `camera`, is met with every enabled canvas's
+// rectangle; where it lands, the canvas is laid out and hit-tested in its own
+// pixels exactly as a screen is. A canvas seen from behind is not hit, and one
+// with something solid in front of it is not either, unless it is
+// `AlwaysOnTop` -- which is also drawn over everything, so it wins over one
+// that is not. Otherwise the nearest wins. A canvas's empty space is not a hit:
+// the ray goes on to what is behind it.
+[[nodiscard]] std::optional<WorldUiPick> pickWorldUi(scene::World& world, core::InstanceId workspace,
+                                                     core::InstanceId uiService, core::Vec2 viewport,
+                                                     const render::RenderCamera& camera, core::Vec2 pointer,
+                                                     const SolidAlong& solidAlong);
 
 } // namespace luaug::app

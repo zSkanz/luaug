@@ -1,5 +1,6 @@
 #include "luaug/app/world_ui.h"
 
+#include "luaug/app/picking.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
@@ -242,19 +243,24 @@ std::optional<CanvasPlacement> placeSurface(const scene::SurfaceGuiComponent& gu
     return placement;
 }
 
-void buildWorldUi(scene::World& world, core::InstanceId workspace, core::InstanceId uiService, Vec2 viewport,
-                  std::span<const rhi::TextureHandle> textures, ui::DrawList& scratch, render::RenderWorld& out)
-{
-    if (!out.camera.valid)
-        return;
+namespace {
 
-    struct Tree
-    {
-        core::InstanceId id;
-        CanvasPlacement placement;
-        f32 brightness = 1.0f;
-        bool onTop = false;
-    };
+// One world canvas this frame: where it is, and how it is drawn.
+struct Tree
+{
+    core::InstanceId id;
+    CanvasPlacement placement;
+    f32 brightness = 1.0f;
+    bool onTop = false;
+    // The part it is printed on or floats over.
+    core::InstanceId adornee;
+};
+
+// Every enabled canvas the camera could see, placed, in pool order.
+[[nodiscard]] std::vector<Tree> collectCanvases(scene::World& world, core::InstanceId workspace,
+                                                core::InstanceId uiService, Vec2 viewport,
+                                                const render::RenderCamera& camera)
+{
     std::vector<Tree> trees;
     const auto reachable = [&](core::InstanceId id) {
         return (workspace.valid() && under(world, id, workspace)) || (uiService.valid() && under(world, id, uiService));
@@ -270,8 +276,8 @@ void buildWorldUi(scene::World& world, core::InstanceId workspace, core::Instanc
         const core::DVec3 anchor{component->cframe.position.x + static_cast<f64>(gui.worldOffset.x),
                                  component->cframe.position.y + static_cast<f64>(gui.worldOffset.y),
                                  component->cframe.position.z + static_cast<f64>(gui.worldOffset.z)};
-        if (const std::optional<CanvasPlacement> placement = placeBillboard(gui, anchor, out.camera, viewport))
-            trees.push_back(Tree{id, *placement, gui.brightness, gui.alwaysOnTop});
+        if (const std::optional<CanvasPlacement> placement = placeBillboard(gui, anchor, camera, viewport))
+            trees.push_back(Tree{id, *placement, gui.brightness, gui.alwaysOnTop, part});
     });
     world.surfaceGuis().forEach([&](core::InstanceId id, const scene::SurfaceGuiComponent& gui) {
         if (!gui.enabled || !reachable(id))
@@ -281,9 +287,21 @@ void buildWorldUi(scene::World& world, core::InstanceId workspace, core::Instanc
         if (component == nullptr)
             return;
         if (const std::optional<CanvasPlacement> placement =
-                placeSurface(gui, component->cframe, component->size, out.camera.origin))
-            trees.push_back(Tree{id, *placement, gui.brightness, gui.alwaysOnTop});
+                placeSurface(gui, component->cframe, component->size, camera.origin))
+            trees.push_back(Tree{id, *placement, gui.brightness, gui.alwaysOnTop, part});
     });
+    return trees;
+}
+
+} // namespace
+
+void buildWorldUi(scene::World& world, core::InstanceId workspace, core::InstanceId uiService, Vec2 viewport,
+                  std::span<const rhi::TextureHandle> textures, ui::DrawList& scratch, render::RenderWorld& out)
+{
+    if (!out.camera.valid)
+        return;
+
+    std::vector<Tree> trees = collectCanvases(world, workspace, uiService, viewport, out.camera);
 
     // **Back to front**, as every blended surface has to be: a near label over
     // a far one, never the reverse. Stable, so two at one distance keep pool
@@ -296,6 +314,63 @@ void buildWorldUi(scene::World& world, core::InstanceId workspace, core::Instanc
         ui::buildCanvasDrawList(world, tree.id, scratch);
         emitCanvas(scratch, tree.placement, tree.brightness, tree.onTop, textures, out);
     }
+}
+
+std::optional<WorldUiPick> pickWorldUi(scene::World& world, core::InstanceId workspace, core::InstanceId uiService,
+                                       Vec2 viewport, const render::RenderCamera& camera, Vec2 pointer,
+                                       const SolidAlong& solidAlong)
+{
+    if (!camera.valid || !(viewport.x > 0.0f) || !(viewport.y > 0.0f))
+        return std::nullopt;
+    // The pointer's ray, in the camera-relative space every placement is in.
+    const PickRay ray = rayThroughPixel(camera.projection, camera.view, core::DVec3{},
+                                        ViewportRect{0.0f, 0.0f, viewport.x, viewport.y}, pointer);
+    const Vec3 origin{static_cast<f32>(ray.origin.x), static_cast<f32>(ray.origin.y), static_cast<f32>(ray.origin.z)};
+
+    std::optional<WorldUiPick> best;
+    bool bestOnTop = false;
+    for (const Tree& tree : collectCanvases(world, workspace, uiService, viewport, camera)) {
+        const CanvasPlacement& at = tree.placement;
+        // The rectangle's plane: `right` and `down` are one pixel each, and
+        // the face looks along the opposite of their cross product.
+        const Vec3 facing = core::cross(at.right, at.down) * -1.0f;
+        const f32 approach = core::dot(ray.direction, facing);
+        // Edge-on, or seen from behind: a sign is read from its front.
+        if (!(approach < -1e-8f))
+            continue;
+        const f32 along = core::dot(at.topLeft - origin, facing) / approach;
+        if (!(along > 0.0f))
+            continue;
+        const Vec3 onPlane = origin + ray.direction * along - at.topLeft;
+        const Vec2 pixel{core::dot(onPlane, at.right) / core::dot(at.right, at.right),
+                         core::dot(onPlane, at.down) / core::dot(at.down, at.down)};
+        if (pixel.x < 0.0f || pixel.y < 0.0f || pixel.x > at.canvas.x || pixel.y > at.canvas.y)
+            continue;
+
+        // A canvas that could not win is not laid out: an on-top one already
+        // found beats anything that is not, and a nearer one of the same kind
+        // beats a farther one.
+        if (best.has_value() && (bestOnTop && !tree.onTop))
+            continue;
+        if (best.has_value() && bestOnTop == tree.onTop && along >= best->distance)
+            continue;
+
+        ui::layoutCanvas(world, tree.id, at.canvas);
+        const core::InstanceId element = ui::hitTestCanvas(world, tree.id, pixel);
+        if (!element.valid())
+            continue;
+        // Something solid in front of it hides it, unless it is drawn on top of
+        // everything. A centimetre of slack, because a surface canvas floats a
+        // millimetre off the face of the part behind it.
+        if (!tree.onTop && solidAlong) {
+            if (const std::optional<f32> solid = solidAlong(origin, ray.direction, tree.adornee);
+                solid.has_value() && *solid < along - 0.01f)
+                continue;
+        }
+        best = WorldUiPick{element, along};
+        bestOnTop = tree.onTop;
+    }
+    return best;
 }
 
 } // namespace luaug::app

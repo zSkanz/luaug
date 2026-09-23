@@ -40,6 +40,11 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **Buttons in the world are pressed** (F3): a `TextButton` on a `SurfaceGui`
+  or `BillboardGui` fires `Activated` and the hover events like one on the
+  screen. The pointer's ray finds it, anything solid in front hides it, and
+  `AlwaysOnTop` wins. `examples/18-world-ui` has a "Next round" button on its
+  scoreboard.
 - **`Terrain:WriteHeights(corner, columns, heights, material?)`**: a heightmap
   in one call, one height per column, row after row. It is the verb for ground
   that comes from a generator or an image. The flagship's middle is written

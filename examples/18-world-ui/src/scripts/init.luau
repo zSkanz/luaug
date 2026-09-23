@@ -11,6 +11,11 @@
 	A billboard's `Size` says two things at once: its scale is metres, so the
 	sign keeps its size in the world and shrinks with distance; its offset is
 	pixels, so a name tag stays readable however far away its owner is.
+
+	**And a button on the wall is a button.** Click "Next round" on the
+	scoreboard: the pointer's ray finds it in the world, exactly as a screen
+	button is found under the pointer, and a crate in front of it takes the
+	click instead.
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -78,6 +83,21 @@ scores.Text = '<font color="#6ec6ff"><b>Blue</b></font>   12<br/>'
     .. '<font color="#ff6b6b"><b>Red</b></font>    9<br/>'
     .. '<i><font size="28" transparency="0.3">first to 15 wins</font></i>'
 scores.Parent = panel
+
+local round = 3
+local nextRound = Instance.new("TextButton")
+nextRound.Size = UDim2.new(0, 170, 0, 56)
+nextRound.Position = UDim2.new(1, -190, 1, -76)
+nextRound.BackgroundColor = Color3.fromRGB(255, 179, 71)
+nextRound.TextColor = Color3.fromRGB(20, 20, 20)
+nextRound.TextSize = 30
+nextRound.Text = "Next round"
+nextRound.Parent = panel
+corner(nextRound, 12)
+nextRound.Activated:Connect(function()
+    round += 1
+    title.Text = `<b>ROUND {round}</b>  <font color="#ffb347">02:17</font>`
+end)
 
 -- **Crates with name tags.** Sized in pixels, so each tag is as big on the
 -- screen near or far; a health bar is two frames.

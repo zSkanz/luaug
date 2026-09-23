@@ -202,13 +202,26 @@ core::InstanceId hitTest(const scene::World& world, core::InstanceId uiService, 
     return best;
 }
 
+core::InstanceId hitTestCanvas(const scene::World& world, core::InstanceId root, core::Vec2 point)
+{
+    const Rect whole{Vec2{-1.0e9f, -1.0e9f}, Vec2{1.0e9f, 1.0e9f}};
+    core::InstanceId hit;
+    f32 bestZ = -1.0e30f;
+    for (core::InstanceId element = world.firstChild(root); element.valid(); element = world.nextSibling(element))
+        probe(world, element, point, whole, hit, bestZ);
+    return hit;
+}
+
 InteractionResult updateInteraction(scene::World& world, core::InstanceId uiService, const InteractionInput& input)
 {
     InteractionResult result;
     if (!uiService.valid())
         return result;
 
-    const core::InstanceId over = hitTest(world, uiService, input.pointer);
+    // The screen first, because it is drawn over the world; a button printed on
+    // a wall answers only where no screen element covers it.
+    const core::InstanceId onScreen = hitTest(world, uiService, input.pointer);
+    const core::InstanceId over = onScreen.valid() ? onScreen : input.worldOver;
     result.pointerOverUi = over.valid();
 
     // Hover, as a pair of edges rather than a state a handler has to compare

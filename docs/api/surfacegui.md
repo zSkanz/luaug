@@ -7,7 +7,7 @@
 
 A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the part.
 
-It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Nothing on it can be clicked yet.
+It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Its buttons are pressed like the screen's, from in front of the face: the pointer's ray finds them in the world, and something solid in front hides them unless `AlwaysOnTop` is set.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on

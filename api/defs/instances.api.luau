@@ -2000,8 +2000,9 @@ local Classes: { Schema.Class } = {
             .. "`ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in "
             .. "front of it, in the same light as the picture around it -- rather than over it.\n\n"
             .. "It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. "
-            .. "Nothing on it can be clicked yet: the pointer reaches the screen's UI and the world, and "
-            .. "a billboard is neither.",
+            .. "Its buttons are pressed like the screen's: the pointer's ray finds them in the world, "
+            .. "and something solid in front hides them unless `AlwaysOnTop` is set. A screen element "
+            .. "over the same pixel wins.",
         Properties = {
             {
                 Name = "Enabled",
@@ -2066,8 +2067,9 @@ local Classes: { Schema.Class } = {
             .. "label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a "
             .. "canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the "
             .. "part.\n\n"
-            .. "It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Nothing on "
-            .. "it can be clicked yet.",
+            .. "It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Its "
+            .. "buttons are pressed like the screen's, from in front of the face: the pointer's ray finds "
+            .. "them in the world, and something solid in front hides them unless `AlwaysOnTop` is set.",
         Properties = {
             {
                 Name = "Enabled",

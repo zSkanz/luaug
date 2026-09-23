@@ -3139,6 +3139,37 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             interaction.caretHome = uiCaretHome;
             interaction.caretEnd = uiCaretEnd;
             interaction.submit = uiSubmit;
+            // **A button printed on a wall is a button** (F3): the pointer's ray
+            // into the world, met with every `SurfaceGui` and `BillboardGui`,
+            // and hidden by anything solid in front of the canvas -- asked of
+            // the physics world, leaving out the part the canvas is on.
+            if (snapshot.camera.valid) {
+                const core::DVec3 cameraOrigin = snapshot.camera.origin;
+                const app::SolidAlong solidAlong = [&host,
+                                                    cameraOrigin](core::Vec3 origin, core::Vec3 direction,
+                                                                  core::InstanceId adornee) -> std::optional<f32> {
+                    const scene::PhysicsSync* physics = host->physics();
+                    if (physics == nullptr)
+                        return std::nullopt;
+                    const std::array<u64, 1> excluded{physics->userDataOf(adornee)};
+                    physics::QueryFilter filter;
+                    filter.mode = physics::QueryFilter::Mode::Exclude;
+                    filter.userData = std::span<const u64>{excluded.data(), adornee.valid() ? 1u : 0u};
+                    constexpr f32 Reach = 2000.0f;
+                    physics::RayHit hit;
+                    const physics::RayD ray{core::DVec3{cameraOrigin.x + static_cast<f64>(origin.x),
+                                                        cameraOrigin.y + static_cast<f64>(origin.y),
+                                                        cameraOrigin.z + static_cast<f64>(origin.z)},
+                                            direction * Reach};
+                    if (!physics->backend().raycast(physics->worldHandle(), ray, filter, hit))
+                        return std::nullopt;
+                    return hit.distance;
+                };
+                if (const std::optional<app::WorldUiPick> picked =
+                        app::pickWorldUi(host->world(), host->workspace(), host->uiService(), uiViewport,
+                                         snapshot.camera, devices.pointer, solidAlong))
+                    interaction.worldOver = picked->element;
+            }
             lastUiPointerDown = uiPointerDown;
             const ui::InteractionResult uiResult = ui::updateInteraction(host->world(), host->uiService(), interaction);
             host->input().setPointerCapturedByUi(uiResult.pointerOverUi);

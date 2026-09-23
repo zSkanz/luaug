@@ -174,3 +174,66 @@ TEST_CASE("a surface's children land on its part, back to front, in the world pa
     REQUIRE_FALSE(out.worldUiRuns.empty());
     CHECK_FALSE(out.worldUiRuns.front().alwaysOnTop);
 }
+
+TEST_CASE("the pointer presses a sign in the world, unless it is behind something or seen from behind")
+{
+    app::testing::Fixture fixture;
+    scene::World world{fixture.classes, fixture.enums, fixture.atoms, 7u};
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+
+    // A wall ten metres ahead with a panel over the whole of its near face.
+    const core::InstanceId wall = world.create(fixture.partClass);
+    scene::PartComponent part;
+    part.cframe.position = core::DVec3{0.0, 0.0, -10.0};
+    part.size = core::Vec3{4.0f, 2.0f, 0.5f};
+    world.parts().add(wall, part);
+    (void)world.setParent(wall, workspace);
+    const core::InstanceId gui = world.create(fixture.folderClass);
+    scene::SurfaceGuiComponent surface;
+    surface.face = 1; // Back: the face +Z points out of, towards the camera.
+    world.surfaceGuis().add(gui, surface);
+    (void)world.setParent(gui, wall);
+    const core::InstanceId panel = world.create(fixture.folderClass);
+    scene::UIObjectComponent frame;
+    frame.size = core::UDim2{core::UDim{1.0f, 0.0f}, core::UDim{1.0f, 0.0f}};
+    world.uiObjects().add(panel, frame);
+    (void)world.setParent(panel, gui);
+
+    const render::RenderCamera camera = cameraAtOrigin();
+    const core::Vec2 viewport{1280.0f, 720.0f};
+    const core::Vec2 centre{640.0f, 360.0f};
+    core::InstanceId askedToIgnore;
+    const app::SolidAlong nothingInTheWay = [&](core::Vec3, core::Vec3, core::InstanceId adornee) {
+        askedToIgnore = adornee;
+        return std::optional<core::f32>{};
+    };
+
+    // Straight ahead: the panel, at the wall's near face.
+    const std::optional<app::WorldUiPick> ahead =
+        app::pickWorldUi(world, workspace, {}, viewport, camera, centre, nothingInTheWay);
+    REQUIRE(ahead.has_value());
+    CHECK(ahead->element == panel);
+    CHECK(static_cast<double>(ahead->distance) == doctest::Approx(9.749).epsilon(0.001));
+    // The part it is printed on is left out of the occlusion question.
+    CHECK(askedToIgnore == wall);
+
+    // Off to the side, the ray misses the wall entirely.
+    CHECK_FALSE(app::pickWorldUi(world, workspace, {}, viewport, camera, core::Vec2{20.0f, 20.0f}, nothingInTheWay)
+                    .has_value());
+
+    // Something solid five metres out hides it...
+    const app::SolidAlong crate = [](core::Vec3, core::Vec3, core::InstanceId) {
+        return std::optional<core::f32>{5.0f};
+    };
+    CHECK_FALSE(app::pickWorldUi(world, workspace, {}, viewport, camera, centre, crate).has_value());
+    // ...unless it is drawn on top of everything.
+    world.surfaceGuis().find(gui)->alwaysOnTop = true;
+    CHECK(app::pickWorldUi(world, workspace, {}, viewport, camera, centre, crate).has_value());
+    world.surfaceGuis().find(gui)->alwaysOnTop = false;
+
+    // On the far face, the camera sees the canvas's back, and a sign is read
+    // from its front.
+    world.surfaceGuis().find(gui)->face = 0; // Front: -Z, away from the camera.
+    CHECK_FALSE(app::pickWorldUi(world, workspace, {}, viewport, camera, centre, nothingInTheWay).has_value());
+}

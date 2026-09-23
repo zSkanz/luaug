@@ -71,11 +71,25 @@ screen's: a colour is converted from the screen's sRGB into linear light and
 scaled by `Brightness`. At one, white reads as a lit white surface; above one it
 glows and blooms, which is what a screen on a wall usually wants.
 
+## Pressing a button in the world
+
+A `TextButton` on a `SurfaceGui` or a `BillboardGui` fires `Activated`, and the
+hover events, exactly as one on the screen does. The engine casts the pointer's
+ray into the world. It finds the canvas the ray meets and the element under
+that point, in the canvas's own pixels:
+
+- **Something solid in front hides it.** A crate between the camera and the
+  scoreboard takes the click. The part the canvas is printed on never counts.
+- **`AlwaysOnTop` is drawn over everything and is pressed over everything.**
+- **A canvas is read from its front.** The back of a sign is not a button.
+- **The screen comes first.** A screen element over the same pixel wins,
+  because it is drawn in front of the world.
+- **Empty canvas is not a hit.** A click on a canvas's transparent space goes
+  on to whatever is behind it.
+
 ## What is not here
 
-Nothing on a `SurfaceGui` or a `BillboardGui` can be clicked yet — the pointer
-reaches the screen's UI and the world, and a sign in the world is neither. A
-`ClipsDescendants` frame in the world clips upright children and not turned
+A `ClipsDescendants` frame in the world clips upright children and not turned
 ones.
 
 ## Where to look next
