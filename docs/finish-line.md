@@ -1624,17 +1624,24 @@ that sends the next session to the wrong place.
   committed work had been linked in. The lesson is the campaign's own standing
   rule pointing the other way: check what you are running before believing what
   it says.
-- **The Linux half of the crash gate is unverified.** On MSVC the runtime's
-  own `__try` around `main` means `std::terminate` never runs, so the note
-  carries the stack rather than the message; POSIX should reach `terminate`
-  and therefore the message. The gate asserts each accordingly and only the
-  Windows half has been run.
+- ~~**The Linux half of the crash gate is unverified.**~~ Verified on
+  2026-09-23. `crash_gate` runs in every Linux ctest, locally in the tier-2
+  container and in CI. It passes there and on macOS, where POSIX reaches
+  `terminate` and the note carries the message. CI run 35847501641, test #4 on
+  both jobs.
 
 ## Blocked
 
+**Nothing, as of 2026-09-23.** The repository went public on 2026-08-27, and
+Actions has run every push since. The sanitizer nightly went green on
+2026-09-23 after five red days. They were a bench budget measured under ASan,
+an unpinned and unauthenticated rokit install, and a job with no Vulkan ICD for
+the gate that asserts nothing skips. The paragraphs below are the record of
+the dark stretch, kept because the lesson in them still holds.
+
 - **Nothing is blocked on the owner.** The one act reserved for them -- making the
   repository public -- is sequenced last and blocks nothing before it.
-- **GitHub Actions has been dark since 2026-08-22**, every run completing in about
+- **GitHub Actions was dark from 2026-08-22 to 2026-08-27**, every run completing in about
   four seconds having executed zero steps. The annotation names it exactly:
   *"The job was not started because recent account payments have failed or your
   spending limit needs to be increased."* Not one job starts -- including
