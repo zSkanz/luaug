@@ -40,6 +40,11 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **A terrain larger than the atlas draws what is near the camera** (ADR
+  0081). Past 16,384 tiles, a 2 km square at half a metre, the loader kept the
+  first tiles in key order, and the editor drew a strip along one edge of the
+  world. It now keeps the nearest, frees the far ones before uploading, and
+  uploads outwards from the camera.
 - **`ReplicatedStorage` and `ServerStorage`** (ADR 0080): two services that
   hold what is not the world, saved with the scene under a new optional
   `storage` key. What `ReplicatedStorage` keeps reaches every replica whatever

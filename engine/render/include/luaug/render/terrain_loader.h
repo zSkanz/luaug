@@ -88,6 +88,8 @@ public:
 
     // How many tiles have an atlas slot, across every terrain.
     [[nodiscard]] core::usize residentCount() const noexcept;
+    // Whether one tile of one terrain has an atlas slot, and so is drawn.
+    [[nodiscard]] bool tileResident(core::InstanceId terrain, asset::TileKey key) const noexcept;
     // How many cave columns are meshed.
     [[nodiscard]] core::usize caveCount() const noexcept { return m_caves.size(); }
     // Tiles uploaded by the last `sync`, for tests and the perf overlay.

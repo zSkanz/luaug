@@ -228,6 +228,42 @@ TEST_CASE("every tile is uploaded once, and a quiet frame uploads nothing")
     CHECK(fixture.loader.lastTileUploads() == 0);
 }
 
+TEST_CASE("a terrain larger than the atlas keeps the tiles nearest the viewer")
+{
+    // **A 2.2 km square at half a metre is 19,000 tiles**, past the atlas's
+    // 16,384. The editor holds a world like that whole. What is drawn is the
+    // part around the camera, and it follows the camera.
+    LoaderFixture fixture;
+    asset::fillFlat(fixture.component().field, core::DVec3{0.0, 0.0, 0.0}, 2200.0f, 0.0f, 1);
+    fixture.component().fieldRevision += 1;
+    const core::usize tiles = fixture.component().field.tileCount();
+    REQUIRE(tiles > 16384u);
+
+    const auto settle = [&]() {
+        for (int frame = 0; frame < 40; ++frame) {
+            (void)fixture.sync();
+            if (fixture.loader.lastTileUploads() == 0)
+                return;
+        }
+        FAIL("the atlas never settled");
+    };
+    // Tile keys are 16 m squares at this voxel: the east and west edges.
+    const asset::TileKey east{68, 0};
+    const asset::TileKey west{-69, 0};
+
+    fixture.loader.setFocus(core::DVec3{1090.0, 0.0, 0.0});
+    settle();
+    CHECK(fixture.loader.residentCount() == 16384u);
+    CHECK(fixture.loader.tileResident(fixture.terrain, east));
+    CHECK_FALSE(fixture.loader.tileResident(fixture.terrain, west));
+
+    fixture.loader.setFocus(core::DVec3{-1090.0, 0.0, 0.0});
+    settle();
+    CHECK(fixture.loader.residentCount() == 16384u);
+    CHECK(fixture.loader.tileResident(fixture.terrain, west));
+    CHECK_FALSE(fixture.loader.tileResident(fixture.terrain, east));
+}
+
 TEST_CASE("a brush stroke uploads the tiles it touched and nothing else")
 {
     // **This is the whole of what an edit costs now**: kilobytes to the GPU.

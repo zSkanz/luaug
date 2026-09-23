@@ -120,3 +120,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0078](0078-a-dot-reaches-a-child-and-the-scene-is-typed.md) | A dot reaches a child after the members, and the scene's tree is typed from the scene itself (supersedes 0061) |
 | [0079](0079-a-client-asks-through-a-remote-function.md) | A client asks the authority through a `RemoteFunction` and waits for the answer; the server never waits on a client |
 | [0080](0080-replicated-storage-and-server-storage.md) | `ReplicatedStorage` and `ServerStorage` hold what is not the world; saved with the scene, one reaching every replica and one staying on the authority |
+| [0081](0081-the-editor-holds-the-field-and-the-gpu-holds-what-is-near.md) | The editor holds the whole field; the terrain atlas keeps the tiles nearest the camera; a scene of cells waits for a 1 GiB field |

@@ -67,6 +67,8 @@ two defects that were already shipping:
 - **The editor holds the whole field**, as it holds the whole scene: the
   partition does not run there. Editing a world larger than memory is a
   scene that is a folder of cells, and that is further off than this.
+  [ADR 0081](0081-the-editor-holds-the-field-and-the-gpu-holds-what-is-near.md)
+  measured where the editor's ceiling really is and set the trigger.
 - **A script's own terrain is resident.** Only a field saved with a scene
   streams. Ground a script generates at runtime lives in memory, like the
   instances it makes.

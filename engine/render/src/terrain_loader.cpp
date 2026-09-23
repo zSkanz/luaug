@@ -274,6 +274,18 @@ usize TerrainLoader::residentCount() const noexcept
     return count;
 }
 
+bool TerrainLoader::tileResident(core::InstanceId terrain, asset::TileKey key) const noexcept
+{
+    for (const GpuTerrain& gpu : m_terrains) {
+        if (gpu.terrain != terrain)
+            continue;
+        const auto at = std::lower_bound(gpu.slots.begin(), gpu.slots.end(), key,
+                                         [](const Slot& entry, asset::TileKey probe) { return entry.key < probe; });
+        return at != gpu.slots.end() && at->key == key;
+    }
+    return false;
+}
+
 bool TerrainLoader::caveResident(core::InstanceId terrain, asset::TileKey column) const noexcept
 {
     const auto at =
@@ -437,8 +449,37 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
         }
 
         // --- The atlas --------------------------------------------------------
-        const std::vector<asset::TileKey> keys = field.tileKeys();
-        const u32 wanted = static_cast<u32>(std::min<usize>(keys.size(), static_cast<usize>(MaxRows) * SlotsPerRow));
+        std::vector<asset::TileKey> keys = field.tileKeys();
+        const usize capacity = static_cast<usize>(MaxRows) * SlotsPerRow;
+
+        // **Only as many as fit, and the ones nearest the viewer.** A terrain
+        // larger than the atlas -- past a 2 km square at half a metre, which
+        // the editor holds whole -- keeps the tiles around the camera, and a
+        // tile it gives up for a nearer one is uploaded again when the camera
+        // comes back. Before this the ceiling kept the first tiles in KEY
+        // order: a strip along one edge of the world, wherever the camera was.
+        // Nearest first is also the upload order under the per-sync budget, so
+        // such a world appears from the camera outwards. Rendering only: the
+        // field, the colliders and the simulation never read this.
+        bool trimmed = false;
+        if (keys.size() > capacity) {
+            const double tileMetres =
+                static_cast<double>(asset::TileEdge) * static_cast<double>(field.settings().voxelSize);
+            const double fx = m_hasFocus ? (m_focus.x - terrain.origin.x) / tileMetres - 0.5 : 0.0;
+            const double fz = m_hasFocus ? (m_focus.z - terrain.origin.z) / tileMetres - 0.5 : 0.0;
+            const auto nearer = [&](asset::TileKey a, asset::TileKey b) {
+                const double da = (static_cast<double>(a.x) - fx) * (static_cast<double>(a.x) - fx) +
+                                  (static_cast<double>(a.z) - fz) * (static_cast<double>(a.z) - fz);
+                const double db = (static_cast<double>(b.x) - fx) * (static_cast<double>(b.x) - fx) +
+                                  (static_cast<double>(b.z) - fz) * (static_cast<double>(b.z) - fz);
+                return da != db ? da < db : a < b;
+            };
+            std::nth_element(keys.begin(), keys.begin() + static_cast<std::ptrdiff_t>(capacity), keys.end(), nearer);
+            keys.resize(capacity);
+            std::sort(keys.begin(), keys.end(), nearer);
+            trimmed = true;
+        }
+        const u32 wanted = static_cast<u32>(keys.size());
         const u32 rowsNeeded = std::max(1u, nextPowerOfTwo((wanted + SlotsPerRow - 1) / SlotsPerRow));
         if (gpu.rows < rowsNeeded || !gpu.heights.valid()) {
             // Grown by recreating: there is no texture copy in the RHI, and a
@@ -520,6 +561,31 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                 return -1;
             return tz * static_cast<i32>(gpu.tableEdge) + tx;
         };
+
+        // **A tile the viewer left behind gives its slot up before a nearer
+        // one needs it.** Freed at the end, as a tile the field no longer holds
+        // is, the atlas stays full through this frame's uploads and the ground
+        // ahead of a moving camera arrives a frame late -- every frame.
+        if (trimmed) {
+            std::vector<asset::TileKey> kept = keys;
+            std::sort(kept.begin(), kept.end());
+            bool freed = false;
+            for (usize at = gpu.slots.size(); at > 0; --at) {
+                const Slot& slot = gpu.slots[at - 1];
+                if (std::binary_search(kept.begin(), kept.end(), slot.key))
+                    continue;
+                gpu.freeSlots.push_back(slot.slot);
+                const i32 index = tableIndex(slot.key);
+                if (index >= 0) {
+                    gpu.table[static_cast<usize>(index)] = -1.0f;
+                    gpu.tableDirty = true;
+                }
+                gpu.slots.erase(gpu.slots.begin() + static_cast<std::ptrdiff_t>(at - 1));
+                freed = true;
+            }
+            if (freed)
+                std::sort(gpu.freeSlots.begin(), gpu.freeSlots.end(), std::greater<>());
+        }
 
         std::vector<float> heights(asset::TileArea);
         std::vector<core::u8> materials(asset::TileArea);

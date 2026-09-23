@@ -185,8 +185,14 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   0080)**: saved with the scene, one replicated to everybody and one kept on the
   authority, typed on `game`, and droppable into from the Explorer.
 
-  **The next action, as a sentence:** editing a world larger than memory
-  (ADR 0075). Android waits, on the owner's word.
+  **Editing a large world was measured before it was built (ADR 0081).** The
+  field in memory is 19 MiB per km² at half a metre, so the editor holds a
+  4 km square whole. The GPU atlas was the real wall: past a 2 km square the
+  editor drew a strip along one edge, and it now keeps the tiles nearest the
+  camera. A scene that is a folder of cells waits for a 1 GiB field.
+
+  **The next action, as a sentence:** nothing on the list the owner left is
+  open except Android, which waits on their word.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is
