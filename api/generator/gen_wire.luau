@@ -142,6 +142,9 @@ emit("    std::span<const FieldDesc> fields;")
 emit("    // The index in `Classes` of the class whose fields this one also carries,")
 emit("    // or -1. One level: a `CharacterBody` is a `BasePart`.")
 emit("    int base = -1;")
+emit("    // A service: one per world, on both ends from boot, so it is never")
+emit("    // spawned, never leaves interest, and travels under a fixed id.")
+emit("    bool service = false;")
 emit("};")
 emit("")
 
@@ -198,7 +201,8 @@ end
 for _, class in Classes do
     local fields = if hasArray[`{class.Name}Fields`] then `{class.Name}Fields` else "{}"
     local base = if class.Extends ~= nil then classIndex[class.Extends] else -1
-    emit("    {" .. `{quote(class.Name)}, {fields}, {base}` .. "},")
+    local service = if class.Service then "true" else "false"
+    emit("    {" .. `{quote(class.Name)}, {fields}, {base}, {service}` .. "},")
 end
 emit("};")
 emit("")

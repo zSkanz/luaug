@@ -384,6 +384,28 @@ void AuthoritySession::capture(const scene::World& world, InstanceId root, u64 t
         stack.insert(stack.end(), children.rbegin(), children.rend());
     }
 
+    // **The services whose properties travel** (`Service = true` in the wire
+    // schema), each under an id of its own that never changes: every world has
+    // one from boot, so there is nothing to spawn and nothing to number.
+    const InstanceId dataModel = world.parentOf(root);
+    for (usize index = 0; index < std::size(generated::Classes) && dataModel.valid(); ++index) {
+        const generated::ClassDesc& desc = generated::Classes[index];
+        if (!desc.service)
+            continue;
+        for (InstanceId child = world.firstChild(dataModel); child.valid(); child = world.nextSibling(child)) {
+            if (world.atoms().text(world.classes().find(world.classOf(child))->name) != desc.name)
+                continue;
+            FieldSet fields;
+            if (!extractFields(world, child, desc, fields))
+                break;
+            setNetId(fields[parentField], RootNetId);
+            const u32 netId = ServiceNetIdBase + static_cast<u32>(index);
+            state->entities.push_back(EntityState{NetId{netId}, static_cast<u8>(index), std::move(fields)});
+            m_order.push_back(Captured{netId, child, -1});
+            break;
+        }
+    }
+
     // Instances gone since the last capture give their ids up for good.
     for (auto at = m_netIds.begin(); at != m_netIds.end();) {
         if (!seen.contains(at->first)) {
@@ -562,6 +584,10 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const st
     std::set_difference(now.begin(), now.end(), peer.known.begin(), peer.known.end(), std::back_inserter(entering));
     std::vector<u32> leaving;
     std::set_difference(peer.known.begin(), peer.known.end(), now.begin(), now.end(), std::back_inserter(leaving));
+    // A service exists on both ends from boot: its first record arrives whole
+    // because no baseline has it, and it is never spawned or despawned.
+    std::erase_if(entering, [](u32 id) { return id >= ServiceNetIdBase; });
+    std::erase_if(leaving, [](u32 id) { return id >= ServiceNetIdBase; });
 
     if (!leaving.empty()) {
         Writer despawn;
@@ -624,8 +650,14 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const st
         }
         if (record.fields.empty())
             continue;
-        if (std::find(record.fields.begin(), record.fields.end(), nameField) != record.fields.end())
-            atoms.insert(asU32(entity.fields[nameField]));
+        // **Every name-shaped field, not `Name` alone**: a decal's image is a
+        // content URN, and an atom number means nothing on another machine.
+        const generated::ClassDesc& described = generated::Classes[entity.schema];
+        for (const usize at : record.fields) {
+            const generated::FieldDesc* field = fieldAt(described, at);
+            if (at == nameField || (field != nullptr && field->encoding == generated::Encoding::NameAtom))
+                atoms.insert(asU32(entity.fields[at]));
+        }
         records.push_back(std::move(record));
     }
 
@@ -1103,6 +1135,19 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
     const usize nameField = commonIndex("Name");
     const usize parentField = commonIndex("Parent");
     for (const EntityState& entity : state.entities) {
+        const bool service = entity.id.value >= ServiceNetIdBase;
+        if (service && !m_locals.contains(entity.id.value)) {
+            // This world's own copy of the service, by its class name.
+            const InstanceId dataModel = world.parentOf(root);
+            const std::string_view wanted = generated::Classes[entity.schema].name;
+            for (InstanceId child = dataModel.valid() ? world.firstChild(dataModel) : InstanceId{}; child.valid();
+                 child = world.nextSibling(child)) {
+                if (world.atoms().text(world.classes().find(world.classOf(child))->name) == wanted) {
+                    m_locals[entity.id.value] = child;
+                    break;
+                }
+            }
+        }
         const auto local = m_locals.find(entity.id.value);
         if (local == m_locals.end() || !world.alive(local->second))
             continue; // its spawn has not arrived yet; the next apply writes it whole
@@ -1113,6 +1158,9 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
         for (usize at = 0; at < entity.fields.size(); ++at) {
             const FieldValue& value = entity.fields[at];
             if (written != m_written.end() && at < written->second.size() && written->second[at] == value)
+                continue;
+            // A service keeps its own name and its place under the data model.
+            if (service && (at == nameField || at == parentField))
                 continue;
             if (at == nameField) {
                 const auto name = m_names.find(asU32(value));
@@ -1133,6 +1181,17 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
             }
             const generated::FieldDesc* field = fieldAt(desc, at);
             const bool cframe = field != nullptr && field->name == "CFrame" && field->pool == "parts";
+            // A name-shaped component field arrives as the authority's atom,
+            // and is this machine's own atom by the time it is written.
+            if (field != nullptr && field->encoding == generated::Encoding::NameAtom) {
+                const auto name = m_names.find(asU32(value));
+                if (name == m_names.end())
+                    continue;
+                FieldValue translated;
+                setU32(translated, name->second.id);
+                (void)applyField(world, local->second, desc, FieldDelta{wireIdAt(desc, at), translated});
+                continue;
+            }
             if (entity.id.value == m_owned && m_owned != 0) {
                 // **This machine's own character is predicted** (ADR 0076): the
                 // local scripts already moved it, so the authority's value

@@ -18,8 +18,9 @@ does not is engine work and belongs in the git history rather than in this file.
 - **Multiplayer prediction, interpolation and interest** (ADR 0076):
   `Player.Character` names a player's part; a replica moves its own at once and
   the authority's snapshots correct it, draws everyone else between snapshots
-  instead of stepping, and is sent only what is near its character. The wire
-  protocol is version 4.
+  instead of stepping, and is sent only what is near its character. Decals and
+  `Lighting` (the time of day, the light and the fog) replicate too. The wire
+  protocol is version 5.
 - **`SurfaceGui` and `BillboardGui`** (F3): UI drawn in the world -- on a face of
   a part (`Enum.Face`, `PixelsPerMetre`) or over a point and facing the camera,
   sized in metres, in pixels, or both. The children are the screen's own

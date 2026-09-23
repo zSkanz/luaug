@@ -301,11 +301,33 @@ struct RealSide
     core::InstanceId dataModel;
     core::InstanceId network;
     core::InstanceId workspace;
+    core::InstanceId lighting;
 
     RealSide()
     {
         scene::generated::registerClasses(classes, atoms);
         scene::generated::registerEnums(enums, atoms);
+        // `Decal` is the renderer's class, and this module sits beside the
+        // renderer rather than above it -- so the one class the wire carries
+        // from there is declared here by hand, storing what the real one does.
+        (void)classes.registerClass({
+            .name = atoms.intern("Decal"),
+            .super = classes.findId(atoms.intern("Instance")),
+            .defaultName = atoms.intern("Decal"),
+            .attachComponents = [](scene::World& world,
+                                   core::InstanceId id) { world.decals().add(id, scene::DecalComponent{}); },
+            .detachComponents = [](scene::World& world, core::InstanceId id) { world.decals().remove(id); },
+        });
+        // And `Lighting`, the service whose properties travel, for the same
+        // reason.
+        (void)classes.registerClass({
+            .name = atoms.intern("Lighting"),
+            .super = classes.findId(atoms.intern("Instance")),
+            .defaultName = atoms.intern("Lighting"),
+            .attachComponents = [](scene::World& world,
+                                   core::InstanceId id) { world.lighting().add(id, scene::LightingComponent{}); },
+            .detachComponents = [](scene::World& world, core::InstanceId id) { world.lighting().remove(id); },
+        });
         const auto make = [this](std::string_view name) {
             const core::InstanceId id = world.create(classes.findId(atoms.intern(name)));
             REQUIRE(id.valid());
@@ -315,6 +337,8 @@ struct RealSide
         dataModel = make("DataModel");
         network = make("NetworkService");
         workspace = make("Workspace");
+        lighting = make("Lighting");
+        REQUIRE_FALSE(world.setParent(lighting, dataModel).has_value());
         REQUIRE_FALSE(world.setParent(network, dataModel).has_value());
         REQUIRE_FALSE(world.setParent(workspace, dataModel).has_value());
     }
@@ -666,4 +690,64 @@ TEST_CASE("another player's part is drawn between snapshots rather than stepping
     const double server = match.server.world.parts().find(other)->cframe.position.x;
     CHECK(positions.back() < server);
     CHECK(server - positions.back() <= 6.0);
+}
+
+TEST_CASE("a decal placed on the authority is seen on a replica, image and all")
+{
+    PlayedMatch match;
+    const core::InstanceId crate = match.part("Crate", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId decal =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("Decal")));
+    REQUIRE(decal.valid());
+    scene::DecalComponent* mark = match.server.world.decals().find(decal);
+    REQUIRE(mark != nullptr);
+    mark->texture = match.server.atoms.intern("asset://textures/scorch.png");
+    mark->size = core::Vec3{3.0f, 3.0f, 1.0f};
+    mark->transparency = 0.25f;
+    REQUIRE_FALSE(match.server.world.setParent(decal, crate).has_value());
+    match.run(4);
+
+    const core::InstanceId seen = match.copyOf(decal);
+    REQUIRE(seen.valid());
+    const scene::DecalComponent* copy = match.client.world.decals().find(seen);
+    REQUIRE(copy != nullptr);
+    // **The URN, in the replica's own atoms**: the authority's atom number
+    // would name some other string here, or none.
+    CHECK(match.client.atoms.text(copy->texture) == "asset://textures/scorch.png");
+    CHECK(static_cast<double>(copy->size.x) == doctest::Approx(3.0));
+    CHECK(static_cast<double>(copy->transparency) == doctest::Approx(0.25));
+    CHECK(match.client.world.parentOf(seen) == match.copyOf(crate));
+
+    // A new image is a new string, and it travels the same way.
+    match.server.world.decals().find(decal)->texture = match.server.atoms.intern("asset://textures/footprint.png");
+    match.run(3);
+    CHECK(match.client.atoms.text(match.client.world.decals().find(seen)->texture) == "asset://textures/footprint.png");
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("night on the authority is night on the replica: Lighting's properties travel")
+{
+    PlayedMatch match;
+    scene::LightingComponent* sky = match.server.world.lighting().find(match.server.lighting);
+    REQUIRE(sky != nullptr);
+    sky->clockTime = 19.5f;
+    sky->fogEnd = 300.0f;
+    sky->fogColor = core::Color3{0.2f, 0.1f, 0.3f};
+    match.run(4);
+
+    const scene::LightingComponent* seen = match.client.world.lighting().find(match.client.lighting);
+    REQUIRE(seen != nullptr);
+    CHECK(static_cast<double>(seen->clockTime) == doctest::Approx(19.5));
+    CHECK(static_cast<double>(seen->fogEnd) == doctest::Approx(300.0));
+    CHECK(static_cast<double>(seen->fogColor.b) == doctest::Approx(0.3));
+    // A service stays where every world keeps it, and is never a copy.
+    CHECK(match.client.world.parentOf(match.client.lighting) == match.client.dataModel);
+    CHECK(match.client.world.name(match.client.lighting) == match.client.atoms.intern("Lighting"));
+
+    // And the clock keeps up as the authority's day turns.
+    sky->clockTime = 6.0f;
+    match.run(3);
+    CHECK(static_cast<double>(match.client.world.lighting().find(match.client.lighting)->clockTime) ==
+          doctest::Approx(6.0));
+    CHECK(match.replica->checksumFailures() == 0);
 }

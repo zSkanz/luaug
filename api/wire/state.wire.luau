@@ -161,6 +161,116 @@ local ModelFields: { Schema.Field } = {
 
 local NoFields: { Schema.Field } = {}
 
+local LightingFields: { Schema.Field } = {
+    {
+        Name = "ClockTime",
+        Id = 1,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "Night on the authority is night on every replica: the sun is where the game says it is.",
+    },
+    {
+        Name = "GeographicLatitude",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "Where the sun's path runs, which with the clock is where every shadow falls.",
+    },
+    {
+        Name = "Ambient",
+        Id = 3,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "The light in the shadows, which a game changes to say it is getting dark.",
+    },
+    {
+        Name = "Brightness",
+        Id = 4,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "How strong the sun is.",
+    },
+    {
+        Name = "FogColor",
+        Id = 5,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "What the distance fades into.",
+    },
+    {
+        Name = "FogStart",
+        Id = 6,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "Where it starts to fade.",
+    },
+    {
+        Name = "FogEnd",
+        Id = 7,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "Where it is gone -- a storm rolling in is this number coming closer.",
+    },
+    {
+        Name = "ExposureCompensation",
+        Id = 8,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "A flash, a blinding moment, a cave entrance a game brightens.",
+    },
+}
+
+local DecalFields: { Schema.Field } = {
+    {
+        Name = "CFrame",
+        Id = 1,
+        Encoding = "CFrameD",
+        Source = "Component",
+        Component = "decals",
+        Doc = "Where the mark is -- relative to the part it is on, so a mark on a moving crate moves with it.",
+    },
+    {
+        Name = "Size",
+        Id = 2,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "decals",
+        Doc = "How much of the world the mark covers.",
+    },
+    {
+        Name = "Texture",
+        Id = 3,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "decals",
+        Doc = "The image, by content URN, through the snapshot's string table as every name travels.",
+    },
+    {
+        Name = "Color",
+        Id = 4,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "decals",
+        Doc = "What the image is multiplied by.",
+    },
+    {
+        Name = "Transparency",
+        Id = 5,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "decals",
+        Doc = "A mark fading out is a game saying something.",
+    },
+}
+
 local ParticleEmitterFields: { Schema.Field } = {
     {
         Name = "Enabled",
@@ -323,6 +433,21 @@ local Classes: { Schema.Class } = {
         Fields = ModelFields,
     },
     {
+        Name = "Lighting",
+        Service = true,
+        Doc = "**The first service whose properties travel**: the time of day, the fog and the light. "
+            .. "It is never spawned -- every world has one from boot, on both ends -- so it travels under "
+            .. "a fixed id and a replica writes its own.",
+        Fields = LightingFields,
+    },
+    {
+        Name = "Decal",
+        Doc = "A scorch mark, a footprint, a poster (F2). Replicated since the snapshot's string table "
+            .. "carries every name-shaped field rather than `Name` alone, which is what its image URN "
+            .. "needed.",
+        Fields = DecalFields,
+    },
+    {
         Name = "ParticleEmitter",
         Doc = "Sparks, smoke and magic (F2). Its particles are a picture and never travel -- each "
             .. "machine simulates its own -- but how an emitter is set up is what a game changes to say "
@@ -347,12 +472,6 @@ local Excluded: { Schema.Excluded } = {
             .. "the world -- from the scene, or later from a streamed cell -- and a sculpt is rare, "
             .. "authored, and not a per-tick fact. ADR 0069 decides this by name so the next person "
             .. "does not have to work out whether it was considered.",
-    },
-    {
-        Name = "Decal",
-        Reason = "Its image is a content URN, and a field that carries a string needs the string table "
-            .. "every other name uses to reach component fields first -- owed with the next protocol "
-            .. "version. Until then a decal a script places on an authority is not seen on a replica.",
     },
     {
         Name = "Player",
@@ -500,10 +619,9 @@ local ExcludedByTag: { Schema.ExcludedTag } = {
         Tag = "Service",
         Reason = "A service is a singleton every world creates at boot, on both sides, so there is "
             .. "nothing to spawn, despawn or reference by network id. Whether a service's PROPERTIES "
-            .. "are world state is a separate question and N1 does not answer it: "
-            .. "`Lighting.ClockTime` is the real example, and it needs a per-service decision and a "
-            .. "second delta path that is not the instance one. Getting instance replication right "
-            .. "first is what makes that question answerable.",
+            .. "are world state is a separate, per-service question: a service whose properties travel is "
+            .. "listed under `Classes` with `Service = true` (`Lighting` is), and every other one "
+            .. "falls here.",
     },
 }
 

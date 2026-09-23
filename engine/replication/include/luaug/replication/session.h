@@ -57,6 +57,11 @@ inline constexpr NetId RootNetId{1};
 // for two seconds, which is a peer about to time out anyway.
 inline constexpr usize StateHistory = 64;
 
+// Where the services whose properties travel are numbered from: one fixed id
+// per wire class, far above any instance's, so a service is never mistaken for
+// something to spawn.
+inline constexpr u32 ServiceNetIdBase = 0x7F000000u;
+
 // Prediction and interpolation (ADR 0076). Two snapshot intervals of delay at
 // the default rate -- the smallest that nearly always has a sample on each
 // side of the moment drawn -- and enough history for a two-second round trip.

@@ -87,6 +87,10 @@ export type Class = {
     --- fields and not the part's six would hold a character that never moves.
     --- One level, and it must be declared earlier in the list.
     Extends: string?,
+    --- A service rather than an instance class: one per world, made at boot on
+    --- both ends, so it is never spawned or despawned and is always in
+    --- interest. Its properties are what travel.
+    Service: boolean?,
     Fields: { Field },
     Retired: { RetiredField }?,
     Doc: string?,

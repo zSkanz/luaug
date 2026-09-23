@@ -102,6 +102,74 @@ using generated::Source;
         return false;
     }
 
+    if (field.pool == "lighting") {
+        const scene::LightingComponent* lighting = world.lighting().find(id);
+        if (lighting == nullptr) {
+            return false;
+        }
+        if (field.name == "ClockTime") {
+            setF32(out, lighting->clockTime);
+            return true;
+        }
+        if (field.name == "GeographicLatitude") {
+            setF32(out, lighting->geographicLatitude);
+            return true;
+        }
+        if (field.name == "Ambient") {
+            setVec3(out, core::Vec3{lighting->ambient.r, lighting->ambient.g, lighting->ambient.b});
+            return true;
+        }
+        if (field.name == "Brightness") {
+            setF32(out, lighting->brightness);
+            return true;
+        }
+        if (field.name == "FogColor") {
+            setVec3(out, core::Vec3{lighting->fogColor.r, lighting->fogColor.g, lighting->fogColor.b});
+            return true;
+        }
+        if (field.name == "FogStart") {
+            setF32(out, lighting->fogStart);
+            return true;
+        }
+        if (field.name == "FogEnd") {
+            setF32(out, lighting->fogEnd);
+            return true;
+        }
+        if (field.name == "ExposureCompensation") {
+            setF32(out, lighting->exposureCompensation);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "decals") {
+        const scene::DecalComponent* decal = world.decals().find(id);
+        if (decal == nullptr) {
+            return false;
+        }
+        if (field.name == "CFrame") {
+            setCFrame(out, decal->cframe);
+            return true;
+        }
+        if (field.name == "Size") {
+            setVec3(out, decal->size);
+            return true;
+        }
+        if (field.name == "Texture") {
+            setU32(out, decal->texture.id);
+            return true;
+        }
+        if (field.name == "Color") {
+            setVec3(out, core::Vec3{decal->color.r, decal->color.g, decal->color.b});
+            return true;
+        }
+        if (field.name == "Transparency") {
+            setF32(out, decal->transparency);
+            return true;
+        }
+        return false;
+    }
+
     if (field.pool == "particleEmitters") {
         const scene::ParticleEmitterComponent* emitter = world.particleEmitters().find(id);
         if (emitter == nullptr) {
@@ -251,6 +319,65 @@ using generated::Source;
         }
         if (field.name == "State") {
             body->state = static_cast<core::i32>(asU32(value));
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "lighting") {
+        scene::LightingComponent* lighting = world.lighting().find(id);
+        if (lighting == nullptr) {
+            return false;
+        }
+        const auto colour = [&value] {
+            const core::Vec3 v = asVec3(value);
+            return core::Color3{v.x, v.y, v.z};
+        };
+        if (field.name == "ClockTime")
+            lighting->clockTime = asF32(value);
+        else if (field.name == "GeographicLatitude")
+            lighting->geographicLatitude = asF32(value);
+        else if (field.name == "Ambient")
+            lighting->ambient = colour();
+        else if (field.name == "Brightness")
+            lighting->brightness = asF32(value);
+        else if (field.name == "FogColor")
+            lighting->fogColor = colour();
+        else if (field.name == "FogStart")
+            lighting->fogStart = asF32(value);
+        else if (field.name == "FogEnd")
+            lighting->fogEnd = asF32(value);
+        else if (field.name == "ExposureCompensation")
+            lighting->exposureCompensation = asF32(value);
+        else
+            return false;
+        return true;
+    }
+
+    if (field.pool == "decals") {
+        scene::DecalComponent* decal = world.decals().find(id);
+        if (decal == nullptr) {
+            return false;
+        }
+        if (field.name == "CFrame") {
+            decal->cframe = asCFrame(value);
+            return true;
+        }
+        if (field.name == "Size") {
+            decal->size = asVec3(value);
+            return true;
+        }
+        if (field.name == "Texture") {
+            decal->texture = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "Color") {
+            const core::Vec3 colour = asVec3(value);
+            decal->color = core::Color3{colour.x, colour.y, colour.z};
+            return true;
+        }
+        if (field.name == "Transparency") {
+            decal->transparency = asF32(value);
             return true;
         }
         return false;

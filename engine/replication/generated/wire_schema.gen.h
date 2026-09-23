@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 4;
+inline constexpr u32 ProtocolVersion = 5;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -73,6 +73,9 @@ struct ClassDesc
     // The index in `Classes` of the class whose fields this one also carries,
     // or -1. One level: a `CharacterBody` is a `BasePart`.
     int base = -1;
+    // A service: one per world, on both ends from boot, so it is never
+    // spawned, never leaves interest, and travels under a fixed id.
+    bool service = false;
 };
 
 // The fields every replicated instance carries whatever its class.
@@ -104,6 +107,25 @@ inline constexpr FieldDesc ModelFields[] = {
     {"Scale", 1, Encoding::F32, Source::Component, "models"},
 };
 
+inline constexpr FieldDesc LightingFields[] = {
+    {"ClockTime", 1, Encoding::F32, Source::Component, "lighting"},
+    {"GeographicLatitude", 2, Encoding::F32, Source::Component, "lighting"},
+    {"Ambient", 3, Encoding::Color3, Source::Component, "lighting"},
+    {"Brightness", 4, Encoding::F32, Source::Component, "lighting"},
+    {"FogColor", 5, Encoding::Color3, Source::Component, "lighting"},
+    {"FogStart", 6, Encoding::F32, Source::Component, "lighting"},
+    {"FogEnd", 7, Encoding::F32, Source::Component, "lighting"},
+    {"ExposureCompensation", 8, Encoding::F32, Source::Component, "lighting"},
+};
+
+inline constexpr FieldDesc DecalFields[] = {
+    {"CFrame", 1, Encoding::CFrameD, Source::Component, "decals"},
+    {"Size", 2, Encoding::Vector3, Source::Component, "decals"},
+    {"Texture", 3, Encoding::NameAtom, Source::Component, "decals"},
+    {"Color", 4, Encoding::Color3, Source::Component, "decals"},
+    {"Transparency", 5, Encoding::F32, Source::Component, "decals"},
+};
+
 inline constexpr FieldDesc ParticleEmitterFields[] = {
     {"Enabled", 1, Encoding::Bool, Source::Component, "particleEmitters"},
     {"Rate", 2, Encoding::F32, Source::Component, "particleEmitters"},
@@ -126,11 +148,13 @@ inline constexpr FieldDesc ParticleEmitterFields[] = {
 
 // Every replicated class, in schema order.
 inline constexpr ClassDesc Classes[] = {
-    {"BasePart", BasePartFields, -1},
-    {"CharacterBody", CharacterBodyFields, 0},
-    {"Model", ModelFields, -1},
-    {"ParticleEmitter", ParticleEmitterFields, -1},
-    {"Folder", {}, -1},
+    {"BasePart", BasePartFields, -1, false},
+    {"CharacterBody", CharacterBodyFields, 0, false},
+    {"Model", ModelFields, -1, false},
+    {"Lighting", LightingFields, -1, true},
+    {"Decal", DecalFields, -1, false},
+    {"ParticleEmitter", ParticleEmitterFields, -1, false},
+    {"Folder", {}, -1, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.

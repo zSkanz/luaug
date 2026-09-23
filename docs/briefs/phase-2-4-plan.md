@@ -823,9 +823,9 @@ overwritten; interpolation of everything else between snapshots; and interest
 management measured from each peer's character on the streaming radius.
 
 **Not built, and named so it is not mistaken for done:** despawn destroys rather
-than using the streaming husk contract (decision 6); prediction corrects by the
-error rather than re-simulating the unanswered intents; and no service's
-properties replicate (`Lighting.ClockTime` is the real example).
+than using the streaming husk contract (decision 6); and prediction corrects by
+the error rather than re-simulating the unanswered intents. Decals and
+`Lighting` replicate since protocol version 5.
 
 ---
 

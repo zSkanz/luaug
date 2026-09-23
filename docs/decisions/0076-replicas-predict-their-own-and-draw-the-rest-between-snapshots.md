@@ -78,6 +78,20 @@ own brief. Each is a thing a person playing notices:
    replica scrubbed it when it left. The checksum is over the peer's subset,
    which is what ADR 0069 decision 8 already said a replica's hash is.
 
+## And two things that were not on the wire (protocol version 5)
+
+8. **Every name-shaped field goes through the snapshot's string table**, not
+   `Name` alone. That is what a `Decal`'s image URN needed, so decals
+   replicate.
+9. **A service whose properties are world state is a wire class with
+   `Service = true`.**
+   - It travels under a fixed id, far above any instance's, and it is never
+     spawned or despawned and is always in interest.
+   - The replica writes the fields to its own service of that class, and never
+     touches the service's name or parent.
+   - `Lighting` is the first, carrying the clock, the latitude, the light, the
+     fog and the exposure. Night on the authority is night on every replica.
+
 ## Not decided here
 
 - **Leaving interest still destroys the replica's copy**, rather than using
