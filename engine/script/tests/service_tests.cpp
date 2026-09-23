@@ -666,3 +666,47 @@ TEST_CASE("game.Loaded is deferred, so a file-scope connection is in time")
         assert(workspace:FindFirstChild("LoadedMarker"):GetAttribute("loaded") == true)
     )") == "");
 }
+
+TEST_CASE("RemoteEvent on a replica: FireServer goes out, and speaking to clients is refused")
+{
+    Fixture fixture;
+    fixture.world->engineState().networkTopology = scene::NetworkTopology::Replica;
+    CHECK(fixture.failure(R"(
+        local remote = Instance.new("RemoteEvent")
+        remote.Name = "Ready"
+        remote.Parent = workspace
+        remote:FireServer("ready", 3)
+    )") == "");
+    // **Out, not in**: a replica's own FireServer is for the authority, and is
+    // never delivered to this machine.
+    REQUIRE(fixture.world->engineState().remoteOutbox.size() == 1);
+    CHECK(fixture.world->engineState().remoteOutbox[0].toServer);
+    CHECK(fixture.world->engineState().remoteInbox.empty());
+
+    CHECK(fixture.raises(R"(workspace:FindFirstChild("Ready"):FireAllClients("no"))", "net.err.remote_authority_only"));
+    CHECK(fixture.raises(R"(workspace:FindFirstChild("Ready"):FireClient(workspace, "no"))",
+                         "net.err.remote_authority_only"));
+    // A value that cannot travel is refused before anything is queued.
+    CHECK(fixture.raises(R"(workspace:FindFirstChild("Ready"):FireServer(function() end))", "net.err.remote_value"));
+    CHECK(fixture.world->engineState().remoteOutbox.size() == 1);
+}
+
+TEST_CASE("RemoteEvent on a dedicated server: nobody to send as, and every message goes out")
+{
+    Fixture fixture;
+    fixture.world->engineState().networkTopology = scene::NetworkTopology::Dedicated;
+    CHECK(fixture.failure(R"(
+        local remote = Instance.new("RemoteEvent")
+        remote.Name = "Round"
+        remote.Parent = workspace
+        remote:FireAllClients("starts")
+    )") == "");
+    // No player at this machine, so nothing is delivered here.
+    CHECK(fixture.world->engineState().remoteInbox.empty());
+    REQUIRE(fixture.world->engineState().remoteOutbox.size() == 1);
+    CHECK_FALSE(fixture.world->engineState().remoteOutbox[0].toServer);
+    CHECK(fixture.world->engineState().remoteOutbox[0].userId == 0);
+
+    CHECK(fixture.raises(R"(workspace:FindFirstChild("Round"):FireServer())", "net.err.remote_no_player"));
+    CHECK(fixture.raises(R"(workspace:FindFirstChild("Round"):FireClient(workspace))", "net.err.remote_not_player"));
+}
