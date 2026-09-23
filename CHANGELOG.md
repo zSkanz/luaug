@@ -40,6 +40,10 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **The flagship stands on terrain** (F1, H3): the middle 512 m of
+  `examples/10-open-world` is one streamed `Terrain`, with a hill and a tunnel
+  through it, in place of 1,024 16-metre boxes. `tools/sculpt-ground` and
+  `tools/merge_ground.luau` make and place it.
 - **A replica keeps what a script holds.** An instance that leaves a replica's
   interest becomes a husk, reparented to nil, and fires
   `StreamingService.InstanceStreamedOut`, exactly as an evicted chunk's does.

@@ -67,18 +67,16 @@ local StartHour = 22.5
 --- field is the one in `tools/generate_world.luau`, and standing a character in
 --- the air at boot would make the first second of every session a fall.
 ---
---- **And on the CENTRE of a ground tile, which is not decoration (D048).** The
---- floor is 32 m tiles whose tops sit at the height field's value at their own
---- centre, so the four tiles meeting at the world origin have four slightly
---- different heights -- and a character spawned exactly there stands on a step
---- and slides off it forever, at about three centimetres a second. It is
---- invisible in the position readout and it moves the CAMERA, which moves the
---- shadow map's texel lattice, which makes every shadow edge in the frame
---- dither. Measured: still to nine decimal places here, drifting at the corner.
---- The spawn is in the SCENE now, and this comment is the record of where it
---- came from: `16, 16`, which is the centre of a ground tile for the reason
---- above. Somebody who moves the character in the editor and saves moves the
---- spawn, which is what a scene being the world means.
+--- **And on the CENTRE of what was a ground tile (D048).** The floor was
+--- boxes whose tops sat at the height field's value at their own centre, so
+--- the four meeting at the world origin had four slightly different heights --
+--- and a character spawned exactly there stood on a step and slid off it
+--- forever, at about three centimetres a second, which moved the camera and
+--- dithered every shadow edge in the frame. The middle of the island is
+--- sculpted `Terrain` now (`tools/sculpt-ground`), which has no steps, but the
+--- spawn is still `16, 16` and still on the same height: the terrain samples
+--- the same function. The spawn is in the SCENE; somebody who moves the
+--- character in the editor and saves moves the spawn.
 
 --- Below this you have fallen out of the world, which in a streamed world means
 --- you outran the ground. Recovered rather than fatal.
@@ -87,7 +85,8 @@ local DeathHeight = -60
 -- --- The character -----------------------------------------------------------
 
 --- The island from `tools/generate_world.luau`, repeated here rather than
---- shared. **Deliberate**: the generator runs in Lute at build time and this
+--- shared -- and a third time in `tools/sculpt-ground`, which samples it into
+--- the terrain in the middle. **Deliberate**: the generator runs in Lute at build time and this
 --- runs in the engine at play time, so there is no module both can require
 --- without the world's shape becoming a runtime dependency of the build. Two
 --- copies, with this comment on both, beats a coupling.

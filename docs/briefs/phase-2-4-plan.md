@@ -306,6 +306,18 @@ The determinism trace (`tests/determinism/terrain`) had already landed with
 the brush, and `tests/conformance/world/terrain.spec.luau` carries the
 script-side sculpt and sampling specs.
 
+**H3 built 2026-09-23, and H2 with it.** The flagship's middle 512 m, around
+the spawn, is one `Terrain` now. It is the island function sampled every metre
+instead of every sixteen, with a hill and a tunnel through it. It streams as
+100 terrain cells beside the 111 cells of parts. `tools/sculpt-ground` is a
+project run once with `--save-scene`. `tools/merge_ground.luau` puts its
+terrain in the scene and removes the 1,024 boxes under it.
+`generate_world.luau` no longer writes them. The flagship's soak, which crosses
+those cells every leg, is the terrain fly-over H2 asked for: a bench scene
+could not stream, because the bench runner has no streamer. It passed at 57
+MiB peak, 3.24 ms p99 and no hitches (`docs/perf-baselines.md`). No capture
+golden or screenshot names this example.
+
 | # | Step | Files | Green because | Goldens |
 |---|---|---|---|---|
 | **H1** | **The seam-continuity gate — the thing that converts "is the hybrid a defect factory" from an argument into a measurement.** A fixture world with a cave crossing both a cell boundary and a brick/height boundary; one downward ray per column; assert every ray hits, that the physics hit height matches the sampler within the stated quantization bound, and that the rasterised render mesh matches the same. Plus conformance specs and a determinism trace. | `tests/conformance/terrain/{sculpt,sampling,streaming}.spec.luau` (new), `tests/determinism/terrain/{init.luau,scenario.json,trace.windows.txt,trace.linux.txt}` (new), `engine/app/tests/terrain_seam_tests.cpp` (new) | New tests. | **new traces recorded on both tiers** |

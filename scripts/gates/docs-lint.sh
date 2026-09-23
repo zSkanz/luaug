@@ -104,15 +104,31 @@ done < <(git ls-files -z -- . ':(exclude)third_party' ':(exclude).github' \
 # Studio" are toolchains, not the reference, and are excluded by name.
 echo "== legal sweep (R7, indirect names in code) =="
 indirect="$(printf '%s|%s|%s|%s' 'RBX[A-Z]' 'Bindable(Event|Function)' '(^|[^A-Za-z])Studio([^A-Za-z]|$)'     '(^|[^A-Za-z])[Ss]tuds?([^A-Za-z]|$)')"
+#
+# **A scene's terrain and blocks are bytes, not names.** They travel as base64
+# inside the JSON, and a long enough run of base64 spells anything: the
+# flagship's sculpted ground contains `RBX` followed by a capital letter
+# twenty-nine times, none of them a word. So a `.json` file is swept with those
+# two payloads blanked out first, and everything else in it -- every name,
+# every property, every class -- is swept exactly as code is.
+codeFiles() {
+    git ls-files -z -- engine runtime shaders tools api tests examples templates i18n cmake scripts \
+        ':(exclude)*.md' ':(exclude)*.png' ':(exclude)scripts/gates/docs-lint.sh'
+}
 while IFS= read -r hit; do
     case "$hit" in
     *"Visual Studio"* | *"Android Studio"*) continue ;;
     esac
     err "an indirect reference R7 forbids: ${hit#*:*:}" "${hit%%:*}"
     status=1
-done < <(git ls-files -z -- engine runtime shaders tools api tests examples templates i18n cmake scripts \
-    ':(exclude)*.md' ':(exclude)*.png' ':(exclude)scripts/gates/docs-lint.sh' \
-    | xargs -0 grep -nE "$indirect" 2>/dev/null || true)
+done < <(
+    codeFiles | grep -zv '\.json$' | xargs -0 grep -nE "$indirect" 2>/dev/null || true
+    codeFiles | grep -z '\.json$' | xargs -0 awk -v re="$indirect" '{
+        line = $0
+        gsub(/"(terrain|blocks)": *"[A-Za-z0-9+\/=]*"/, "\"payload\": \"\"", line)
+        if (line ~ re) print FILENAME ":" FNR ":" line
+    }' 2>/dev/null || true
+)
 
 # --- Ledger shape (MASTER_PROMPT.md §11) ------------------------------------
 echo "== ledger format =="

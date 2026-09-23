@@ -208,6 +208,17 @@ to a file and taxes every configuration to enable.
 
 | **F1** | `tests/bench/terrain_sculpt` (128 m of ground, one brush stamp every tick at 2, 4 and 8 m, one dig in seven, one paint in seven) | `win-msvc-dev` | mean sim tick | **4.27 ms** | 16 ms |
 | F1 | `tests/bench/terrain_sculpt` | `win-msvc-dev` | worst sim tick | 15.06 ms | — |
+| **F1 H2/H3** | `openworld_soak`, the flagship **with its middle 512 m as streamed terrain** (100 cells of `Terrain` at 1 m, a hill and a tunnel; 5,939 frames of walking and flying) | `win-msvc-dev` | median / p99 / worst frame | **2.07 / 3.24 / 5.20 ms**, 0 hitches | 33 ms p99 |
+| F1 H2/H3 | `openworld_soak` | `win-msvc-dev` | worst streaming pump | 0.71 ms | — |
+| F1 H2/H3 | `openworld_soak` | `win-msvc-dev` | peak resident memory | **57 MiB** (47 MiB with boxes for ground) | 192 MiB |
+
+**H2's terrain fly-over is the flagship's soak, not a bench of its own.** The
+bench runner steps a world host, and a world host has no streamer: a
+`terrain_stream` scene there would measure a terrain that never streams. The
+flagship's soak runs the whole frame -- both streamers, the collider mirror
+and the renderer -- over a path that crosses the terrain's cell boundaries
+every leg. It passed on the first run. Terrain's cost is ten MiB of peak for
+a hundred cells, with no frame over 5.2 ms.
 
 **This bench should have been F1's first commit and was its last, and the cost of
 that is the honest part of this table.** The plan said it in as many words --

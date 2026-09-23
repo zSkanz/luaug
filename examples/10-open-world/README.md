@@ -56,6 +56,14 @@ on a slow machine.
 - **The towers are navigation.** One every half kilometre, because a procedural
   world without landmarks is a treadmill: correct, streamed, and impossible to
   find your way across.
+- **The middle of the island is terrain, and the rest is boxes.** The 512 m
+  square around the spawn is one `Terrain` named `Ground`, sampled every metre:
+  the same island function as the boxes around it, without their 16 m steps.
+  It is a hundred streamed cells, so the ground streams in and out like
+  everything else. North-east of the spawn, at about (130, -90), a hill has a
+  tunnel through it -- walk in with the lantern, since terrain is dark inside.
+  `tools/sculpt-ground` makes the terrain and `tools/merge_ground.luau` puts it
+  in the scene. Both are described at the top of their files.
 
 ## The world is generated, not committed
 

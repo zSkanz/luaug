@@ -57,6 +57,11 @@ local BeachTop = 1.6
 --- What the character in the scene is given. The world is checked against it
 --- before it is written.
 local AutoStepHeight = 0.6
+--- Half the square in the middle that is sculpted `Terrain` rather than boxes
+--- (phase-2-4-plan H3). No box is written under it. **It moves with
+--- `HalfRegion` in `tools/sculpt-ground` and `TerrainRegion` in
+--- `tools/merge_ground.luau`**, which is what makes and places the terrain.
+local TerrainRegion = 256
 
 --- A deterministic value hash, so the island is the same on every machine and in
 --- every run. `math.random` would be neither: it is seeded per process and its
@@ -251,10 +256,13 @@ while tx < HalfWorld do
                     then SeabedPalette
                     elseif top < BeachTop then SandPalette
                     else GrassPalette
-                table.insert(
-                    terrain,
-                    part("Ground", 0, px, top - thickness / 2, pz, size, thickness, size, pick(palette, sx, sz, 1))
-                )
+                local sculpted = math.abs(px) < TerrainRegion and math.abs(pz) < TerrainRegion
+                if not sculpted then
+                    table.insert(
+                        terrain,
+                        part("Ground", 0, px, top - thickness / 2, pz, size, thickness, size, pick(palette, sx, sz, 1))
+                    )
+                end
 
                 -- **The sea is a surface, not a volume**: one flat tile at sea
                 -- level wherever the ground is below it. The bed is still under

@@ -112,8 +112,10 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   **The seam gate (H1) is built**: 3,808 rays through a tunnel crossing a cell
   boundary, a tile boundary and the bricked/height edge. Each ray hits the
   field, the collider and the drawn surface, and no hit is more than a
-  quarter-voxel off the field. What is left of F1: the stream bench and
-  flagship swap (H2, H3), and streaming while editing.
+  quarter-voxel off the field. **The flagship has terrain (H2, H3)**: the
+  middle 512 m of `examples/10-open-world` is streamed `Terrain`, with a hill
+  and a tunnel, and its soak holds at 57 MiB and 3.24 ms p99. What is left of
+  F1: streaming while editing.
 
   **V1, `VoxelService`, is built** -- a block world with a registry, place and
   break, a DDA raycast, a greedy mesher with corner occlusion, colliders near
