@@ -581,6 +581,9 @@ private:
     rhi::PipelineHandle voxelPipeline_{};
     // The same shader, blended and not writing depth, for glass and water.
     rhi::PipelineHandle voxelBlendPipeline_{};
+    // The cutout faces' shadow: depth only, with the forward pass's hole test,
+    // so a leaf block casts the leaves rather than a square.
+    rhi::PipelineHandle voxelShadowPipeline_{};
     bool voxelTried_ = false;
     GpuVoxelPalette voxelPalette_{};
     // The block atlas (V1): one tile per distinct block image, filled by
@@ -1445,8 +1448,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     for (rhi::PipelineHandle* pipeline :
          {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_, &voxelPipeline_,
-          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_, &decalPipeline_, &worldUiPipeline_,
-          &worldUiOnTopPipeline_}) {
+          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_, &voxelShadowPipeline_, &decalPipeline_,
+          &worldUiPipeline_, &worldUiOnTopPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1786,11 +1789,16 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         const bool voxelDraw = (selection == Selection::Opaque || selection == Selection::Transparent) &&
                                batch == nullptr && draw.voxelBlock && voxelPipeline_.valid() &&
                                voxelBlendPipeline_.valid();
+        // A leaf's shadow has the leaf's holes: the cutout faces cast through
+        // the hole test rather than as the solid squares their mesh is.
+        const bool leafShadow = selection == Selection::Shadow && batch == nullptr && draw.voxelBlock && draw.cutout &&
+                                voxelShadowPipeline_.valid();
         const rhi::PipelineHandle wanted =
             batch != nullptr ? instancedPipeline
             : skinnedDraw    ? skinnedPipeline
             : caveDraw       ? terrainCavePipeline_
             : voxelDraw      ? (selection == Selection::Transparent ? voxelBlendPipeline_ : voxelPipeline_)
+            : leafShadow     ? voxelShadowPipeline_
                              : staticPipeline;
         if (!(wanted == currentPipeline)) {
             cmd.setPipeline(wanted);
@@ -1804,6 +1812,15 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             // two batches overwrites the same slot.
             const GpuShadowUniforms uniforms{viewProjection, batch != nullptr ? Mat4{} : draw.transform};
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
+            if (leafShadow && boundMaterial != kVoxelBinding) {
+                cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(&voxelPalette_, sizeof(voxelPalette_)));
+                const std::array<rhi::TextureBinding, 1> atlas{
+                    voxelAtlas_.valid() ? rhi::TextureBinding{voxelAtlas_, pointSampler_}
+                                        : rhi::TextureBinding{whitePixel_, pointSampler_},
+                };
+                cmd.bindTextures(rhi::ShaderStage::Fragment, 0, atlas);
+                boundMaterial = kVoxelBinding;
+            }
         }
         else {
             GpuObjectUniforms uniforms{viewProjection, batch != nullptr ? Mat4{} : draw.transform,
@@ -2224,6 +2241,25 @@ bool DefaultRenderer::ensureVoxel(rhi::IDevice& device)
         .depthStencilFormat = kDepthFormat,
         .debugName = "voxel-blend",
     });
+
+    // The shadow pipeline's state is `shadow_depth`'s -- front faces culled,
+    // for the reason D051 gives -- and only its fragment stage differs.
+    const rhi::ShaderHandle shadowVertex = load("voxel_shadow", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle shadowFragment = load("voxel_shadow", rhi::ShaderStage::Fragment);
+    if (shadowVertex.valid() && shadowFragment.valid()) {
+        const std::span<const rhi::VertexAttribute> shadowAttributes{attributes.data(), 3};
+        voxelShadowPipeline_ = device.createGraphicsPipeline({
+            .vertexShader = shadowVertex,
+            .fragmentShader = shadowFragment,
+            .vertexBuffers = buffers,
+            .vertexAttributes = shadowAttributes,
+            .rasterizer = {.cullMode = rhi::CullMode::Front},
+            .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+            .colorTargets = {},
+            .depthStencilFormat = kShadowFormat,
+            .debugName = "voxel-shadow",
+        });
+    }
     return voxelPipeline_.valid();
 }
 

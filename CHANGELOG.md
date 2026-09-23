@@ -39,6 +39,8 @@ does not is engine work and belongs in the git history rather than in this file.
 - A partitioned scene kept its block world (D157); a terrain larger than about a
   square kilometre reopened after a save (D159); terrain edges stopped hanging
   curtains to the floor as the level of detail changed.
+- A tree of `Cutout` leaf blocks casts its leaves, holes and all, rather than a
+  solid square.
 
 ## [1.1.0] — 2026-09-23
 

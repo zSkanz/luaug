@@ -72,8 +72,11 @@ the shadow crawling as the camera moves.
 
 - **A transparent part casts a full shadow.** The shadow pass draws everything;
   a half-transparent pane occludes completely.
-- **Alpha-masked geometry writes depth where its own fragments would have been
-  discarded**, so a cut-out leaf casts the shadow of its quad.
+- **An alpha-masked mesh material writes depth where its own fragments would
+  have been discarded**, so a cut-out quad on a mesh casts the shadow of the
+  whole quad. Blocks are the exception: a `Cutout` block type's shadow is drawn
+  with the same hole test as the block itself, so a tree of leaf blocks casts
+  its leaves rather than a square.
 
 ## Where to look next
 
