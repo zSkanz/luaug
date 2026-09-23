@@ -236,6 +236,49 @@
       "Events": []
     },
     {
+      "Name": "BillboardGui",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Adornee",
+          "Type": "BasePart?"
+        },
+        {
+          "Name": "AlwaysOnTop",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "Brightness",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "MaxDistance",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Size",
+          "Type": "UDim2",
+          "Default": "UDim2.new(0, 200, 0, 50)"
+        },
+        {
+          "Name": "WorldOffset",
+          "Type": "vector",
+          "Default": "vector.zero"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Bone",
       "Extends": "Attachment",
       "Tags": [],
@@ -2188,6 +2231,44 @@
           ]
         }
       ]
+    },
+    {
+      "Name": "SurfaceGui",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Adornee",
+          "Type": "BasePart?"
+        },
+        {
+          "Name": "AlwaysOnTop",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "Brightness",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Face",
+          "Type": "Enum.Face",
+          "Default": "Enum.Face.Front"
+        },
+        {
+          "Name": "PixelsPerMetre",
+          "Type": "number",
+          "Default": "50"
+        }
+      ],
+      "Methods": [],
+      "Events": []
     },
     {
       "Name": "TagService",
@@ -4904,6 +4985,35 @@
         {
           "Name": "Sine",
           "Value": 1
+        }
+      ]
+    },
+    {
+      "Name": "Face",
+      "Items": [
+        {
+          "Name": "Back",
+          "Value": 1
+        },
+        {
+          "Name": "Bottom",
+          "Value": 3
+        },
+        {
+          "Name": "Front",
+          "Value": 0
+        },
+        {
+          "Name": "Left",
+          "Value": 5
+        },
+        {
+          "Name": "Right",
+          "Value": 4
+        },
+        {
+          "Name": "Top",
+          "Value": 2
         }
       ]
     },

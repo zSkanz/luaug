@@ -922,6 +922,250 @@ bool setUICornerCornerRadius(scene::World& world, core::InstanceId id, const Val
 // ancestry root-first and calls every hook it finds, so a `TextButton` gets both
 // the `UIObject` pair and the `TextLabel` pair without either naming the other.
 
+// --- BillboardGui and SurfaceGui (F3) ------------------------------------------
+//
+// Neither has a dirty flag: a world tree is laid out every frame it is drawn,
+// because a billboard's canvas changes size with distance. So these setters
+// store and nothing more.
+
+namespace {
+
+// A part, or nothing. What `Adornee` accepts on both classes.
+[[nodiscard]] bool takeAdornee(const scene::World& world, const Value& value, core::InstanceId& out)
+{
+    const auto* id = std::get_if<core::InstanceId>(&value);
+    if (id == nullptr)
+        return false;
+    if (id->valid() && world.parts().find(*id) == nullptr)
+        return false;
+    out = *id;
+    return true;
+}
+
+[[nodiscard]] bool takeAtLeastZero(const Value& value, f32& out)
+{
+    const auto* number = std::get_if<core::f64>(&value);
+    if (number == nullptr || !std::isfinite(*number) || *number < 0.0)
+        return false;
+    out = static_cast<f32>(*number);
+    return true;
+}
+
+} // namespace
+
+Value getBillboardGuiEnabled(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->enabled};
+}
+
+bool setBillboardGuiEnabled(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    const auto* flag = std::get_if<bool>(&value);
+    if (gui == nullptr || flag == nullptr)
+        return false;
+    gui->enabled = *flag;
+    return true;
+}
+
+Value getBillboardGuiAdornee(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->adornee};
+}
+
+bool setBillboardGuiAdornee(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui != nullptr && takeAdornee(world, value, gui->adornee);
+}
+
+Value getBillboardGuiSize(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->size};
+}
+
+bool setBillboardGuiSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    const auto* size = std::get_if<core::UDim2>(&value);
+    if (gui == nullptr || size == nullptr || !isFinite(size->x) || !isFinite(size->y))
+        return false;
+    gui->size = *size;
+    return true;
+}
+
+Value getBillboardGuiWorldOffset(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->worldOffset};
+}
+
+bool setBillboardGuiWorldOffset(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    const auto* offset = std::get_if<core::Vec3>(&value);
+    if (gui == nullptr || offset == nullptr || !std::isfinite(offset->x) || !std::isfinite(offset->y) ||
+        !std::isfinite(offset->z))
+        return false;
+    gui->worldOffset = *offset;
+    return true;
+}
+
+Value getBillboardGuiAlwaysOnTop(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->alwaysOnTop};
+}
+
+bool setBillboardGuiAlwaysOnTop(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    const auto* flag = std::get_if<bool>(&value);
+    if (gui == nullptr || flag == nullptr)
+        return false;
+    gui->alwaysOnTop = *flag;
+    return true;
+}
+
+Value getBillboardGuiMaxDistance(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{static_cast<core::f64>(gui->maxDistance)};
+}
+
+bool setBillboardGuiMaxDistance(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui != nullptr && takeAtLeastZero(value, gui->maxDistance);
+}
+
+Value getBillboardGuiBrightness(const scene::World& world, core::InstanceId id)
+{
+    const scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui == nullptr ? Value{} : Value{static_cast<core::f64>(gui->brightness)};
+}
+
+bool setBillboardGuiBrightness(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::BillboardGuiComponent* gui = world.billboardGuis().find(id);
+    return gui != nullptr && takeAtLeastZero(value, gui->brightness);
+}
+
+void attachBillboardGuiComponents(scene::World& world, core::InstanceId id)
+{
+    world.billboardGuis().add(id, scene::BillboardGuiComponent{});
+}
+
+void detachBillboardGuiComponents(scene::World& world, core::InstanceId id)
+{
+    world.billboardGuis().remove(id);
+}
+
+Value getSurfaceGuiEnabled(const scene::World& world, core::InstanceId id)
+{
+    const scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->enabled};
+}
+
+bool setSurfaceGuiEnabled(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    const auto* flag = std::get_if<bool>(&value);
+    if (gui == nullptr || flag == nullptr)
+        return false;
+    gui->enabled = *flag;
+    return true;
+}
+
+Value getSurfaceGuiAdornee(const scene::World& world, core::InstanceId id)
+{
+    const scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->adornee};
+}
+
+bool setSurfaceGuiAdornee(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui != nullptr && takeAdornee(world, value, gui->adornee);
+}
+
+Value getSurfaceGuiFace(const scene::World& world, core::InstanceId id)
+{
+    const scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui == nullptr ? Value{} : Value{scene::EnumValue{generated::FaceEnumId, gui->face}};
+}
+
+bool setSurfaceGuiFace(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    if (gui == nullptr)
+        return false;
+    core::i32 item = 0;
+    if (!takeEnum(world, value, generated::FaceEnumId, item))
+        return false;
+    gui->face = item;
+    return true;
+}
+
+Value getSurfaceGuiPixelsPerMetre(const scene::World& world, core::InstanceId id)
+{
+    const scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui == nullptr ? Value{} : Value{static_cast<core::f64>(gui->pixelsPerMetre)};
+}
+
+bool setSurfaceGuiPixelsPerMetre(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    f32 density = 0.0f;
+    // Zero pixels to a metre is a canvas with no size, which lays out nothing
+    // and divides by zero on the way to the world.
+    if (gui == nullptr || !takeAtLeastZero(value, density) || !(density > 0.0f))
+        return false;
+    gui->pixelsPerMetre = density;
+    return true;
+}
+
+Value getSurfaceGuiAlwaysOnTop(const scene::World& world, core::InstanceId id)
+{
+    const scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui == nullptr ? Value{} : Value{gui->alwaysOnTop};
+}
+
+bool setSurfaceGuiAlwaysOnTop(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    const auto* flag = std::get_if<bool>(&value);
+    if (gui == nullptr || flag == nullptr)
+        return false;
+    gui->alwaysOnTop = *flag;
+    return true;
+}
+
+Value getSurfaceGuiBrightness(const scene::World& world, core::InstanceId id)
+{
+    const scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui == nullptr ? Value{} : Value{static_cast<core::f64>(gui->brightness)};
+}
+
+bool setSurfaceGuiBrightness(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::SurfaceGuiComponent* gui = world.surfaceGuis().find(id);
+    return gui != nullptr && takeAtLeastZero(value, gui->brightness);
+}
+
+void attachSurfaceGuiComponents(scene::World& world, core::InstanceId id)
+{
+    world.surfaceGuis().add(id, scene::SurfaceGuiComponent{});
+}
+
+void detachSurfaceGuiComponents(scene::World& world, core::InstanceId id)
+{
+    world.surfaceGuis().remove(id);
+}
+
 void attachScreenGuiComponents(scene::World& world, core::InstanceId id)
 {
     world.screenGuis().add(id, scene::ScreenGuiComponent{});

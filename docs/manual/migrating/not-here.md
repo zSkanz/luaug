@@ -21,7 +21,6 @@ The shape of the replacement is one HTTP client and your own server. See
 
 | Missing | State |
 |---|---|
-| World-space UI and billboards | **Planned**, next phase. The UI tree exists; putting its output somewhere other than the screen does not. |
 | Complex-script shaping | **Not scheduled.** A label lays its codepoints out left to right, so Arabic, Devanagari and Thai do not join. Rich text is here: `TextLabel.RichText`. |
 | Skyboxes and custom environments | **Not present.** The sky is analytic, from `Lighting`, and it is also the reflection environment — right outdoors and wrong in a cave. |
 | Screen-space reflections | **Not scheduled.** What ships is image-based lighting from that sky. |

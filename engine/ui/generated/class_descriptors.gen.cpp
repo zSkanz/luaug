@@ -92,6 +92,182 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     screenGuiDesc.detachComponents = native::detachScreenGuiComponents;
     classes.registerClass(screenGuiDesc);
 
+    // --- BillboardGui ---
+    static std::array<scene::PropertyDesc, 7> billboardGuiProperties;
+    billboardGuiProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it is laid out and drawn at all.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBillboardGuiEnabled,
+            .set = native::setBillboardGuiEnabled,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Adornee"),
+            .type = scene::ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The part it hangs over. Empty means its parent, when its parent is a part; a billboard with neither is not drawn.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getBillboardGuiAdornee,
+            .set = native::setBillboardGuiAdornee,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Size"),
+            .type = scene::ValueType::UDim2,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How big it is. **The scale is in metres and the offset in pixels**, and the two mean different things: a scale keeps its size in the world, so it shrinks with distance like anything else there; an offset keeps its size on the screen, so a name tag is as readable across the map as up close. The children lay out against the pixel size either way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_udim2"),
+            .get = native::getBillboardGuiSize,
+            .set = native::setBillboardGuiSize,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("WorldOffset"),
+            .type = scene::ValueType::Vector3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where its centre sits relative to the adornee's centre, in metres and in the world's own axes -- `vector.create(0, 3, 0)` is three metres above it however the part is turned.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getBillboardGuiWorldOffset,
+            .set = native::setBillboardGuiWorldOffset,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("AlwaysOnTop"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it shows through walls. Off, it is hidden by whatever is in front of it, like anything in the world.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getBillboardGuiAlwaysOnTop,
+            .set = native::setBillboardGuiAlwaysOnTop,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("MaxDistance"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far from the camera it stops being drawn, in metres. Zero means no limit.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getBillboardGuiMaxDistance,
+            .set = native::setBillboardGuiMaxDistance,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Brightness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How bright its colours are in the world's light, which is brighter than the screen's: above one, it glows and blooms.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getBillboardGuiBrightness,
+            .set = native::setBillboardGuiBrightness,
+        },
+    }};
+    scene::ClassDescriptor billboardGuiDesc;
+    billboardGuiDesc.name = atoms.intern("BillboardGui");
+    billboardGuiDesc.super = instanceClass;
+    billboardGuiDesc.flags = scene::ClassFlags::None;
+    billboardGuiDesc.defaultName = atoms.intern("BillboardGui");
+    billboardGuiDesc.doc = "A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in front of it, in the same light as the picture around it -- rather than over it.\012\012It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. Nothing on it can be clicked yet: the pointer reaches the screen's UI and the world, and a billboard is neither.";
+    billboardGuiDesc.properties = billboardGuiProperties;
+    billboardGuiDesc.attachComponents = native::attachBillboardGuiComponents;
+    billboardGuiDesc.detachComponents = native::detachBillboardGuiComponents;
+    classes.registerClass(billboardGuiDesc);
+
+    // --- SurfaceGui ---
+    static std::array<scene::PropertyDesc, 6> surfaceGuiProperties;
+    surfaceGuiProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it is laid out and drawn at all.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getSurfaceGuiEnabled,
+            .set = native::setSurfaceGuiEnabled,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Adornee"),
+            .type = scene::ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The part it covers. Empty means its parent, when its parent is a part.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getSurfaceGuiAdornee,
+            .set = native::setSurfaceGuiAdornee,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Face"),
+            .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("Face"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Which face of the part it covers. `Front` is the one the part's `LookVector` comes out of, and every side face is read the right way up.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getSurfaceGuiFace,
+            .set = native::setSurfaceGuiFace,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("PixelsPerMetre"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How many of the canvas's pixels fit in a metre of the face, which is what a child's offset and a `TextSize` are measured in. Fifty makes 14-point text about a hand high on a wall; more is finer text on the same face.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getSurfaceGuiPixelsPerMetre,
+            .set = native::setSurfaceGuiPixelsPerMetre,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("AlwaysOnTop"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it shows through what is in front of the face.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getSurfaceGuiAlwaysOnTop,
+            .set = native::setSurfaceGuiAlwaysOnTop,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Brightness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How bright its colours are in the world's light: above one, a screen that glows.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getSurfaceGuiBrightness,
+            .set = native::setSurfaceGuiBrightness,
+        },
+    }};
+    scene::ClassDescriptor surfaceGuiDesc;
+    surfaceGuiDesc.name = atoms.intern("SurfaceGui");
+    surfaceGuiDesc.super = instanceClass;
+    surfaceGuiDesc.flags = scene::ClassFlags::None;
+    surfaceGuiDesc.defaultName = atoms.intern("SurfaceGui");
+    surfaceGuiDesc.doc = "A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the part.\012\012It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Nothing on it can be clicked yet.";
+    surfaceGuiDesc.properties = surfaceGuiProperties;
+    surfaceGuiDesc.attachComponents = native::attachSurfaceGuiComponents;
+    surfaceGuiDesc.detachComponents = native::detachSurfaceGuiComponents;
+    classes.registerClass(surfaceGuiDesc);
+
     // --- UIObject ---
     static std::array<scene::PropertyDesc, 13> uIObjectProperties;
     uIObjectProperties = {{

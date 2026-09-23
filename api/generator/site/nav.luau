@@ -120,6 +120,7 @@ local Sections: { Section } = {
             { Slug = "layout", Title = "Layout with UDim2" },
             { Slug = "text-and-images", Title = "Text and images" },
             { Slug = "interaction", Title = "Buttons and interaction" },
+            { Slug = "world-space", Title = "UI in the world" },
         },
     },
     {

@@ -277,6 +277,14 @@ struct LayoutStats
 // tree, because a scale is a fraction of something that just changed.
 void layout(scene::World& world, core::InstanceId uiService, core::Vec2 windowSize);
 
+// **One tree against a canvas of its own** (F3): the children of `root` laid
+// out inside `(0, 0)` to `canvasSize`, with `AbsolutePosition` and
+// `AbsoluteSize` in the canvas's pixels rather than the window's. What a
+// `BillboardGui` and a `SurfaceGui` are laid out with, every frame they are
+// drawn -- they have no dirty flag, since a billboard's canvas changes size
+// with its distance.
+void layoutCanvas(scene::World& world, core::InstanceId root, core::Vec2 canvasSize);
+
 [[nodiscard]] const LayoutStats& layoutStats() noexcept;
 void resetLayoutStats() noexcept;
 
@@ -349,5 +357,9 @@ struct InteractionResult
 // produced and computes nothing: a draw list that laid anything out would make
 // "what is on screen" depend on when it was asked.
 void buildDrawList(const scene::World& world, core::InstanceId uiService, DrawList& out);
+
+// The same for one canvas tree laid out by `layoutCanvas`: quads in the
+// canvas's pixels, `ZIndex` then document order. Replaces what `out` held.
+void buildCanvasDrawList(const scene::World& world, core::InstanceId root, DrawList& out);
 
 } // namespace luaug::ui

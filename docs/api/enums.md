@@ -85,6 +85,19 @@ The shape of a tween's progress curve (§2.1). The set is the one tutorials and 
 | `Bounce` | 9 | Settles by bouncing, like something dropped. |
 | `Elastic` | 10 | Oscillates past both ends before settling. Like `Back`, it leaves 0-1. |
 
+## Enum.Face
+
+One face of a part, for what is drawn on it (F3). Named from the part's own point of view.
+
+| Item | Value | Description |
+|---|---|---|
+| `Front` | 0 | The face its `LookVector` comes out of. |
+| `Back` | 1 | Opposite the front. |
+| `Top` | 2 | The face its `UpVector` comes out of. |
+| `Bottom` | 3 | Opposite the top. |
+| `Right` | 4 | The face its `RightVector` comes out of. |
+| `Left` | 5 | Opposite the right. |
+
 ## Enum.FillDirection
 
 Which way a `UIListLayout` stacks its siblings (§2.2).

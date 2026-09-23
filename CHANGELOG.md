@@ -15,6 +15,10 @@ does not is engine work and belongs in the git history rather than in this file.
   `<i>`, `<u>`, `<s>`, `<font color size transparency>` and `<br/>`, with the
   five XML entities -- so colour, size and weight change part-way through one
   label. A tag it does not understand is drawn as text.
+- **`SurfaceGui` and `BillboardGui`** (F3): UI drawn in the world -- on a face of
+  a part (`Enum.Face`, `PixelsPerMetre`) or over a point and facing the camera,
+  sized in metres, in pixels, or both. The children are the screen's own
+  classes, laid out the same way, and hidden by what is in front of them.
 - **Terrain and block worlds stream from disk** (ADR 0075): a saved field of
   sixteen 64 m cells or more is cut into cells at play and streamed around the
   foci on the terrain radii. A cell somebody changed is never evicted, and the

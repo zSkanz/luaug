@@ -762,6 +762,33 @@ struct ScreenGuiComponent
     bool layoutDirty = true;
 };
 
+// `BillboardGui` (F3): a tree hung in the world, facing the camera. Laid out
+// every frame it is drawn rather than on a dirty flag -- its canvas can change
+// size with distance, and a name tag is a handful of elements.
+struct BillboardGuiComponent
+{
+    bool enabled = true;
+    core::InstanceId adornee;
+    // Scale in metres, offset in pixels (the property's doc says why).
+    core::UDim2 size{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 50.0f}};
+    core::Vec3 worldOffset{};
+    bool alwaysOnTop = false;
+    f32 maxDistance = 0.0f;
+    f32 brightness = 1.0f;
+};
+
+// `SurfaceGui` (F3): a tree drawn onto one face of a part.
+struct SurfaceGuiComponent
+{
+    bool enabled = true;
+    core::InstanceId adornee;
+    // `Enum.Face`: Front, Back, Top, Bottom, Right, Left.
+    i32 face = 0;
+    f32 pixelsPerMetre = 50.0f;
+    bool alwaysOnTop = false;
+    f32 brightness = 1.0f;
+};
+
 // `UIObject`, and therefore attached to every element on screen.
 //
 // The two `absolute*` fields are OUTPUTS of the solver rather than state a

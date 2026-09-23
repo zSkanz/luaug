@@ -768,6 +768,18 @@ local Definition: Schema.Definition = {
             } :: { Schema.EnumItem },
         },
         {
+            Name = "Face",
+            Doc = "One face of a part, for what is drawn on it (F3). Named from the part's own point of view.",
+            Items = {
+                { Name = "Front", Value = 0, Doc = "The face its `LookVector` comes out of." },
+                { Name = "Back", Value = 1, Doc = "Opposite the front." },
+                { Name = "Top", Value = 2, Doc = "The face its `UpVector` comes out of." },
+                { Name = "Bottom", Value = 3, Doc = "Opposite the top." },
+                { Name = "Right", Value = 4, Doc = "The face its `RightVector` comes out of." },
+                { Name = "Left", Value = 5, Doc = "Opposite the right." },
+            } :: { Schema.EnumItem },
+        },
+        {
             Name = "BlockOpacity",
             Doc = "How much of what is behind a block shows through it (V1).",
             Items = {

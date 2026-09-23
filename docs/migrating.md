@@ -340,7 +340,7 @@ Each of these has an owner in the roadmap's post-v1 phases rather than a shrug.
 | Particles (`ParticleEmitter`) | Shipped in post-v1 phase 2 (ADR 0072) |
 | Decals | Shipped in post-v1 phase 2, **projected into the world** rather than parented to a face |
 | Terrain | Shipped in post-v1 phase 2 — sculpted, collided, saved, and streamed from disk (ADRs 0067, 0075) |
-| `SurfaceGui`, billboards | Post-v1 phase 2 — the UI tree exists; putting it in world space does not |
+| `SurfaceGui`, billboards | Shipped in post-v1 phase 2: `SurfaceGui` and `BillboardGui` |
 | Rich text | Shipped in post-v1 phase 2: `TextLabel.RichText` |
 | Navmesh pathfinding | Post-v1 phase 3, over the Recast seam already vendored (ADR 0022) |
 | 2D workflow | Post-v1 phase 3 |

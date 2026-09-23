@@ -65,7 +65,8 @@ inline constexpr scene::EnumId AutomaticSizeEnumId = 22;
 inline constexpr scene::EnumId ScaleTypeEnumId = 23;
 inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
 inline constexpr scene::EnumId ParticleShapeEnumId = 25;
-inline constexpr scene::EnumId BlockOpacityEnumId = 26;
+inline constexpr scene::EnumId FaceEnumId = 26;
+inline constexpr scene::EnumId BlockOpacityEnumId = 27;
 
 } // namespace generated
 
@@ -89,6 +90,40 @@ scene::Value getScreenGuiScreenInsets(const scene::World& world, core::InstanceI
 bool setScreenGuiScreenInsets(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachScreenGuiComponents(scene::World& world, core::InstanceId id);
 void detachScreenGuiComponents(scene::World& world, core::InstanceId id);
+
+// BillboardGui
+scene::Value getBillboardGuiEnabled(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBillboardGuiAdornee(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiAdornee(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBillboardGuiSize(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBillboardGuiWorldOffset(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiWorldOffset(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBillboardGuiAlwaysOnTop(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiAlwaysOnTop(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBillboardGuiMaxDistance(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiMaxDistance(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBillboardGuiBrightness(const scene::World& world, core::InstanceId id);
+bool setBillboardGuiBrightness(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachBillboardGuiComponents(scene::World& world, core::InstanceId id);
+void detachBillboardGuiComponents(scene::World& world, core::InstanceId id);
+
+// SurfaceGui
+scene::Value getSurfaceGuiEnabled(const scene::World& world, core::InstanceId id);
+bool setSurfaceGuiEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSurfaceGuiAdornee(const scene::World& world, core::InstanceId id);
+bool setSurfaceGuiAdornee(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSurfaceGuiFace(const scene::World& world, core::InstanceId id);
+bool setSurfaceGuiFace(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSurfaceGuiPixelsPerMetre(const scene::World& world, core::InstanceId id);
+bool setSurfaceGuiPixelsPerMetre(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSurfaceGuiAlwaysOnTop(const scene::World& world, core::InstanceId id);
+bool setSurfaceGuiAlwaysOnTop(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSurfaceGuiBrightness(const scene::World& world, core::InstanceId id);
+bool setSurfaceGuiBrightness(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachSurfaceGuiComponents(scene::World& world, core::InstanceId id);
+void detachSurfaceGuiComponents(scene::World& world, core::InstanceId id);
 
 // UIObject
 scene::Value getUIObjectPosition(const scene::World& world, core::InstanceId id);

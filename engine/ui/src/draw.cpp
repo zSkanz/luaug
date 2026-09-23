@@ -536,6 +536,21 @@ void buildDrawList(const scene::World& world, core::InstanceId uiService, DrawLi
     }
 }
 
+void buildCanvasDrawList(const scene::World& world, core::InstanceId root, DrawList& out)
+{
+    out.clear();
+    out.scissors.push_back(Rect{Vec2{-1.0e9f, -1.0e9f}, Vec2{1.0e9f, 1.0e9f}});
+    if (!root.valid())
+        return;
+    std::vector<Entry> entries;
+    for (core::InstanceId element = world.firstChild(root); element.valid(); element = world.nextSibling(element))
+        collect(world, element, 0, Vec2{1.0f, 0.0f}, Vec2{}, entries, out.scissors);
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const Entry& a, const Entry& b) { return a.zIndex < b.zIndex; });
+    for (const Entry& entry : entries)
+        emit(world, entry, out);
+}
+
 void setImageProvider(ImageProvider provider, void* user) noexcept
 {
     g_imageProvider = provider;

@@ -102,6 +102,9 @@ end
 declare extern type EnumParticleShape extends EnumItem with
 end
 
+declare extern type EnumFace extends EnumItem with
+end
+
 declare extern type EnumBlockOpacity extends EnumItem with
 end
 
@@ -1224,6 +1227,48 @@ declare extern type ScreenGui extends Instance with
     ScreenInsets: boolean
 end
 
+declare extern type BillboardGui extends Instance with
+    --- Whether it is laid out and drawn at all.
+    Enabled: boolean
+    --- The part it hangs over. Empty means its parent, when its parent is a part; a billboard with
+    --- neither is not drawn.
+    Adornee: BasePart?
+    --- How big it is. **The scale is in metres and the offset in pixels**, and the two mean different
+    --- things: a scale keeps its size in the world, so it shrinks with distance like anything else
+    --- there; an offset keeps its size on the screen, so a name tag is as readable across the map as up
+    --- close. The children lay out against the pixel size either way.
+    Size: UDim2
+    --- Where its centre sits relative to the adornee's centre, in metres and in the world's own axes --
+    --- `vector.create(0, 3, 0)` is three metres above it however the part is turned.
+    WorldOffset: vector
+    --- Whether it shows through walls. Off, it is hidden by whatever is in front of it, like anything
+    --- in the world.
+    AlwaysOnTop: boolean
+    --- How far from the camera it stops being drawn, in metres. Zero means no limit.
+    MaxDistance: number
+    --- How bright its colours are in the world's light, which is brighter than the screen's: above one,
+    --- it glows and blooms.
+    Brightness: number
+end
+
+declare extern type SurfaceGui extends Instance with
+    --- Whether it is laid out and drawn at all.
+    Enabled: boolean
+    --- The part it covers. Empty means its parent, when its parent is a part.
+    Adornee: BasePart?
+    --- Which face of the part it covers. `Front` is the one the part's `LookVector` comes out of, and
+    --- every side face is read the right way up.
+    Face: EnumFace
+    --- How many of the canvas's pixels fit in a metre of the face, which is what a child's offset and a
+    --- `TextSize` are measured in. Fifty makes 14-point text about a hand high on a wall; more is finer
+    --- text on the same face.
+    PixelsPerMetre: number
+    --- Whether it shows through what is in front of the face.
+    AlwaysOnTop: boolean
+    --- How bright its colours are in the world's light: above one, a screen that glows.
+    Brightness: number
+end
+
 declare extern type UIObject extends Instance with
     --- Where this object's `AnchorPoint` sits inside its parent.
     Position: UDim2
@@ -2295,6 +2340,15 @@ declare Enum: {
         Square: EnumParticleShape,
         GetEnumItems: (self: any) -> { EnumParticleShape },
     },
+    Face: {
+        Front: EnumFace,
+        Back: EnumFace,
+        Top: EnumFace,
+        Bottom: EnumFace,
+        Right: EnumFace,
+        Left: EnumFace,
+        GetEnumItems: (self: any) -> { EnumFace },
+    },
     BlockOpacity: {
         Opaque: EnumBlockOpacity,
         Cutout: EnumBlockOpacity,
@@ -2413,6 +2467,8 @@ declare Instance: {
         & (("InputAction") -> InputAction)
         & (("InputBinding") -> InputBinding)
         & (("ScreenGui") -> ScreenGui)
+        & (("BillboardGui") -> BillboardGui)
+        & (("SurfaceGui") -> SurfaceGui)
         & (("Frame") -> Frame)
         & (("TextLabel") -> TextLabel)
         & (("TextButton") -> TextButton)

@@ -19,6 +19,7 @@ automated headless gate script (screenshot/capture + asserted behavior):
 | `14-voxels` | post-v1 phase 2 | `VoxelService`: a block world registered, filled, mined with `Raycast` and collided — not the terrain |
 | `15-multiplayer` | post-v1 phase 4 | one project in every posture: `--host`, `--join`, `--serve` or solo. The authority builds and moves the world, the replica is sent it, and `NetworkService.Authority` is the one question the script asks |
 | `16-particles` | post-v1 phase 2 | `ParticleEmitter`: fire, smoke, sparks, a fountain and a scripted burst -- additive and blended in one draw, from parts and from attachments |
+| `18-world-ui` | post-v1 phase 2 | `SurfaceGui` and `BillboardGui`: a scoreboard with rich text on a wall, name tags and health bars over crates, and a sign sized in metres -- all drawn in the world, hidden by what is in front |
 | `17-cave` | post-v1 phase 2 | `Terrain` as a volume: a mountain with a tunnel dug into its side, a chamber and a skylight shaft, and a camera that flies through it -- dark inside, lit by its lamps |
 
 Assets used by examples must be permissively licensed and recorded in

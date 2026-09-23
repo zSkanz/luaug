@@ -319,6 +319,43 @@ struct RenderParticle
     f32 distance = 0.0f;
 };
 
+// One corner of a world-space UI quad (F3), as `ui_world.hlsl` reads it: the
+// host has already placed it in the world, camera-relative like every f32
+// position here, and the rest travels as a screen UI vertex's does.
+struct WorldUiVertex
+{
+    f32 x = 0.0f;
+    f32 y = 0.0f;
+    f32 z = 0.0f;
+    core::u8 r = 255;
+    core::u8 g = 255;
+    core::u8 b = 255;
+    core::u8 a = 255;
+    // The rounded-corner frame, in canvas pixels (`UiVertex` says why).
+    f32 localX = 0.0f;
+    f32 localY = 0.0f;
+    f32 halfX = 0.0f;
+    f32 halfY = 0.0f;
+    f32 radius = 0.0f;
+    f32 u = 0.0f;
+    f32 v = 0.0f;
+};
+
+static_assert(sizeof(WorldUiVertex) == 44, "the ui_world vertex layout is an ABI decision the shader shares");
+
+// A stretch of world UI vertices drawn with one texture, one brightness and one
+// depth rule. In back-to-front order of the trees they came from.
+struct WorldUiRun
+{
+    core::u32 firstVertex = 0;
+    core::u32 vertexCount = 0;
+    // Invalid for none: the renderer's white pixel.
+    rhi::TextureHandle texture;
+    f32 brightness = 1.0f;
+    // Drawn after everything else in the world and never hidden.
+    bool alwaysOnTop = false;
+};
+
 struct RenderWorld
 {
     RenderCamera camera;
@@ -360,6 +397,11 @@ struct RenderWorld
     std::vector<RenderParticle> particles;
     // This frame's decals, in pool order.
     std::vector<RenderDecal> decals;
+    // This frame's world-space UI (F3), placed by the host after extraction:
+    // the UI module owns the layout and the draw list, and the renderer only
+    // draws what it is handed.
+    std::vector<WorldUiVertex> worldUiVertices;
+    std::vector<WorldUiRun> worldUiRuns;
     // The block world's block size, which the block shader needs to name the
     // block a fragment belongs to.
     f32 voxelBlockSize = 1.0f;
@@ -387,6 +429,8 @@ struct RenderWorld
         voxelTextures.clear();
         particles.clear();
         decals.clear();
+        worldUiVertices.clear();
+        worldUiRuns.clear();
         voxelBlockSize = 1.0f;
         candidateDraws = 0;
         culledDraws = 0;

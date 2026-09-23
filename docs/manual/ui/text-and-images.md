@@ -171,8 +171,8 @@ font files, and a `TextInput` always shows its text plain.
 ## What is not here
 
 Complex scripts are not shaped: codepoints are laid out left to right, so
-Arabic, Devanagari and Thai do not join. No world-space UI yet: this tree draws
-on the screen and nowhere else.
+Arabic, Devanagari and Thai do not join. The same classes draw in the world
+under a `SurfaceGui` or a `BillboardGui`: see [UI in the world](manual:ui/world-space).
 
 ## Where to look next
 

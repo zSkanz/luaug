@@ -1970,6 +1970,127 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Property },
     },
     {
+        Name = "BillboardGui",
+        Extends = "Instance",
+        Module = "ui",
+        Storage = "BillboardGui",
+        Doc = "A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health "
+            .. "bar over a crate, a marker on an objective. Its children are laid out exactly as a "
+            .. "`ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in "
+            .. "front of it, in the same light as the picture around it -- rather than over it.\n\n"
+            .. "It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. "
+            .. "Nothing on it can be clicked yet: the pointer reaches the screen's UI and the world, and "
+            .. "a billboard is neither.",
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether it is laid out and drawn at all.",
+            },
+            {
+                Name = "Adornee",
+                Type = "BasePart?",
+                Doc = "The part it hangs over. Empty means its parent, when its parent is a part; a billboard "
+                    .. "with neither is not drawn.",
+            },
+            {
+                Name = "Size",
+                Type = "UDim2",
+                Default = "UDim2.new(0, 200, 0, 50)",
+                Doc = "How big it is. **The scale is in metres and the offset in pixels**, and the two mean "
+                    .. "different things: a scale keeps its size in the world, so it shrinks with distance "
+                    .. "like anything else there; an offset keeps its size on the screen, so a name tag "
+                    .. "is as readable across the map as up close. The children lay out against the pixel "
+                    .. "size either way.",
+            },
+            {
+                Name = "WorldOffset",
+                Type = "vector",
+                Default = "vector.zero",
+                Doc = "Where its centre sits relative to the adornee's centre, in metres and in the world's "
+                    .. "own axes -- `vector.create(0, 3, 0)` is three metres above it however the part is "
+                    .. "turned.",
+            },
+            {
+                Name = "AlwaysOnTop",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether it shows through walls. Off, it is hidden by whatever is in front of it, like "
+                    .. "anything in the world.",
+            },
+            {
+                Name = "MaxDistance",
+                Type = "number",
+                Default = "0",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How far from the camera it stops being drawn, in metres. Zero means no limit.",
+            },
+            {
+                Name = "Brightness",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How bright its colours are in the world's light, which is brighter than the screen's: "
+                    .. "above one, it glows and blooms.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "SurfaceGui",
+        Extends = "Instance",
+        Module = "ui",
+        Storage = "SurfaceGui",
+        Doc = "A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a "
+            .. "label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a "
+            .. "canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the "
+            .. "part.\n\n"
+            .. "It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Nothing on "
+            .. "it can be clicked yet.",
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether it is laid out and drawn at all.",
+            },
+            {
+                Name = "Adornee",
+                Type = "BasePart?",
+                Doc = "The part it covers. Empty means its parent, when its parent is a part.",
+            },
+            {
+                Name = "Face",
+                Type = "Enum.Face",
+                Default = "Enum.Face.Front",
+                Doc = "Which face of the part it covers. `Front` is the one the part's `LookVector` comes out "
+                    .. "of, and every side face is read the right way up.",
+            },
+            {
+                Name = "PixelsPerMetre",
+                Type = "number",
+                Default = "50",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How many of the canvas's pixels fit in a metre of the face, which is what a child's "
+                    .. "offset and a `TextSize` are measured in. Fifty makes 14-point text about a hand high "
+                    .. "on a wall; more is finer text on the same face.",
+            },
+            {
+                Name = "AlwaysOnTop",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether it shows through what is in front of the face.",
+            },
+            {
+                Name = "Brightness",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How bright its colours are in the world's light: above one, a screen that glows.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         Name = "UIObject",
         Extends = "Instance",
         Module = "ui",

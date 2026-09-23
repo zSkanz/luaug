@@ -463,6 +463,14 @@ local Excluded: { Schema.Excluded } = {
         Reason = "Screen-space UI is drawn from local state by local scripts. What a player sees on "
             .. "their own HUD is not a fact the authority owns.",
     },
+    {
+        Name = "BillboardGui",
+        Reason = "World-space UI is built by each peer's own scripts, as the screen's is: everything under "
+            .. "it is a UI class the wire does not carry, so sending the root alone would send an empty "
+            .. "board. A name tag over another player's character is made on each client from what IS "
+            .. "replicated -- the character and its name.",
+    },
+    { Name = "SurfaceGui", Reason = "World-space UI. The same as `BillboardGui`." },
     { Name = "Frame", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextLabel", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextButton", Reason = "Screen-space UI. The same as `ScreenGui`." },

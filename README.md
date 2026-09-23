@@ -85,8 +85,8 @@ compares draw commands rather than pixels, an editor-seam proof that runs two
 worlds and two VMs in one process, and a soak that walks the flagship for ten
 minutes and asserts the memory curve flattens.
 
-**What it does not have, stated plainly.** No `SurfaceGui` or billboards yet,
-no navmesh, no 2D workflow, no mobile. Multiplayer
+**What it does not have, stated plainly.** No navmesh, no 2D workflow, no
+mobile. Multiplayer
 runs on a LAN over an unencrypted transport, with no client prediction yet.
 Each has an owner in the roadmap's post-v1 phases rather than a shrug, and
 [`docs/migrating.md`](docs/migrating.md) §5 lists them with

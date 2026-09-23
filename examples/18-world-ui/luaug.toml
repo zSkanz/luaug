@@ -1,0 +1,15 @@
+# UI in the world (F3): BillboardGui and SurfaceGui.
+#
+# No scene file: the script builds a wall with a scoreboard on it and crates
+# with name tags over them, because how each is placed is the subject.
+
+[project]
+name = "LuauG World UI"
+id = "dev.luaug.world-ui"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — World UI"
+width = 1280
+height = 720

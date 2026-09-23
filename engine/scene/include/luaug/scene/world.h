@@ -245,6 +245,8 @@ struct NameIndex
     X(SoundComponent, sounds)                                                                                          \
     X(AudioGroupComponent, audioGroups)                                                                                \
     X(ScreenGuiComponent, screenGuis)                                                                                  \
+    X(BillboardGuiComponent, billboardGuis)                                                                            \
+    X(SurfaceGuiComponent, surfaceGuis)                                                                                \
     X(UIObjectComponent, uiObjects)                                                                                    \
     X(TextLabelComponent, textLabels)                                                                                  \
     X(TextInputComponent, textInputs)                                                                                  \
@@ -719,6 +721,10 @@ public:
     // The ui module's classes (M6).
     [[nodiscard]] ComponentPool<ScreenGuiComponent>& screenGuis() noexcept { return m_screenGuis; }
     [[nodiscard]] const ComponentPool<ScreenGuiComponent>& screenGuis() const noexcept { return m_screenGuis; }
+    [[nodiscard]] ComponentPool<BillboardGuiComponent>& billboardGuis() noexcept { return m_billboardGuis; }
+    [[nodiscard]] const ComponentPool<BillboardGuiComponent>& billboardGuis() const noexcept { return m_billboardGuis; }
+    [[nodiscard]] ComponentPool<SurfaceGuiComponent>& surfaceGuis() noexcept { return m_surfaceGuis; }
+    [[nodiscard]] const ComponentPool<SurfaceGuiComponent>& surfaceGuis() const noexcept { return m_surfaceGuis; }
     [[nodiscard]] ComponentPool<UIObjectComponent>& uiObjects() noexcept { return m_uiObjects; }
     [[nodiscard]] const ComponentPool<UIObjectComponent>& uiObjects() const noexcept { return m_uiObjects; }
     [[nodiscard]] ComponentPool<TextLabelComponent>& textLabels() noexcept { return m_textLabels; }

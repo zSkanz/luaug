@@ -456,6 +456,9 @@ Instance (abstract)
 ├─ InputContext / InputAction / InputBinding   (§2.4)
 ├─ ScreenGui                   -- Enabled, DisplayOrder, ScreenInsets. The screen root a UI tree
 │                              -- is parented UNDER; it extends Instance, not UIObject
+├─ SurfaceGui / BillboardGui   -- the same trees drawn IN the world (F3): on a face of a part
+│                              -- (Face, PixelsPerMetre) or over a point facing the camera (Size
+│                              -- scale in metres and offset in pixels, WorldOffset, MaxDistance)
 ├─ UIObject (abstract)         -- Position/Size: UDim2, AnchorPoint: Vector2, Rotation,
 │  │                           -- BackgroundColor: Color3, BackgroundTransparency, Visible,
 │  │                           -- ZIndex, LayoutOrder, AutomaticSize, ClipsDescendants,
@@ -479,7 +482,7 @@ Layout is computed directly -- two passes over each dirty `ScreenGui` -- and no
 solver is exposed or vendored. It was to have been Clay; ADR 0040 records why a
 `UDim2` placement turned out to be arithmetic rather than a constraint problem.
 **Not here (documented honestly):**
-SurfaceGui/billboards and video. **Four things have come off this list.** The solver joints did: it read "every constraint except the
+video. **Five things have come off this list.** The solver joints did: it read "every constraint except the
 rigid weld — no `HingeConstraint`, `SpringConstraint` or `Motor6D`, and no
 solver joint of any kind", and `HingeConstraint`, `BallSocketConstraint` and
 `FixedConstraint` now ship over `Attachment` pairs, with a `Ragdoll` assembled
@@ -489,10 +492,12 @@ encodings (ADR 0067), sculpted from a script through `FillBall`/`FillBlock`/
 `PaintBall` or from the editor's brush, meshed, collided, saved with the scene
 and reached as `workspace.Terrain`. `ParticleEmitter` did (F2, ADR 0072), and
 so did rich text: `TextLabel.RichText` reads its text as markup, so one label
-changes colour, size and weight part-way through (F3).
+changes colour, size and weight part-way through (F3). And world-space UI did:
+a `SurfaceGui` on a face of a part and a `BillboardGui` over a point, both laid
+out as a `ScreenGui` is and drawn in the world rather than over it (F3).
 
 **The rest of that list now has an owner** (roadmap post-v1 phase 2, opened
-2026-08-27): `SurfaceGui`/billboards are being built. Video is not, and has no phase. This paragraph stays until each one
+2026-08-27) has shipped. Video is not, and has no phase. This paragraph stays until each one
 ships rather than being edited in advance: **a surface is documented as absent
 while it is absent**, which is the same rule that forbids a declared class
 nothing implements — so Terrain left it in the commit that made it false and

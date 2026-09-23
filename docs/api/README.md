@@ -47,6 +47,7 @@ guided tour.
 | [`BallSocketConstraint`](ballsocketconstraint.md) | [`Constraint`](constraint.md) | A joint free to rotate in every direction about one point, and optionally limited to a cone and a twist. |
 | [`BasePart`](basepart.md) | [`PVInstance`](pvinstance.md) | The abstract base of every solid object in the world: a transform, a size and a look. |
 | [`BaseScript`](basescript.md) | [`Instance`](instance.md) | The abstract base of anything that carries Luau code. |
+| [`BillboardGui`](billboardgui.md) | [`Instance`](instance.md) | A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. |
 | [`Bone`](bone.md) | [`Attachment`](attachment.md) | An attachment that follows a joint of the `MeshPart` it is parented to. |
 | [`Camera`](camera.md) | [`PVInstance`](pvinstance.md) | The viewpoint the world is rendered from. |
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
@@ -78,6 +79,7 @@ guided tour.
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |
 | [`Sound`](sound.md) | [`Instance`](instance.md) | One sound, playing or not (§2.2). |
 | [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its parent's forward direction. |
+| [`SurfaceGui`](surfacegui.md) | [`Instance`](instance.md) | A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. |
 | [`Terrain`](terrain.md) | [`Instance`](instance.md) | A sculpted, collidable landscape: ground you dig into rather than a floor made of parts. |
 | [`TextButton`](textbutton.md) | [`TextLabel`](textlabel.md) | A `TextLabel` that is meant to be pressed. |
 | [`TextInput`](textinput.md) | [`TextLabel`](textlabel.md) | A single-line editable field (§2.2). |

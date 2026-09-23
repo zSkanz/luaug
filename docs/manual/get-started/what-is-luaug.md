@@ -60,7 +60,6 @@ Worth knowing before you start rather than after:
 
 | Missing | State |
 |---|---|
-| World-space UI (`SurfaceGui`, billboards) | Being built |
 | Constraints beyond a rigid weld | Not scheduled |
 | `BasePart.Material` | Not shipped; a surface look rather than body state |
 | A filesystem for scripts | Not present; persistence is a backend |

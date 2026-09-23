@@ -367,6 +367,16 @@ void layout(scene::World& world, core::InstanceId uiService, core::Vec2 windowSi
     }
 }
 
+void layoutCanvas(scene::World& world, core::InstanceId root, core::Vec2 canvasSize)
+{
+    if (!root.valid())
+        return;
+    Pass pass{world, {}};
+    ++g_stats.solverRuns;
+    for (core::InstanceId element = world.firstChild(root); element.valid(); element = world.nextSibling(element))
+        place(world, pass, element, Vec2{}, canvasSize, Vec2{}, false);
+}
+
 const LayoutStats& layoutStats() noexcept
 {
     return g_stats;

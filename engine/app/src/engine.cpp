@@ -35,6 +35,7 @@
 #include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_text.h"
 #include "luaug/app/world_host.h"
+#include "luaug/app/world_ui.h"
 #include "luaug/asset/content.h"
 #include "luaug/asset/image.h"
 #include "luaug/core/build_info.h"
@@ -667,6 +668,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     bool uiSubmit = false;
     render::DebugDraw debugDraw;
     ui::DrawList uiDrawList;
+    // One tree's canvas at a time, for the world-space UI (F3).
+    ui::DrawList worldUiDrawList;
     std::vector<render::UiVertex> uiVertices;
     std::vector<render::UiScissorRun> uiRuns;
     std::vector<rhi::TextureHandle> uiTextures;
@@ -3144,6 +3147,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             for (const rhi::TextureHandle image : uiText.images())
                 uiTextures.push_back(image);
             buildUiGeometry(uiDrawList, uiViewport, uiVertices, uiRuns, uiTextures);
+
+            // **The world's UI, into the picture the renderer is about to
+            // draw** (F3): laid out and drawn by the same code as the screen's,
+            // placed on its parts and billboards, and sharing the screen's
+            // glyph atlas and images.
+            buildWorldUi(host->world(), host->workspace(), host->uiService(), uiViewport, uiTextures, worldUiDrawList,
+                         snapshot);
 
             frameVisibleObjects = 0;
             frameTriangles = 0;

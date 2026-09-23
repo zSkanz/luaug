@@ -3399,6 +3399,46 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     particleShapeDesc.items = particleShapeItems;
     enums.registerEnum(particleShapeDesc);
 
+    // --- Face ---
+    static std::array<EnumItemDesc, 6> faceItems;
+    faceItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Front"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Back"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Top"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Bottom"),
+            .value = 3,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Right"),
+            .value = 4,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Left"),
+            .value = 5,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor faceDesc;
+    faceDesc.name = atoms.intern("Face");
+    faceDesc.docKey = {};
+    faceDesc.items = faceItems;
+    enums.registerEnum(faceDesc);
+
     // --- BlockOpacity ---
     static std::array<EnumItemDesc, 3> blockOpacityItems;
     blockOpacityItems = {{

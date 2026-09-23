@@ -427,6 +427,22 @@ struct GpuDecalUniforms
 
 static_assert(sizeof(GpuDecalUniforms) == 128, "GpuDecalUniforms is a cbuffer layout");
 
+// Vertex stage, `b0 space1`, for `ui_world` (F3).
+struct GpuWorldUiView
+{
+    core::Mat4 viewProjection;
+};
+
+static_assert(sizeof(GpuWorldUiView) == 64, "GpuWorldUiView is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for `ui_world`: x is the brightness.
+struct GpuWorldUiLook
+{
+    f32 params[4]{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuWorldUiLook) == 16, "GpuWorldUiLook is a cbuffer layout");
+
 // Fragment stage, `b0 space3`, for `decal`.
 struct GpuDecalFragment
 {

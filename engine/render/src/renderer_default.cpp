@@ -390,6 +390,8 @@ private:
     [[nodiscard]] bool ensureParticles(rhi::IDevice& device);
     // The decal pipeline, on the same lazy terms.
     [[nodiscard]] bool ensureDecals(rhi::IDevice& device);
+    // The world UI pipelines and buffer, on the same lazy terms.
+    [[nodiscard]] bool ensureWorldUi(rhi::IDevice& device);
     // Picks this frame's nodes for every terrain in `world`, from its camera.
     void selectTerrain(const RenderWorld& world);
     // Draws the selected nodes. `cull` is a cascade's or a light's sphere;
@@ -595,6 +597,13 @@ private:
     rhi::PipelineHandle decalPipeline_{};
     bool decalTried_ = false;
     rhi::BufferHandle particleBuffer_{};
+    // World-space UI (F3): one pipeline tested against depth and one that is
+    // not, for `AlwaysOnTop`, and a vertex buffer of `MaxWorldUiVertices`.
+    rhi::PipelineHandle worldUiPipeline_{};
+    rhi::PipelineHandle worldUiOnTopPipeline_{};
+    rhi::BufferHandle worldUiBuffer_{};
+    bool worldUiTried_ = false;
+    u32 worldUiVertexCount_ = 0;
     bool particleTried_ = false;
     std::vector<GpuParticle> particleStaging_;
     u32 particleCount_ = 0;
@@ -1436,7 +1445,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     for (rhi::PipelineHandle* pipeline :
          {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_, &voxelPipeline_,
-          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_, &decalPipeline_}) {
+          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_, &decalPipeline_, &worldUiPipeline_,
+          &worldUiOnTopPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1452,12 +1462,16 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     if (particleBuffer_.valid())
         device.destroy(particleBuffer_);
     particleBuffer_ = {};
+    if (worldUiBuffer_.valid())
+        device.destroy(worldUiBuffer_);
+    worldUiBuffer_ = {};
     if (voxelAtlas_.valid())
         device.destroy(voxelAtlas_);
     voxelAtlas_ = {};
     voxelTiles_.clear();
     particleTried_ = false;
     decalTried_ = false;
+    worldUiTried_ = false;
     terrainGridUploaded_ = false;
 
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
@@ -1947,6 +1961,87 @@ void uploadTerrainGrid(rhi::ICmdList& cmd, rhi::BufferHandle vertices, rhi::Buff
 }
 
 } // namespace
+
+// A frame's world UI stops here: ten thousand quads, far past any screen of
+// name tags, and a fixed buffer rather than one that grows under a frame.
+constexpr u32 MaxWorldUiVertices = 60000;
+
+bool DefaultRenderer::ensureWorldUi(rhi::IDevice& device)
+{
+    if (worldUiTried_)
+        return worldUiPipeline_.valid() && worldUiOnTopPipeline_.valid() && worldUiBuffer_.valid();
+    worldUiTried_ = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+    core::EngineError error;
+    const rhi::ShaderHandle vertex = shaderLibrary_->create(device, "ui_world", rhi::ShaderStage::Vertex, &error);
+    const rhi::ShaderHandle fragment = shaderLibrary_->create(device, "ui_world", rhi::ShaderStage::Fragment, &error);
+    for (const rhi::ShaderHandle handle : {vertex, fragment}) {
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+    }
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+
+    const std::array<rhi::VertexAttribute, 5> attributes{
+        rhi::VertexAttribute{.location = 0,
+                             .bufferSlot = 0,
+                             .format = rhi::VertexFormat::Float3,
+                             .offsetBytes = offsetof(WorldUiVertex, x)},
+        rhi::VertexAttribute{.location = 1,
+                             .bufferSlot = 0,
+                             .format = rhi::VertexFormat::Ubyte4Unorm,
+                             .offsetBytes = offsetof(WorldUiVertex, r)},
+        rhi::VertexAttribute{.location = 2,
+                             .bufferSlot = 0,
+                             .format = rhi::VertexFormat::Float4,
+                             .offsetBytes = offsetof(WorldUiVertex, localX)},
+        rhi::VertexAttribute{.location = 3,
+                             .bufferSlot = 0,
+                             .format = rhi::VertexFormat::Float1,
+                             .offsetBytes = offsetof(WorldUiVertex, radius)},
+        rhi::VertexAttribute{.location = 4,
+                             .bufferSlot = 0,
+                             .format = rhi::VertexFormat::Float2,
+                             .offsetBytes = offsetof(WorldUiVertex, u)},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> buffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = sizeof(WorldUiVertex)},
+    };
+    // Straight alpha, as the screen's UI blends: a panel's transparency is a
+    // property, and a UI colour is not premultiplied anywhere upstream.
+    const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true},
+    }};
+    const auto make = [&](bool tested, const char* name) {
+        return device.createGraphicsPipeline({
+            .vertexShader = vertex,
+            .fragmentShader = fragment,
+            .vertexBuffers = buffers,
+            .vertexAttributes = attributes,
+            // Both sides: a sign is read from in front, and seen edge-on or
+            // from behind it is a sign seen from behind.
+            .rasterizer = {.cullMode = rhi::CullMode::None},
+            // Tested and never written, like every blended surface: hidden by
+            // what is in front, and never hiding what is drawn after it.
+            .depthStencil = {.depthTest = tested, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+            .colorTargets = hdrTarget,
+            .depthStencilFormat = kDepthFormat,
+            .debugName = name,
+        });
+    };
+    worldUiPipeline_ = make(true, "ui_world");
+    worldUiOnTopPipeline_ = make(false, "ui_world.top");
+    worldUiBuffer_ = device.createBuffer({
+        .usage = rhi::BufferUsage::Vertex,
+        .sizeBytes = static_cast<u32>(MaxWorldUiVertices * sizeof(WorldUiVertex)),
+        .debugName = "ui_world",
+    });
+    return worldUiPipeline_.valid() && worldUiOnTopPipeline_.valid() && worldUiBuffer_.valid();
+}
 
 bool DefaultRenderer::ensureDecals(rhi::IDevice& device)
 {
@@ -2471,6 +2566,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         }
         cmd.upload(particleBuffer_, asBytes(particleStaging_.data(), particleStaging_.size() * sizeof(GpuParticle)), 0);
         particleCount_ = static_cast<u32>(count);
+    }
+
+    // This frame's world UI, up before any pass for the same reason (F3).
+    worldUiVertexCount_ = 0;
+    if (!world.worldUiVertices.empty() && ensureWorldUi(device)) {
+        worldUiVertexCount_ = static_cast<u32>(std::min<usize>(world.worldUiVertices.size(), MaxWorldUiVertices));
+        cmd.upload(worldUiBuffer_, asBytes(world.worldUiVertices.data(), worldUiVertexCount_ * sizeof(WorldUiVertex)),
+                   0);
     }
 
     // The terrain's nodes for this frame, chosen from the camera once and used
@@ -3169,6 +3272,32 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             cmd.bindVertexBuffers(0, particleBuffers);
             cmd.draw(6, particleCount_, 0, 0);
             stats_.drawCalls += 1;
+        }
+
+        // **World UI after the particles** (F3): the trees arrive back to
+        // front, and the ones that are always on top come after all of them.
+        if (worldUiVertexCount_ > 0) {
+            GpuWorldUiView view;
+            view.viewProjection = world.camera.viewProjection;
+            const std::array<rhi::BufferHandle, 1> uiBuffers{worldUiBuffer_};
+            for (const bool onTop : {false, true}) {
+                cmd.setPipeline(onTop ? worldUiOnTopPipeline_ : worldUiPipeline_);
+                cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&view, sizeof(view)));
+                cmd.bindVertexBuffers(0, uiBuffers);
+                for (const WorldUiRun& run : world.worldUiRuns) {
+                    if (run.alwaysOnTop != onTop || run.vertexCount == 0 ||
+                        run.firstVertex + run.vertexCount > worldUiVertexCount_)
+                        continue;
+                    GpuWorldUiLook look;
+                    look.params[0] = run.brightness;
+                    cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&look, sizeof(look)));
+                    const std::array<rhi::TextureBinding, 1> texture{
+                        rhi::TextureBinding{run.texture.valid() ? run.texture : whitePixel_, environmentSampler_}};
+                    cmd.bindTextures(rhi::ShaderStage::Fragment, 0, texture);
+                    cmd.draw(run.vertexCount, 1, run.firstVertex, 0);
+                    stats_.drawCalls += 1;
+                }
+            }
         }
     }
 
