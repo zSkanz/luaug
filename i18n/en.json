@@ -54,6 +54,7 @@
   "engine.bench.info.result": "Bench {name}: {instances} instances, {ticks} ticks, {mean} ms/tick mean, {max} ms worst.",
   "engine.bench.err.script_errors": "Bench {name} logged {count} errors, so the world it measured is not the one it describes.",
   "engine.bench.err.over_budget": "Bench {name} took {mean} ms/tick, over its {budget} ms budget.",
+  "engine.bench.warn.over_budget_sanitized": "Bench {name} took {mean} ms/tick, over its {budget} ms budget -- reported, not failed, because this build runs under a sanitizer.",
   "engine.project.warn.no_scripts": "No entry scripts under {path}; the project will boot and do nothing. A project mounts src/scripts/**/*.luau.",
   "engine.capture.info.written": "Wrote the render command stream to {path}.",
   "engine.capture.err.empty": "Nothing was recorded; --capture-out needs --rhi=capture.",

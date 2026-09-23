@@ -261,7 +261,17 @@ std::optional<core::EngineError> runBenchmarks(const std::filesystem::path& root
                 I18nArg{"mean", milliseconds(result.meanTickMs)},
                 I18nArg{"budget", milliseconds(result.budgetMs)},
             };
+#ifdef LUAUG_SANITIZERS_ENABLED
+            // **Measured and reported, not gating, under a sanitizer** -- the
+            // rule the soak gate already states. A budget is a statement about
+            // the shipped code, and an instrumented build runs a memory-heavy
+            // scenario an order of magnitude slower: `terrain_sculpt` is 4.3 ms
+            // a tick natively and 42 ms under ASan, and failing the nightly on
+            // that measures the tool, not the engine.
+            core::log(LogLevel::Warn, LUAUG_TR("engine.bench.warn.over_budget_sanitized"), budgetArgs);
+#else
             overBudget = core::makeError(LUAUG_TR("engine.bench.err.over_budget"), budgetArgs);
+#endif
         }
 
         out.push_back(std::move(result));

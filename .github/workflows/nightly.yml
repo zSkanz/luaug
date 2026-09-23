@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # The same pin as ci.yml's (R5). This file used to fetch the installer from
+  # rokit's `main`, which is an unpinned tool by another name.
+  ROKIT_VERSION: "1.2.0"
+
 concurrency:
   # The opposite of ci.yml's choice on purpose: CI cancels superseded runs
   # because a newer commit answers the same question, while a nightly gets one
@@ -90,10 +95,19 @@ jobs:
 
       - name: Install the Luau toolchain (rokit)
         shell: bash
+        env:
+          # Authenticated for the reason ci.yml gives: rokit resolves every
+          # pinned tool through api.github.com, and unauthenticated that limit
+          # is shared across the runner's IP. The nightly of 2026-09-20 died
+          # here with a 403 before building anything.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          curl -fsSL https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.sh | bash
+          curl -fsSL -o /tmp/rokit.zip             "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-linux-x86_64.zip"
+          unzip -q /tmp/rokit.zip -d /tmp/rokit
+          /tmp/rokit/rokit self-install
           echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          "$HOME/.rokit/bin/rokit" authenticate github --token "$GH_TOKEN"
           "$HOME/.rokit/bin/rokit" install --no-trust-check
 
       # The same script the local gate runs, which is the whole point: when the
