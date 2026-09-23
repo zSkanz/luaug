@@ -4668,28 +4668,52 @@ TEST_CASE("a stroke stamps by distance, not by frame count")
     const Walked slow = walk(4);
     const Walked fast = walk(40);
 
-    // **The same number of edits**, which is the claim the arithmetic makes: a
-    // drag is walked in metres, so cutting it into ten times as many frames does
-    // not stamp ten times as often.
-    CHECK(slow.stamps == fast.stamps);
-    CHECK(slow.stamps > 1);
-
-    // **And byte-identical ground**, which is a stronger claim than "close" and
-    // is only true because the ray is cast against the field as it was when the
-    // stroke began. Against the live field the brush burrows into the hole it is
-    // digging, and how deep depends on how many frames the drag took.
-    // And the same ground, to within a thousandth of a metre.
+    // **Nearly the same edits, and nearly the same ground.** A drag is walked
+    // in metres, so cutting it into ten times as many frames does not stamp
+    // ten times as often -- that was the defect this test was written for,
+    // when a high framerate stamped once for the whole drag.
     //
-    // **Not byte-identical, and that is a fact about a perspective camera rather
-    // than about the brush.** The two walks put the pointer over different
-    // pixels -- the slow one never visits the ones the fast one does -- and a
-    // ray through a different pixel meets the ground at a slightly different
-    // point. The stamps land on the same lattice of the stroke; their heights
-    // are interpolated between hits a few micrometres apart.
+    // Not identical any more, and on purpose: a brush aims at the ground as it
+    // now is (the owner, 2026-09-23), so each frame's ray lands a little lower
+    // in the trench it is digging, and where the frames fall moves the stamps
+    // by a few centimetres. Identical ground needed a brush aimed at the field
+    // as the stroke began, which could not see its own work while held.
+    CHECK(std::abs(static_cast<int>(slow.stamps) - static_cast<int>(fast.stamps)) <= 1);
+    CHECK(slow.stamps > 1);
     for (core::usize at = 0; at < slow.heights.size(); ++at) {
         CAPTURE(at);
-        CHECK(std::abs(slow.heights[at] - fast.heights[at]) < 0.001f);
+        CHECK(std::abs(slow.heights[at] - fast.heights[at]) < 0.25f);
     }
+}
+
+TEST_CASE("a brush held still keeps working the ground under it, as it now is")
+{
+    // **The owner's report**: holding the mouse down did not see the changes
+    // the brush was making. Held still, a raise keeps climbing and a dig keeps
+    // going down, each stamp aimed at the ground the one before it left.
+    const auto hold = [](Editor::BrushOp op) {
+        BrushRig rig;
+        rig.lookDown(60.0);
+        rig.editor.setTool(Editor::Tool::Sculpt);
+        rig.editor.setBrushOp(op);
+        rig.editor.setBrushRadius(4.0f);
+        rig.editor.setBrushStrength(1.0f);
+        const core::Vec2 pixel = rig.pixelOf(core::DVec3{0.0, 0.0, 0.0});
+        rig.frame(pixel, true, true, 0.0);
+        for (int at = 0; at < 60; ++at)
+            rig.frame(pixel, false, true, 1.0 / 60.0);
+        rig.frame(pixel, false, false, 0.0);
+        return std::pair{rig.editor.lastStrokeStamps(),
+                         static_cast<double>(asset::heightAt(rig.field().field, 0.0, 0.0).value_or(0.0f))};
+    };
+    const auto [raised, top] = hold(Editor::BrushOp::Add);
+    // A second at full strength: twenty stamps, and a hill several times one
+    // stamp's height -- each stamp climbed the last one.
+    CHECK(raised >= 15);
+    CHECK(top > 4.0);
+    const auto [dug, bottom] = hold(Editor::BrushOp::Subtract);
+    CHECK(dug >= 15);
+    CHECK(bottom < -4.0);
 }
 
 TEST_CASE("painting through the editor changes material and not height")

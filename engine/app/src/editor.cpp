@@ -2982,16 +2982,15 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         return false;
     }
 
-    // **Against the frozen field while a stroke is running**, against the live
-    // one while merely hovering -- so the ring follows the ground as it is, and
-    // the stamps go where the stroke was aimed when it began. `Stroke::aimField`
-    // says at length why.
-    //
-    // A carving stroke is the exception, and aims at the live field: it exists
-    // to burrow.
+    // **Against the live field, stroke or no stroke** (the owner, 2026-09-23:
+    // "it does not see the changes while I hold the mouse"). A brush held down
+    // works on the ground as it now is: adding piles up towards the camera,
+    // raising keeps climbing, digging goes deeper. Aiming at the field as the
+    // stroke began was what the height-brush era chose, to stop a held brush
+    // burrowing -- which is exactly what the reference editors' brushes do,
+    // and what a person holding one down means.
     const PickRay ray = rayThrough(m_pointer);
-    const bool frozen = m_stroke.has_value() && !m_stroke->carve;
-    const asset::TerrainField& aimAt = frozen ? m_stroke->aimField : terrain->field;
+    const asset::TerrainField& aimAt = terrain->field;
     // **Cast in the FIELD's space and answered in the world's.** A terrain can
     // be moved, and the field knows nothing about that -- the origin is applied
     // by its consumers rather than baked into every tile. So the ray goes in
@@ -3067,7 +3066,6 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         stroke.terrain = terrainId;
         stroke.gesture = inspector.beginGesture();
         stroke.last = m_brushAim->position;
-        stroke.aimField = terrain->field;
         // Where `Flatten` levels to. Captured once, here, so a drag across a
         // hillside levels it to where the stroke began rather than chasing its
         // own result downhill.
@@ -3082,42 +3080,12 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         return true;
     }
 
-    // **A drag in progress, walked in metres.** Every stamp between the last one
-    // and where the pointer is now, so the stroke is a function of where the
-    // pointer went rather than of how many frames it took to get there.
-    //
-    // `m_stroke->last` is the last STAMP, not last frame's pointer, and it only
-    // moves when a stamp happens -- which is what makes a slow drag at 120 Hz
-    // and a fast one at 30 leave the same ground rather than merely similar
-    // ground. Advancing it every frame was the defect: at a high framerate every
-    // step was shorter than one stamp, so the whole drag stamped once.
-    const auto radius = static_cast<double>(m_brush.radius);
-    const auto spacing = static_cast<double>(m_brush.spacing);
-    if (m_stroke->carve) {
-        carveStroke(*terrain, ray.direction, dt);
-        m_pending.reset();
-        return true;
-    }
-    if (!strokeAdvanced(m_stroke->last, m_brushAim->position, radius, spacing)) {
-        m_pending.reset();
-        return true;
-    }
-
-    // **The first entry IS the last stamp**, because the walk starts at `from`
-    // -- so it is skipped rather than re-applied, and the anchor moves to the
-    // last entry rather than to the pointer. The pointer is ahead of the last
-    // stamp by the fraction of a step not yet walked, and that fraction is
-    // carried into the next frame rather than dropped.
-    const std::vector<core::DVec3> stamps = strokeStamps(m_stroke->last, m_brushAim->position, radius, spacing);
-    for (core::usize at = 1; at < stamps.size(); ++at) {
-        applyBrushAt(*terrain, stamps[at]);
-        m_stroke->stamps += 1;
-    }
-    if (!stamps.empty())
-        m_stroke->last = stamps.back();
-
-    // The gesture is still the same one, so the undo step above is still the
-    // step this belongs to; nothing more to record.
+    // **A drag in progress, walked in metres; a held pointer, on the clock.**
+    // One path for every tool (`holdStroke`): a drag stamps every step of the
+    // way from the last stamp, so it is a function of where the pointer went
+    // rather than of how many frames it took, and a pointer held still keeps
+    // working the ground under it, as it now is.
+    holdStroke(*terrain, ray.direction, dt);
     m_pending.reset();
     return true;
 }
@@ -3139,9 +3107,14 @@ constexpr float CarveSteepness = 0.7f;
 constexpr double CarveSpeedMin = 1.5;
 constexpr double CarveSpeedMax = 8.0;
 
-// At most this many boring stamps in one frame, so a hitch of a second does
-// not bore a second's worth of tunnel in one go behind the person's back.
+// At most this many held stamps in one frame, so a hitch of a second does not
+// work a second's worth of ground in one go behind the person's back.
 constexpr int CarveStampsPerFrame = 4;
+
+// How often a brush held still stamps, from the weakest brush to the
+// strongest: every tool but a carve, which paces itself by boring speed.
+constexpr double HeldStampsMin = 4.0;
+constexpr double HeldStampsMax = 20.0;
 
 // How far one stamp of the round brush raises the centre of its disc, in
 // metres. Scaled by the radius, so a big brush builds a hill as fast relative
@@ -3162,7 +3135,7 @@ bool Editor::carves(Tool tool, const Brush& brush, core::Vec3 normal) noexcept
     return brush.shape == BrushShape::Box || normal.y < CarveSteepness;
 }
 
-void Editor::carveStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt)
+void Editor::holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt)
 {
     // **Two motions, told apart by direction.** The live aim moves ALONG the
     // ray when the stamp before it opened the wall up -- that is boring, and it
@@ -3189,11 +3162,14 @@ void Editor::carveStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirecti
         return;
     }
 
-    // Held still: one ball every `radius / speed` seconds, each where the ray
-    // now meets the wall -- which the ball before it moved a radius deeper.
-    const double speed =
-        CarveSpeedMin + (CarveSpeedMax - CarveSpeedMin) * static_cast<double>(std::clamp(m_brush.strength, 0.0f, 1.0f));
-    const double interval = std::max(radius, 0.1) / speed;
+    // Held still: a stamp on the clock, each where the ray now meets the ground
+    // -- which the stamp before it moved. A carve bores a ball every
+    // `radius / speed` seconds; every other tool stamps at a rate the strength
+    // sets, so a held Add piles up and a held raise keeps climbing.
+    const double strength = static_cast<double>(std::clamp(m_brush.strength, 0.0f, 1.0f));
+    const double interval = m_stroke->carve
+                                ? std::max(radius, 0.1) / (CarveSpeedMin + (CarveSpeedMax - CarveSpeedMin) * strength)
+                                : 1.0 / (HeldStampsMin + (HeldStampsMax - HeldStampsMin) * strength);
     m_stroke->carveClock = std::min(m_stroke->carveClock + std::max(dt, 0.0), interval * CarveStampsPerFrame);
     while (m_stroke->carveClock >= interval) {
         m_stroke->carveClock -= interval;

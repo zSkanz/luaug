@@ -115,6 +115,17 @@ inline constexpr core::u32 ChunkEdge = 32;
 inline constexpr core::u32 ChunkRows = ChunkEdge * ChunkEdge;
 inline constexpr core::u32 ChunkVolume = ChunkRows * ChunkEdge;
 
+// **How deep ground laid on empty terrain goes**, in metres under the lowest
+// surface a verb lays: `writeHeights`, `fillFlat` and a first raise on empty
+// columns. Rounded down to a chunk boundary and never past the world's floor.
+//
+// A slab and not a pillar to the floor, and the owner is why: ground laid from
+// the floor at -256 m stood as a tower wherever it met the air, and ground
+// extended sideways with a brush stood as a different one beside it. A slab
+// this deep has walls and a bottom of the same height all round, and room
+// under the surface for any cave a person digs by hand.
+inline constexpr float LaidDepth = 32.0f;
+
 // Level 0 is the voxels themselves; level L averages 2^L on a side, down to one
 // value for the whole chunk at level 5.
 inline constexpr core::u32 ChunkLevels = 6;
@@ -316,6 +327,9 @@ public:
     // highest place its occupancy crosses one half, going up. Nothing where the
     // column holds no ground at all. Caves under it do not change the answer.
     [[nodiscard]] std::optional<float> columnTop(core::i32 x, core::i32 z) const noexcept;
+    // The bottom of the ground in one voxel column: the lowest place occupancy
+    // crosses one half, going down. Nothing where the column holds no ground.
+    [[nodiscard]] std::optional<float> columnBottom(core::i32 x, core::i32 z) const noexcept;
 
     // xxh3 over every chunk's key and digest, in key order.
     [[nodiscard]] core::u64 digest() const noexcept;

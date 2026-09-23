@@ -155,24 +155,38 @@ asset::TerrainMesh meshTerrainNode(const asset::TerrainField& field, TerrainNode
     if (node.level > TerrainTopLevel)
         return {};
     const i32 n = across(node.level);
-    const std::optional<std::pair<i32, i32>> rows = asset::activeRows(field, node.x * n, node.z * n, n);
-    if (!rows.has_value())
-        return {};
     const i32 step = across(node.level);
-    asset::MeshRegion region;
-    region.level = node.level;
-    // A node is `n` chunks of 32 voxels, which at its own level is 32 voxels:
-    // every node, whatever its level, is 32 cells a side.
-    region.minX = node.x * static_cast<i32>(asset::ChunkEdge);
-    region.minZ = node.z * static_cast<i32>(asset::ChunkEdge);
-    region.cellsX = asset::ChunkEdge;
-    region.cellsZ = asset::ChunkEdge;
-    region.minY = asset::floorDiv(rows->first, step);
-    region.cellsY = static_cast<u32>(asset::floorDiv(rows->second, step) - region.minY + 1);
-    // **Two of this level's cells**: enough to reach under the widest crack a
-    // coarser neighbour can leave, and hidden in the ground either way.
-    region.skirt = 2.0f * static_cast<f32>(step) * field.settings().voxelSize;
-    return asset::meshField(field, region);
+    // **One region per run of rows that can hold a surface** (`activeRuns`):
+    // the ground's top and the bottom of the terrain far under it are meshed,
+    // and the solid rock between is not walked. Runs that meet at this level's
+    // coarser rows are merged first, so no two regions own the same row.
+    std::vector<std::pair<i32, i32>> runs;
+    for (const auto& [low, high] : asset::activeRuns(field, node.x * n, node.z * n, n)) {
+        const i32 first = asset::floorDiv(low, step);
+        const i32 last = asset::floorDiv(high, step);
+        if (!runs.empty() && first <= runs.back().second + 1)
+            runs.back().second = std::max(runs.back().second, last);
+        else
+            runs.emplace_back(first, last);
+    }
+    asset::TerrainMesh out;
+    for (const auto& [first, last] : runs) {
+        asset::MeshRegion region;
+        region.level = node.level;
+        // A node is `n` chunks of 32 voxels, which at its own level is 32
+        // voxels: every node, whatever its level, is 32 cells a side.
+        region.minX = node.x * static_cast<i32>(asset::ChunkEdge);
+        region.minZ = node.z * static_cast<i32>(asset::ChunkEdge);
+        region.cellsX = asset::ChunkEdge;
+        region.cellsZ = asset::ChunkEdge;
+        region.minY = first;
+        region.cellsY = static_cast<u32>(last - first + 1);
+        // **Two of this level's cells**: enough to reach under the widest
+        // crack a coarser neighbour can leave, and hidden in the ground.
+        region.skirt = 2.0f * static_cast<f32>(step) * field.settings().voxelSize;
+        asset::appendMesh(out, asset::meshField(field, region));
+    }
+    return out;
 }
 
 TerrainLoader::Node* TerrainLoader::find(const scene::World* world, core::InstanceId terrain,

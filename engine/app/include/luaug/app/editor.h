@@ -2228,25 +2228,6 @@ private:
     {
         core::InstanceId terrain;
 
-        // **The ground as it was when the stroke started**, and the ray is cast
-        // against this rather than against the live field for as long as the
-        // button is held.
-        //
-        // Without it a brush aimed at the surface it is CHANGING burrows: each
-        // stamp lowers the ground, so the next frame's ray lands lower, so the
-        // next stamp is lower again -- and holding the button still over one
-        // spot digs to the floor. Measured, before this: a drag that should have
-        // laid twenty-one stamps laid three hundred and thirty-seven, and cut a
-        // trench fifteen metres deeper than the same drag at a lower framerate.
-        //
-        // It also makes the stroke a pure function of where the pointer went,
-        // which is what lets a test assert that two framerates leave the same
-        // ground rather than merely similar ground.
-        //
-        // The copy is a vector of shared pointers to tiles nobody is about to
-        // change, not a copy of the ground (ADR 0067) -- which is the one reason
-        // freezing it is affordable at all.
-        asset::TerrainField aimField;
         // Where the last stamp of the previous frame landed, so this frame's
         // stamps are walked from there rather than from the frame before.
         core::DVec3 last;
@@ -2259,12 +2240,11 @@ private:
         f32 plane = 0.0f;
         // **A carving stroke: digging INTO the ground rather than lowering
         // it.** Decided once, where the stroke began: a dig with the box, or
-        // with the round brush aimed at ground steeper than it is flat. It is
-        // the one stroke that aims at the LIVE field -- burrowing is what it is
-        // for -- and it bores on the clock rather than on the pointer, so a
-        // tunnel is as deep after a second at 30 Hz as at 144.
+        // with the round brush aimed at ground steeper than it is flat. Held
+        // still, it bores a ball every `radius / speed` seconds, so a tunnel is
+        // as deep after a second at 30 Hz as at 144.
         bool carve = false;
-        // Seconds banked toward the next boring stamp.
+        // Seconds banked toward the next stamp of a brush held still.
         double carveClock = 0.0;
     };
 
@@ -2279,13 +2259,14 @@ private:
     // Whether a stroke begun with this tool and brush, on ground with this
     // normal, carves into it (`Stroke::carve`).
     [[nodiscard]] static bool carves(Tool tool, const Brush& brush, core::Vec3 normal) noexcept;
-    // One frame of a carving stroke: a drag stamps by distance, a held pointer
-    // bores on the clock.
-    void carveStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt);
+    // One frame of a stroke, aimed at the ground as it now is: a drag stamps
+    // by distance, and a pointer held still stamps on the clock -- a carve at
+    // its boring speed, every other tool at a rate its strength sets.
+    void holdStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt);
 
-    // A block stroke: the grid it aims against, frozen for the reason
-    // `Stroke::aimField` is, and the last cell it changed so a drag held over
-    // one cell edits it once.
+    // A block stroke: the grid it aims against, frozen while the button is
+    // held so a drag does not climb the blocks it has just placed, and the last
+    // cell it changed so a drag held over one cell edits it once.
     struct BlockStroke
     {
         asset::VoxelGrid aimGrid;

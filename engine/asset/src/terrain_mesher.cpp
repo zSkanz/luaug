@@ -121,56 +121,139 @@ void gather(const TerrainField& field, u32 level, i32 x0, i32 y0, i32 z0, i32 si
 
 } // namespace
 
-std::optional<std::pair<i32, i32>> activeRows(const TerrainField& field, i32 chunkX, i32 chunkZ, i32 across)
+namespace {
+
+// Whether one face layer of a chunk is ground all the way across: `axis` 0, 1
+// or 2 for x, y or z, and `high` for the layer at 31 rather than 0.
+[[nodiscard]] bool faceSolid(const TerrainChunk& chunk, u32 axis, bool high) noexcept
+{
+    if (chunk.uniform())
+        return chunk.value().occupancy >= 128;
+    const u32 at = high ? ChunkEdge - 1 : 0;
+    for (u32 a = 0; a < ChunkEdge; ++a) {
+        for (u32 b = 0; b < ChunkEdge; ++b) {
+            const Voxel voxel =
+                axis == 0 ? chunk.get(at, a, b) : (axis == 1 ? chunk.get(b, at, a) : chunk.get(b, a, at));
+            if (voxel.occupancy < 128)
+                return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+std::vector<std::pair<i32, i32>> activeRuns(const TerrainField& field, i32 chunkX, i32 chunkZ, i32 across)
 {
     constexpr auto edge = static_cast<i32>(ChunkEdge);
-    i32 low = std::numeric_limits<i32>::max();
-    i32 high = std::numeric_limits<i32>::lowest();
-    const auto solid = [](const TerrainChunk& chunk) { return chunk.uniform() && chunk.value().occupancy >= 128; };
-    // Whether one layer of a chunk is ground all the way across: a solid chunk
-    // under a chunk whose bottom layer is all ground has no surface on its top
-    // face, whatever is further up.
-    const auto layerSolid = [](const TerrainChunk& chunk, core::u32 y) {
-        if (chunk.uniform())
-            return chunk.value().occupancy >= 128;
-        std::array<u16, ChunkEdge> row{};
-        for (core::u32 z = 0; z < ChunkEdge; ++z) {
-            chunk.readRow(y, z, row);
-            for (const u16 value : row) {
-                if ((value & 0xFF) < 128)
-                    return false;
-            }
-        }
-        return true;
-    };
+    // **Which layers of chunks can hold a surface**: one that is not all one
+    // value, or one that is solid and has something other than solid ground
+    // against any of its six faces -- air above it, the air past the edge of
+    // the terrain beside it, or nothing under it. The last two are what give
+    // the terrain walls and a bottom of the same kind all round; without them
+    // an edge showed a wall where its chunks happened to be rows and an open
+    // side where they happened to be whole.
+    std::vector<i32> layers;
     for (i32 cz = chunkZ - 1; cz <= chunkZ + across; ++cz) {
         for (i32 cx = chunkX - 1; cx <= chunkX + across; ++cx) {
-            const std::span<const TerrainField::Entry> column = field.column(cx, cz);
-            for (usize at = 0; at < column.size(); ++at) {
-                const TerrainField::Entry& entry = column[at];
+            for (const TerrainField::Entry& entry : field.column(cx, cz)) {
                 const TerrainChunk& chunk = *entry.second;
                 bool interesting = !chunk.uniform();
-                if (!interesting && solid(chunk)) {
-                    // Solid, and what is above it is not: its top is a surface.
-                    const bool above = at + 1 < column.size() && column[at + 1].first.y == entry.first.y + 1 &&
-                                       layerSolid(*column[at + 1].second, 0);
-                    // Air under it and not the floor of the world: an underside.
-                    const bool below = at == 0 || (column[at - 1].first.y == entry.first.y - 1 &&
-                                                   layerSolid(*column[at - 1].second, ChunkEdge - 1));
-                    interesting = !above || !below;
+                if (!interesting && chunk.value().occupancy >= 128) {
+                    static constexpr std::array<std::array<i32, 3>, 6> Faces{{
+                        {-1, 0, 0},
+                        {1, 0, 0},
+                        {0, -1, 0},
+                        {0, 1, 0},
+                        {0, 0, -1},
+                        {0, 0, 1},
+                    }};
+                    for (const std::array<i32, 3>& face : Faces) {
+                        const TerrainChunk* near = field.findChunk(
+                            ChunkKey{entry.first.x + face[0], entry.first.y + face[1], entry.first.z + face[2]});
+                        const u32 axis = face[0] != 0 ? 0u : (face[1] != 0 ? 1u : 2u);
+                        const bool nearHigh = (face[0] + face[1] + face[2]) < 0;
+                        if (near == nullptr || !faceSolid(*near, axis, nearHigh)) {
+                            interesting = true;
+                            break;
+                        }
+                    }
                 }
-                if (!interesting)
-                    continue;
-                low = std::min(low, entry.first.y * edge);
-                high = std::max(high, entry.first.y * edge + edge - 1);
+                if (interesting)
+                    layers.push_back(entry.first.y);
             }
         }
     }
-    if (low > high)
+    std::sort(layers.begin(), layers.end());
+    layers.erase(std::unique(layers.begin(), layers.end()), layers.end());
+
+    // Each layer's rows, a voxel either side -- a surface on a chunk's face is
+    // between its last voxel and the next chunk's first -- merged where they
+    // touch.
+    std::vector<std::pair<i32, i32>> runs;
+    for (const i32 layer : layers) {
+        const i32 low = layer * edge - 2;
+        const i32 high = layer * edge + edge + 1;
+        if (!runs.empty() && low <= runs.back().second + 1)
+            runs.back().second = std::max(runs.back().second, high);
+        else
+            runs.emplace_back(low, high);
+    }
+    return runs;
+}
+
+std::optional<std::pair<i32, i32>> activeRows(const TerrainField& field, i32 chunkX, i32 chunkZ, i32 across)
+{
+    const std::vector<std::pair<i32, i32>> runs = activeRuns(field, chunkX, chunkZ, across);
+    if (runs.empty())
         return std::nullopt;
-    // A voxel either side: a surface on a chunk's face is between its last
-    // voxel and the next chunk's first.
-    return std::pair{low - 2, high + 2};
+    return std::pair{runs.front().first, runs.back().second};
+}
+
+void appendMesh(TerrainMesh& into, const TerrainMesh& from)
+{
+    if (from.mesh.indices.empty())
+        return;
+    if (into.mesh.indices.empty()) {
+        into = from;
+        return;
+    }
+    // Sections stay one per material, in id order: both meshes' triangles of a
+    // material are gathered into one run.
+    const auto offset = static_cast<u32>(into.mesh.vertices.size());
+    std::map<u8, std::vector<u32>> buckets;
+    const auto gather = [&](const TerrainMesh& mesh, u32 shift) {
+        for (usize section = 0; section < mesh.mesh.submeshes.size(); ++section) {
+            const Submesh& sub = mesh.mesh.submeshes[section];
+            std::vector<u32>& bucket = buckets[mesh.sectionMaterials[section]];
+            for (u32 at = 0; at < sub.indexCount; ++at)
+                bucket.push_back(mesh.mesh.indices[sub.firstIndex + at] + shift);
+        }
+    };
+    gather(into, 0);
+    gather(from, offset);
+    into.mesh.vertices.insert(into.mesh.vertices.end(), from.mesh.vertices.begin(), from.mesh.vertices.end());
+    into.mesh.indices.clear();
+    into.mesh.submeshes.clear();
+    into.sectionMaterials.clear();
+    for (const auto& [material, indices] : buckets) {
+        Submesh section;
+        section.firstIndex = static_cast<u32>(into.mesh.indices.size());
+        section.indexCount = static_cast<u32>(indices.size());
+        into.mesh.indices.insert(into.mesh.indices.end(), indices.begin(), indices.end());
+        into.mesh.submeshes.push_back(section);
+        into.sectionMaterials.push_back(material);
+    }
+    const auto colliderOffset = static_cast<u32>(into.colliderPoints.size());
+    into.colliderPoints.insert(into.colliderPoints.end(), from.colliderPoints.begin(), from.colliderPoints.end());
+    for (const u32 index : from.colliderIndices)
+        into.colliderIndices.push_back(index + colliderOffset);
+    into.mesh.bounds.min.x = std::min(into.mesh.bounds.min.x, from.mesh.bounds.min.x);
+    into.mesh.bounds.min.y = std::min(into.mesh.bounds.min.y, from.mesh.bounds.min.y);
+    into.mesh.bounds.min.z = std::min(into.mesh.bounds.min.z, from.mesh.bounds.min.z);
+    into.mesh.bounds.max.x = std::max(into.mesh.bounds.max.x, from.mesh.bounds.max.x);
+    into.mesh.bounds.max.y = std::max(into.mesh.bounds.max.y, from.mesh.bounds.max.y);
+    into.mesh.bounds.max.z = std::max(into.mesh.bounds.max.z, from.mesh.bounds.max.z);
 }
 
 TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
@@ -227,20 +310,27 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     const i32 mapW = nx + 2 * margin;
     const i32 mapD = nz + 2 * margin;
     std::vector<float> tops(static_cast<usize>(mapW) * static_cast<usize>(mapD));
+    std::vector<float> bottoms(tops.size());
     const auto half = static_cast<i32>((1u << level) / 2);
     for (i32 z = 0; z < mapD; ++z) {
         for (i32 x = 0; x < mapW; ++x) {
             const i32 columnX = (mapX0 + x) * static_cast<i32>(1u << level) + half;
             const i32 columnZ = (mapZ0 + z) * static_cast<i32>(1u << level) + half;
-            tops[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x)] =
-                field.columnTop(columnX, columnZ).value_or(std::numeric_limits<float>::quiet_NaN());
+            const usize slot = static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x);
+            tops[slot] = field.columnTop(columnX, columnZ).value_or(std::numeric_limits<float>::quiet_NaN());
+            bottoms[slot] =
+                std::isnan(tops[slot])
+                    ? tops[slot]
+                    : field.columnBottom(columnX, columnZ).value_or(std::numeric_limits<float>::quiet_NaN());
         }
     }
-    const auto topAt = [&](float x, float z) {
+    const auto slotAt = [&](float x, float z) {
         const i32 kx = std::clamp(static_cast<i32>(std::floor(x / step)) - mapX0, 0, mapW - 1);
         const i32 kz = std::clamp(static_cast<i32>(std::floor(z / step)) - mapZ0, 0, mapD - 1);
-        return tops[static_cast<usize>(kz) * static_cast<usize>(mapW) + static_cast<usize>(kx)];
+        return static_cast<usize>(kz) * static_cast<usize>(mapW) + static_cast<usize>(kx);
     };
+    const auto topAt = [&](float x, float z) { return tops[slotAt(x, z)]; };
+    const auto bottomAt = [&](float x, float z) { return bottoms[slotAt(x, z)]; };
 
     // **How much of the sky a vertex sees**, from 0 to 1: the column tops on a
     // fixed disc round it, each counted as blocking by how far it stands above
@@ -278,6 +368,15 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         const float own = topAt(from.x, from.z);
         if (std::isnan(own) || own <= from.y)
             return 1.0f;
+        // **Nor does one under all the ground in its column** -- the underside
+        // of the terrain, not the roof of a cave, which has a floor under it.
+        // It sees the world below and the horizon rather than the sky: half,
+        // which draws it as shade rather than as a black hole. Counted as a
+        // roof, the terrain's bottom and every ledge's underside went black.
+        constexpr float Underside = 0.5f;
+        const float bottom = bottomAt(from.x, from.z);
+        if (!std::isnan(bottom) && from.y < bottom)
+            return Underside;
         float blocked = 0.0f;
         for (const Tap& tap : Taps) {
             const float top = topAt(from.x + tap.x, from.z + tap.z);

@@ -137,6 +137,13 @@ does not is engine work and belongs in the git history rather than in this file.
 - `Terrain.Compact` has nothing left to do and returns 0; every edit leaves the
   voxels compact.
 - `Terrain.CellCount` counts chunks of 32 voxels a side.
+- **The terrain brush works on the ground as it now is, while the button is
+  held.** A held Add piles up, a held raise keeps climbing and a held dig goes
+  deeper, at a rate the brush's strength sets. It used to aim at the ground as
+  the stroke began, and could not see its own work.
+- Ground laid where there was none -- `WriteHeights`, Generate Flat Ground, a
+  first raise on empty terrain -- is a slab 32 m deep rather than a column to
+  `MinHeight`. A terrain's edges show walls and a bottom, all the same way.
 
 ### Fixed
 

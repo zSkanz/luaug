@@ -896,10 +896,10 @@ declare extern type Terrain extends Instance with
     --- baked into the grid, so moving a sculpted world is one number rather than a rewrite of every
     --- voxel. It translates and does not turn.
     Position: vector
-    --- The world's floor, in metres: no voxel below it is ever written. **It is also where ground
-    --- starts.** `WriteHeights`, Generate Flat Ground and a first raise on empty terrain lay ground
-    --- from here up to the surface, so a hill is solid all the way down and a tunnel dug into it has
-    --- ground under its floor.
+    --- The world's floor, in metres: no voxel below it is ever written. Ground laid where there was
+    --- none -- by `WriteHeights`, Generate Flat Ground or a first raise on empty terrain -- is a slab
+    --- 32 metres deep under its lowest surface, rounded down to a whole chunk, and never deeper than
+    --- this.
     MinHeight: number
     --- The world's ceiling, in metres: no voxel above it is ever written.
     MaxHeight: number
@@ -966,8 +966,8 @@ declare extern type Terrain extends Instance with
     --- million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`;
     --- `material` (default 1) is what new ground is made of. Each column's top moves to its height --
     --- ground added from the old top up, or taken from it down -- and a cave under the top stays. A
-    --- column with no ground at all is filled from `MinHeight`. A height that is not a number is
-    --- skipped.
+    --- column with no ground at all is laid as a slab 32 metres deep under the table's lowest height. A
+    --- height that is not a number is skipped.
     function WriteHeights(self, corner: vector, columns: number, heights: { number }, material: number?): number
     --- Removes every voxel. The terrain is empty afterwards and `VoxelSize` becomes settable again.
     function Clear(self): ()

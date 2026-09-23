@@ -58,6 +58,16 @@ struct Band
                 static_cast<i32>(std::floor(static_cast<double>(field.settings().maxHeight) / voxel - 0.5))};
 }
 
+// Where ground laid on empty columns starts, as a voxel row: `LaidDepth` under
+// `lowest`, rounded down to a chunk boundary so the slab's bottom is whole
+// chunks, and never under the floor.
+[[nodiscard]] i32 laidBase(const TerrainField& field, double lowest, const Band& band) noexcept
+{
+    constexpr auto edge = static_cast<i32>(ChunkEdge);
+    const i32 row = field.voxelIndex(lowest - static_cast<double>(LaidDepth));
+    return std::max(floorDiv(row, edge) * edge, band.low);
+}
+
 // The inclusive voxel box around `[low, high]` in metres, widened by the ramp's
 // reach so its outer half is written too, and clamped to the band on y.
 struct Box
@@ -339,8 +349,23 @@ EditReport writeHeights(TerrainField& field, i32 firstX, i32 firstZ, u32 columns
     const auto rows = static_cast<u32>(heights.size() / columns);
     if (rows == 0)
         return report;
-    const Band band = bandOf(field);
     constexpr auto edge = static_cast<i32>(ChunkEdge);
+    // **Empty columns are laid as a slab** (`LaidDepth`) under the lowest height
+    // of the whole table, so a heightmap's valleys and its peaks stand on one
+    // bottom. Everything below reads the band from there up.
+    Band band = bandOf(field);
+    {
+        double lowest = std::numeric_limits<double>::max();
+        for (usize at = 0; at < heights.size(); ++at) {
+            if (!std::isnan(heights[at]) && (materials.size() == 1 || (at < materials.size() && materials[at] != 0)))
+                lowest = std::min(lowest, static_cast<double>(heights[at]));
+        }
+        if (lowest == std::numeric_limits<double>::max())
+            return report;
+        lowest = std::clamp(lowest, static_cast<double>(field.settings().minHeight),
+                            static_cast<double>(field.settings().maxHeight));
+        band.low = laidBase(field, lowest, band);
+    }
 
     // Chunk column by chunk column, so the covered-chunk shortcut can see a
     // whole block of heights at once.
@@ -661,14 +686,15 @@ EditReport raiseBall(TerrainField& field, DVec3 center, double radius, float amo
 
             // **An empty column is laid from `center`'s height up**, when there
             // is a material to lay: the first stroke on an empty terrain makes
-            // ground rather than nothing. From the floor, so what it makes is
-            // ground and not a floating slab.
+            // ground rather than nothing. As the slab every other laying verb
+            // makes (`LaidDepth`), so ground extended sideways from generated
+            // ground has the same bottom.
             if (!anyGround) {
                 if (!raising || material == 0 || field.columnTop(x, z).has_value())
                     continue;
                 const double top = center.y + shift;
                 const i32 to = std::min(field.voxelIndex(top) + RampReach, band.high);
-                for (i32 y = band.low; y <= to; ++y) {
+                for (i32 y = laidBase(field, center.y, band); y <= to; ++y) {
                     const u8 occupancy = quantiseOccupancy(ramp(field.voxelCenter(y) - top, voxel));
                     if (occupancy > writer.get(x, y, z).occupancy)
                         writer.set(x, y, z, Voxel{occupancy, material});

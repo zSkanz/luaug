@@ -371,13 +371,14 @@ TEST_CASE("a heightmap on empty ground is whole chunks under a thin skin")
     constexpr core::u32 Columns = 64;
     const std::vector<float> heights(Columns * Columns, 20.0f);
     const EditReport report = writeHeights(field, 0, 0, Columns, heights, 1);
-    CHECK(report.touched > 64u * 64u * 80u);
-    // From the floor at -64 to 20 is three whole chunks a column and the one the
-    // surface is in, four columns of them.
+    CHECK(report.touched > 64u * 64u * 50u);
+    // A slab `LaidDepth` deep, to a chunk boundary: from -32 to 20 is one whole
+    // chunk a column and the one the surface is in, four columns of them.
     std::size_t uniform = 0;
     for (const TerrainField::Entry& entry : field.chunks())
         uniform += entry.second->uniform() ? 1u : 0u;
-    CHECK(uniform >= 4u * 2u);
+    CHECK(uniform >= 4u);
+    CHECK(field.findChunk(ChunkKey{0, -2, 0}) == nullptr);
     CHECK(field.bytes() < 256u * 1024u);
     CHECK(top(field, 10.5, 40.5) == doctest::Approx(20.0).epsilon(0.005));
 }

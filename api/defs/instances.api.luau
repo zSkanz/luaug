@@ -1141,9 +1141,9 @@ local Classes: { Schema.Class } = {
                 Type = "number",
                 Default = "-256",
                 Doc = "The world's floor, in metres: no voxel below it is ever written.\n\n"
-                    .. "**It is also where ground starts.** `WriteHeights`, Generate Flat Ground and a "
-                    .. "first raise on empty terrain lay ground from here up to the surface, so a hill is "
-                    .. "solid all the way down and a tunnel dug into it has ground under its floor.",
+                    .. "Ground laid where there was none -- by `WriteHeights`, Generate Flat Ground or a "
+                    .. "first raise on empty terrain -- is a slab 32 metres deep under its lowest surface, "
+                    .. "rounded down to a whole chunk, and never deeper than this.",
             },
             {
                 Name = "MaxHeight",
@@ -1353,8 +1353,8 @@ local Classes: { Schema.Class } = {
                     .. "calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; "
                     .. "`material` (default 1) is what new ground is made of. Each column's top moves to its "
                     .. "height -- ground added from the old top up, or taken from it down -- and a cave under "
-                    .. "the top stays. A column with no ground at all is filled from `MinHeight`. A height "
-                    .. "that is not a number is skipped.",
+                    .. "the top stays. A column with no ground at all is laid as a slab 32 metres deep under "
+                    .. "the table's lowest height. A height that is not a number is skipped.",
             },
             {
                 Name = "Clear",

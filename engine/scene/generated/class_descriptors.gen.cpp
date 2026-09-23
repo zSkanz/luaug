@@ -1048,7 +1048,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The world's floor, in metres: no voxel below it is ever written.\012\012**It is also where ground starts.** `WriteHeights`, Generate Flat Ground and a first raise on empty terrain lay ground from here up to the surface, so a hill is solid all the way down and a tunnel dug into it has ground under its floor.",
+            .doc = "The world's floor, in metres: no voxel below it is ever written.\012\012Ground laid where there was none -- by `WriteHeights`, Generate Flat Ground or a first raise on empty terrain -- is a slab 32 metres deep under its lowest surface, rounded down to a whole chunk, and never deeper than this.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTerrainMinHeight,
             .set = native::setTerrainMinHeight,
@@ -1160,7 +1160,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("WriteHeights"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Writes a heightmap in one call: one height per column of voxels, `columns` to a row, row after row along +Z, starting at the column `corner` falls in (its X and Z; Y is not read). Returns how many voxels it changed.\012\012**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where a brush per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is what new ground is made of. Each column's top moves to its height -- ground added from the old top up, or taken from it down -- and a cave under the top stays. A column with no ground at all is filled from `MinHeight`. A height that is not a number is skipped.",
+            .doc = "Writes a heightmap in one call: one height per column of voxels, `columns` to a row, row after row along +Z, starting at the column `corner` falls in (its X and Z; Y is not read). Returns how many voxels it changed.\012\012**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where a brush per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is what new ground is made of. Each column's top moves to its height -- ground added from the old top up, or taken from it down -- and a cave under the top stays. A column with no ground at all is laid as a slab 32 metres deep under the table's lowest height. A height that is not a number is skipped.",
         },
         MethodDesc{
             .name = atoms.intern("Clear"),

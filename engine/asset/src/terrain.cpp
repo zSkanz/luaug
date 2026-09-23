@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 
 #define XXH_INLINE_ALL
@@ -399,6 +400,36 @@ std::optional<float> TerrainField::columnTop(i32 x, i32 z) const noexcept
                 return (static_cast<float>(baseY + y) + 0.5f + t) * voxel;
             }
             above = here;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<float> TerrainField::columnBottom(i32 x, i32 z) const noexcept
+{
+    const std::span<const Entry> chunks = column(floorDiv(x, Edge), floorDiv(z, Edge));
+    const auto localX = static_cast<u32>(floorMod(x, Edge));
+    const auto localZ = static_cast<u32>(floorMod(z, Edge));
+    const float voxel = m_settings.voxelSize;
+    // `columnTop` upside down: walked bottom up, the first voxel at least half
+    // full is the bottom, and the crossing is between it and the one below.
+    float below = 0.0f;
+    for (auto at = chunks.begin(); at != chunks.end(); ++at) {
+        const TerrainChunk& chunk = *at->second;
+        const i32 baseY = at->first.y * Edge;
+        if (at == chunks.begin() || std::prev(at)->first.y != at->first.y - 1)
+            below = 0.0f;
+        if (chunk.uniform() && chunk.value().occupancy < 128) {
+            below = occupancyOf(chunk.value());
+            continue;
+        }
+        for (i32 y = 0; y < Edge; ++y) {
+            const float here = occupancyOf(chunk.get(localX, static_cast<u32>(y), localZ));
+            if (here >= 0.5f) {
+                const float t = here - below > 1e-6f ? (here - 0.5f) / (here - below) : 0.0f;
+                return (static_cast<float>(baseY + y) + 0.5f - t) * voxel;
+            }
+            below = here;
         }
     }
     return std::nullopt;

@@ -68,9 +68,10 @@ TEST_CASE("a field with no surface produces no triangles")
 {
     const TerrainField empty(settingsOf());
     CHECK(meshField(empty, regionAt(0, 0, 0)).mesh.indices.empty());
-    // All ground is no surface either.
+    // All ground is no surface either: the rows between the slab's bottom at
+    // 0 and its top at 40.
     const TerrainField buried = flatGround(40.0f);
-    CHECK(meshField(buried, regionAt(0, -32, 0)).mesh.indices.empty());
+    CHECK(meshField(buried, regionAt(0, 6, 0, 16)).mesh.indices.empty());
 }
 
 TEST_CASE("flat ground meshes as a plane at the height it was given, facing up")
@@ -247,9 +248,48 @@ TEST_CASE("the rows a column of chunks can have a surface in")
     const TerrainField field = flatGround(40.0f);
     const std::optional<std::pair<core::i32, core::i32>> rows = activeRows(field, 0, 0, 1);
     REQUIRE(rows.has_value());
-    // The surface is in the chunk from 32 to 63; the floor is not a surface,
-    // and neither are the solid chunks between.
-    CHECK(rows->first <= 38);
+    // The top is in the chunk from 32 to 63 and the slab's bottom is at 0
+    // (`LaidDepth` under 40, to a chunk boundary): both are surfaces.
+    CHECK(rows->first <= -1);
+    CHECK(rows->first >= -2);
     CHECK(rows->second >= 42);
-    CHECK(rows->first >= 29);
+
+    // Ground laid from a deep floor is two runs, its top and its bottom, and
+    // the solid rock between them is not walked.
+    TerrainField deep(FieldSettings{.voxelSize = 1.0f, .minHeight = -256.0f, .maxHeight = 64.0f});
+    (void)fillBlock(deep, core::DVec3{16.0, -128.0, 16.0}, core::Vec3{128.0f, 256.0f, 128.0f}, 1);
+    const std::vector<std::pair<core::i32, core::i32>> runs = activeRuns(deep, 0, 0, 1);
+    REQUIRE(runs.size() == 2);
+    CHECK(runs[0].second < runs[1].first);
+}
+
+TEST_CASE("ground laid on empty terrain has walls and a bottom all round, and the bottom is not black")
+{
+    // **The owner's screenshot**: ground generated and then extended sideways
+    // stood as two different things -- a slab whose sides stopped short, open
+    // underneath, and a wall to the world's floor with a black line along its
+    // foot. Laid ground is a slab `LaidDepth` deep, and its edges are meshed
+    // the same way whatever the chunks under them happen to be stored as.
+    TerrainField field(settingsOf());
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 4.0f, 1);
+    const std::vector<std::pair<core::i32, core::i32>> runs = activeRuns(field, 0, 0, 1);
+    REQUIRE_FALSE(runs.empty());
+    MeshRegion region = regionAt(0, runs.front().first, 0);
+    region.cellsY = static_cast<core::u32>(runs.back().second - runs.front().first + 1);
+    const TerrainMesh meshed = meshField(field, region);
+    bool wall = false;
+    bool bottom = false;
+    float bottomSky = 0.0f;
+    for (const Vertex& vertex : meshed.mesh.vertices) {
+        // The +x side of the square is at 32, the edge of this region.
+        wall = wall || (vertex.normal.x > 0.9f && vertex.position.y < -8.0f);
+        if (vertex.normal.y < -0.9f) {
+            bottom = true;
+            bottomSky = std::max(bottomSky, vertex.tangent[1]);
+        }
+    }
+    CHECK(wall);
+    CHECK(bottom);
+    // Shade, not the black of a cave's roof.
+    CHECK(bottomSky > 0.25f);
 }

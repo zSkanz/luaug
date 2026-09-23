@@ -25,6 +25,7 @@
 
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace luaug::asset {
 
@@ -83,17 +84,24 @@ struct TerrainMesh
 // Extracts the surface of `field` over `region`.
 [[nodiscard]] TerrainMesh meshField(const TerrainField& field, const MeshRegion& region);
 
-// **The level-0 voxel rows a column of chunks could have a surface in**, lowest
-// and highest inclusive, over the chunk columns from (`chunkX`, `chunkZ`)
-// `across` wide and a ring of one chunk round them -- or nothing when no chunk
-// there can hold one. A chunk can when it is not all one value, or when it is
-// solid and the chunk above it is not, or it has air under it and is not the
-// lowest chunk of its column: the world's own floor is not a surface anybody
-// sees.
+// **The runs of level-0 voxel rows a column of chunks can have a surface in**,
+// lowest first and each inclusive, over the chunk columns from (`chunkX`,
+// `chunkZ`) `across` wide and a ring of one chunk round them. A layer of chunks
+// can when one of them is not all one value, or is solid with something other
+// than solid ground against any face: air above, the air past the terrain's
+// edge beside it, nothing under it -- which is what gives terrain walls and a
+// bottom of one kind all round.
 //
-// What a renderer uses to mesh a whole column of chunks as one node without
-// walking hundreds of metres of solid rock and open sky.
+// What a renderer meshes a whole column of chunks by, one run at a time,
+// without walking the solid rock between its surface and its bottom.
+[[nodiscard]] std::vector<std::pair<core::i32, core::i32>> activeRuns(const TerrainField& field, core::i32 chunkX,
+                                                                      core::i32 chunkZ, core::i32 across);
+
+// The lowest and highest rows of `activeRuns`, or nothing when there are none.
 [[nodiscard]] std::optional<std::pair<core::i32, core::i32>> activeRows(const TerrainField& field, core::i32 chunkX,
                                                                         core::i32 chunkZ, core::i32 across);
+
+// Appends one mesh to another, keeping one section per material in id order.
+void appendMesh(TerrainMesh& into, const TerrainMesh& from);
 
 } // namespace luaug::asset

@@ -32,9 +32,12 @@ terrain:FillBlock(vector.create(0, -15, 0), vector.create(64, 34, 64), 1)
 
 `workspace.Terrain` names the world's terrain once there is one.
 
-`MinHeight` is also where ground starts: `WriteHeights`, Generate Flat Ground
-and a first raise on empty terrain fill from there up. `VoxelSize` can only
-change while the terrain is empty.
+**Ground laid where there was none is a slab 32 metres deep**, under the
+lowest surface it lays and rounded down to a whole chunk. That covers
+`WriteHeights`, Generate Flat Ground and a first raise on empty terrain.
+Its sides and bottom are drawn and collide like its top, so the edge of a
+terrain looks the same everywhere, however it was made. Nothing is written
+below `MinHeight`. `VoxelSize` can only change while the terrain is empty.
 
 ## Shaping it
 
@@ -119,8 +122,16 @@ Material 0 is not ground: it is what digging writes.
 ## In the editor
 
 The terrain tools sculpt, dig and paint with a brush, one undo step per stroke.
-Aimed at steep ground, **dig carves into the wall** and keeps boring forward
-while the button is held, which is how a cave is started from a cliff face.
+
+- **Dragging** stamps the brush every step of the way.
+- **Holding it still** keeps working the ground under it, as that ground now
+  is:
+  - Add piles up towards you;
+  - a raise keeps climbing;
+  - a dig keeps going down;
+  - the brush's strength sets how fast.
+- **Aimed at steep ground, dig carves into the wall** and bores forward while
+  the button is held. That is how a cave is started from a cliff face.
 
 **Heightmap** lays an image over the ground:
 
@@ -136,7 +147,8 @@ back.
   samples (`.r16`, `.raw`), keeps a slope smooth. An 8-bit image has 256 steps,
   and over a hundred metres a character walks up those steps as stairs.
 - **Ground under the square.** Each column's top moves to the image's height,
-  and a cave under the top stays where it is.
+  and a cave under the top stays where it is. Where there was no ground, the
+  image is laid as a slab 32 m deep under its lowest point.
 
 **Settings** holds the three numbers a terrain is decided at:
 - `VoxelSize`, which can change only while the terrain is empty;

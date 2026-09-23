@@ -76,9 +76,15 @@ promotion and no atlas. Every consumer asks the same grid.
   `(i + 0.5) * v`. `v` is `VoxelSize`, which now defaults to 1 m (it was
   0.5). A terrain converted from the old format keeps its own size.
 - **The surface is where occupancy crosses one half.** A flat ground at
-  height `h` has occupancy `clamp(0.5 - (y - h) / v, 0, 1)` at a voxel whose
+  height `h` has occupancy `clamp(0.5 - (y - h) / (4v), 0, 1)` at a voxel whose
   centre is `y`. Mesher, raycast and `HeightAt` interpolate that crossing, so
   the surface lands where the brush put it, not on the lattice.
+- **Occupancy ramps across four voxels, not one** (`RampVoxels`), and that
+  was measured. Ground laid from heights knows only its vertical distance.
+  With a one-voxel ramp, a slope past 45 degrees clamps the voxel beside the
+  surface, and the crossing lands in the wrong place: every hillside was a
+  staircase. Across four voxels the field stays linear to 63 degrees, and
+  `writeHeights` divides by the slope for the rest.
 - **Occupancy 0 is air, and air has material 0**, always. Every write path
   normalises this, because a digest over bytes would otherwise tell two
   equal worlds apart.
@@ -101,21 +107,26 @@ promotion and no atlas. Every consumer asks the same grid.
 
 ### Editing
 
-Every verb reads and writes occupancies over the brush's box, with a
-one-voxel ramp at the boundary so the surface lands exactly on it.
+Every verb reads and writes occupancies over the brush's box, with the ramp
+at the boundary so the surface lands exactly on it.
 
 - **Fills** take the maximum of old and new occupancy. **Removals** take the
   minimum against one minus the new.
 - **Raise** shifts each column up inside the brush's cylinder by the falloff,
   and keeps the larger of the old and shifted occupancy. **Lower** is the
   mirror. So a cave under the brush's reach is not moved.
-- **Smooth** blends each voxel toward the mean of its 27 neighbours.
+- **Smooth** blends each voxel toward a separable box blur one to four voxels
+  wide, growing with the brush. The mean of a linear ramp is the ramp, so a
+  three-voxel blur only rounded a step's edges.
 - **Flatten** blends toward the occupancy of a plane.
 - **Paint** writes material where occupancy is not zero.
 - **`fillFlat` and `writeHeights` move each column's top**, as volume:
   - they fill from the top up to the height, or clear from the height down to
     the top;
-  - a column with no ground is filled from the floor;
+  - a column with no ground is laid as a slab (see "Edges and bottoms");
+  - within the ramp round the new top the ramp is written exactly: taking the
+    larger or the smaller of two ramps of different slopes put the top in
+    neither place;
   - a cave under the top stays (D162's promise, kept);
   - they write chunk by chunk, so a whole square of uniform chunks costs one
     value each, not 32,768 writes.
@@ -143,8 +154,11 @@ and vertex normals come from the density's gradient.
 
 ### Drawing
 
-The GPU height atlas, the CDLOD grid, `terrain.hlsl`, `terrain_depth.hlsl` and
-the cave flag are gone. The ground is meshes, exactly as caves were.
+The GPU height atlas, the CDLOD grid, `luaug_terrain.hlsli` and the cave flag
+are gone. The ground is meshes, exactly as caves were.
+- The cave shader is now `terrain.hlsl`.
+- `terrain_depth.hlsl` draws a mesh into the shadow maps with no culling,
+  pushed away from the light.
 
 - **The ground is split into a quadtree of columns of chunks.**
   - A leaf is one column of chunks, meshed at level 0.
@@ -152,9 +166,14 @@ the cave flag are gone. The ground is meshes, exactly as caves were.
     `L` mips.
   - Each node spans the full height its chunks occupy, so level-of-detail
     seams are only ever on the sides, where skirts cover them.
-- **A node is split when the camera is nearer than 2.5 times its width.**
+- **A node is split when the camera is nearer than 2 times its width.**
 - **A node is drawn until all its children are ready, and a set of children
   until their parent is.** So a change of level never shows a hole.
+  - "Ready" means covered all the way down, not merely built.
+  - Every node the selection walks through is kept.
+  - Without either, an ancestor let go was rebuilt and counted as ready. It
+    then covered the close-up, coarse, every few seconds: the flicker the owner
+    saw in `17-cave`.
 - **Meshes are built nearest first, a fixed count per frame** (R10: a count,
   never a clock). An edit rebuilds only the nodes whose chunks changed.
 - **Shading is the old cave shader, renamed `terrain.hlsl`.** It uses:
@@ -187,6 +206,28 @@ it, as it did when every tile had a height field.
 A version 2 file, from the hybrid, is decoded by the old reader. It is then
 resampled into voxels by the old sampler, and never written again. So every
 saved world opens.
+
+### Edges and bottoms (amended the same day)
+
+The owner extended generated ground sideways. The result showed two different
+things side by side:
+- a slab whose sides stopped short and were open underneath;
+- a wall down to the world's floor, with a black line along its foot.
+
+Three rules now make an edge look the same however it was made:
+
+- **Ground laid where there was none is a slab `LaidDepth` (32 m) deep**, not
+  a pillar to `MinHeight`. It lies under the lowest surface the verb lays and
+  is rounded down to a chunk boundary. This covers `writeHeights`, `fillFlat`
+  and a first raise on empty columns.
+- **A solid chunk with anything but solid ground against any face can hold a
+  surface.** That includes air past the terrain's edge beside it, or nothing
+  under it. So walls and bottoms are meshed everywhere, and a node is meshed
+  one run of such chunk layers at a time (`activeRuns`), never walking the
+  rock between.
+- **A vertex under all the ground in its column sees half the sky.** That is
+  the terrain's underside, not a cave's roof, which has a floor under it.
+  Counted as a roof, it was drawn black.
 
 ## Consequences
 
