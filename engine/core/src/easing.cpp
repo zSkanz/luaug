@@ -1,5 +1,7 @@
 #include "luaug/core/easing.h"
 
+#include "luaug/core/dmath.h"
+
 #include <cmath>
 
 namespace luaug::core {
@@ -48,7 +50,7 @@ constexpr f32 ElasticShift = ElasticPeriod / 4.0f;
     case EasingStyle::Linear:
         return t;
     case EasingStyle::Sine:
-        return 1.0f - std::cos(t * Pi * 0.5f);
+        return 1.0f - dmath::cos(t * Pi * 0.5f);
     case EasingStyle::Quad:
         return t * t;
     case EasingStyle::Cubic:
@@ -60,7 +62,7 @@ constexpr f32 ElasticShift = ElasticPeriod / 4.0f;
     case EasingStyle::Exponential:
         // Exactly 0 at 0, rather than 2^-10 -- which is 0.00098 and would leave
         // a property visibly off its start for the first frame.
-        return t == 0.0f ? 0.0f : std::pow(2.0f, 10.0f * (t - 1.0f));
+        return t == 0.0f ? 0.0f : dmath::pow(2.0f, 10.0f * (t - 1.0f));
     case EasingStyle::Circular:
         return 1.0f - std::sqrt(std::fmax(0.0f, 1.0f - t * t));
     case EasingStyle::Back:
@@ -72,7 +74,8 @@ constexpr f32 ElasticShift = ElasticPeriod / 4.0f;
             return 0.0f;
         if (t == 1.0f)
             return 1.0f;
-        return -std::pow(2.0f, 10.0f * (t - 1.0f)) * std::sin((t - 1.0f - ElasticShift) * 2.0f * Pi / ElasticPeriod);
+        return -dmath::pow(2.0f, 10.0f * (t - 1.0f)) *
+               dmath::sin((t - 1.0f - ElasticShift) * 2.0f * Pi / ElasticPeriod);
     }
     return t;
 }

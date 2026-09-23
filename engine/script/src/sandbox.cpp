@@ -1,7 +1,16 @@
 #include "luaug/script/sandbox.h"
 
+#include "luaug/core/dmath.h"
+
 #include <lua.h>
 #include <lualib.h>
+
+// Only a build that compiles source has compile options to set (ADR 0002).
+#if LUAUG_LUAU_COMPILER
+#include <luacode.h>
+#endif
+
+#include <cmath>
 
 namespace luaug::script {
 
@@ -50,6 +59,106 @@ void removeUnsafeGlobals(lua_State* L)
     // -- as an empty table that the seal below freezes.
     lua_newtable(L);
     lua_setglobal(L, "_G");
+}
+
+namespace {
+
+namespace dm = core::dmath;
+
+// One argument in, one number out: the shape of every function below but
+// `log` and `atan2`.
+template <double (*Function)(double)>
+int unary(lua_State* L)
+{
+    lua_pushnumber(L, Function(luaL_checknumber(L, 1)));
+    return 1;
+}
+
+int mathAtan2(lua_State* L)
+{
+    lua_pushnumber(L, dm::atan2(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+    return 1;
+}
+
+int mathPow(lua_State* L)
+{
+    lua_pushnumber(L, dm::pow(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+    return 1;
+}
+
+// Luau's own semantics for the optional base: two and ten are answered by
+// their own functions, so `math.log(8, 2)` is 3 and not a quotient's rounding.
+int mathLog(lua_State* L)
+{
+    const double x = luaL_checknumber(L, 1);
+    if (lua_isnoneornil(L, 2)) {
+        lua_pushnumber(L, dm::log(x));
+        return 1;
+    }
+    const double base = luaL_checknumber(L, 2);
+    if (base == 2.0)
+        lua_pushnumber(L, dm::log2(x));
+    else if (base == 10.0)
+        lua_pushnumber(L, dm::log10(x));
+    else
+        lua_pushnumber(L, dm::log(x) / dm::log(base));
+    return 1;
+}
+
+// `vector.angle`, as Luau writes it -- the cross product's length against the
+// dot product, signed by an optional axis -- with the arctangent this engine's.
+int vectorAngle(lua_State* L)
+{
+    const float* a = luaL_checkvector(L, 1);
+    const float* b = luaL_checkvector(L, 2);
+    const float* axis = luaL_optvector(L, 3, nullptr);
+    const float cross[] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    const double sine = std::sqrt(static_cast<double>(cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]));
+    const auto cosine = static_cast<double>(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]);
+    double angle = dm::atan2(sine, cosine);
+    if (axis != nullptr && cross[0] * axis[0] + cross[1] * axis[1] + cross[2] * axis[2] < 0.0f)
+        angle = -angle;
+    lua_pushnumber(L, angle);
+    return 1;
+}
+
+} // namespace
+
+const char* const DeterministicBuiltins[] = {
+    "math.sin",  "math.cos",  "math.tan", "math.asin", "math.acos",  "math.atan", "math.atan2",   "math.sinh",
+    "math.cosh", "math.tanh", "math.exp", "math.log",  "math.log10", "math.pow",  "vector.angle", nullptr,
+};
+
+#if LUAUG_LUAU_COMPILER
+void applyDeterministicBuiltins(lua_CompileOptions& options) noexcept
+{
+    options.disabledBuiltins = DeterministicBuiltins;
+}
+#endif
+
+void installDeterministicMath(lua_State* L)
+{
+    static const luaL_Reg Math[] = {
+        {"sin", unary<dm::sin>},     {"cos", unary<dm::cos>},   {"tan", unary<dm::tan>}, {"asin", unary<dm::asin>},
+        {"acos", unary<dm::acos>},   {"atan", unary<dm::atan>}, {"atan2", mathAtan2},    {"sinh", unary<dm::sinh>},
+        {"cosh", unary<dm::cosh>},   {"tanh", unary<dm::tanh>}, {"exp", unary<dm::exp>}, {"log", mathLog},
+        {"log10", unary<dm::log10>}, {"pow", mathPow},          {nullptr, nullptr},
+    };
+    lua_getglobal(L, "math");
+    if (lua_istable(L, -1)) {
+        for (const luaL_Reg* entry = Math; entry->name != nullptr; ++entry) {
+            lua_pushcfunction(L, entry->func, entry->name);
+            lua_setfield(L, -2, entry->name);
+        }
+    }
+    lua_pop(L, 1);
+
+    lua_getglobal(L, "vector");
+    if (lua_istable(L, -1)) {
+        lua_pushcfunction(L, vectorAngle, "angle");
+        lua_setfield(L, -2, "angle");
+    }
+    lua_pop(L, 1);
 }
 
 void sealGlobals(lua_State* L)

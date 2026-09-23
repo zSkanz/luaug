@@ -3,6 +3,7 @@
 #include "luaug/scene/world.h"
 #include "luaug/script/debugger.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/sandbox.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 
@@ -49,6 +50,7 @@ namespace {
     options.vectorLib = "Vector3";
     options.vectorCtor = "new";
     options.vectorType = "Vector3";
+    applyDeterministicBuiltins(options);
 
     const std::string chunk = "@" + std::string(chunkName);
     char* bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);

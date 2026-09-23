@@ -3,6 +3,5 @@
   "script": "init.luau",
   "seed": 20260827,
   "ticks": 1200,
-  "checkpointEvery": 100,
-  "sameBuildOnly": true
+  "checkpointEvery": 100
 }

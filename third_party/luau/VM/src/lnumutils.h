@@ -9,7 +9,10 @@
 #define luai_numsub(a, b) ((a) - (b))
 #define luai_nummul(a, b) ((a) * (b))
 #define luai_numdiv(a, b) ((a) / (b))
-#define luai_numpow(a, b) (pow(a, b))
+// LuauG: `^` goes through the embedder's own pow, which gives the same bits on
+// every platform where the C runtime's pow does not (LuauG ADR 0083).
+double luaug_dpow(double a, double b);
+#define luai_numpow(a, b) (luaug_dpow(a, b))
 #define luai_numunm(a) (-(a))
 #define luai_numisnan(a) ((a) != (a))
 #define luai_numeq(a, b) ((a) == (b))

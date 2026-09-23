@@ -126,6 +126,14 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Changed
 
+- **The simulation is deterministic across platforms** (level C, ADR 0083). The
+  same seed and the same operations give the same world hash on Windows, Linux
+  and macOS. The engine ships its own `sin`, `cos`, `exp`, `log`, `pow` and the
+  rest, a script's `math` and `^` use them, and no compiler may fuse a
+  multiply-add the source did not write. A replay recorded on one machine plays
+  back on another, and each determinism scenario has one trace for every
+  platform.
+
 - **`Terrain.VoxelSize` defaults to one metre** (was half a metre). A terrain
   that was already sculpted keeps its own.
 - `Terrain.HeightAt` answers the top of the ground in a column, over a cave

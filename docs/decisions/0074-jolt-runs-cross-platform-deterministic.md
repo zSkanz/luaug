@@ -8,6 +8,8 @@
   where it is.
 - Amends: ADR 0025 (determinism levels), `third_party/CMakeLists.txt`'s Jolt
   options
+- Amended by: [0083](0083-the-simulation-is-deterministic-across-platforms.md),
+  which does the two items this record left and makes the guarantee level C
 
 ## Context
 

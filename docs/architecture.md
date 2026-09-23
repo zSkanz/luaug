@@ -879,16 +879,17 @@ self-registration.**
   seed + recorded tick-stamped input stream; the harness runs each scenario
   twice in-process and once from a fresh process, comparing `WorldHash`
   (xxh3 over canonical serialization of sim-relevant components + physics
-  state) every N ticks. **Guarantee under test: same build + same platform +
-  same seed/inputs/tick-config ⇒ same WorldHash.** Same-binary determinism is
-  a merge gate from M5; cross-platform (win↔linux) comparison runs as a
-  tracked non-blocking job.
-  **A committed trace is a cross-BUILD check and the guarantee is same-build**,
-  which is free for integer and tree state and is not for floating point: a
-  scenario whose hash depends on the compiler's code generation sets
-  `sameBuildOnly` in its manifest, carries no trace, and is verified by three
-  runs of one build plus tolerance-based assertions inside the scene. M5's
-  character replay is the first of those, and CI is what found the distinction.
+  state) every N ticks. **Guarantee under test, since 2026-09-23 (ADR 0083):
+  same seed/inputs/tick-config ⇒ same WorldHash on every platform and
+  compiler** -- level C. One committed `trace.txt` per scenario, and Windows,
+  Linux and macOS all gate against it. What makes it hold: the simulation's
+  transcendentals are the engine's own (`core::dmath`), Luau's `math` and `^`
+  go through them, Jolt runs cross-platform deterministic (ADR 0074), and no
+  compiler fuses a multiply-add the source did not write.
+  `sameBuildOnly` still exists for a scenario that genuinely cannot hold a
+  trace -- three runs of one build instead -- and no determinism scenario
+  uses it any more; the character replay was the first to need it and, with
+  `ragdoll` and `terrain`, stopped needing it the day level C landed.
 - **Render tests — capture first:** the `rhi_capture` backend records a
   canonical JSON command stream (pipelines, bind sets, draw params, resource
   descs, debug groups; floats quantized) → hash vs golden per scenario. This

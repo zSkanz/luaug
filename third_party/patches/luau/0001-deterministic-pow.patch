@@ -1,0 +1,74 @@
+diff --git a/Compiler/src/ConstantFolding.cpp b/Compiler/src/ConstantFolding.cpp
+index 8bf220d3..d8d3cc64 100644
+--- a/Compiler/src/ConstantFolding.cpp
++++ b/Compiler/src/ConstantFolding.cpp
+@@ -9,6 +9,9 @@
+ #include <vector>
+ #include <math.h>
+ 
++// LuauG: a constant `^` folds through the same pow the VM uses (LuauG ADR 0083).
++double luaug_dpow(double a, double b);
++
+ LUAU_FASTFLAG(LuauIntegerType2)
+ 
+ namespace Luau
+@@ -447,7 +450,7 @@ static void foldBinary(Constant& result, AstExprBinary::Op op, const Constant& l
+         if (la.type == Constant::Type_Number && ra.type == Constant::Type_Number)
+         {
+             result.type = Constant::Type_Number;
+-            result.valueNumber = pow(la.valueNumber, ra.valueNumber);
++            result.valueNumber = luaug_dpow(la.valueNumber, ra.valueNumber);
+         }
+         break;
+ 
+diff --git a/VM/src/lbuiltins.cpp b/VM/src/lbuiltins.cpp
+index 9a70de36..eebcae43 100644
+--- a/VM/src/lbuiltins.cpp
++++ b/VM/src/lbuiltins.cpp
+@@ -348,7 +348,7 @@ static int luauF_pow(lua_State* L, StkId res, TValue* arg0, int nresults, StkId
+     {
+         double a1 = nvalue(arg0);
+         double a2 = nvalue(args);
+-        setnvalue(res, pow(a1, a2));
++        setnvalue(res, luai_numpow(a1, a2));
+         return 1;
+     }
+ 
+diff --git a/VM/src/lnumutils.h b/VM/src/lnumutils.h
+index ef021161..630ca692 100644
+--- a/VM/src/lnumutils.h
++++ b/VM/src/lnumutils.h
+@@ -9,7 +9,10 @@
+ #define luai_numsub(a, b) ((a) - (b))
+ #define luai_nummul(a, b) ((a) * (b))
+ #define luai_numdiv(a, b) ((a) / (b))
+-#define luai_numpow(a, b) (pow(a, b))
++// LuauG: `^` goes through the embedder's own pow, which gives the same bits on
++// every platform where the C runtime's pow does not (LuauG ADR 0083).
++double luaug_dpow(double a, double b);
++#define luai_numpow(a, b) (luaug_dpow(a, b))
+ #define luai_numunm(a) (-(a))
+ #define luai_numisnan(a) ((a) != (a))
+ #define luai_numeq(a, b) ((a) == (b))
+diff --git a/VM/src/lvmexecute.cpp b/VM/src/lvmexecute.cpp
+index 4bf43954..e9b603e7 100644
+--- a/VM/src/lvmexecute.cpp
++++ b/VM/src/lvmexecute.cpp
+@@ -2063,7 +2063,7 @@ reentry:
+                 // fast-path
+                 if (ttisnumber(rb) && ttisnumber(rc))
+                 {
+-                    setnvalue(ra, pow(nvalue(rb), nvalue(rc)));
++                    setnvalue(ra, luai_numpow(nvalue(rb), nvalue(rc)));
+                     VM_NEXT();
+                 }
+                 else
+@@ -2298,7 +2298,7 @@ reentry:
+                     double nk = nvalue(kv);
+ 
+                     // pow is very slow so we specialize this for ^2, ^0.5 and ^3
+-                    double r = (nk == 2.0) ? nb * nb : (nk == 0.5) ? sqrt(nb) : (nk == 3.0) ? nb * nb * nb : pow(nb, nk);
++                    double r = (nk == 2.0) ? nb * nb : (nk == 0.5) ? sqrt(nb) : (nk == 3.0) ? nb * nb * nb : luai_numpow(nb, nk);
+ 
+                     setnvalue(ra, r);
+                     VM_NEXT();

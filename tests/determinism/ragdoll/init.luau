@@ -26,10 +26,10 @@
 --- exactly the structure below, so this scenario simulates what that function
 --- writes even though it did not write it.
 ---
---- `sameBuildOnly`, like `character`: this accumulates into `CFrame`, whose
---- position is f64 engine-side, so the last-ULP disagreement between two libms
---- survives instead of being rounded away (README, "Why the traces are
---- per-platform").
+--- **One trace for every platform** (README, "One trace, every platform"). This
+--- was `sameBuildOnly` until level C: it accumulates into state a libm's last
+--- bit used to reach, and the engine's own transcendentals are what let it hold
+--- a committed trace.
 ---
 --- The assertions are `error` calls, and the harness fails a run that logged
 --- one -- which is what stops a scenario dying on tick one and having its

@@ -1,5 +1,7 @@
 #include "luaug/core/math.h"
 
+#include "luaug/core/dmath.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -223,7 +225,7 @@ Mat4 perspective(f32 fovYRadians, f32 aspect, f32 nearZ, f32 farZ) noexcept
     // want the former, so SDL_GPU does too. Getting this wrong does not produce
     // an error -- it produces a scene where half the depth range is wasted and
     // z-fighting appears at distances that look arbitrary.
-    const f32 f = 1.0f / std::tan(fovYRadians * 0.5f);
+    const f32 f = 1.0f / dmath::tan(fovYRadians * 0.5f);
 
     Mat4 result;
     result.m[0][0] = f / aspect;
@@ -357,8 +359,8 @@ Mat3 orthonormalize(const Mat3& m) noexcept
 Mat3 rotationX(f32 radians) noexcept
 {
     // Right-hand rule about +X: +Y turns toward +Z.
-    const f32 s = std::sin(radians);
-    const f32 c = std::cos(radians);
+    const f32 s = dmath::sin(radians);
+    const f32 c = dmath::cos(radians);
 
     Mat3 result;
     result.m[1][1] = c;
@@ -372,8 +374,8 @@ Mat3 rotationY(f32 radians) noexcept
 {
     // Right-hand rule about +Y: +Z turns toward +X, which is why a +pi/2 yaw
     // takes LookVector from (0, 0, -1) to (-1, 0, 0) (api-design.md §2.3).
-    const f32 s = std::sin(radians);
-    const f32 c = std::cos(radians);
+    const f32 s = dmath::sin(radians);
+    const f32 c = dmath::cos(radians);
 
     Mat3 result;
     result.m[0][0] = c;
@@ -386,8 +388,8 @@ Mat3 rotationY(f32 radians) noexcept
 Mat3 rotationZ(f32 radians) noexcept
 {
     // Right-hand rule about +Z: +X turns toward +Y.
-    const f32 s = std::sin(radians);
-    const f32 c = std::cos(radians);
+    const f32 s = dmath::sin(radians);
+    const f32 c = dmath::cos(radians);
 
     Mat3 result;
     result.m[0][0] = c;
@@ -749,15 +751,15 @@ Vec3 toEuler(const Mat3& rotation, RotationOrder order) noexcept
     constexpr f32 lockEpsilon = 1.0f - 1e-6f;
     if (std::abs(sinMiddle) > lockEpsilon) {
         const f32 sign = sinMiddle < 0.0f ? -1.0f : 1.0f;
-        setComponent(result, i, std::atan2(sign * element(rotation, j, i), element(rotation, j, j)));
-        setComponent(result, j, std::asin(sinMiddle));
+        setComponent(result, i, dmath::atan2(sign * element(rotation, j, i), element(rotation, j, j)));
+        setComponent(result, j, dmath::asin(sinMiddle));
         setComponent(result, k, 0.0f);
         return result;
     }
 
-    setComponent(result, i, std::atan2(-parity * element(rotation, j, k), element(rotation, k, k)));
-    setComponent(result, j, std::asin(sinMiddle));
-    setComponent(result, k, std::atan2(-parity * element(rotation, i, j), element(rotation, i, i)));
+    setComponent(result, i, dmath::atan2(-parity * element(rotation, j, k), element(rotation, k, k)));
+    setComponent(result, j, dmath::asin(sinMiddle));
+    setComponent(result, k, dmath::atan2(-parity * element(rotation, i, j), element(rotation, i, i)));
     return result;
 }
 
@@ -778,8 +780,8 @@ Mat3 fromAxisAngle(Vec3 axis, f32 radians) noexcept
         return {}; // no direction to turn about; the identity beats NaN
 
     const f32 half = radians * 0.5f;
-    const f32 s = std::sin(half);
-    return fromQuaternion(unit.x * s, unit.y * s, unit.z * s, std::cos(half));
+    const f32 s = dmath::sin(half);
+    return fromQuaternion(unit.x * s, unit.y * s, unit.z * s, dmath::cos(half));
 }
 
 void toAxisAngle(const Mat3& rotation, Vec3& axis, f32& radians) noexcept
@@ -814,7 +816,7 @@ void toAxisAngle(const Mat3& rotation, Vec3& axis, f32& radians) noexcept
     }
 
     axis = Vec3{x / sinHalf, y / sinHalf, z / sinHalf};
-    radians = 2.0f * std::atan2(sinHalf, std::clamp(w, -1.0f, 1.0f));
+    radians = 2.0f * dmath::atan2(sinHalf, std::clamp(w, -1.0f, 1.0f));
 }
 
 Mat3 fromQuaternion(f32 x, f32 y, f32 z, f32 w) noexcept
@@ -913,10 +915,10 @@ Mat3 slerp(const Mat3& a, const Mat3& b, f32 alpha) noexcept
     // under an f32 ulp there, and only one of them divides by nearly zero.
     constexpr f32 linearThreshold = 1.0f - 1e-6f;
     if (cosine < linearThreshold) {
-        const f32 theta = std::acos(std::clamp(cosine, -1.0f, 1.0f));
-        const f32 sinTheta = std::sin(theta);
-        weightA = std::sin((1.0f - alpha) * theta) / sinTheta;
-        weightB = std::sin(alpha * theta) / sinTheta;
+        const f32 theta = dmath::acos(std::clamp(cosine, -1.0f, 1.0f));
+        const f32 sinTheta = dmath::sin(theta);
+        weightA = dmath::sin((1.0f - alpha) * theta) / sinTheta;
+        weightB = dmath::sin(alpha * theta) / sinTheta;
     }
 
     return fromQuaternion(weightA * ax + weightB * bx, weightA * ay + weightB * by, weightA * az + weightB * bz,

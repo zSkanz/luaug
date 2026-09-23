@@ -38,7 +38,7 @@
   "engine.replay.err.no_ticks": "{path} runs zero ticks, so it proves nothing. Set \"ticks\".",
   "engine.replay.err.script_errors": "Scenario {name} logged {count} errors, so its world is not the one it describes.",
   "engine.replay.err.attribute_missing": "Replay {name}: the run ended without setting `{attribute}`, so it did not finish.",
-  "engine.replay.err.no_trace_for_platform": "No recorded trace at {path}. Traces are per-platform (see tests/determinism/README.md); record this one on {platform} with --record-replay.",
+  "engine.replay.err.no_trace_for_platform": "No recorded trace at {path} (on {platform}). One trace serves every platform (see tests/determinism/README.md); record it with --record-replay on any of them.",
   "engine.replay.err.no_scenarios": "No scenarios under {path}. An empty determinism gate passes forever.",
   "engine.replay.err.diverged": "Determinism broken at tick {tick}: {expectedLabel} hashed {expected}, {actualLabel} hashed {actual}.",
   "engine.replay.err.length_mismatch": "Trace lengths differ: {expectedLabel} has {expected} checkpoints, {actualLabel} has {actual}.",

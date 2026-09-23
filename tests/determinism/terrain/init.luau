@@ -25,10 +25,10 @@
 --- ground a previous ball had just laid. `Random.new(seed)` is the
 --- engine's own generator and is part of the recorded state.
 ---
---- `sameBuildOnly`, like `character` and `ragdoll`: this settles rigid bodies
---- onto a sampled surface, so the last-ULP disagreement between two libms
---- survives into a position instead of being rounded away (README, "Why the
---- traces are per-platform").
+--- **One trace for every platform** (README, "One trace, every platform"). This
+--- was `sameBuildOnly` until level C: it accumulates into state a libm's last
+--- bit used to reach, and the engine's own transcendentals are what let it hold
+--- a committed trace.
 ---
 --- The assertions are `error` calls, and the harness fails a run that logged
 --- one -- which is what stops a scenario dying on tick one and having its

@@ -9,6 +9,9 @@
 #include <vector>
 #include <math.h>
 
+// LuauG: a constant `^` folds through the same pow the VM uses (LuauG ADR 0083).
+double luaug_dpow(double a, double b);
+
 LUAU_FASTFLAG(LuauIntegerType2)
 
 namespace Luau
@@ -447,7 +450,7 @@ static void foldBinary(Constant& result, AstExprBinary::Op op, const Constant& l
         if (la.type == Constant::Type_Number && ra.type == Constant::Type_Number)
         {
             result.type = Constant::Type_Number;
-            result.valueNumber = pow(la.valueNumber, ra.valueNumber);
+            result.valueNumber = luaug_dpow(la.valueNumber, ra.valueNumber);
         }
         break;
 

@@ -63,6 +63,17 @@ if(LUAUG_BUILD_TESTS)
     enable_testing()
 endif()
 
+# **No multiply-add the source did not write** (ADR 0083). A fused multiply-add
+# rounds once where the written `a * b + c` rounds twice, so a compiler that
+# fuses on its own gives different bits from one that does not -- and Clang
+# fuses by default wherever the target has the instruction, which is every ARM
+# machine and so every Mac. Off everywhere, vendored code included, because
+# Luau's VM and the physics are on the simulation's path too. MSVC contracts
+# only under `/fp:contract` or `/fp:fast`, and this build passes neither.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options(-ffp-contract=off)
+endif()
+
 add_subdirectory(third_party)
 
 # Modules are added in layer order; luaug_add_module() refuses a dependency it

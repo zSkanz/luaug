@@ -2,6 +2,17 @@
 # architecture.md §2 reserves those for `script` (and the host above it), so
 # core stays usable by tooling and tests that have no VM.
 
+# **The engine's own transcendentals** (ADR 0083), as a library of their own
+# rather than a source of `core`: Luau's VM and compiler link them too -- their
+# `^` goes through `luaug_dpow` (the patch in third_party/patches/luau) -- and
+# must not pull the rest of core in with them. Core links it publicly, so every
+# module sees `luaug/core/dmath.h` as it sees the rest of core.
+add_library(luaug_dmath STATIC src/dmath.cpp)
+target_include_directories(luaug_dmath PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(luaug_dmath PRIVATE luaug::warnings)
+target_link_libraries(Luau.VM PUBLIC luaug_dmath)
+target_link_libraries(Luau.Compiler PUBLIC luaug_dmath)
+
 luaug_add_module(core
     LAYER 0
     SOURCES
@@ -20,6 +31,8 @@ luaug_add_module(core
         src/random.cpp
         src/toml.cpp
         src/toml_edit.cpp
+    PUBLIC_DEPS
+        luaug_dmath
     PRIVATE_DEPS
         blake3::blake3
 )
@@ -28,6 +41,7 @@ luaug_add_module_tests(core
     SOURCES
         tests/base64_tests.cpp
         tests/content_hash_tests.cpp
+        tests/dmath_tests.cpp
         tests/text_key_tests.cpp
         tests/i18n_tests.cpp
         tests/json_tests.cpp

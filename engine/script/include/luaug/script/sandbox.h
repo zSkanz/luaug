@@ -14,6 +14,7 @@
 #pragma once
 
 struct lua_State;
+struct lua_CompileOptions;
 
 namespace luaug::script {
 
@@ -30,5 +31,22 @@ void removeUnsafeGlobals(lua_State* L);
 // silently fails inside the VM, which is why every global has to be installed
 // first.
 void sealGlobals(lua_State* L);
+
+// **`math` and `vector.angle` through the engine's own transcendentals**
+// (ADR 0083). Luau's library calls each platform's C runtime, which rounds
+// `sin` and the rest differently on Windows, Linux and macOS; a script's
+// `math.sin` is on the simulation's path, so it answers with `core::dmath`
+// instead. Same names, same arguments, same results to within an ulp -- and
+// the same bits everywhere. Runs before the seal, like every other global.
+void installDeterministicMath(lua_State* L);
+
+// The library functions the compiler must not turn into a fastcall, because a
+// fastcall reaches the C runtime directly and never sees the functions
+// `installDeterministicMath` put in the table. Null-terminated.
+extern const char* const DeterministicBuiltins[];
+
+// Every script is compiled with these: the builtins above disabled. Called by
+// each place the engine compiles a chunk, so none can forget.
+void applyDeterministicBuiltins(lua_CompileOptions& options) noexcept;
 
 } // namespace luaug::script

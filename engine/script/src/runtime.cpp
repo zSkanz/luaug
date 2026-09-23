@@ -211,6 +211,7 @@ std::optional<core::EngineError> ScriptRuntime::boot(core::InstanceId adoptDataM
     // `luaL_sandbox` removes nothing (see sandbox.h). Everything api-design.md
     // §1.1 calls removed goes here, before the freeze.
     removeUnsafeGlobals(L);
+    installDeterministicMath(L);
 
     // Globals belong between here and the seal. There is no second chance: the
     // sandbox marks the global table read-only and a later `lua_setglobal`
@@ -385,6 +386,7 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
     options.vectorLib = "Vector3";
     options.vectorCtor = "new";
     options.vectorType = "Vector3";
+    applyDeterministicBuiltins(options);
 
     const std::string chunk = "@" + std::string(chunkName);
     char* bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);

@@ -32,3 +32,10 @@ gates merges from M5.
 ## Consequences
 Tests and terminology stay honest; rollback foundations (ADR 0016) rest on a
 guarantee that is actually enforceable in CI.
+
+## Amended 2026-09-23
+
+**The guarantee is level C** ([ADR 0083](0083-the-simulation-is-deterministic-across-platforms.md)):
+the research-grade problem above turned out to be four bounded items, and all
+four are done. The same seed and operations give the same world hash on every
+platform and compiler, and one committed trace per scenario gates every tier.

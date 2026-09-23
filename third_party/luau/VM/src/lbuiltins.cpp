@@ -348,7 +348,7 @@ static int luauF_pow(lua_State* L, StkId res, TValue* arg0, int nresults, StkId 
     {
         double a1 = nvalue(arg0);
         double a2 = nvalue(args);
-        setnvalue(res, pow(a1, a2));
+        setnvalue(res, luai_numpow(a1, a2));
         return 1;
     }
 

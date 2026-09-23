@@ -49,20 +49,18 @@ constexpr f64 kReplayTimestep = 1.0 / 60.0;
     return std::nullopt;
 }
 
-// Which platform's recorded trace this build should be compared against.
+// **One trace, every platform** (ADR 0083). The traces used to be per platform
+// because the guarantee was: MSVC's C runtime and glibc round `sin` differently
+// in the last bit, and one bit compounded over 500 ticks is a different world.
+// The simulation's transcendentals are the engine's own now (`core::dmath`),
+// Luau's `math` and `^` go through them, Jolt runs cross-platform deterministic
+// (ADR 0074) and no compiler may fuse a multiply-add the source did not write --
+// so Windows, Linux and macOS compute the same bits, and one file holds the
+// answer all three must reproduce. A tier that parts from it is a defect, not a
+// platform difference to record.
 //
-// Per-platform because the guarantee is per-platform, and architecture.md §9
-// says so in as many words: "same build + same platform + same seed/inputs/
-// tick-config ⇒ same WorldHash", with cross-platform comparison a tracked
-// non-blocking concern. The reason is `sin`. A script that calls `math.sin` gets
-// MSVC's CRT on Windows and glibc's on Linux, the two disagree in the last ULP,
-// and one ULP compounded over 500 ticks of accumulated transforms is a different
-// world. Making that agree means shipping our own transcendentals, which is a
-// real option and is not M2's.
-//
-// One file per platform is therefore the honest shape: each tier gates against
-// what it actually recorded, so a Linux regression is caught on Linux, and
-// nobody is asked to reconcile two libms to merge a patch.
+// The platform's name stays in the messages, because "this build" is not an
+// explanation when the build that parted is on a runner somebody cannot see.
 [[nodiscard]] std::string_view platformName() noexcept
 {
 #if defined(_WIN32)
@@ -76,7 +74,7 @@ constexpr f64 kReplayTimestep = 1.0 / 60.0;
 
 [[nodiscard]] std::filesystem::path tracePathFor(const std::filesystem::path& directory)
 {
-    return directory / (std::string("trace.").append(platformName()).append(".txt"));
+    return directory / "trace.txt";
 }
 
 [[nodiscard]] std::string hex(u64 value)
@@ -503,7 +501,7 @@ std::optional<core::EngineError> runReplayGate(const std::filesystem::path& root
         if (auto error = compareTraces(first, second, "run 1", "run 2"); error.has_value())
             return error;
 
-        // A missing trace for THIS platform is an error, never a skip. A gate
+        // A missing trace is an error, never a skip. A gate
         // that quietly degrades to "the two in-process runs agreed" is the
         // weaker half of the check reporting success for the whole of it, and
         // the in-process half is exactly the one that missed the padding bug.

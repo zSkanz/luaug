@@ -16,7 +16,7 @@ recorded trace per platform:
   "ticks": 10000, "checkpointEvery": 500 }
 ```
 
-`trace.<platform>.txt` is one `<tick> <hash>` line per checkpoint, in hex — text
+`trace.txt` is one `<tick> <hash>` line per checkpoint, in hex — text
 so that a change to it is reviewed as a diff, and 21 short lines so the diff says
 *which* checkpoint moved rather than only that the end result did.
 
@@ -34,49 +34,57 @@ Three ways, and each catches something the others cannot:
 3. **Every 500 ticks, not just the end.** Two final hashes that differ tell you
    nothing; a divergence at tick 4,200 tells you where to look.
 
-A missing trace for the current platform is an **error**, not a skip: a gate that
+A missing trace is an **error**, not a skip: a gate that
 quietly degrades to "the two in-process runs agreed" reports success for the
 weaker half of the check, and the weaker half is the one that missed the padding
 bug.
 
-## Why the traces are per-platform
+## One trace, every platform
 
-Because the guarantee is per-platform, and architecture.md §9 says so: *same
-build + same platform + same seed/inputs/tick-config ⇒ same WorldHash*, with
-cross-platform comparison a tracked, non-blocking concern.
+**The guarantee is level C since 2026-09-23** (ADR 0083): the same seed and the
+same operations give the same world hash on Windows, Linux and macOS, whatever
+compiler built the engine. One `trace.txt` per scenario, and every tier gates
+against it.
 
-The reason is `sin`. `math.sin` reaches MSVC's CRT on Windows and glibc's on
-Linux; they disagree in the last ULP, and one ULP compounded over 500 ticks of
-accumulated transforms is a different world. Making that agree means shipping our
-own transcendentals — a real option, and not M2's.
+It used to be per platform, and the reason was `sin`. `math.sin` reached MSVC's C
+runtime on Windows and glibc's on Linux, the two disagree in the last bit, and one
+bit compounded over 500 ticks of accumulated transforms is a different world. What
+changed:
 
-One file per platform is the honest shape: each tier gates against what it
-actually recorded, so a Linux regression is caught on Linux and nobody has to
-reconcile two libms to merge a patch.
+- **The simulation's transcendentals are the engine's own** (`core::dmath`):
+  argument reduction and fixed polynomials in plain IEEE arithmetic, the same
+  bits everywhere. `core` maths, `CFrame`, easing and the seeded random use them.
+- **Luau's `math` goes through them**, with the builtins disabled in the
+  compiler so no fastcall reaches the C runtime, and **`^` does too**, through
+  one patch to the vendored VM and compiler (`third_party/patches/luau`).
+- **Jolt runs cross-platform deterministic** (ADR 0074).
+- **No compiler fuses a multiply-add the source did not write**
+  (`-ffp-contract=off`), which is what would otherwise part an ARM Mac from an
+  x86 PC.
 
-**Where the divergence actually is, measured:** `churn`'s Windows and Linux
-traces agree at tick 0 and differ from tick 500 on. `example01`'s are byte-for-
-byte identical at every checkpoint. The difference between them is precision, not
-luck: `example01` stores its results in `Part.Position`, which is f32 (R9), and
-rounding to f32 discards the disagreement; `churn` accumulates into `CFrame`,
-whose position is f64 engine-side, and f64 keeps it. So the cross-platform
-divergence surface is exactly the f64 state — which is worth knowing before M5
-puts physics in it.
+Measured when it landed: all five scenarios, `character`, `churn`, `example01`,
+`ragdoll` and `terrain`, produced byte-identical traces under MSVC on Windows and
+Clang with glibc on Linux, and `character`, `ragdoll` and `terrain` stopped being
+`sameBuildOnly`. macOS is proved by the CI job that runs the same file.
+
+**A tier that parts from the trace is a defect**, not a platform difference to
+record: find the maths that reached a platform's runtime.
 
 ## Re-recording
 
-`--record-replay` rewrites the goldens for the platform it runs on, and it is the
+`--record-replay` rewrites the goldens, on whichever platform it runs, and it is the
 wrong answer to a failure unless you can say which semantic change moved the hash
 and why it was intentional. A hash that moves for a reason nobody can name is the
 bug this directory exists to find.
 
-Recording the Linux trace uses the same container the gate does:
+Any tier can record them, because every tier must produce the same file; the
+Linux container is how to check a recording made on Windows before pushing:
 
 ```
 docker run --rm -v "$PWD:/repo" -v luaug-tier2-build:/build -e LUAUG_BUILD_ROOT=/build \
   luaug-tier2:latest bash -lc \
   "cd /repo && cmake --build --preset linux-clang-dev && \
-   /build/linux-clang-dev/engine/app/luaug-host --replay=/repo/tests/determinism --record-replay"
+   /build/linux-clang-dev/engine/app/luaug-host --replay=/repo/tests/determinism"
 ```
 
 Editing a scenario's script counts as a semantic change, including edits that

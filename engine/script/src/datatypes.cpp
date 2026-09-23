@@ -1,5 +1,6 @@
 #include "luaug/script/datatypes.h"
 
+#include "luaug/core/dmath.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/animation.h"
 #include "luaug/script/input_events.h"
@@ -1217,7 +1218,7 @@ int vectorAngle(lua_State* L)
     const Vec3 a = checkVec3(L, 1);
     const Vec3 b = checkVec3(L, 2);
     const Vec3 crossed = core::cross(a, b);
-    const f32 angle = std::atan2(core::length(crossed), core::dot(a, b));
+    const f32 angle = core::dmath::atan2(core::length(crossed), core::dot(a, b));
 
     if (lua_isnoneornil(L, 3)) {
         pushNumber(L, angle);

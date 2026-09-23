@@ -2063,7 +2063,7 @@ reentry:
                 // fast-path
                 if (ttisnumber(rb) && ttisnumber(rc))
                 {
-                    setnvalue(ra, pow(nvalue(rb), nvalue(rc)));
+                    setnvalue(ra, luai_numpow(nvalue(rb), nvalue(rc)));
                     VM_NEXT();
                 }
                 else
@@ -2298,7 +2298,7 @@ reentry:
                     double nk = nvalue(kv);
 
                     // pow is very slow so we specialize this for ^2, ^0.5 and ^3
-                    double r = (nk == 2.0) ? nb * nb : (nk == 0.5) ? sqrt(nb) : (nk == 3.0) ? nb * nb * nb : pow(nb, nk);
+                    double r = (nk == 2.0) ? nb * nb : (nk == 0.5) ? sqrt(nb) : (nk == 3.0) ? nb * nb * nb : luai_numpow(nb, nk);
 
                     setnvalue(ra, r);
                     VM_NEXT();

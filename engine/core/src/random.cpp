@@ -1,5 +1,7 @@
 #include "luaug/core/random.h"
 
+#include "luaug/core/dmath.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -140,8 +142,8 @@ Vec3 Pcg32::nextUnitVector() noexcept
     const f64 radius = std::sqrt(std::max(0.0, 1.0 - z * z));
 
     return Vec3{
-        static_cast<f32>(radius * std::cos(azimuth)),
-        static_cast<f32>(radius * std::sin(azimuth)),
+        static_cast<f32>(radius * dmath::cos(azimuth)),
+        static_cast<f32>(radius * dmath::sin(azimuth)),
         static_cast<f32>(z),
     };
 }
