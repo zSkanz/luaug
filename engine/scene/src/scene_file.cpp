@@ -1,5 +1,6 @@
 #include <luaug/asset/terrain.h>
 #include <luaug/asset/terrain_cell.h>
+#include <luaug/asset/voxel.h>
 #include <luaug/core/base64.h>
 #include <luaug/core/i18n.h>
 #include <luaug/core/json.h>
@@ -967,6 +968,118 @@ core::InstanceId placeStamp(World& world, core::InstanceId parent, std::string_v
 }
 } // namespace
 
+namespace {
+
+// --- The block world (V1) ------------------------------------------------------
+//
+// **At the top of the scene, not inside the tree**, because `VoxelService` is a
+// service and the tree a scene carries is Workspace's. One key, written only
+// when there is something in it, so a scene with no blocks is byte-identical to
+// one written before blocks existed.
+
+VoxelComponent* voxelsOf(World& world) noexcept
+{
+    VoxelComponent* found = nullptr;
+    world.voxels().forEach([&found](core::InstanceId, VoxelComponent& voxels) {
+        if (found == nullptr)
+            found = &voxels;
+    });
+    return found;
+}
+
+void writeVoxels(JsonWriter& writer, const World& world)
+{
+    const VoxelComponent* voxels = nullptr;
+    world.voxels().forEach([&voxels](core::InstanceId, const VoxelComponent& found) {
+        if (voxels == nullptr)
+            voxels = &found;
+    });
+    if (voxels == nullptr || (voxels->grid.chunkCount() == 0 && voxels->types.empty() && voxels->blockSize == 1.0f))
+        return;
+
+    writer.key("voxels");
+    writer.beginObject();
+    writer.field("blockSize", static_cast<f64>(voxels->blockSize));
+    writer.key("types");
+    writer.beginArray();
+    for (const VoxelBlockType& type : voxels->types) {
+        writer.beginObject();
+        writer.field("name", world.atoms().text(type.name));
+        writer.key("color");
+        writer.beginArray();
+        writer.value(static_cast<f64>(type.color.r));
+        writer.value(static_cast<f64>(type.color.g));
+        writer.value(static_cast<f64>(type.color.b));
+        writer.endArray();
+        writer.endObject();
+    }
+    writer.endArray();
+    writer.key("chunks");
+    writer.beginArray();
+    for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
+        const asset::VoxelChunk* chunk = voxels->grid.findChunk(key);
+        if (chunk == nullptr)
+            continue;
+        writer.beginObject();
+        writer.field("x", static_cast<core::i64>(key.x));
+        writer.field("y", static_cast<core::i64>(key.y));
+        writer.field("z", static_cast<core::i64>(key.z));
+        const std::vector<core::u8> bytes = asset::encodeVoxelChunk(*chunk);
+        writer.field("blocks", core::base64Encode(bytes));
+        writer.endObject();
+    }
+    writer.endArray();
+    writer.endObject();
+}
+
+// Replaces the block world with what the scene says -- nothing, when it has no
+// `voxels` key. A chunk that does not decode is dropped and counted, the way a
+// malformed terrain cell is.
+void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
+{
+    VoxelComponent* voxels = voxelsOf(world);
+    if (voxels == nullptr)
+        return;
+    voxels->grid.clear();
+    voxels->types.clear();
+    voxels->blockSize = 1.0f;
+    voxels->revision += 1;
+
+    const JsonValue node = root["voxels"];
+    if (node.type() != core::JsonType::Object)
+        return;
+    const f64 size = node["blockSize"].asNumber(1.0);
+    if (size > 0.0)
+        voxels->blockSize = static_cast<f32>(size);
+    if (const JsonValue types = node["types"]; types.type() == core::JsonType::Array) {
+        for (core::usize at = 0; at < types.size(); ++at) {
+            const JsonValue type = types.at(at);
+            const JsonValue color = type["color"];
+            voxels->types.push_back(VoxelBlockType{world.atoms().intern(type["name"].asString()),
+                                                   core::Color3{static_cast<f32>(color.at(0).asNumber(1.0)),
+                                                                static_cast<f32>(color.at(1).asNumber(1.0)),
+                                                                static_cast<f32>(color.at(2).asNumber(1.0))}});
+        }
+    }
+    if (const JsonValue chunks = node["chunks"]; chunks.type() == core::JsonType::Array) {
+        std::vector<asset::BlockId> blocks;
+        for (core::usize at = 0; at < chunks.size(); ++at) {
+            const JsonValue chunk = chunks.at(at);
+            const std::optional<std::vector<core::u8>> bytes = core::base64Decode(chunk["blocks"].asString());
+            if (!bytes.has_value() || !asset::decodeVoxelChunk(*bytes, blocks)) {
+                ++out.refusedProperties;
+                continue;
+            }
+            voxels->grid.setChunk(asset::VoxelChunkKey{static_cast<core::i32>(chunk["x"].asInteger()),
+                                                       static_cast<core::i32>(chunk["y"].asInteger()),
+                                                       static_cast<core::i32>(chunk["z"].asInteger())},
+                                  blocks);
+        }
+    }
+}
+
+} // namespace
+
 void clearScene(World& world)
 {
     const core::InstanceId workspace = workspaceOf(world);
@@ -1044,6 +1157,7 @@ std::string writeScene(const World& world, SceneIoReport* report, StampLibrary* 
         writer.key("root");
         writeInstance(writer, world, workspace, paths, out, core::InstanceId{}, stamps);
     }
+    writeVoxels(writer, world);
 
     writer.endObject();
     return writer.text();
@@ -1072,6 +1186,7 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
     // Replacing, not merging: a scene IS the world's contents, and a load that
     // merged would double everything the second time it ran.
     clearScene(world);
+    readVoxels(world, root, out);
 
     std::vector<PendingReference> pending;
     if (const JsonValue rootNode = root["root"]; rootNode.type() == core::JsonType::Object) {

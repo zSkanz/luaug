@@ -1449,6 +1449,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "TweenService"): TweenService
     function GetService(self, name: "UIService"): UIService
     function GetService(self, name: "AudioService"): AudioService
+    function GetService(self, name: "VoxelService"): VoxelService
     --- Returns the service of this name. Services are singletons and all of them exist from boot, so
     --- this is a lookup rather than a creation and every call returns the same ordinary child of
     --- `game`. A string literal gives an exactly typed result; a name computed at runtime gives the
@@ -1843,6 +1844,44 @@ declare extern type AudioService extends Instance with
     --- where that matters. The handle is also what a caller sets the volume through, since this takes
     --- only the content.
     function PlayLocal(self, content: Content): Sound
+end
+
+declare extern type VoxelService extends Instance with
+    --- How large a block is, in metres. **Only settable while the world holds no blocks**: resizing a
+    --- built world would move every block, so it is refused by name rather than done quietly. `Clear`
+    --- first if that is really what you want.
+    BlockSize: number
+    --- How many 16 x 16 x 16 chunks hold at least one block. A chunk emptied of blocks is dropped, so
+    --- this counts what the world actually stores.
+    read ChunkCount: number
+    --- How many block types have been registered. Ids run from 1 to this number.
+    read BlockTypeCount: number
+    --- Registers a block type and returns its id. Ids are handed out in registration order from 1,
+    --- which makes them a pure function of the script that registered them -- the same script on every
+    --- machine gets the same ids. Registering a name twice returns the id it already has and updates
+    --- its colour.
+    function RegisterBlock(self, name: string, color: Color3): number
+    --- The id a block type was registered with, or nil for a name nobody registered.
+    function GetBlockId(self, name: string): number?
+    --- Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are
+    --- rounded down. Returns whether anything changed.
+    function SetBlock(self, block: vector, id: number): boolean
+    --- The id of the block at a block coordinate, 0 for air.
+    function GetBlock(self, block: vector): number
+    --- Fills every block in the box between two block coordinates, both included, with one id -- 0
+    --- empties it. Returns how many blocks changed. The way to build a floor, a wall or a world's first
+    --- ground in one call rather than thousands.
+    function FillBlocks(self, from: vector, to: vector, id: number): number
+    --- Removes every block. The registered block types stay.
+    function Clear(self): ()
+    --- The block coordinate a world position falls in.
+    function WorldToBlock(self, position: vector): vector
+    --- The world position of a block's centre.
+    function BlockToWorld(self, block: vector): vector
+    --- Walks a ray block by block and returns the first solid block it enters and the face it entered
+    --- through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length.
+    --- The block is what a pickaxe breaks; the block plus the normal is where a placed block goes.
+    function Raycast(self, origin: vector, direction: vector): (vector?, vector?)
 end
 
 declare Enum: {

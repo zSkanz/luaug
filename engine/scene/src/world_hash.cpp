@@ -298,15 +298,38 @@ u64 World::worldHash() const
             for (const asset::TileKey key : terrain->field.tileKeys()) {
                 hasher.pod(key.x);
                 hasher.pod(key.z);
+                // `digestOf`, never the field: the digest is computed lazily and
+                // is stale after any write until somebody asks for it -- which
+                // made an edit invisible to the hash.
                 if (const asset::HeightTile* tile = terrain->field.findTile(key); tile != nullptr)
-                    hasher.pod(tile->digest);
+                    hasher.pod(asset::digestOf(*tile));
             }
             for (const asset::BrickKey key : terrain->field.brickKeys()) {
                 hasher.pod(key.x);
                 hasher.pod(key.y);
                 hasher.pod(key.z);
                 if (const asset::Brick* brick = terrain->field.findBrick(key); brick != nullptr)
-                    hasher.pod(brick->digest);
+                    hasher.pod(asset::digestOf(*brick));
+            }
+        }
+
+        // **The block world (V1)**, on the terrain's rules: the block size and
+        // the registry, then each chunk's key beside its digest, in key order.
+        if (const VoxelComponent* voxels = m_voxels.find(id); voxels != nullptr) {
+            hasher.number(static_cast<f64>(voxels->blockSize));
+            hasher.pod(static_cast<core::u64>(voxels->types.size()));
+            for (const VoxelBlockType& type : voxels->types) {
+                hasher.text(m_atoms.text(type.name));
+                hasher.number(static_cast<f64>(type.color.r));
+                hasher.number(static_cast<f64>(type.color.g));
+                hasher.number(static_cast<f64>(type.color.b));
+            }
+            for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
+                hasher.pod(key.x);
+                hasher.pod(key.y);
+                hasher.pod(key.z);
+                if (const asset::VoxelChunk* chunk = voxels->grid.findChunk(key); chunk != nullptr)
+                    hasher.pod(asset::digestOf(*chunk));
             }
         }
 

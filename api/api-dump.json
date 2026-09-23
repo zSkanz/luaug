@@ -2477,6 +2477,145 @@
       "Events": []
     },
     {
+      "Name": "VoxelService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "BlockSize",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "BlockTypeCount",
+          "Type": "number",
+          "ReadOnly": true
+        },
+        {
+          "Name": "ChunkCount",
+          "Type": "number",
+          "ReadOnly": true
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "BlockToWorld",
+          "Parameters": [
+            {
+              "Name": "block",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["vector"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Clear",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FillBlocks",
+          "Parameters": [
+            {
+              "Name": "from",
+              "Type": "vector"
+            },
+            {
+              "Name": "to",
+              "Type": "vector"
+            },
+            {
+              "Name": "id",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetBlock",
+          "Parameters": [
+            {
+              "Name": "block",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "GetBlockId",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            }
+          ],
+          "Returns": ["number?"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Raycast",
+          "Parameters": [
+            {
+              "Name": "origin",
+              "Type": "vector"
+            },
+            {
+              "Name": "direction",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["vector?", "vector?"],
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "RegisterBlock",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            },
+            {
+              "Name": "color",
+              "Type": "Color3"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SetBlock",
+          "Parameters": [
+            {
+              "Name": "block",
+              "Type": "vector"
+            },
+            {
+              "Name": "id",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["boolean"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "WorldToBlock",
+          "Parameters": [
+            {
+              "Name": "position",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["vector"],
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "Weld",
       "Extends": "Instance",
       "Tags": [],

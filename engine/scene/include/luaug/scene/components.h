@@ -32,6 +32,7 @@
 #pragma once
 
 #include "luaug/asset/terrain.h"
+#include "luaug/asset/voxel.h"
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
@@ -502,6 +503,27 @@ struct TerrainComponent
     // so digging past it does not deepen the world, it stops.
     f32 minHeight = -256.0f;
     f32 maxHeight = 256.0f;
+};
+
+// A registered block type (V1, `VoxelService`). Its id is its position in the
+// registry plus one, which is registration order -- a pure function of the
+// script that registered it.
+struct VoxelBlockType
+{
+    core::NameAtom name;
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+};
+
+// The block world `VoxelService` owns. **Not the terrain** -- see
+// `luaug/asset/voxel.h`. One per `VoxelService`, which is one per DataModel.
+struct VoxelComponent
+{
+    asset::VoxelGrid grid;
+    f32 blockSize = 1.0f;
+    std::vector<VoxelBlockType> types;
+    // **Bumped on every write to `grid`**, the same trick the terrain uses: the
+    // renderer and the physics mirror compare it before doing any work.
+    core::u64 revision = 0;
 };
 
 // `PVInstance`'s own state, and therefore attached to every `BasePart`, `Model`

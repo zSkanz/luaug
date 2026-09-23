@@ -280,6 +280,51 @@ void detachWorkspaceComponents(World& world, core::InstanceId id)
 
 // --- Attachment ---------------------------------------------------------------
 
+// --- VoxelService (V1) --------------------------------------------------------
+
+void attachVoxelComponents(World& world, core::InstanceId id)
+{
+    world.voxels().add(id, VoxelComponent{});
+}
+
+void detachVoxelComponents(World& world, core::InstanceId id)
+{
+    world.voxels().remove(id);
+}
+
+Value getVoxelServiceBlockSize(const World& world, core::InstanceId id)
+{
+    const VoxelComponent* voxels = world.voxels().find(id);
+    return voxels == nullptr ? Value{} : Value{static_cast<f64>(voxels->blockSize)};
+}
+
+bool setVoxelServiceBlockSize(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* size = std::get_if<f64>(&value);
+    VoxelComponent* voxels = world.voxels().find(id);
+    if (size == nullptr || voxels == nullptr || !finite(*size) || *size <= 0.0)
+        return false;
+    // Only while empty: resizing a built world would move every block. Refused
+    // by name (`scene.err.voxel_not_empty`) rather than done quietly.
+    if (voxels->grid.chunkCount() > 0)
+        return false;
+    voxels->blockSize = static_cast<f32>(*size);
+    voxels->revision += 1;
+    return true;
+}
+
+Value getVoxelServiceChunkCount(const World& world, core::InstanceId id)
+{
+    const VoxelComponent* voxels = world.voxels().find(id);
+    return voxels == nullptr ? Value{} : Value{static_cast<f64>(voxels->grid.chunkCount())};
+}
+
+Value getVoxelServiceBlockTypeCount(const World& world, core::InstanceId id)
+{
+    const VoxelComponent* voxels = world.voxels().find(id);
+    return voxels == nullptr ? Value{} : Value{static_cast<f64>(voxels->types.size())};
+}
+
 // --- Terrain (ADR 0067) ------------------------------------------------------
 
 void attachTerrainComponents(World& world, core::InstanceId id)

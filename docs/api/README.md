@@ -33,6 +33,7 @@ guided tour.
 | [`TagService`](tagservice.md) | [`Instance`](instance.md) | Finds instances by tag. |
 | [`TweenService`](tweenservice.md) | [`Instance`](instance.md) | Property animation (§2.1). |
 | [`UIService`](uiservice.md) | [`Instance`](instance.md) | The parent of every `ScreenGui` and the source of the two numbers a layout needs about the screen it is on (§2.1). |
+| [`VoxelService`](voxelservice.md) | [`Instance`](instance.md) | A world made of blocks: the service for block games -- mining, building, a world of cubes in chunks. |
 | [`Workspace`](workspace.md) | [`Instance`](instance.md) | The root of the 3D scene, reached through the `workspace` global as well as through `game:GetService`. |
 
 ## Instances

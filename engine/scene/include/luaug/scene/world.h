@@ -216,6 +216,7 @@ struct NameIndex
     X(MaterialComponent, materials)                                                                                    \
     X(WorkspaceComponent, workspaces)                                                                                  \
     X(TerrainComponent, terrains)                                                                                      \
+    X(VoxelComponent, voxels)                                                                                          \
     X(ModelComponent, models)                                                                                          \
     X(ScriptComponent, scripts)                                                                                        \
     X(SoundComponent, sounds)                                                                                          \
@@ -632,6 +633,8 @@ public:
     // was deferred and never built.
     [[nodiscard]] ComponentPool<TerrainComponent>& terrains() noexcept { return m_terrains; }
     [[nodiscard]] const ComponentPool<TerrainComponent>& terrains() const noexcept { return m_terrains; }
+    [[nodiscard]] ComponentPool<VoxelComponent>& voxels() noexcept { return m_voxels; }
+    [[nodiscard]] const ComponentPool<VoxelComponent>& voxels() const noexcept { return m_voxels; }
 
     [[nodiscard]] ComponentPool<AttachmentComponent>& attachments() noexcept { return m_attachments; }
     [[nodiscard]] const ComponentPool<AttachmentComponent>& attachments() const noexcept { return m_attachments; }

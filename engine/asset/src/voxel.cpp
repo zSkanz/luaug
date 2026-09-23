@@ -2,6 +2,7 @@
 
 #define XXH_INLINE_ALL
 #include <algorithm>
+#include <utility>
 
 #include "xxhash.h"
 
@@ -34,6 +35,47 @@ u64 digestOf(const VoxelChunk& chunk) noexcept
         chunk.digestValid = true;
     }
     return chunk.digest;
+}
+
+std::vector<core::u8> encodeVoxelChunk(const VoxelChunk& chunk)
+{
+    std::vector<core::u8> bytes;
+    const auto put = [&bytes](core::u16 value) {
+        bytes.push_back(static_cast<core::u8>(value & 0xFFu));
+        bytes.push_back(static_cast<core::u8>(value >> 8u));
+    };
+    u32 at = 0;
+    while (at < VoxelChunkVolume) {
+        const BlockId id = chunk.blocks[at];
+        u32 run = 1;
+        // A run is capped at the u16 it is stored in; a whole chunk is 4096, so
+        // the cap is never reached, and it is here so the format says so.
+        while (at + run < VoxelChunkVolume && chunk.blocks[at + run] == id && run < 0xFFFFu)
+            ++run;
+        put(id);
+        put(static_cast<core::u16>(run));
+        at += run;
+    }
+    return bytes;
+}
+
+bool decodeVoxelChunk(std::span<const core::u8> bytes, std::vector<BlockId>& out)
+{
+    if (bytes.size() % 4 != 0)
+        return false;
+    std::vector<BlockId> blocks;
+    blocks.reserve(VoxelChunkVolume);
+    for (usize at = 0; at < bytes.size(); at += 4) {
+        const auto id = static_cast<BlockId>(bytes[at] | (bytes[at + 1] << 8u));
+        const auto run = static_cast<u32>(bytes[at + 2] | (bytes[at + 3] << 8u));
+        if (run == 0 || blocks.size() + run > VoxelChunkVolume)
+            return false;
+        blocks.insert(blocks.end(), run, id);
+    }
+    if (blocks.size() != VoxelChunkVolume)
+        return false;
+    out = std::move(blocks);
+    return true;
 }
 
 VoxelChunkKey voxelChunkOf(i32 x, i32 y, i32 z) noexcept

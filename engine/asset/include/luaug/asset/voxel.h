@@ -107,6 +107,16 @@ private:
     std::vector<std::pair<VoxelChunkKey, std::shared_ptr<VoxelChunk>>> m_chunks;
 };
 
+// A chunk's blocks as bytes, run-length encoded: pairs of little-endian u16
+// (id, run length), runs in index order. A chunk of ground is mostly a few long
+// runs -- a flat floor is sixteen runs of air and stone per layer at worst -- so
+// this is what a scene file and a streamed chunk carry rather than 8 KB of ids.
+[[nodiscard]] std::vector<core::u8> encodeVoxelChunk(const VoxelChunk& chunk);
+
+// The inverse. False when the bytes do not describe exactly one chunk -- a run
+// past the end, a truncated pair -- in which case `out` is left untouched.
+[[nodiscard]] bool decodeVoxelChunk(std::span<const core::u8> bytes, std::vector<BlockId>& out);
+
 // Which chunk a block coordinate is in, and where inside it.
 [[nodiscard]] VoxelChunkKey voxelChunkOf(core::i32 x, core::i32 y, core::i32 z) noexcept;
 

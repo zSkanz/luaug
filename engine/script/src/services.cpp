@@ -12,8 +12,10 @@
 #include <lualib.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -968,6 +970,238 @@ int audioServicePlayLocal(lua_State* L)
     return 1;
 }
 
+// --- VoxelService (V1) ---------------------------------------------------------
+//
+// A block world: integer block coordinates in, block ids out. Every write bumps
+// `revision`, which is the one signal the renderer and the physics mirror read.
+
+scene::VoxelComponent& voxelsOf(lua_State* L)
+{
+    const core::InstanceId self = checkInstance(L, 1);
+    scene::VoxelComponent* voxels = world(L).voxels().find(self);
+    if (voxels == nullptr) {
+        const core::I18nArg args[] = {{"className", std::string_view{"VoxelService"}}};
+        raise(L, LUAUG_TR("scene.err.unknown_service"), args);
+    }
+    return *voxels;
+}
+
+// A block coordinate from a `vector`: each component rounded DOWN, so `(0.9,
+// 0, 0)` is block 0 and `(-0.1, 0, 0)` is block -1 -- the same rule
+// `WorldToBlock` uses, which is what makes the two agree.
+struct BlockCoord
+{
+    core::i32 x = 0;
+    core::i32 y = 0;
+    core::i32 z = 0;
+};
+
+BlockCoord checkBlockCoord(lua_State* L, int index)
+{
+    const core::Vec3 v = checkVector3(L, index);
+    return BlockCoord{static_cast<core::i32>(std::floor(v.x)), static_cast<core::i32>(std::floor(v.y)),
+                      static_cast<core::i32>(std::floor(v.z))};
+}
+
+asset::BlockId checkBlockId(lua_State* L, int index, const scene::VoxelComponent& voxels)
+{
+    const lua_Integer id = luaL_checkinteger(L, index);
+    if (id < 0 || static_cast<core::u64>(id) > voxels.types.size()) {
+        const core::I18nArg args[] = {{"id", static_cast<core::i64>(id)},
+                                      {"count", static_cast<core::i64>(voxels.types.size())}};
+        raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
+    }
+    return static_cast<asset::BlockId>(id);
+}
+
+int voxelRegisterBlock(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    usize length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+    const core::Color3 color = checkColor3(L, 3);
+    const core::NameAtom name = world(L).atoms().intern(std::string_view{text, length});
+    for (usize at = 0; at < voxels.types.size(); ++at) {
+        if (voxels.types[at].name == name) {
+            if (!(voxels.types[at].color == color)) {
+                voxels.types[at].color = color;
+                voxels.revision += 1;
+            }
+            lua_pushinteger(L, static_cast<int>(at + 1));
+            return 1;
+        }
+    }
+    // Sixty-five thousand types is the id's range; refusing past it is kinder
+    // than wrapping an id onto somebody else's block.
+    if (voxels.types.size() >= 0xFFFFu) {
+        const core::I18nArg args[] = {{"id", static_cast<core::i64>(voxels.types.size() + 1)},
+                                      {"count", static_cast<core::i64>(voxels.types.size())}};
+        raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
+    }
+    voxels.types.push_back(scene::VoxelBlockType{name, color});
+    voxels.revision += 1;
+    lua_pushinteger(L, static_cast<int>(voxels.types.size()));
+    return 1;
+}
+
+int voxelGetBlockId(lua_State* L)
+{
+    const scene::VoxelComponent& voxels = voxelsOf(L);
+    usize length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+    const core::NameAtom name = world(L).atoms().lookup(std::string_view{text, length});
+    for (usize at = 0; at < voxels.types.size(); ++at) {
+        if (name.valid() && voxels.types[at].name == name) {
+            lua_pushinteger(L, static_cast<int>(at + 1));
+            return 1;
+        }
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
+int voxelSetBlock(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    const BlockCoord at = checkBlockCoord(L, 2);
+    const asset::BlockId id = checkBlockId(L, 3, voxels);
+    const bool changed = voxels.grid.set(at.x, at.y, at.z, id);
+    if (changed)
+        voxels.revision += 1;
+    lua_pushboolean(L, changed ? 1 : 0);
+    return 1;
+}
+
+int voxelGetBlock(lua_State* L)
+{
+    const scene::VoxelComponent& voxels = voxelsOf(L);
+    const BlockCoord at = checkBlockCoord(L, 2);
+    lua_pushinteger(L, static_cast<int>(voxels.grid.get(at.x, at.y, at.z)));
+    return 1;
+}
+
+int voxelFillBlocks(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    const BlockCoord from = checkBlockCoord(L, 2);
+    const BlockCoord to = checkBlockCoord(L, 3);
+    const asset::BlockId id = checkBlockId(L, 4, voxels);
+    const core::u32 changed = voxels.grid.fill(from.x, from.y, from.z, to.x, to.y, to.z, id);
+    if (changed > 0)
+        voxels.revision += 1;
+    lua_pushinteger(L, static_cast<int>(changed));
+    return 1;
+}
+
+int voxelClear(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    if (voxels.grid.chunkCount() > 0) {
+        voxels.grid.clear();
+        voxels.revision += 1;
+    }
+    return 0;
+}
+
+int voxelWorldToBlock(lua_State* L)
+{
+    const scene::VoxelComponent& voxels = voxelsOf(L);
+    const core::Vec3 position = checkVector3(L, 2);
+    const f32 size = voxels.blockSize;
+    pushVector3(
+        L, core::Vec3{std::floor(position.x / size), std::floor(position.y / size), std::floor(position.z / size)});
+    return 1;
+}
+
+int voxelBlockToWorld(lua_State* L)
+{
+    const scene::VoxelComponent& voxels = voxelsOf(L);
+    const BlockCoord at = checkBlockCoord(L, 2);
+    const f32 size = voxels.blockSize;
+    pushVector3(L, core::Vec3{(static_cast<f32>(at.x) + 0.5f) * size, (static_cast<f32>(at.y) + 0.5f) * size,
+                              (static_cast<f32>(at.z) + 0.5f) * size});
+    return 1;
+}
+
+// Amanatides and Woo's traversal: step from block to block along the ray,
+// always into whichever neighbour the ray reaches first, so no block it passes
+// through is skipped and none it misses is visited.
+int voxelRaycast(lua_State* L)
+{
+    const scene::VoxelComponent& voxels = voxelsOf(L);
+    const core::Vec3 origin = checkVector3(L, 2);
+    const core::Vec3 direction = checkVector3(L, 3);
+    const f32 size = voxels.blockSize;
+    const f32 length = core::length(direction);
+    if (!(length > 0.0f) || !(size > 0.0f)) {
+        lua_pushnil(L);
+        lua_pushnil(L);
+        return 2;
+    }
+
+    // In block units from here on.
+    const std::array<f64, 3> start{static_cast<f64>(origin.x / size), static_cast<f64>(origin.y / size),
+                                   static_cast<f64>(origin.z / size)};
+    const std::array<f64, 3> step{static_cast<f64>(direction.x / length), static_cast<f64>(direction.y / length),
+                                  static_cast<f64>(direction.z / length)};
+    const f64 reach = static_cast<f64>(length / size);
+
+    std::array<core::i32, 3> block{static_cast<core::i32>(std::floor(start[0])),
+                                   static_cast<core::i32>(std::floor(start[1])),
+                                   static_cast<core::i32>(std::floor(start[2]))};
+    std::array<core::i32, 3> stepSign{};
+    std::array<f64, 3> nextBoundary{};
+    std::array<f64, 3> delta{};
+    for (usize axis = 0; axis < 3; ++axis) {
+        if (step[axis] > 0.0) {
+            stepSign[axis] = 1;
+            nextBoundary[axis] = (static_cast<f64>(block[axis]) + 1.0 - start[axis]) / step[axis];
+            delta[axis] = 1.0 / step[axis];
+        }
+        else if (step[axis] < 0.0) {
+            stepSign[axis] = -1;
+            nextBoundary[axis] = (start[axis] - static_cast<f64>(block[axis])) / -step[axis];
+            delta[axis] = 1.0 / -step[axis];
+        }
+        else {
+            nextBoundary[axis] = std::numeric_limits<f64>::infinity();
+            delta[axis] = std::numeric_limits<f64>::infinity();
+        }
+    }
+
+    // A ray that starts inside a block hits it, through no face at all.
+    if (voxels.grid.get(block[0], block[1], block[2]) != asset::AirBlock) {
+        pushVector3(L, core::Vec3{static_cast<f32>(block[0]), static_cast<f32>(block[1]), static_cast<f32>(block[2])});
+        pushVector3(L, core::Vec3{0.0f, 0.0f, 0.0f});
+        return 2;
+    }
+
+    // Bounded by the ray's length, and by a hard step count so a ray a million
+    // blocks long cannot stall a tick.
+    for (int steps = 0; steps < 4096; ++steps) {
+        usize axis = 0;
+        if (nextBoundary[1] < nextBoundary[axis])
+            axis = 1;
+        if (nextBoundary[2] < nextBoundary[axis])
+            axis = 2;
+        if (nextBoundary[axis] > reach)
+            break;
+        block[axis] += stepSign[axis];
+        nextBoundary[axis] += delta[axis];
+        if (voxels.grid.get(block[0], block[1], block[2]) != asset::AirBlock) {
+            core::Vec3 normal{0.0f, 0.0f, 0.0f};
+            (axis == 0 ? normal.x : axis == 1 ? normal.y : normal.z) = static_cast<f32>(-stepSign[axis]);
+            pushVector3(L,
+                        core::Vec3{static_cast<f32>(block[0]), static_cast<f32>(block[1]), static_cast<f32>(block[2])});
+            pushVector3(L, normal);
+            return 2;
+        }
+    }
+    lua_pushnil(L);
+    lua_pushnil(L);
+    return 2;
+}
+
 // `WaitForChild` is here rather than in `instance_binding.cpp` because it parks
 // on a tree state and only the resumption phase this file owns can wake it.
 constexpr InstanceMethodBinding ServiceMethods[] = {
@@ -1025,6 +1259,16 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"PhysicsService", "RegisterCollisionGroup", physicsRegisterCollisionGroup},
     {"PhysicsService", "CollisionGroupSetCollidable", physicsCollisionGroupSetCollidable},
     {"PhysicsService", "GetRegisteredCollisionGroups", physicsGetRegisteredCollisionGroups},
+
+    {"VoxelService", "RegisterBlock", voxelRegisterBlock},
+    {"VoxelService", "GetBlockId", voxelGetBlockId},
+    {"VoxelService", "SetBlock", voxelSetBlock},
+    {"VoxelService", "GetBlock", voxelGetBlock},
+    {"VoxelService", "FillBlocks", voxelFillBlocks},
+    {"VoxelService", "Clear", voxelClear},
+    {"VoxelService", "WorldToBlock", voxelWorldToBlock},
+    {"VoxelService", "BlockToWorld", voxelBlockToWorld},
+    {"VoxelService", "Raycast", voxelRaycast},
 };
 
 } // namespace

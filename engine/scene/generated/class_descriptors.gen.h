@@ -294,6 +294,14 @@ bool setDebugServiceOverlayVisible(World& world, core::InstanceId id, const Valu
 Value getPhysicsServiceFixedTimestep(const World& world, core::InstanceId id);
 bool setPhysicsServiceFixedTimestep(World& world, core::InstanceId id, const Value& value);
 
+// VoxelService
+Value getVoxelServiceBlockSize(const World& world, core::InstanceId id);
+bool setVoxelServiceBlockSize(World& world, core::InstanceId id, const Value& value);
+Value getVoxelServiceChunkCount(const World& world, core::InstanceId id);
+Value getVoxelServiceBlockTypeCount(const World& world, core::InstanceId id);
+void attachVoxelComponents(World& world, core::InstanceId id);
+void detachVoxelComponents(World& world, core::InstanceId id);
+
 } // namespace native
 
 } // namespace luaug::scene

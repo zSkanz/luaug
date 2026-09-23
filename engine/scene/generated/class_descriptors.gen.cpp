@@ -1899,6 +1899,112 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     tweenServiceDesc.doc = "Property animation (\302\247" "2.1). It exists so that \"move this over half a second, easing out\" is one call rather than a `Heartbeat` handler with a timer in it -- and so that the engine, not the game, owns the arithmetic that makes two such animations agree.";
     tweenServiceDesc.methods = tweenServiceMethods;
     classes.registerClass(tweenServiceDesc);
+
+    // --- VoxelService ---
+    static std::array<PropertyDesc, 3> voxelServiceProperties;
+    voxelServiceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("BlockSize"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How large a block is, in metres. **Only settable while the world holds no blocks**: resizing a built world would move every block, so it is refused by name rather than done quietly. `Clear` first if that is really what you want.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.voxel_not_empty"),
+            .get = native::getVoxelServiceBlockSize,
+            .set = native::setVoxelServiceBlockSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("ChunkCount"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "How many 16 x 16 x 16 chunks hold at least one block. A chunk emptied of blocks is dropped, so this counts what the world actually stores.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getVoxelServiceChunkCount,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("BlockTypeCount"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "How many block types have been registered. Ids run from 1 to this number.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getVoxelServiceBlockTypeCount,
+            .set = nullptr,
+        },
+    }};
+    static std::array<MethodDesc, 9> voxelServiceMethods;
+    voxelServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("RegisterBlock"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colour.",
+        },
+        MethodDesc{
+            .name = atoms.intern("GetBlockId"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .doc = "The id a block type was registered with, or nil for a name nobody registered.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetBlock"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are rounded down. Returns whether anything changed.",
+        },
+        MethodDesc{
+            .name = atoms.intern("GetBlock"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .doc = "The id of the block at a block coordinate, 0 for air.",
+        },
+        MethodDesc{
+            .name = atoms.intern("FillBlocks"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Fills every block in the box between two block coordinates, both included, with one id -- 0 empties it. Returns how many blocks changed. The way to build a floor, a wall or a world's first ground in one call rather than thousands.",
+        },
+        MethodDesc{
+            .name = atoms.intern("Clear"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Removes every block. The registered block types stay.",
+        },
+        MethodDesc{
+            .name = atoms.intern("WorldToBlock"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .doc = "The block coordinate a world position falls in.",
+        },
+        MethodDesc{
+            .name = atoms.intern("BlockToWorld"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .doc = "The world position of a block's centre.",
+        },
+        MethodDesc{
+            .name = atoms.intern("Raycast"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .doc = "Walks a ray block by block and returns the first solid block it enters and the face it entered through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length. The block is what a pickaxe breaks; the block plus the normal is where a placed block goes.",
+        },
+    }};
+    ClassDescriptor voxelServiceDesc;
+    voxelServiceDesc.name = atoms.intern("VoxelService");
+    voxelServiceDesc.super = instanceClass;
+    voxelServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    voxelServiceDesc.defaultName = atoms.intern("VoxelService");
+    voxelServiceDesc.doc = "A world made of blocks: the service for block games -- mining, building, a world of cubes in chunks. **It is not `Terrain`.** Terrain is a sculpted landscape, a smooth surface at any angle; this is a grid of cubes, each one a block type, whose surface is axis-aligned faces.\012\012Blocks are addressed by integer block coordinates, as a `vector` of whole numbers: block `(0, 0, 0)` spans from the origin to `BlockSize` on every axis. Register the block types a game uses once, then place and break them by id. Id 0 is air.\012\012The world is drawn and collided by the engine: every chunk that holds blocks is meshed with its hidden faces removed and its coplanar faces merged, and shaded with ambient occlusion at every corner.";
+    voxelServiceDesc.properties = voxelServiceProperties;
+    voxelServiceDesc.methods = voxelServiceMethods;
+    voxelServiceDesc.attachComponents = native::attachVoxelComponents;
+    voxelServiceDesc.detachComponents = native::detachVoxelComponents;
+    classes.registerClass(voxelServiceDesc);
 }
 
 // Registered in declaration order, so an enum's `EnumId` is its position in

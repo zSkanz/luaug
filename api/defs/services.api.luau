@@ -1063,6 +1063,141 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "VoxelService",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Voxel",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "A world made of blocks: the service for block games -- mining, building, a world of cubes in "
+            .. "chunks. **It is not `Terrain`.** Terrain is a sculpted landscape, a smooth surface at any "
+            .. "angle; this is a grid of cubes, each one a block type, whose surface is axis-aligned faces.\n\n"
+            .. "Blocks are addressed by integer block coordinates, as a `vector` of whole numbers: block "
+            .. "`(0, 0, 0)` spans from the origin to `BlockSize` on every axis. Register the block types a "
+            .. "game uses once, then place and break them by id. Id 0 is air.\n\n"
+            .. "The world is drawn and collided by the engine: every chunk that holds blocks is meshed "
+            .. "with its hidden faces removed and its coplanar faces merged, and shaded with ambient "
+            .. "occlusion at every corner.",
+        Properties = {
+            {
+                Name = "BlockSize",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.voxel_not_empty",
+                Doc = "How large a block is, in metres. **Only settable while the world holds no blocks**: "
+                    .. "resizing a built world would move every block, so it is refused by name rather than "
+                    .. "done quietly. `Clear` first if that is really what you want.",
+            },
+            {
+                Name = "ChunkCount",
+                Type = "number",
+                ReadOnly = true,
+                Doc = "How many 16 x 16 x 16 chunks hold at least one block. A chunk emptied of blocks is "
+                    .. "dropped, so this counts what the world actually stores.",
+            },
+            {
+                Name = "BlockTypeCount",
+                Type = "number",
+                ReadOnly = true,
+                Doc = "How many block types have been registered. Ids run from 1 to this number.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "RegisterBlock",
+                Parameters = {
+                    { Name = "name", Type = "string" },
+                    { Name = "color", Type = "Color3" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Registers a block type and returns its id. Ids are handed out in registration order "
+                    .. "from 1, which makes them a pure function of the script that registered them -- the "
+                    .. "same script on every machine gets the same ids. Registering a name twice returns the "
+                    .. "id it already has and updates its colour.",
+            },
+            {
+                Name = "GetBlockId",
+                Parameters = {
+                    { Name = "name", Type = "string" },
+                },
+                Returns = { "number?" },
+                ThreadSafety = "Safe",
+                Doc = "The id a block type was registered with, or nil for a name nobody registered.",
+            },
+            {
+                Name = "SetBlock",
+                Parameters = {
+                    { Name = "block", Type = "vector" },
+                    { Name = "id", Type = "number" },
+                },
+                Returns = { "boolean" },
+                ThreadSafety = "Unsafe",
+                Doc = "Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its "
+                    .. "components are rounded down. Returns whether anything changed.",
+            },
+            {
+                Name = "GetBlock",
+                Parameters = {
+                    { Name = "block", Type = "vector" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Safe",
+                Doc = "The id of the block at a block coordinate, 0 for air.",
+            },
+            {
+                Name = "FillBlocks",
+                Parameters = {
+                    { Name = "from", Type = "vector" },
+                    { Name = "to", Type = "vector" },
+                    { Name = "id", Type = "number" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Fills every block in the box between two block coordinates, both included, with one "
+                    .. "id -- 0 empties it. Returns how many blocks changed. The way to build a floor, a "
+                    .. "wall or a world's first ground in one call rather than thousands.",
+            },
+            {
+                Name = "Clear",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Removes every block. The registered block types stay.",
+            },
+            {
+                Name = "WorldToBlock",
+                Parameters = {
+                    { Name = "position", Type = "vector" },
+                },
+                Returns = { "vector" },
+                ThreadSafety = "Safe",
+                Doc = "The block coordinate a world position falls in.",
+            },
+            {
+                Name = "BlockToWorld",
+                Parameters = {
+                    { Name = "block", Type = "vector" },
+                },
+                Returns = { "vector" },
+                ThreadSafety = "Safe",
+                Doc = "The world position of a block's centre.",
+            },
+            {
+                Name = "Raycast",
+                Parameters = {
+                    { Name = "origin", Type = "vector" },
+                    { Name = "direction", Type = "vector" },
+                },
+                Returns = { "vector?", "vector?" },
+                ThreadSafety = "Safe",
+                Doc = "Walks a ray block by block and returns the first solid block it enters and the face "
+                    .. "it entered through, as an outward normal -- or nil and nil if it hits nothing within "
+                    .. "`direction`'s length. The block is what a pickaxe breaks; the block plus the normal "
+                    .. "is where a placed block goes.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {
