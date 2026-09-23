@@ -52,6 +52,10 @@ void wakeFluidsInBox(VoxelComponent& voxels, core::i32 minX, core::i32 minY, cor
 // something next to it changed.
 void wakeAllFluids(VoxelComponent& voxels);
 
+// The same for the blocks of `arrived` only -- a streamed cell just merged into
+// the world, whose water was written down without its steps too.
+void wakeFluidsIn(VoxelComponent& voxels, const asset::VoxelGrid& arrived);
+
 // One tick of every fluid. `tick` is the simulation's own count. Returns how
 // many blocks changed; bumps `revision` when any did.
 core::u32 stepFluids(VoxelComponent& voxels, core::u64 tick);

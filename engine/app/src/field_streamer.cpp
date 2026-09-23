@@ -5,6 +5,7 @@
 #include "luaug/core/log.h"
 #include "luaug/platform/platform.h"
 #include "luaug/scene/components.h"
+#include "luaug/scene/voxel_fluid.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
@@ -121,6 +122,10 @@ f64 FieldStreamer::materialize(asset::ChunkId id, std::span<const std::byte> byt
     if (scene::VoxelComponent* component = voxels(); component != nullptr) {
         component->grid.shareFrom(cell.grid);
         component->revision += 1;
+        // Its water was saved without the steps it was due. A still lake
+        // settles in one look; water that moves makes the cell one somebody
+        // changed, which is what it now is.
+        scene::wakeFluidsIn(*component, cell.grid);
         m_voxelCells[id] = std::move(cell);
     }
     return millisecondsSince(started);

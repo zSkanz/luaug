@@ -162,3 +162,19 @@ TEST_CASE("a slower fluid moves at its own pace, and one that is not a fluid nev
     CHECK(still.at(1, 0, 0) == asset::AirBlock);
     CHECK(still.voxels.fluidWakes.empty());
 }
+
+TEST_CASE("water that arrives in a streamed cell is woken, and nothing else is")
+{
+    Pond pond;
+    // Already in the world, and still: nothing wakes it.
+    (void)pond.voxels.grid.set(-10, 0, -10, Water);
+    // What a streamed cell brings: a source with room to spread.
+    asset::VoxelGrid arrived;
+    (void)arrived.set(10, 0, 10, Water);
+    (void)pond.voxels.grid.set(10, 0, 10, Water);
+
+    scene::wakeFluidsIn(pond.voxels, arrived);
+    pond.run(10);
+    CHECK(pond.at(11, 0, 10) == asset::blockWithState(Water, 1));
+    CHECK(pond.at(-9, 0, -10) == asset::AirBlock);
+}

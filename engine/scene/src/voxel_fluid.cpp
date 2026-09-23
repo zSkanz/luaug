@@ -153,11 +153,16 @@ void wakeFluidsInBox(VoxelComponent& voxels, i32 minX, i32 minY, i32 minZ, i32 m
 
 void wakeAllFluids(VoxelComponent& voxels)
 {
+    wakeFluidsIn(voxels, voxels.grid);
+}
+
+void wakeFluidsIn(VoxelComponent& voxels, const asset::VoxelGrid& arrived)
+{
     if (!anyFluid(voxels))
         return;
     const auto edge = static_cast<i32>(asset::VoxelChunkEdge);
-    for (const asset::VoxelChunkKey key : voxels.grid.chunkKeys()) {
-        const asset::VoxelChunk* chunk = voxels.grid.findChunk(key);
+    for (const asset::VoxelChunkKey key : arrived.chunkKeys()) {
+        const asset::VoxelChunk* chunk = arrived.findChunk(key);
         if (chunk == nullptr)
             continue;
         for (i32 y = 0; y < edge; ++y) {
