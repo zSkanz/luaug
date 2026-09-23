@@ -791,6 +791,22 @@ std::optional<core::EngineError> Partitioner::run(std::string_view sceneJson)
     residual.append(kFormat);
     residual.append("\",\"version\":1,\"root\":");
     (void)visitChildren(*root, textOf(*root, "name"), residual);
+    // **Every other top-level member, verbatim.** The residual scene is the
+    // whole scene minus what went into cells, and the tree is not the whole
+    // scene: the block world is a top-level `voxels` member, and rebuilding the
+    // object from the three keys this function reads silently dropped it -- a
+    // game with a block world and enough parts to partition booted with no
+    // blocks at all. Copied through rather than named, so the next member
+    // `writeScene` grows cannot be dropped the same way.
+    (void)jsonslice::forEachMember(sceneJson, [&](std::string_view key, std::string_view value) {
+        if (key == "format" || key == "version" || key == "root")
+            return true;
+        residual.append(",\"");
+        residual.append(key);
+        residual.append("\":");
+        residual.append(value);
+        return true;
+    });
     residual.push_back('}');
 
     m_out.scene = std::move(residual);

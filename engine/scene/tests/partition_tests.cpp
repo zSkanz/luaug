@@ -227,6 +227,27 @@ TEST_CASE("a scene with nothing streamable partitions to itself, byte for byte")
     CHECK(partitioned.cells.empty());
 }
 
+TEST_CASE("the block world and every other top-level member survive a partition")
+{
+    // **A defect, found reading the partitioner for terrain streaming**: the
+    // residual scene was rebuilt from `format`, `version` and `root`, and the
+    // block world is a top-level `voxels` member -- so a game with blocks and
+    // enough parts to partition booted with no blocks at all.
+    seedRealCatalog();
+    Sandbox sandbox;
+
+    const std::string voxels =
+        R"({"blockSize":1,"types":[{"name":"Stone"}],"chunks":[{"x":0,"y":0,"z":0,"blocks":"AQA="}]})";
+    std::string text = sceneText(partNode("Near", 10.0, 0.0, 10.0));
+    text.pop_back();
+    text += R"(,"voxels":)" + voxels + "}";
+
+    const Partition partitioned = partition(sandbox, text);
+    CHECK(partitioned.result.report.records == 1);
+    CHECK(partitioned.result.scene.find(R"("voxels":)" + voxels) != std::string::npos);
+    CHECK(partitioned.result.scene.find("\"Near\"") == std::string::npos);
+}
+
 TEST_CASE("a loose part goes into the cell its position falls in")
 {
     seedRealCatalog();
