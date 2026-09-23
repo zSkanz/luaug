@@ -163,6 +163,7 @@ end
 Lighting.ClockTime = 8.4
 Lighting.GeographicLatitude = 22
 Lighting.Ambient = Color3.fromRGB(26, 34, 46)
+Lighting.OutdoorAmbient = Color3.fromRGB(26, 34, 46)
 Lighting.Brightness = 2.6
 -- Auto exposure is on by default, and an ocean is a big even field of one
 -- brightness -- exactly the scene a metering system lifts until the water is

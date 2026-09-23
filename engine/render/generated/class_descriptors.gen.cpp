@@ -809,7 +809,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(animationPlayerDesc);
 
     // --- Lighting ---
-    static std::array<scene::PropertyDesc, 9> lightingProperties;
+    static std::array<scene::PropertyDesc, 10> lightingProperties;
     lightingProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("ClockTime"),
@@ -839,10 +839,21 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "Flat light reaching every surface from every direction. A stand-in for bounced light until there is any; not clamped, so it can be pushed above one deliberately.",
+            .doc = "The flat light in ENCLOSED spaces -- a cave, a tunnel, under an overhang: surfaces that see none of the sky. `OutdoorAmbient` is the light of those that see all of it, and a surface that sees some takes a blend of the two by how much. A stand-in for bounced light, so a cave is dim rather than black; set it darker for a darker cave. Not clamped, so it can be pushed above one deliberately.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getLightingAmbient,
             .set = native::setLightingAmbient,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("OutdoorAmbient"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The flat light on surfaces that see the open sky. What `Ambient` is for enclosed spaces; the two start equal, so a world that sets neither is lit the same inside and out, and one that wants dark caves darkens `Ambient` alone. A part is outdoors unless the terrain says otherwise.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getLightingOutdoorAmbient,
+            .set = native::setLightingOutdoorAmbient,
         },
         scene::PropertyDesc{
             .name = atoms.intern("Brightness"),

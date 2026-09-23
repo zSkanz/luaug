@@ -2842,6 +2842,9 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         frame.ambient[0] = world.environment.ambient.r;
         frame.ambient[1] = world.environment.ambient.g;
         frame.ambient[2] = world.environment.ambient.b;
+        frame.outdoorAmbient[0] = world.environment.outdoorAmbient.r;
+        frame.outdoorAmbient[1] = world.environment.outdoorAmbient.g;
+        frame.outdoorAmbient[2] = world.environment.outdoorAmbient.b;
         frame.fogColor[0] = world.environment.fogColor.r;
         frame.fogColor[1] = world.environment.fogColor.g;
         frame.fogColor[2] = world.environment.fogColor.b;
@@ -3008,10 +3011,12 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             particleUniforms.cameraUp[1] = up.y;
             particleUniforms.cameraUp[2] = up.z;
 
+            // A particle carries no sky term, so it is lit as the open air is
+            // (ADR 0084): `OutdoorAmbient`, not the enclosed `Ambient`.
             GpuParticleLighting lighting;
-            lighting.ambient[0] = world.environment.ambient.r;
-            lighting.ambient[1] = world.environment.ambient.g;
-            lighting.ambient[2] = world.environment.ambient.b;
+            lighting.ambient[0] = world.environment.outdoorAmbient.r;
+            lighting.ambient[1] = world.environment.outdoorAmbient.g;
+            lighting.ambient[2] = world.environment.outdoorAmbient.b;
             const f32 sun = world.environment.sunBrightness * sky.dayFactor;
             lighting.sunLight[0] = sky.sunColor.r * sun;
             lighting.sunLight[1] = sky.sunColor.g * sun;

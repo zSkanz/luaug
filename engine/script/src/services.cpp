@@ -401,7 +401,7 @@ int debugServiceSetCustomStat(lua_State* L)
 // The built-in panels, api-design.md §2.1. A closed list rather than a free
 // namespace, because an unknown panel raises and there has to be something to
 // compare against.
-constexpr std::string_view Panels[] = {"Stats", "Scene", "Log", "Streaming", "Physics"};
+constexpr std::string_view Panels[] = {"Stats", "Scene", "Log", "Streaming", "Physics", "Terrain"};
 
 [[nodiscard]] core::NameAtom checkPanelName(lua_State* L, int index)
 {

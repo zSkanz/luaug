@@ -23,6 +23,11 @@ local Rock = 3
 local Air = 0
 
 Lighting.ClockTime = 15.5
+-- **A cave is dim, not black.** `Ambient` is the light of enclosed spaces and
+-- `OutdoorAmbient` that of the open air (ADR 0084): the plain keeps the default,
+-- and the cave gets a low cool light of its own -- enough to see the walls by
+-- -- while the crystals and the torch still do the lighting inside.
+Lighting.Ambient = Color3.fromRGB(14, 15, 20)
 
 local terrain = Instance.new("Terrain")
 terrain.Name = "Ground"

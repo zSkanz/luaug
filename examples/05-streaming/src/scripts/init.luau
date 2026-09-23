@@ -20,6 +20,7 @@ local StreamingService = game:GetService("StreamingService")
 -- A clear morning, so the terrain reads as terrain rather than as silhouettes.
 Lighting.ClockTime = 9
 Lighting.Ambient = Color3.fromRGB(22, 25, 30)
+Lighting.OutdoorAmbient = Color3.fromRGB(22, 25, 30)
 Lighting.Brightness = 2
 Lighting.FogStart = 600
 Lighting.FogEnd = 2600

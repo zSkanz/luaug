@@ -104,7 +104,11 @@ struct GpuFrameUniforms
     // white light while the sky's disc was tinted, so a sunset lit a scene
     // exactly like noon did.
     f32 sunColorUnused[4]{1.0f, 0.96f, 0.9f, 0.0f};
+    // `Lighting.Ambient`, the flat light of enclosed spaces, and below it
+    // `Lighting.OutdoorAmbient`, that of open ones; a surface takes a blend by
+    // how much sky it sees (ADR 0084). w unused in both.
     f32 ambient[4]{0.15f, 0.16f, 0.2f, 0.0f};
+    f32 outdoorAmbient[4]{0.15f, 0.16f, 0.2f, 0.0f};
     f32 fogColor[4]{0.6f, 0.7f, 0.85f, 0.0f};
     // x start, y end, z one over (end - start) precomputed because a fragment
     // shader would otherwise divide per pixel, w unused. When fog is off
@@ -163,7 +167,7 @@ struct GpuFrameUniforms
     f32 localShadowParams[4]{};
 };
 
-static_assert(sizeof(GpuFrameUniforms) == 208 + 256 + 144 + 64 * kLocalShadowTileCount + 16,
+static_assert(sizeof(GpuFrameUniforms) == 224 + 256 + 144 + 64 * kLocalShadowTileCount + 16,
               "GpuFrameUniforms is a cbuffer layout; see luaug_forward.hlsli");
 
 // Fragment stage, `b1 space3`. Per material rather than per frame, because it

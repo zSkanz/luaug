@@ -229,8 +229,19 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Ambient",
                 Type = "Color3",
-                Doc = "Flat light reaching every surface from every direction. A stand-in for bounced light until "
-                    .. "there is any; not clamped, so it can be pushed above one deliberately.",
+                Doc = "The flat light in ENCLOSED spaces -- a cave, a tunnel, under an overhang: surfaces that see "
+                    .. "none of the sky. `OutdoorAmbient` is the light of those that see all of it, and a surface "
+                    .. "that sees some takes a blend of the two by how much. A stand-in for bounced light, so a "
+                    .. "cave is dim rather than black; set it darker for a darker cave. Not clamped, so it can be "
+                    .. "pushed above one deliberately.",
+            },
+            {
+                Name = "OutdoorAmbient",
+                Type = "Color3",
+                Doc = "The flat light on surfaces that see the open sky. What `Ambient` is for enclosed spaces; "
+                    .. "the two start equal, so a world that sets neither is lit the same inside and out, and one "
+                    .. "that wants dark caves darkens `Ambient` alone. A part is outdoors unless the terrain says "
+                    .. "otherwise.",
             },
             {
                 Name = "Brightness",
@@ -923,7 +934,9 @@ local Classes: { Schema.Class } = {
                 Returns = {},
                 ThreadSafety = "Unsafe",
                 Doc = "Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, "
-                    .. "`Streaming` and `Physics`; an unknown panel raises `scene.err.unknown_stat`.",
+                    .. "`Streaming`, `Physics` and `Terrain` -- the terrain's triangles and normals around the "
+                    .. "camera, red where a triangle faces the wrong way; an unknown panel raises "
+                    .. "`scene.err.unknown_stat`.",
             },
             {
                 Name = "HidePanel",

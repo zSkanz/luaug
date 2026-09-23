@@ -67,6 +67,7 @@ luaug_add_module_tests(asset
         tests/content_tests.cpp
         tests/terrain_tests.cpp
         tests/terrain_mesher_tests.cpp
+        tests/terrain_mesh_validation_tests.cpp
         tests/terrain_cell_tests.cpp
         tests/field_cells_tests.cpp
         tests/voxel_tests.cpp

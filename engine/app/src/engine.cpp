@@ -33,6 +33,7 @@
 #include "luaug/app/skeleton_overlay.h"
 #include "luaug/app/soak.h"
 #include "luaug/app/streaming_host.h"
+#include "luaug/app/terrain_overlay.h"
 #include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_text.h"
 #include "luaug/app/world_host.h"
@@ -2735,6 +2736,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                      chosen ? render::DebugColor::fromLinear(1.0f, 0.85f, 0.35f)
                                             : render::DebugColor::fromLinear(0.45f, 0.55f, 0.70f),
                                      12);
+            }
+        }
+
+        // **The terrain's triangles and normals** (the owner's terrain report),
+        // behind `View > Terrain Wireframe` and `Terrain Normals` in the editor
+        // and `DebugService:ShowPanel("Terrain")` in a game -- which shows both.
+        // Around the eye the frame is drawn from: the editor's camera, or the
+        // world's own when a game is running.
+        {
+            const bool terrainPanel = script::panelOpen(host->runtime().state(), "Terrain");
+            const bool wireframe = terrainPanel || (overlay.has_value() && overlay->panels().showTerrainWireframe);
+            const bool normals = terrainPanel || (overlay.has_value() && overlay->panels().showTerrainNormals);
+            if (wireframe || normals) {
+                core::DVec3 eye = editor.cameraCFrame().position;
+                if (const scene::CameraComponent* camera = host->world().cameras().find(listener);
+                    camera != nullptr && !listenWithEditor)
+                    eye = camera->cframe.position;
+                drawTerrainDebug(host->world(), eye, wireframe, normals, debugDraw);
             }
         }
 

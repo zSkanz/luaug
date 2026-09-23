@@ -100,6 +100,7 @@ workspace.CurrentCamera = camera
 -- difference between two runs of this scene cannot be the cascades.
 Lighting.Brightness = 0
 Lighting.Ambient = Color3.fromRGB(6, 6, 8)
+Lighting.OutdoorAmbient = Color3.fromRGB(6, 6, 8)
 Lighting.FogStart = 400
 Lighting.FogEnd = 800
 

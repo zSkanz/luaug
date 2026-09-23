@@ -40,4 +40,5 @@ workspace.CurrentCamera = camera
 Lighting.ClockTime = 8.0
 Lighting.GeographicLatitude = 55
 Lighting.Ambient = Color3.fromRGB(12, 16, 22)
+Lighting.OutdoorAmbient = Color3.fromRGB(12, 16, 22)
 Lighting.Brightness = 3.1

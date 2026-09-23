@@ -1,0 +1,15 @@
+# A cave dug into a mountain from the side (F1): Terrain as a volume.
+#
+# No scene file: the script sculpts the mountain, digs the tunnel and flies the
+# camera through it, because the order of those calls is the subject.
+
+[project]
+name = "LuauG Terrain Test"
+id = "dev.luaug.terraintest"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Terrain Test"
+width = 1280
+height = 720

@@ -285,9 +285,8 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     // sky, prefiltered by roughness, so a metal reflects the hour the script
     // set instead of reflecting nothing.
     //
-    // `Ambient` is ADDED to the irradiance rather than replaced by it, so the
-    // property keeps meaning what it documents: light reaching every surface
-    // from every direction, a stand-in for bounced light there is still none of.
+    // The ambient is ADDED to the irradiance rather than replaced by it: a
+    // stand-in for bounced light there is still none of.
     // The occlusion term multiplies the environment and the ambient below, and
     // NOTHING else. A surface's occlusion of the environment says nothing about
     // whether the sun reaches it, and the sun has a shadow map that answers
@@ -295,8 +294,11 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     // ambient-occlusion pass ends up looking like dirt.
     const float2 screenUv = pixel * ViewportParams.zw;
     const float rawOcclusion = OcclusionTexture.SampleLevel(OcclusionSampler, screenUv, 0.0f);
-    const float occlusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z) * sky;
+    const float screenOcclusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z);
+    const float occlusion = screenOcclusion * sky;
 
+    // The sky's own light -- its irradiance and its reflection -- reaches only
+    // as much of the surface as sees the sky.
     color += evaluateEnvironment(surface, EnvironmentMap, EnvironmentSampler, BrdfLut, BrdfSampler, IrradianceSh,
                                  EnvironmentParams.x, EnvironmentParams.y, occlusion);
     // And `Ambient` on the DIFFUSE lobe only, which is a change of side rather
@@ -307,7 +309,16 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     // behind it now, and it answers that case properly -- adding a flat term on
     // top of a prefiltered one is counting the same light twice, and it shows up
     // as metal that cannot be made dark.
-    color += Ambient.rgb * surface.DiffuseColor * occlusion;
+    //
+    // **Which ambient is a question of where the surface is** (ADR 0084):
+    // `OutdoorAmbient` for one that sees the open sky, `Ambient` for one that
+    // sees none of it -- a cave, a tunnel, under an overhang -- and a blend by
+    // how much sky it sees between. It used to be `Ambient` scaled BY the sky
+    // term, which zeroed it in exactly the places a stand-in for bounced light
+    // exists for, and a cave came out black wherever a lamp did not reach (the
+    // owner's terrain report). The screen-space occlusion still darkens it.
+    const float3 ambient = lerp(Ambient.rgb, OutdoorAmbient.rgb, sky);
+    color += ambient * surface.DiffuseColor * screenOcclusion;
     return color;
 }
 

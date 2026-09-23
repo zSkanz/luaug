@@ -46,7 +46,7 @@ Publishes a game-defined number under this name, readable afterwards through `Ge
 
 ### `ShowPanel(name: string)`
 
-Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming` and `Physics`; an unknown panel raises `scene.err.unknown_stat`.
+Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming`, `Physics` and `Terrain` -- the terrain's triangles and normals around the camera, red where a triangle faces the wrong way; an unknown panel raises `scene.err.unknown_stat`.
 
 ## Events
 

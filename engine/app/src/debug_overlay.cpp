@@ -4988,6 +4988,8 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
                               "Right-click the snap button for the step");
         }
         ImGui::MenuItem("Collision Shapes", nullptr, &panels.showCollision);
+        ImGui::MenuItem("Terrain Wireframe", nullptr, &panels.showTerrainWireframe);
+        ImGui::MenuItem("Terrain Normals", nullptr, &panels.showTerrainNormals);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("draw what the SOLVER thinks each part is, which is not always what is drawn: a mesh "
                               "collides as a hull, a wedge as its whole box");

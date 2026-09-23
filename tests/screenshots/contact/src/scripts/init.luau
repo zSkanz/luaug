@@ -75,6 +75,7 @@ workspace.CurrentCamera = camera
 -- centimetre of bright floor.
 Lighting.GeographicLatitude = 20
 Lighting.Ambient = Color3.fromRGB(18, 20, 26)
+Lighting.OutdoorAmbient = Color3.fromRGB(18, 20, 26)
 Lighting.Brightness = 2.4
 Lighting.FogStart = 120
 Lighting.FogEnd = 400

@@ -227,6 +227,8 @@ scene::Value getLightingGeographicLatitude(const scene::World& world, core::Inst
 bool setLightingGeographicLatitude(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getLightingAmbient(const scene::World& world, core::InstanceId id);
 bool setLightingAmbient(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getLightingOutdoorAmbient(const scene::World& world, core::InstanceId id);
+bool setLightingOutdoorAmbient(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getLightingBrightness(const scene::World& world, core::InstanceId id);
 bool setLightingBrightness(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getLightingFogColor(const scene::World& world, core::InstanceId id);

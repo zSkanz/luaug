@@ -16,7 +16,7 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Ambient` | `Color3` | — | read/write | Flat light reaching every surface from every direction. A stand-in for bounced light until there is any; not clamped, so it can be pushed above one deliberately. |
+| `Ambient` | `Color3` | — | read/write | The flat light in ENCLOSED spaces -- a cave, a tunnel, under an overhang: surfaces that see none of the sky. `OutdoorAmbient` is the light of those that see all of it, and a surface that sees some takes a blend of the two by how much. A stand-in for bounced light, so a cave is dim rather than black; set it darker for a darker cave. Not clamped, so it can be pushed above one deliberately. |
 | `Brightness` | `number` | — | read/write | How strong the sun is, independent of its colour. |
 | `ClockTime` | `number` | — | read/write | The hour of day, 0 to 24, wrapping rather than clamping so that adding a delta every tick never has to check. It is the ONLY input to the sun's direction, which is what makes a replay light the same way the live run did. |
 | `ExposureCompensation` | `number` | — | read/write | Exposure in EV stops, on top of the automatic exposure the renderer measures from the frame itself. Zero means whatever it measured; +1 is twice the light and -1 is half, which is the unit a camera uses. It is a look rather than a limit, so it is not clamped. |
@@ -24,4 +24,5 @@ offers is on the base's page, which is what keeps one added member on
 | `FogEnd` | `number` | — | read/write | Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, which is how fog is turned off without a separate flag. |
 | `FogStart` | `number` | — | read/write | Distance in metres at which fog begins. |
 | `GeographicLatitude` | `number` | — | read/write | Degrees north of the equator, which tilts the sun's arc across the sky. The second and last input to SunDirection. |
+| `OutdoorAmbient` | `Color3` | — | read/write | The flat light on surfaces that see the open sky. What `Ambient` is for enclosed spaces; the two start equal, so a world that sets neither is lit the same inside and out, and one that wants dark caves darkens `Ambient` alone. A part is outdoors unless the terrain says otherwise. |
 | `SunDirection` | `vector` | — | read-only | The unit vector pointing from the world towards the sun, derived from ClockTime and GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same ClockTime always gives the same direction. |

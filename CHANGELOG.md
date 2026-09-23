@@ -11,6 +11,14 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **Terrain debug views**: `Terrain wireframe` and `Terrain normals` in the
+  editor's viewport settings, and `DebugService:ShowPanel("Terrain")` in a game.
+  Triangles are drawn green, or red where one faces the wrong way, with a line
+  along each vertex normal.
+- **`examples/19-terrain-test`**: every controlled case of the terrain report
+  side by side (flat, slope, hill, a ball added and taken away, tunnel, cave,
+  wall, overhang, a chunk corner), toured from above, the side and below.
+
 - **Terrain is a grid of voxels** (ADR 0082). Every voxel holds a material and
   an occupancy, and the surface is where the occupancy crosses one half:
   - caves, overhangs and flat ground are the same data, so nothing is special
@@ -126,6 +134,12 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Changed
 
+- **`Lighting.Ambient` lights enclosed spaces, and the new
+  `Lighting.OutdoorAmbient` lights open ones** (ADR 0084). A surface takes a
+  blend of the two by how much sky it sees, so a cave is dim rather than black.
+  Both start at the old `Ambient` default. A script that set `Ambient` to light
+  its parts should set `OutdoorAmbient` too, since parts are outdoors.
+
 - **The simulation is deterministic across platforms** (level C, ADR 0083). The
   same seed and the same operations give the same world hash on Windows, Linux
   and macOS. The engine ships its own `sin`, `cos`, `exp`, `log`, `pow` and the
@@ -160,6 +174,9 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Fixed
 
+- The shadow under an overhang no longer shows a row of teeth along its edge,
+  and the terrain's quads are split along their shorter diagonal, so sharp rims
+  no longer make long thin triangles (the owner's terrain report).
 - **One ctrl+Z undoes one brush stroke** (D168). Every stroke of a session had
   joined one undo step, so a single ctrl+Z took back all of the terrain's
   edits.

@@ -390,6 +390,14 @@ struct EditorPanels
     // Off by default because a grid is only useful while placing something, and
     // a permanent one is lines across every screenshot.
     bool showGrid = false;
+
+    // **The terrain's own triangles, and its normals** (the owner's terrain
+    // report): the mesh around the camera as lines, green where a triangle's
+    // winding agrees with its normals and red where it does not, and a short
+    // line along each vertex's normal. The shaded picture cannot tell a wrong
+    // normal from a dark material; these can. `terrain_overlay.h` has the rest.
+    bool showTerrainWireframe = false;
+    bool showTerrainNormals = false;
 };
 
 // What the shell asked for this frame, drained by the frame loop at the safe

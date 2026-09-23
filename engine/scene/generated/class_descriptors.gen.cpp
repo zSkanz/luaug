@@ -2038,7 +2038,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("ShowPanel"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming` and `Physics`; an unknown panel raises `scene.err.unknown_stat`.",
+            .doc = "Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming`, `Physics` and `Terrain` -- the terrain's triangles and normals around the camera, red where a triangle faces the wrong way; an unknown panel raises `scene.err.unknown_stat`.",
         },
         MethodDesc{
             .name = atoms.intern("HidePanel"),

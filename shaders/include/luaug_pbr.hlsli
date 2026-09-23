@@ -96,6 +96,7 @@ cbuffer GpuFrameUniforms : register(b0, space3)
     // exactly like noon did.
     float4 SunColorUnused;
     float4 Ambient;
+    float4 OutdoorAmbient;
     float4 FogColor;
     // x start, y end, z one over (end - start), w unused. z is zero when fog is
     // off, which zeroes the fog factor without the shader testing for it.

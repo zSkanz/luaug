@@ -1359,6 +1359,10 @@
           "Type": "number"
         },
         {
+          "Name": "OutdoorAmbient",
+          "Type": "Color3"
+        },
+        {
           "Name": "SunDirection",
           "Type": "vector",
           "ReadOnly": true,

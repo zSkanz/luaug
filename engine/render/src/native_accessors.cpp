@@ -1189,6 +1189,22 @@ bool setLightingAmbient(scene::World& world, core::InstanceId id, const Value& v
     return true;
 }
 
+Value getLightingOutdoorAmbient(const scene::World& world, core::InstanceId id)
+{
+    const scene::LightingComponent* lighting = readLighting(world, id);
+    return lighting == nullptr ? Value{} : Value{lighting->outdoorAmbient};
+}
+
+bool setLightingOutdoorAmbient(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* color = std::get_if<core::Color3>(&value);
+    scene::LightingComponent* lighting = writeLighting(world, id);
+    if (color == nullptr || lighting == nullptr)
+        return false;
+    lighting->outdoorAmbient = *color;
+    return true;
+}
+
 Value getLightingBrightness(const scene::World& world, core::InstanceId id)
 {
     const scene::LightingComponent* lighting = readLighting(world, id);

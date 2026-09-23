@@ -300,7 +300,7 @@ caller owns (§3.1).
 **`DebugService`** — ImGui overlay + instrumentation (present in shipped
 builds with the overlay off unless enabled).
 - Overlay: `OverlayVisible: boolean`, `ShowPanel(name)`, `HidePanel(name)`
-  (built-ins: "Stats", "Scene", "Log", "Streaming", "Physics")
+  (built-ins: "Stats", "Scene", "Log", "Streaming", "Physics", "Terrain")
 - Gizmos (dev): `DrawLine(a, b, color?)`, `DrawBox(cframe, size, color?)`,
   `DrawSphere(position, radius, color?)` (per-frame). Headless there is no
   renderer and all three are **silent no-ops** — they must not raise, so debug

@@ -27,6 +27,7 @@ doing nothing:
 | `Log` | What `print`, `warn` and the engine have said. |
 | `Streaming` | Chunk states, foci, residency. |
 | `Physics` | Bodies, contacts, the solver. |
+| `Terrain` | The terrain's triangles and vertex normals around the camera. A red triangle faces the wrong way; the editor has the same two views under `Terrain wireframe` and `Terrain normals`. |
 
 `DebugService.ShowPanel` and `DebugService.HidePanel` take those names.
 

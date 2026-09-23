@@ -1665,9 +1665,16 @@ declare extern type Lighting extends Instance with
     --- Degrees north of the equator, which tilts the sun's arc across the sky. The second and last
     --- input to SunDirection.
     GeographicLatitude: number
-    --- Flat light reaching every surface from every direction. A stand-in for bounced light until there
-    --- is any; not clamped, so it can be pushed above one deliberately.
+    --- The flat light in ENCLOSED spaces -- a cave, a tunnel, under an overhang: surfaces that see none
+    --- of the sky. `OutdoorAmbient` is the light of those that see all of it, and a surface that sees
+    --- some takes a blend of the two by how much. A stand-in for bounced light, so a cave is dim rather
+    --- than black; set it darker for a darker cave. Not clamped, so it can be pushed above one
+    --- deliberately.
     Ambient: Color3
+    --- The flat light on surfaces that see the open sky. What `Ambient` is for enclosed spaces; the two
+    --- start equal, so a world that sets neither is lit the same inside and out, and one that wants
+    --- dark caves darkens `Ambient` alone. A part is outdoors unless the terrain says otherwise.
+    OutdoorAmbient: Color3
     --- How strong the sun is, independent of its colour.
     Brightness: number
     --- What distance fades towards between FogStart and FogEnd.
@@ -1928,8 +1935,9 @@ declare extern type DebugService extends Instance with
     --- Publishes a game-defined number under this name, readable afterwards through `GetStat` and shown
     --- on the stats panel. A value that is not a number raises like any other typed-argument mismatch.
     function SetCustomStat(self, name: string, value: number): ()
-    --- Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming`
-    --- and `Physics`; an unknown panel raises `scene.err.unknown_stat`.
+    --- Opens one panel of the overlay by name. The built-ins are `Stats`, `Scene`, `Log`, `Streaming`,
+    --- `Physics` and `Terrain` -- the terrain's triangles and normals around the camera, red where a
+    --- triangle faces the wrong way; an unknown panel raises `scene.err.unknown_stat`.
     function ShowPanel(self, name: string): ()
     --- Closes one panel of the overlay by name, taking the same names as `ShowPanel`. An unknown panel
     --- raises `scene.err.unknown_stat`.

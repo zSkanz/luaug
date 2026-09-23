@@ -208,7 +208,7 @@ to a file and taxes every configuration to enable.
 
 | **F1** | `tests/bench/terrain_sculpt` (128 m of ground, one brush stamp every tick at 2, 4 and 8 m, one dig in seven, one paint in seven), re-measured on the voxel grid (ADR 0082; it was 4.27 ms on the hybrid) | `win-msvc-dev` | mean sim tick | **0.19 ms** | 16 ms |
 | F1 | `tests/bench/terrain_sculpt` | `win-msvc-dev` | worst sim tick | 1.44 ms (was 15.06) | — |
-| ADR 0082 | meshing one full-detail terrain node, 32 by 32 voxels and its surface, what a dig rebuilds (`luaug_render_tests --test-case="what meshing a terrain node costs" --no-skip`) | `win-msvc-dev` | per node | **3.5 ms** at 1 m, **4.6 ms** at 0.5 m (walls, bottoms and sky rays; 2.9 and 3.3 ms without the rays) | — |
+| ADR 0082 | meshing one full-detail terrain node, 32 by 32 voxels and its surface, what a dig rebuilds (`luaug_render_tests --test-case="what meshing a terrain node costs" --no-skip`) | `win-msvc-dev` | per node | **3.7 ms** at 1 m, **5.2 ms** at 0.5 m (walls, bottoms and the openness rays over the whole sphere; 2.9 and 3.3 ms without the rays) | — |
 | **F1 H2/H3** | `openworld_soak`, the flagship **with its middle 512 m as streamed terrain** (a 1 m heightmap written by `Terrain:WriteHeights`, a hill and a tunnel; 5,939 frames of walking and flying) | `win-msvc-dev` | median / p99 / worst frame | **2.04 / 3.10 / 5.19 ms**, 0 hitches | 33 ms p99 |
 | F1 H2/H3 | `openworld_soak` | `win-msvc-dev` | worst streaming pump | 1.04 ms | — |
 | F1 H2/H3 | `openworld_soak` | `win-msvc-dev` | peak resident memory | **56 MiB** (47 MiB with boxes for ground) | 192 MiB |

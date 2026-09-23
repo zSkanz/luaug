@@ -160,16 +160,27 @@ and vertex normals come from the density's gradient.
 - **Skirts hang from the outer ring, along the negative normal.** They cover
   the crack where two levels meet. A collider is always meshed at level 0 and
   never gets a skirt.
-- **Sky visibility is still baked per vertex**, from rays (amended the same
-  day). Eight bearings at 60, 30 and 10 degrees, plus the zenith, are marched
-  up to 12 m across a map of each column's bottom and top, built once per
-  region. A ray is blocked where it passes between the two. Each ray is
-  weighed by how squarely the surface faces it.
-  - The first version asked only whether a point was under its column's
-    ground. A ball added to the side of the terrain then stood a dark stripe
-    down the whole wall under it (the owner's picture).
-  - A point above every top within reach skips the rays, and that is most of
-    open ground. The rays cost about 0.6 ms of a node's 3.5 ms.
+- **Openness is baked per vertex**, from rays over the whole sphere (amended
+  the same day, twice).
+  - Eight bearings at 60, 30 and 10 degrees above the horizon and below it,
+    plus straight up and straight down, are marched up to 12 m across a map
+    of each column's bottom and top, built once per region.
+  - A ray is blocked where it passes between a column's bottom and its top,
+    and open once it is above every top or below every bottom in reach.
+  - Each ray is weighed by how squarely the surface faces it, so every
+    surface is judged by one rule. Open ground and an open wall see all they
+    face, the terrain's underside sees the air under it, and a tunnel sees
+    rock.
+  - **The first version asked only whether a point was under its column's
+    ground.** A ball added to the side of the terrain then stood a dark
+    stripe down the whole wall under it (the owner's picture).
+  - **The second weighed only the sky**, and gave a surface facing down a
+    fixed half. The rim under an overhang then alternated between the two
+    rules from vertex to vertex, and the triangles between drew a row of teeth
+    (the owner's second picture). With every direction weighed alike, the
+    value turns smoothly as the normal does.
+  - A point facing up above every top within reach skips the rays, and that
+    is most of open ground. A node meshes in about 3.7 ms at 1 m.
 
 ### Drawing
 

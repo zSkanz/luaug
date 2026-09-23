@@ -134,7 +134,10 @@ struct RenderEnvironment
     // Points from the world towards the sun, so shading dots it against a
     // normal without negating.
     Vec3 sunDirection{0.0f, 1.0f, 0.0f};
+    // Enclosed spaces, and open ones: `Lighting.Ambient` and
+    // `Lighting.OutdoorAmbient` (ADR 0084).
     Color3 ambient{0.15f, 0.16f, 0.2f};
+    Color3 outdoorAmbient{0.15f, 0.16f, 0.2f};
     f32 sunBrightness = 2.0f;
     Color3 fogColor{0.6f, 0.7f, 0.85f};
     f32 fogStart = 200.0f;

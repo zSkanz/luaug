@@ -486,7 +486,10 @@ struct LightingComponent
     // Hours, 0 to 24, wrapping.
     f32 clockTime = 12.0f;
     f32 geographicLatitude = 0.0f;
+    // Enclosed spaces, and open ones (ADR 0084). Equal by default, so a world
+    // that sets neither is lit the same inside and out.
     core::Color3 ambient{0.15f, 0.16f, 0.2f};
+    core::Color3 outdoorAmbient{0.15f, 0.16f, 0.2f};
     f32 brightness = 2.0f;
     core::Color3 fogColor{0.6f, 0.7f, 0.85f};
     f32 fogStart = 200.0f;

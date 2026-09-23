@@ -82,8 +82,10 @@ tier gates against it. `character`, `ragdoll` and `terrain` stop being
 - `dmath_tests.cpp` holds a table of exact bit patterns written on Windows.
   Every tier must reproduce every bit, which is the most direct test of the
   claim there is.
-- **macOS is proved by CI**, which runs the same `trace.txt` and the same
-  golden table. No local instrument can.
+- **macOS proved it on the first run**: CI run 35922428910, Apple Clang on
+  Apple silicon, passed `determinism` against the same `trace.txt` files and
+  `core`'s golden bit table. That is three compilers, two C runtimes and two
+  instruction sets producing one world hash.
 
 ## Consequences
 

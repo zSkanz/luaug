@@ -402,6 +402,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     if (const scene::LightingComponent* lighting = world.lighting().find(lightingHost); lighting != nullptr) {
         out.environment.sunDirection = sunDirection(lighting->clockTime, lighting->geographicLatitude);
         out.environment.ambient = lighting->ambient;
+        out.environment.outdoorAmbient = lighting->outdoorAmbient;
         out.environment.sunBrightness = lighting->brightness;
         out.environment.fogColor = lighting->fogColor;
         out.environment.fogStart = lighting->fogStart;

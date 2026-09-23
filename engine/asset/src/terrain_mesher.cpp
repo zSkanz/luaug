@@ -372,25 +372,56 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         }
     }
 
-    // **How much of the sky a vertex sees**, from 0 to 1: a fixed fan of rays
-    // over the sky, from a point lifted off the surface along its normal, each
+    // And the lowest bottom within reach, for the rays that go down: one below
+    // it has passed under every column's ground it could meet.
+    std::vector<float> nearBottoms(bottoms.size(), std::numeric_limits<float>::infinity());
+    {
+        const i32 reach = static_cast<i32>(std::ceil(SkyReach / step)) + 1;
+        std::vector<float> across(bottoms.size(), std::numeric_limits<float>::infinity());
+        for (i32 z = 0; z < mapD; ++z) {
+            for (i32 x = 0; x < mapW; ++x) {
+                float lowest = std::numeric_limits<float>::infinity();
+                for (i32 k = std::max(x - reach, 0); k <= std::min(x + reach, mapW - 1); ++k) {
+                    const float bottom =
+                        bottoms[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(k)];
+                    if (!std::isnan(bottom))
+                        lowest = std::min(lowest, bottom);
+                }
+                across[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x)] = lowest;
+            }
+        }
+        for (i32 z = 0; z < mapD; ++z) {
+            for (i32 x = 0; x < mapW; ++x) {
+                float lowest = std::numeric_limits<float>::infinity();
+                for (i32 k = std::max(z - reach, 0); k <= std::min(z + reach, mapD - 1); ++k)
+                    lowest = std::min(lowest,
+                                      across[static_cast<usize>(k) * static_cast<usize>(mapW) + static_cast<usize>(x)]);
+                nearBottoms[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x)] = lowest;
+            }
+        }
+    }
+
+    // **How open a vertex is**, from 0 to 1: a fixed fan of rays over the
+    // whole sphere, from a point lifted off the surface along its normal, each
     // marched across the column map and blocked where it passes between a
-    // column's bottom and its top. Weighted by how squarely each faces the
-    // normal, so an open wall sees all of the sky it can face, as open ground
-    // does. Deep in a tunnel every ray meets roof; at its mouth the ones that
-    // leave by it do not.
+    // column's bottom and its top, and each weighed by how squarely the surface
+    // faces it. So a surface counts only the half of the world in front of it,
+    // and every surface is judged by one rule: open ground and an open wall see
+    // all of what they face, the underside of the terrain sees the open air
+    // below it, and deep in a tunnel every ray meets rock.
     //
-    // **Rays, not the ground straight above**, and the owner's picture is why:
-    // a ball added to the side of the terrain stood a dark stripe down the
-    // whole wall under it, because every point below a column's ground counted
-    // as under a roof -- however far below, and however small the roof. A ray
-    // from twenty metres down the wall leaves past a four-metre ball.
+    // **Rays, not the ground straight above** (the owner's picture): a ball on
+    // the side of the terrain stood a dark stripe down the wall under it when
+    // every point below a column's ground counted as under a roof. **And the
+    // whole sphere, not only the sky** (the owner's second picture): the rim
+    // under an overhang alternated between vertices facing up enough to count
+    // the sky and vertices facing down that took a fixed half, and the triangles
+    // between them drew a row of teeth. With every direction weighed the same
+    // way, the answer turns smoothly as the normal does.
     //
     // A fixed pattern with written-out constants (no `std::cos`), so the same
     // field meshes to the same bytes on every platform.
     const auto skyVisibility = [&](Vec3 position, Vec3 normal) {
-        // Eight bearings, and three rings up from the horizon: 60, 30 and 10
-        // degrees -- cosine, sine and rise per metre across. Plus the zenith.
         struct Bearing
         {
             float x;
@@ -407,70 +438,72 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
             {0.0f, -1.0f},
             {D, -D},
         }};
+        // Six rings, at 60, 30 and 10 degrees above the horizon and below it:
+        // cosine, sine and rise per metre across.
         struct Ring
         {
             float across;
             float up;
             float rise;
         };
-        static constexpr std::array<Ring, 3> Rings{{
+        static constexpr std::array<Ring, 6> Rings{{
             {0.5f, 0.8660254f, 1.7320508f},
             {0.8660254f, 0.5f, 0.5773503f},
             {0.9848078f, 0.1736482f, 0.1763270f},
+            {0.9848078f, -0.1736482f, -0.1763270f},
+            {0.8660254f, -0.5f, -0.5773503f},
+            {0.5f, -0.8660254f, -1.7320508f},
         }};
         constexpr float Lift = 1.5f;
         const Vec3 from{position.x + normal.x * Lift, position.y + normal.y * Lift, position.z + normal.z * Lift};
-        // A point with no ground above it anywhere in reach sees the sky.
         const float highest = nearTops[slotAt(from.x, from.z)];
-        if (highest <= from.y)
+        const float lowest = nearBottoms[slotAt(from.x, from.z)];
+        // Facing up past every downward ring, above every top in reach: open,
+        // without a ray. That is almost all open ground.
+        if (highest <= from.y && normal.y >= 0.9848078f)
             return 1.0f;
         const float own = topAt(from.x, from.z);
         const float ownBottom = bottomAt(from.x, from.z);
 
-        // Each ray weighed by how squarely the surface faces it; a surface
-        // that faces down faces none of the sky, and is weighed over it as
-        // ground is.
-        const auto facingOf = [&](Bearing bearing, Ring ring) {
+        const auto facingOf = [&](Bearing bearing, const Ring& ring) {
             return std::max(
                 bearing.x * ring.across * normal.x + ring.up * normal.y + bearing.z * ring.across * normal.z, 0.0f);
         };
-        float facing = std::max(normal.y, 0.0f);
-        for (const Bearing& bearing : Bearings) {
-            for (const Ring& ring : Rings)
-                facing += facingOf(bearing, ring);
-        }
-        const bool down = facing < 0.25f;
 
         float seen = 0.0f;
         float total = 0.0f;
-        // The zenith: open where nothing in this column is above the point.
-        const float zenith = down ? 1.0f : std::max(normal.y, 0.0f);
-        if (zenith > 0.0f) {
-            total += zenith;
+        // Straight up and straight down: open when nothing in this column is
+        // on that side of the point.
+        if (const float up = std::max(normal.y, 0.0f); up > 0.0f) {
+            total += up;
             if (std::isnan(own) || own <= from.y)
-                seen += zenith;
+                seen += up;
         }
-        // **One march per bearing, all three rings at once**: a column is
-        // looked up once per stop, and each ring still unsettled is checked
-        // against it -- blocked where it passes between the column's bottom and
-        // top, free once it is above every top in reach, since it only rises.
-        // In map cells, so a stop is an add and a truncation rather than a
-        // division and a floor: the margin keeps every stop inside the map
-        // and on its positive side.
+        if (const float down = std::max(-normal.y, 0.0f); down > 0.0f) {
+            total += down;
+            if (std::isnan(ownBottom) || ownBottom >= from.y)
+                seen += down;
+        }
+        // **One march per bearing, every ring at once**: a column is looked up
+        // once per stop, and each ring still unsettled is checked against it --
+        // blocked where it passes between the column's bottom and top, open once
+        // it is above every top in reach going up or below every bottom going
+        // down. In map cells, so a stop is an add and a truncation: the margin
+        // keeps every stop inside the map and on its positive side.
         const float cellX = from.x / step - static_cast<float>(mapX0);
         const float cellZ = from.z / step - static_cast<float>(mapZ0);
         const float perCell = 1.0f / step;
         for (const Bearing& bearing : Bearings) {
-            std::array<float, 3> weight{};
-            std::array<bool, 3> settled{};
-            int open = 0;
+            std::array<float, Rings.size()> weight{};
+            std::array<bool, Rings.size()> settled{};
+            int unsettled = 0;
             for (usize r = 0; r < Rings.size(); ++r) {
-                weight[r] = down ? Rings[r].up : facingOf(bearing, Rings[r]);
+                weight[r] = facingOf(bearing, Rings[r]);
                 settled[r] = weight[r] <= 0.0f;
-                open += settled[r] ? 0 : 1;
+                unsettled += settled[r] ? 0 : 1;
                 total += weight[r];
             }
-            for (usize at = 0; at < SkyStops.size() && open > 0; ++at) {
+            for (usize at = 0; at < SkyStops.size() && unsettled > 0; ++at) {
                 const float d = SkyStops[at];
                 const i32 kx = std::clamp(static_cast<i32>(cellX + bearing.x * d * perCell), 0, mapW - 1);
                 const i32 kz = std::clamp(static_cast<i32>(cellZ + bearing.z * d * perCell), 0, mapD - 1);
@@ -482,14 +515,15 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                     if (settled[r])
                         continue;
                     const float y = from.y + Rings[r].rise * d;
-                    if (y > highest) {
+                    const bool rising = Rings[r].rise > 0.0f;
+                    if ((rising && y > highest) || (!rising && y < lowest)) {
                         settled[r] = true;
                         seen += weight[r];
-                        open -= 1;
+                        unsettled -= 1;
                     }
                     else if (!std::isnan(top) && y <= top && y >= bottom) {
                         settled[r] = true;
-                        open -= 1;
+                        unsettled -= 1;
                     }
                 }
             }
@@ -499,15 +533,7 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                     seen += weight[r];
             }
         }
-        const float visible = total > 0.0f ? seen / total : 1.0f;
-        // **Under all the ground in its column** -- the underside of the
-        // terrain or of a ledge, not the roof of a cave, which has a floor under
-        // it -- a point sees the world below and the horizon: at least half,
-        // which draws it as shade rather than as a black hole.
-        constexpr float Underside = 0.5f;
-        if (!std::isnan(ownBottom) && from.y < ownBottom)
-            return std::max(visible, Underside);
-        return visible;
+        return total > 0.0f ? seen / total : 1.0f;
     };
 
     // --- Vertices: one per cell the surface passes through ---------------
@@ -709,8 +735,27 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         const u32 d = cellVertex[cellIndex(c3[0], c3[1], c3[2])];
         if (a == NoVertex || b == NoVertex || c == NoVertex || d == NoVertex)
             return;
-        emitTriangle(a, b, c);
-        emitTriangle(a, c, d);
+        // **Split along the shorter diagonal.** A quad whose four vertices
+        // were pulled toward a sharp edge -- a ball set into a hole, the rim of
+        // a cut -- is a long thin shape, and splitting it the long way gives
+        // two slivers that shade as a streak (the owner's terrain report,
+        // "stretched faces"; measured at an aspect of 28 before this). The
+        // short way gives two sound triangles. A tie takes a-c, and the quad
+        // belongs to exactly one region, so every region splits it alike.
+        const auto distance2 = [&](u32 p, u32 q) {
+            const Vec3& from = out.mesh.vertices[p].position;
+            const Vec3& to = out.mesh.vertices[q].position;
+            const Vec3 d{to.x - from.x, to.y - from.y, to.z - from.z};
+            return d.x * d.x + d.y * d.y + d.z * d.z;
+        };
+        if (distance2(b, d) < distance2(a, c)) {
+            emitTriangle(a, b, d);
+            emitTriangle(b, c, d);
+        }
+        else {
+            emitTriangle(a, b, c);
+            emitTriangle(a, c, d);
+        }
     };
     // Owned point `p` (local `o` in [0, n)) is sample `o + 2`, and the cell
     // whose low corner is point `p - 1 + k` has local index `o + k`.

@@ -201,6 +201,7 @@ local rig = cameraRigs.thirdPerson({
 
 Lighting.GeographicLatitude = 34
 Lighting.Ambient = Color3.fromRGB(16, 18, 24)
+Lighting.OutdoorAmbient = Color3.fromRGB(16, 18, 24)
 Lighting.Brightness = 2.3
 -- **The artist control on top of the metered exposure**, in EV stops, and this
 -- scene needs one for a reason worth writing down: automatic exposure maps the
