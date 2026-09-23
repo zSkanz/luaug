@@ -1,6 +1,7 @@
 #include <luaug/app/brush_overlay.h>
 #include <luaug/app/editor.h>
 #include <luaug/app/scene_definitions.h>
+#include <luaug/asset/image.h>
 #include <luaug/core/json.h>
 #include <luaug/core/json_writer.h>
 #include <luaug/platform/file.h>
@@ -3311,6 +3312,36 @@ bool Editor::setBlockTypeColors(scene::World& world, Inspector& inspector, asset
     return true;
 }
 
+bool Editor::setBlockTypeLook(scene::World& world, Inspector& inspector, asset::BlockId id,
+                              const std::array<core::NameAtom, 3>& textures, core::i32 opacity, f32 transparency,
+                              core::u64 gesture)
+{
+    (void)inspector;
+    scene::VoxelComponent* voxels = voxelsIn(world);
+    if (voxels == nullptr || id == asset::AirBlock || id > voxels->types.size())
+        return false;
+    // The script's own rules: an opacity outside the enum is refused there by
+    // its type, and here by the range, and see-through is clamped rather than
+    // refused because a slider that overshoots is a slider.
+    if (opacity < 0 || opacity > 2)
+        return false;
+    const f32 clamped = std::isfinite(transparency) ? std::clamp(transparency, 0.0f, 1.0f) : 0.5f;
+    const scene::VoxelBlockType& type = voxels->types[id - 1u];
+    if (type.texture == textures[0] && type.sideTexture == textures[1] && type.bottomTexture == textures[2] &&
+        type.opacity == opacity && type.transparency == clamped)
+        return false;
+    m_history.record(world, "Change Block Look", gesture);
+    scene::VoxelBlockType& live = voxelsIn(world)->types[id - 1u];
+    live.texture = textures[0];
+    live.sideTexture = textures[1];
+    live.bottomTexture = textures[2];
+    live.opacity = opacity;
+    live.transparency = clamped;
+    voxelsIn(world)->revision += 1;
+    m_sceneDirty = true;
+    return true;
+}
+
 bool Editor::clearBlocks(scene::World& world, Inspector& inspector)
 {
     (void)inspector;
@@ -3566,6 +3597,84 @@ bool Editor::clearTerrain(scene::World& world, core::InstanceId root, Inspector&
     terrain->field = asset::TerrainField(terrain->field.settings());
     terrain->fieldRevision += 1;
     m_sceneDirty = true;
+    return true;
+}
+
+bool Editor::importHeightmap(scene::World& world, core::InstanceId rootOrWorkspace, Inspector& inspector,
+                             const HeightmapImport& spec)
+{
+    if (spec.source.empty() || !(spec.size > 0.0f) || !std::isfinite(spec.low) || !std::isfinite(spec.high) ||
+        spec.material == 0) {
+        m_status = EditorStatus{"choose a heightmap, a size and a height range first", true};
+        return false;
+    }
+    const std::string name = spec.source.filename().string();
+
+    // **Read and decoded before anything is recorded**, so a file that is not a
+    // heightmap refuses with the world untouched and no undo step to wade past.
+    std::vector<std::byte> bytes;
+    if (!platform::readFile(spec.source, bytes)) {
+        m_status = EditorStatus{"could not read " + name, true};
+        return false;
+    }
+    asset::HeightImage image;
+    if (const std::optional<core::EngineError> error = asset::decodeHeightmap(bytes, name, image); error.has_value()) {
+        m_status = EditorStatus{name + " is not a heightmap this can read: " + error->message, true};
+        return false;
+    }
+
+    // One column per voxel across the square, corner to corner, and as many
+    // rows as keep the image's proportions. Capped where `WriteHeights` caps:
+    // past it the ask is a mistake in the size, not a larger world.
+    const core::InstanceId existing = terrainIn(world, rootOrWorkspace);
+    const scene::TerrainComponent* before = existing.valid() ? world.terrains().find(existing) : nullptr;
+    const f32 voxel = before != nullptr ? before->field.settings().voxelSize : asset::FieldSettings{}.voxelSize;
+    constexpr core::u32 MaxColumns = 4096;
+    const double across = std::round(static_cast<double>(spec.size) / static_cast<double>(voxel)) + 1.0;
+    if (across > static_cast<double>(MaxColumns)) {
+        m_status = EditorStatus{"that is more than 4096 columns across at this voxel size; import it smaller", true};
+        return false;
+    }
+    const auto columns = static_cast<core::u32>(across);
+    const auto rows = std::max<core::u32>(
+        1u, static_cast<core::u32>(std::lround(static_cast<double>(columns) * image.height / image.width)));
+    if (rows > MaxColumns) {
+        m_status = EditorStatus{"that image is too tall for its width at this size; import it smaller", true};
+        return false;
+    }
+
+    const core::InstanceId id = createTerrain(world, rootOrWorkspace, inspector);
+    if (world.terrains().find(id) == nullptr) {
+        m_status = EditorStatus{"this world has nowhere to put terrain", true};
+        return false;
+    }
+    m_history.record(world, "Import Heightmap");
+    scene::TerrainComponent& terrain = *world.terrains().find(id);
+
+    // Into the field's own space, which is the world's less the terrain's
+    // origin, exactly as the script verb does it.
+    const auto originY = static_cast<f32>(terrain.origin.y);
+    const std::vector<float> heights =
+        asset::resampleHeights(image, columns, rows, spec.low - originY, spec.high - originY);
+    const double half = 0.5 * static_cast<double>(columns - 1u) * static_cast<double>(voxel);
+    const double halfRows = 0.5 * static_cast<double>(rows - 1u) * static_cast<double>(voxel);
+    const auto firstX = static_cast<core::i32>(std::floor(-half / static_cast<double>(voxel)));
+    const auto firstZ = static_cast<core::i32>(std::floor(-halfRows / static_cast<double>(voxel)));
+    const asset::EditReport report =
+        asset::writeHeights(terrain.field, firstX, firstZ, columns, heights, spec.material);
+    terrain.fieldRevision += 1;
+    m_sceneDirty = true;
+
+    const asset::FieldSettings& settings = terrain.field.settings();
+    const bool clamped = std::min(spec.low, spec.high) - originY < settings.minHeight ||
+                         std::max(spec.low, spec.high) - originY > settings.maxHeight;
+    std::string message = name + ": " + std::to_string(image.width) + " x " + std::to_string(image.height) +
+                          " pixels onto " + std::to_string(columns) + " x " + std::to_string(rows) + " columns";
+    if (report.promoted > 0)
+        message += ", " + std::to_string(report.promoted) + " cave column(s) left as they were";
+    if (clamped)
+        message += ", clamped to the terrain's MinHeight and MaxHeight";
+    m_status = EditorStatus{message, false};
     return true;
 }
 

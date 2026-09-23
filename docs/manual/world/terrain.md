@@ -80,6 +80,20 @@ The terrain tools sculpt, dig and paint with a brush, one undo step per stroke.
 Aimed at steep ground, **dig carves into the wall** and keeps boring forward
 while the button is held, which is how a cave is started from a cliff face.
 
+**Heightmap** lays an image over the ground: choose a file, say how wide it is
+laid and which heights black and white stand for, and import. The square is
+centred on the terrain's `Position`, and the image's top-left pixel is its
+corner with the smallest x and z. A 16-bit PNG, or a RAW file of square
+16-bit little-endian samples (`.r16`, `.raw`), keeps a slope smooth. An 8-bit
+image has 256 steps, and over a hundred metres a character walks up those
+steps as stairs. Caves under the square are left as they are, and one ctrl-Z
+takes the import back.
+
+**Settings** holds the three numbers a terrain is decided at:
+- `VoxelSize`, which can change only while the terrain is empty;
+- `MinHeight` and `MaxHeight`, which bound how deep anything digs and how high
+  it rises.
+
 ## Large worlds
 
 A terrain saved with a scene streams from disk once it is sixteen cells or

@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace luaug::asset {
@@ -59,5 +60,45 @@ struct Image
 // the file is to be evidence.
 [[nodiscard]] std::optional<core::EngineError> writePng(const std::filesystem::path& path,
                                                         std::span<const std::byte> pixels, u32 width, u32 height);
+
+// --- Heightmaps ---------------------------------------------------------------
+
+// A heightmap, as elevations from 0 (black) to 1 (white), top row first.
+//
+// **Its own decode rather than `Image`**, because `Image` is eight bits and a
+// heightmap at eight bits is 256 steps: a hundred-metre range in 256 steps is a
+// terrace every forty centimetres, which a character walks up as stairs. Every
+// terrain tool trades in sixteen-bit greyscale for that reason, so this reads a
+// sixteen-bit PNG at its full depth.
+struct HeightImage
+{
+    u32 width = 0;
+    u32 height = 0;
+    std::vector<float> samples;
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return width > 0 && height > 0 && samples.size() == static_cast<std::size_t>(width) * height;
+    }
+};
+
+// Decodes a heightmap by its file name's extension.
+//
+// - `.r16` and `.raw` are headerless little-endian sixteen-bit samples, square,
+//   which is what terrain tools export when they export "RAW". The side is the
+//   square root of the sample count, and a count that is not a square is
+//   refused rather than guessed at.
+// - Anything else goes through the image decoder, at sixteen bits where the
+//   file has them. A colour file is read as its luminance, which is what a
+//   grey one already is.
+[[nodiscard]] std::optional<core::EngineError> decodeHeightmap(std::span<const std::byte> encoded,
+                                                               std::string_view fileName, HeightImage& out);
+
+// Resamples a heightmap onto `columns` x `rows` terrain columns, bilinearly,
+// and maps 0 to `low` and 1 to `high`. Row-major, first row first: the image's
+// top-left pixel is the first column of the first row, which is the corner with
+// the smallest x and z.
+[[nodiscard]] std::vector<float> resampleHeights(const HeightImage& image, u32 columns, u32 rows, float low,
+                                                 float high);
 
 } // namespace luaug::asset

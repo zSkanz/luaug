@@ -107,6 +107,11 @@ The block tool places, breaks and replaces blocks from a palette of the
 registered types, one undo step per stroke. It aims through fluids, as a
 game's pickaxe does.
 
+Under the palette, the selected type's colours, its three images and its
+opacity are edited in place. These are what `SetBlockTextures` and
+`SetBlockOpacity` set from a script. The images are picked from the project's
+`content/`, and a colour tints its image, so white shows an image as drawn.
+
 ## Large worlds
 
 A block world saved with a scene streams from disk in 64 m cells once it is

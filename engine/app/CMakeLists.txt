@@ -41,6 +41,7 @@ luaug_add_module(app
         src/reference_grid.cpp
         src/brush_overlay.cpp
         src/skeleton_overlay.cpp
+        src/world_panels.cpp
         src/editor.cpp
         src/content_tree.cpp
         src/content_import.cpp

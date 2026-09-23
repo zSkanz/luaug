@@ -1004,9 +1004,8 @@ the block-state layout those games shipped, so a type is one of 4,095 and
 nothing about the chunk format changed. A fluid never collides and `Raycast`
 passes through it (`luaug/scene/voxel_fluid.h`).
 
-**Not built yet, and named so it is not mistaken for done:** a block type's
-images and opacity set from the editor's panel rather than a script. Two fluids
-meeting react since the same day: `SetFluidReaction` says what one becomes where
+A block type's images and opacity are set from the editor's panel as well as
+from a script since the same day. Two fluids meeting react since the same day: `SetFluidReaction` says what one becomes where
 it touches the other.
 
 ## The unresolved list, carried forward rather than closed

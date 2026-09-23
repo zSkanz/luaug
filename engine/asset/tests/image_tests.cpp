@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -150,4 +151,92 @@ TEST_CASE_FIXTURE(CatalogFixture, "image: writePng rejects a buffer that does no
     CHECK(writePng(scratchFile("never.png"), tooSmall, 4, 4).has_value());
     CHECK(writePng(scratchFile("never.png"), tooSmall, 0, 4).has_value());
     CHECK_FALSE(std::filesystem::exists(scratchFile("never.png")));
+}
+
+// --- Heightmaps -----------------------------------------------------------------
+
+namespace {
+
+std::vector<std::byte> bytesOf(std::initializer_list<unsigned> values)
+{
+    std::vector<std::byte> out;
+    for (const unsigned value : values)
+        out.push_back(static_cast<std::byte>(value));
+    return out;
+}
+
+} // namespace
+
+TEST_CASE_FIXTURE(CatalogFixture, "heightmap: a sixteen-bit PNG keeps its sixteen bits")
+{
+    // A 2x1 greyscale PNG at sixteen bits, samples 0x0102 and 0xFFFE: values an
+    // eight-bit decode could not tell from 0x0100 and 0xFF00.
+    const std::vector<std::byte> png = bytesOf(
+        {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+         0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x00, 0x00, 0x81, 0xd9, 0xfc, 0x15, 0x00, 0x00, 0x00,
+         0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x64, 0xfa, 0xff, 0x0f, 0x00, 0x03, 0x0b, 0x02, 0x01,
+         0x84, 0x91, 0xe8, 0x13, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82});
+    luaug::asset::HeightImage image;
+    REQUIRE_FALSE(luaug::asset::decodeHeightmap(png, "ridge.png", image).has_value());
+    REQUIRE(image.valid());
+    CHECK(image.width == 2u);
+    CHECK(image.height == 1u);
+    CHECK(image.samples[0] == static_cast<float>(0x0102) / 65535.0f);
+    CHECK(image.samples[1] == static_cast<float>(0xFFFE) / 65535.0f);
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "heightmap: RAW is square little-endian sixteen-bit samples")
+{
+    const std::vector<std::byte> raw = bytesOf({0x00, 0x00, 0xff, 0xff, 0x00, 0x80, 0x01, 0x00});
+    luaug::asset::HeightImage image;
+    REQUIRE_FALSE(luaug::asset::decodeHeightmap(raw, "island.R16", image).has_value());
+    CHECK(image.width == 2u);
+    CHECK(image.height == 2u);
+    CHECK(image.samples[0] == 0.0f);
+    CHECK(image.samples[1] == 1.0f);
+    CHECK(image.samples[2] == static_cast<float>(0x8000) / 65535.0f);
+    CHECK(image.samples[3] == 1.0f / 65535.0f);
+
+    // Six samples is not a square, and a guessed side would be a sheared map.
+    const std::vector<std::byte> ragged(12, std::byte{0});
+    CHECK(luaug::asset::decodeHeightmap(ragged, "island.raw", image).has_value());
+    CHECK_FALSE(image.valid());
+}
+
+TEST_CASE_FIXTURE(CatalogFixture, "heightmap: an eight-bit PNG decodes to the same range")
+{
+    const std::filesystem::path path = scratchFile("heightmap_8bit.png");
+    const std::vector<std::byte> pixels = bytesOf({0, 0, 0, 255, 255, 255, 255, 255});
+    REQUIRE_FALSE(writePng(path, pixels, 2, 1).has_value());
+    const std::vector<std::byte> encoded = readAll(path);
+
+    luaug::asset::HeightImage image;
+    REQUIRE_FALSE(luaug::asset::decodeHeightmap(encoded, "flat.png", image).has_value());
+    CHECK(image.samples[0] == 0.0f);
+    CHECK(image.samples[1] == 1.0f);
+}
+
+TEST_CASE("heightmap: resampling lands the corners on the corners and blends between")
+{
+    luaug::asset::HeightImage image;
+    image.width = 2;
+    image.height = 2;
+    image.samples = {0.0f, 1.0f, 0.0f, 1.0f};
+
+    // At its own size, exact, mapped onto the range.
+    const std::vector<float> same = luaug::asset::resampleHeights(image, 2, 2, 10.0f, 30.0f);
+    REQUIRE(same.size() == 4u);
+    CHECK(same[0] == 10.0f);
+    CHECK(same[1] == 30.0f);
+    CHECK(same[2] == 10.0f);
+    CHECK(same[3] == 30.0f);
+
+    // Stretched to three columns, the middle one is halfway.
+    const std::vector<float> wide = luaug::asset::resampleHeights(image, 3, 2, 0.0f, 8.0f);
+    REQUIRE(wide.size() == 6u);
+    CHECK(wide[0] == 0.0f);
+    CHECK(wide[1] == 4.0f);
+    CHECK(wide[2] == 8.0f);
+
+    CHECK(luaug::asset::resampleHeights(image, 0, 2, 0.0f, 1.0f).empty());
 }

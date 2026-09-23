@@ -124,8 +124,8 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   movers, and `examples/14-voxels`. It is not `Terrain` and shares nothing with
   it but a word; [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md)
   says why. Since then it has gained an editor tool, see-through blocks, cells
-  streamed from disk and fluids (below). What it does not have yet: a block
-  type's images and opacity set from the editor's panel. Fluids react with each
+  streamed from disk and fluids (below). A type's images and opacity are set
+  from the editor's panel since 2026-09-23. Fluids react with each
   other through `SetFluidReaction`.
 
   **Water is a fluid since 2026-09-23**: `SetBlockFluid` makes a type pour,
@@ -171,11 +171,15 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   fires `InstanceStreamedOut`, and building it found D160 -- the chunk
   streamer's half of that contract had never been wired.
 
-  **The next action, as a sentence:** the editor's smaller items -- heightmap
-  import, `VoxelSize` and the height range, a block type's image and opacity
-  in the panel -- wait on `engine/app/src/debug_overlay.cpp`, which holds the
-  owner's uncommitted work; everything that does not touch it goes first.
-  Android waits.
+  **The editor's smaller items are built (2026-09-23)**: the Terrain panel
+  imports a heightmap and holds `VoxelSize` and the height range, and the
+  Blocks panel sets a type's images and opacity. They live in
+  `engine/app/src/world_panels.cpp` and hook into the shell in three lines,
+  so the owner's uncommitted work in `debug_overlay.cpp` stays theirs.
+
+  **The next action, as a sentence:** `RemoteFunction` and a replicated
+  storage container, which ADR 0077 left for later, then editing a world
+  larger than memory (ADR 0075). Android waits, on the owner's word.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is

@@ -5207,3 +5207,74 @@ TEST_CASE("the block tool with no block world does not eat the click")
     rig.inspector.applyPending(rig.world);
     CHECK(rig.inspector.selection() == subject);
 }
+
+// --- Heightmaps and a block type's look (the panels' authoring verbs) ----------
+
+TEST_CASE("a heightmap lays its ramp over the ground, and one undo takes it back")
+{
+    BrushRig rig;
+    // Three by three sixteen-bit samples, black to white left to right: a ramp.
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "luaug-editor-ramp.r16";
+    {
+        std::ofstream out(path, std::ios::binary);
+        for (int row = 0; row < 3; ++row) {
+            const unsigned char ramp[6] = {0x00, 0x00, 0x00, 0x80, 0xff, 0xff};
+            out.write(reinterpret_cast<const char*>(ramp), sizeof(ramp));
+        }
+    }
+    REQUIRE(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.0)) == doctest::Approx(0.0));
+
+    // One metre at half-metre voxels is three columns, corner to corner.
+    Editor::HeightmapImport spec;
+    spec.source = path;
+    spec.size = 1.0f;
+    spec.low = 0.0f;
+    spec.high = 8.0f;
+    REQUIRE(rig.editor.importHeightmap(rig.world, rig.root, rig.inspector, spec));
+    CHECK_FALSE(rig.editor.status().failed);
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, -0.5, 0.0)) == doctest::Approx(0.0).epsilon(0.01));
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.0, 0.0)) == doctest::Approx(4.0).epsilon(0.01));
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.0)) == doctest::Approx(8.0).epsilon(0.01));
+
+    REQUIRE(rig.editor.undo(rig.world, rig.inspector));
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.0)) == doctest::Approx(0.0));
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+TEST_CASE("a file that is not a heightmap changes nothing and says so")
+{
+    BrushRig rig;
+    const core::u64 before = rig.field().field.digest();
+    Editor::HeightmapImport spec;
+    spec.source = std::filesystem::temp_directory_path() / "luaug-editor-no-such-heightmap.png";
+    CHECK_FALSE(rig.editor.importHeightmap(rig.world, rig.root, rig.inspector, spec));
+    CHECK(rig.editor.status().failed);
+    CHECK(rig.field().field.digest() == before);
+    // Nothing was recorded, so there is nothing to undo.
+    CHECK_FALSE(rig.editor.undo(rig.world, rig.inspector));
+}
+
+TEST_CASE("a block type's images and opacity are set from the panel, and undo")
+{
+    BlockRig rig;
+    const std::array<core::NameAtom, 3> images{rig.atoms.intern("asset://textures/glass.png"),
+                                               rig.atoms.intern("asset://textures/glass.png"), core::NameAtom{}};
+    REQUIRE(rig.editor.setBlockTypeLook(rig.world, rig.inspector, rig.stone, images, 2, 0.3f));
+    const scene::VoxelBlockType& type = Editor::voxelsIn(rig.world)->types[0];
+    CHECK(type.texture == images[0]);
+    CHECK(type.sideTexture == images[1]);
+    CHECK_FALSE(type.bottomTexture.valid());
+    CHECK(type.opacity == 2);
+    CHECK(static_cast<double>(type.transparency) == doctest::Approx(0.3));
+
+    // The same look again is no step, and an opacity outside the enum is refused.
+    CHECK_FALSE(rig.editor.setBlockTypeLook(rig.world, rig.inspector, rig.stone, images, 2, 0.3f));
+    CHECK_FALSE(rig.editor.setBlockTypeLook(rig.world, rig.inspector, rig.stone, images, 3, 0.3f));
+    CHECK_FALSE(rig.editor.setBlockTypeLook(rig.world, rig.inspector, 9, images, 0, 0.5f));
+
+    REQUIRE(rig.editor.undo(rig.world, rig.inspector));
+    const scene::VoxelBlockType& restored = Editor::voxelsIn(rig.world)->types[0];
+    CHECK_FALSE(restored.texture.valid());
+    CHECK(restored.opacity == 0);
+}

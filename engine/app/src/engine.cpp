@@ -517,6 +517,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // its callback arrives while events are pumped.
     std::vector<std::filesystem::path> importedPaths;
     bool importPending = false;
+    // The same, for the Terrain panel's heightmap: one file, handed to the
+    // editor when it arrives rather than copied anywhere.
+    std::vector<std::filesystem::path> heightmapPicked;
+    bool heightmapPending = false;
     // The instance an Explorer import will parent what it makes under, held
     // across the frames the dialog is open.
     core::InstanceId importParent;
@@ -1656,6 +1660,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                             importedPaths = std::move(chosen);
                                             importPending = false;
                                         });
+                }
+
+                if (editorCommands.pickHeightmap && !heightmapPending && window != nullptr) {
+                    heightmapPending = true;
+                    platform::pickFiles(
+                        *window, editor.content().root().string(), false,
+                        [&heightmapPicked, &heightmapPending](std::vector<std::filesystem::path> chosen) {
+                            heightmapPicked = std::move(chosen);
+                            heightmapPending = false;
+                        });
+                }
+                if (!heightmapPicked.empty()) {
+                    editor.setHeightmapSource(heightmapPicked.front());
+                    heightmapPicked.clear();
                 }
 
                 if (!importedPaths.empty()) {

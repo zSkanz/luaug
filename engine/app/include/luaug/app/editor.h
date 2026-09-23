@@ -20,6 +20,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 // The editor's model: what it has selected, where its 3D view is, and what the
@@ -456,6 +457,11 @@ struct EditorCommands
     // world has no class for is imported and nothing more, which is the honest
     // half of the answer.
     core::InstanceId importParent;
+    // **A heightmap for the Terrain panel**, from the system's picker, for the
+    // reason `importAssets` goes through the loop. What is chosen is read where
+    // it lies rather than copied into `content/`: the ground it makes is saved
+    // with the scene, and the image is not needed again.
+    bool pickHeightmap = false;
 
     // --- What a right-click asked for ----------------------------------------
     //
@@ -1758,6 +1764,28 @@ public:
     // sounds like.
     bool clearTerrain(scene::World& world, core::InstanceId root, Inspector& inspector);
 
+    // **Ground from a heightmap image**, the way every terrain editor starts a
+    // real landscape: a square of `size` metres centred on the terrain's
+    // origin, black at `low` and white at `high`, in world metres.
+    //
+    // It is `Terrain:WriteHeights` with a file in front of it, so a column that
+    // carries voxels -- a cave -- is left alone, and heights past the terrain's
+    // `MinHeight` and `MaxHeight` are clamped to them; the status line says
+    // both. Creates the terrain when there is none, as `generateGround` does,
+    // and that is an undo step of its own.
+    struct HeightmapImport
+    {
+        std::filesystem::path source;
+        f32 size = 256.0f;
+        f32 low = 0.0f;
+        f32 high = 64.0f;
+        core::u8 material = 1;
+    };
+    bool importHeightmap(scene::World& world, core::InstanceId root, Inspector& inspector, const HeightmapImport& spec);
+    // The file the Terrain panel imports from, as the picker last answered.
+    [[nodiscard]] const std::filesystem::path& heightmapSource() const noexcept { return m_heightmapSource; }
+    void setHeightmapSource(std::filesystem::path source) { m_heightmapSource = std::move(source); }
+
     // The terrain under the root the viewport is drawing, or nothing.
     [[nodiscard]] core::InstanceId terrainIn(const scene::World& world, core::InstanceId root) const;
 
@@ -1877,6 +1905,13 @@ public:
     // step; zero records one step per call.
     bool setBlockTypeColors(scene::World& world, Inspector& inspector, asset::BlockId id, core::Color3 top,
                             core::Color3 side, core::Color3 bottom, core::u64 gesture = 0);
+    // A type's images and how see-through it is: what `SetBlockTextures` and
+    // `SetBlockOpacity` set from a script, set from the panel. `textures` are
+    // content URNs for the top, the sides and the bottom, empty for none;
+    // `opacity` is `Enum.BlockOpacity`'s value. `gesture` as for the colours.
+    bool setBlockTypeLook(scene::World& world, Inspector& inspector, asset::BlockId id,
+                          const std::array<core::NameAtom, 3>& textures, core::i32 opacity, f32 transparency,
+                          core::u64 gesture = 0);
     // Removes every block and keeps the types. Records an undo step.
     bool clearBlocks(scene::World& world, Inspector& inspector);
 
@@ -2277,6 +2312,7 @@ private:
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;
     bool m_brushPlaneLock = true;
+    std::filesystem::path m_heightmapSource;
     core::u32 m_lastStrokeStamps = 0;
     Brush m_brush;
     std::optional<asset::TerrainHit> m_brushAim;

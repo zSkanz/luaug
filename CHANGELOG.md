@@ -40,6 +40,10 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **The editor's Terrain panel imports a heightmap and holds the terrain's
+  settings**: a 16-bit PNG or RAW image laid over the ground at a size and
+  between two heights, one undo step, and `VoxelSize`, `MinHeight` and
+  `MaxHeight` beside it. The Blocks panel sets a type's images and opacity.
 - **A dot reaches a child, and the scene is typed** (ADR 0078, superseding
   0061): `workspace.Player.Walker` reaches the child after the members, and
   `.luaug/types/scene.d.luau` declares the scene's tree so the analyzer types

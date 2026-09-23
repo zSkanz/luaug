@@ -1,6 +1,7 @@
 #include "luaug/app/debug_overlay.h"
 
 #include "luaug/app/streaming_host.h"
+#include "luaug/app/world_panels.h"
 #include "luaug/asset/terrain_palette.h"
 #include "luaug/audio/audio.h"
 
@@ -6020,6 +6021,7 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
                 inspector.endGesture();
                 recolour = 0;
             }
+            drawBlockLook(editor, world, inspector);
         }
 
         ImGui::Separator();
@@ -6250,6 +6252,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 goto terrainPanelDone;
             }
             drawTerrainPanel(*editor, *world, treeRoot, *inspector);
+            drawTerrainSetup(*editor, *world, treeRoot, *inspector, commands);
         }
         ImGui::End();
     }
