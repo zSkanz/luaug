@@ -113,4 +113,22 @@ describe("terrain", function()
         terrain:FillBall(vector.create(0, -6, 0), 4, 0)
         expect(terrain:HeightAt(0, 0)):ToBeCloseTo(roof :: number, 1)
     end)
+    it("writes a heightmap in one call, row after row, clamped to its range", function()
+        -- Three columns by two rows at the default half-metre voxel, starting at
+        -- the column at the origin.
+        local written = terrain:WriteHeights(vector.create(0, 0, 0), 3, { 1, 2, 3, 4, 5, 100 }, Sand)
+        expect(written):ToBe(6)
+        expect(terrain:HeightAt(0, 0)):ToBeCloseTo(1, 3)
+        expect(terrain:HeightAt(1, 0)):ToBeCloseTo(3, 3)
+        expect(terrain:HeightAt(0, 0.5)):ToBeCloseTo(4, 3)
+        -- Past `MaxHeight`, it stops there.
+        expect(terrain:HeightAt(1, 0.5)):ToBeCloseTo(32, 3)
+
+        expect(function()
+            terrain:WriteHeights(vector.create(0, 0, 0), 4, { 1, 2, 3, 4, 5, 6 })
+        end):ToThrow()
+        expect(function()
+            terrain:WriteHeights(vector.create(0, 0, 0), 0, { 1 })
+        end):ToThrow()
+    end)
 end)

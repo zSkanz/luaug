@@ -40,6 +40,10 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **`Terrain:WriteHeights(corner, columns, heights, material?)`**: a heightmap
+  in one call, one height per column, row after row. It is the verb for ground
+  that comes from a generator or an image. The flagship's middle is written
+  with it in under a second, where one `FillBlock` per column took 28.
 - **Water flows** (V1): `VoxelService:SetBlockFluid(id, reach, ticksPerStep)`
   makes a block type a fluid. It pours down first, spreads up to seven blocks
   sideways (shallower with each one), and drains when its source is taken. It

@@ -56,24 +56,23 @@ terrain.MinHeight = -32
 terrain.MaxHeight = 64
 terrain.Parent = Workspace
 
--- **One column at a time, from below the floor to the island's height.** A
--- column that reaches `MinHeight` is height-encoded, the cheap case; the
--- hill's tunnel below is what turns a few of them into voxels.
+-- **The island, as a heightmap, in one call.** One height per column, row
+-- after row along +Z; the hill's tunnel below is what turns a few columns into
+-- voxels.
 --
 -- Up to +HalfRegion INCLUSIVE: a lattice column is a vertex, and the ground
 -- between two vertices is only drawn when both exist, so stopping one short
 -- would leave a metre-wide slot along two edges between this and the boxes.
-local Floor = -40
-for x = -HalfRegion, HalfRegion, VoxelSize do
-    for z = -HalfRegion, HalfRegion, VoxelSize do
-        local top = heightAt(x, z)
-        terrain:FillBlock(
-            vector.create(x, (top + Floor) / 2, z),
-            vector.create(VoxelSize, top - Floor, VoxelSize),
-            Grass
-        )
+local heights: { number } = {}
+local columns = 0
+for z = -HalfRegion, HalfRegion, VoxelSize do
+    columns = 0
+    for x = -HalfRegion, HalfRegion, VoxelSize do
+        table.insert(heights, heightAt(x, z))
+        columns += 1
     end
 end
+terrain:WriteHeights(vector.create(-HalfRegion, 0, -HalfRegion), columns, heights, Grass)
 
 -- **A hill with a tunnel through it**, north-east of the spawn and inside the
 -- autopilot's 220 m walking circle, so a soak walks past it and never into it.

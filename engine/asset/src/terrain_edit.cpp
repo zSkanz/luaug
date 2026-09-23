@@ -592,6 +592,32 @@ EditReport fillFlat(TerrainField& field, DVec3 center, float size, float height,
     return report;
 }
 
+EditReport writeHeights(TerrainField& field, i32 firstX, i32 firstZ, u32 columns, std::span<const float> heights,
+                        u8 material)
+{
+    EditReport report;
+    if (columns == 0 || material == 0)
+        return report;
+    const float low = field.settings().minHeight;
+    const float high = field.settings().maxHeight;
+    for (usize at = 0; at < heights.size(); ++at) {
+        const i32 x = firstX + static_cast<i32>(at % columns);
+        const i32 z = firstZ + static_cast<i32>(at / columns);
+        if (field.isBricked(x, z)) {
+            report.promoted += 1;
+            continue;
+        }
+        const float height = heights[at];
+        // A NaN is not a height; it is a generator's bug, and writing it would
+        // put a hole in the ground nobody could find.
+        if (!std::isfinite(height))
+            continue;
+        field.setColumn(x, z, std::clamp(height, low, high), material);
+        report.touched += 1;
+    }
+    return report;
+}
+
 EditReport smoothBall(TerrainField& field, DVec3 center, double radius, float strength)
 {
     EditReport report;

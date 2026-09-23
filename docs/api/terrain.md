@@ -69,3 +69,9 @@ A `material` of zero is refused rather than treated as erase. Zero means erase t
 Raises the ground under a disc by `amount` metres at the centre, falling smoothly to nothing at the rim -- or lowers it, when `amount` is negative. Returns how many columns it changed.
 
 This is the heightmap sculpting brush, and it is what to reach for to shape hills and valleys: it only ever moves the surface, so it never creates an overhang. `FillBall` adds a real ball, which near its rim hangs over the ground below it -- the right verb for a boulder or a tunnel, and the wrong one for a hill.
+
+### `WriteHeights(corner: vector, columns: number, heights: { number }, material: number?): number`
+
+Writes a heightmap in one call: one height per column, `columns` to a row, row after row along +Z, starting at the column at `corner` (its X and Z; Y is not read). Columns are `VoxelSize` apart, so a 257 by 257 table at a one-metre voxel covers 256 metres with both edges included. Returns how many columns it wrote.
+
+**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where `FillBlock` per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is painted on every column written. A column with a cave in it has no single height and is left as it is, and a height that is not a number is skipped rather than written.

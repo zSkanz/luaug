@@ -2463,6 +2463,29 @@
           ],
           "Returns": ["number"],
           "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "WriteHeights",
+          "Parameters": [
+            {
+              "Name": "corner",
+              "Type": "vector"
+            },
+            {
+              "Name": "columns",
+              "Type": "number"
+            },
+            {
+              "Name": "heights",
+              "Type": "{ number }"
+            },
+            {
+              "Name": "material",
+              "Type": "number?"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
         }
       ],
       "Events": []

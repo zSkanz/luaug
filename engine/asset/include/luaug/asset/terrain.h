@@ -377,6 +377,15 @@ EditReport fillBlock(TerrainField& field, core::DVec3 center, core::Vec3 size, c
 // generator nobody trusts. `EditReport::promoted` carries the count skipped.
 EditReport fillFlat(TerrainField& field, core::DVec3 center, float size, float height, core::u8 material);
 
+// **A heightmap, written whole**: one height per lattice column, row after row
+// along +z, starting at column (`firstX`, `firstZ`) and `columns` wide. What a
+// generator or an imported image hands over, in one call instead of a brush
+// stamp per column. Heights are clamped into the field's range; a column that
+// carries voxels -- a cave -- has no single height and is left alone, counted
+// as `promoted` so a caller can say what it did not do.
+EditReport writeHeights(TerrainField& field, core::i32 firstX, core::i32 firstZ, core::u32 columns,
+                        std::span<const float> heights, core::u8 material);
+
 // Softens the ground under a ball, pulling every column's height towards the
 // average of its neighbours.
 //

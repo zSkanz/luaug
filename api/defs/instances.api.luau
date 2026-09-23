@@ -1241,6 +1241,27 @@ local Classes: { Schema.Class } = {
                     .. "along a direction rather than the top of the ground.",
             },
             {
+                Name = "WriteHeights",
+                Parameters = {
+                    { Name = "corner", Type = "vector" },
+                    { Name = "columns", Type = "number" },
+                    { Name = "heights", Type = "{ number }" },
+                    { Name = "material", Type = "number?" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Writes a heightmap in one call: one height per column, `columns` to a row, row after "
+                    .. "row along +Z, starting at the column at `corner` (its X and Z; Y is not read). Columns "
+                    .. "are `VoxelSize` apart, so a 257 by 257 table at a one-metre voxel covers 256 metres "
+                    .. "with both edges included. Returns how many columns it wrote.\n\n"
+                    .. "**This is the verb for ground that comes from somewhere** -- a generator's noise, an "
+                    .. "image, another tool -- where `FillBlock` per column would be a quarter of a million "
+                    .. "calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; "
+                    .. "`material` (default 1) is painted on every column written. A column with a cave "
+                    .. "in it has no single height and is left as it is, and a height that is not a number "
+                    .. "is skipped rather than written.",
+            },
+            {
                 Name = "Clear",
                 Parameters = {},
                 Returns = {},

@@ -860,3 +860,30 @@ TEST_CASE("a bowl carved from the top of flat ground is still a height function"
     REQUIRE(bottom.has_value());
     CHECK(*bottom < -3.0f);
 }
+
+TEST_CASE("a heightmap is written whole, row after row, clamped, and a cave is left alone")
+{
+    TerrainField field(FieldSettings{.voxelSize = 1.0f});
+    field.setHeightRange(-8.0f, 8.0f);
+    const std::vector<float> heights{1.0f, 2.0f, 3.0f, 4.0f, 50.0f, std::nanf("")};
+    const EditReport report = writeHeights(field, 10, 20, 3, heights, 2);
+    CHECK(report.touched == 5);
+    CHECK(heightAt(field, 10.0, 20.0) == doctest::Approx(1.0));
+    CHECK(heightAt(field, 12.0, 20.0) == doctest::Approx(3.0));
+    CHECK(heightAt(field, 10.0, 21.0) == doctest::Approx(4.0));
+    // Clamped into the reserved range, and a NaN never written.
+    CHECK(heightAt(field, 11.0, 21.0) == doctest::Approx(8.0));
+    CHECK_FALSE(heightAt(field, 12.0, 21.0).has_value());
+    // No width, nothing written; material zero is not ground.
+    CHECK(writeHeights(field, 0, 0, 0, heights, 2).touched == 0);
+    CHECK(writeHeights(field, 0, 0, 3, heights, 0).touched == 0);
+
+    // A column that carries voxels has no single height, so it is skipped.
+    (void)fillBlock(field, core::DVec3{40.0, -4.0, 40.0}, core::Vec3{8.0f, 8.0f, 8.0f}, 1);
+    (void)fillBall(field, core::DVec3{40.0, -4.0, 40.0}, 2.0, 0);
+    REQUIRE(field.isBricked(40, 40));
+    const std::vector<float> one{5.0f};
+    const EditReport skipped = writeHeights(field, 40, 40, 1, one, 1);
+    CHECK(skipped.touched == 0);
+    CHECK(skipped.promoted == 1);
+}

@@ -1076,7 +1076,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 7> terrainMethods;
+    static std::array<MethodDesc, 8> terrainMethods;
     terrainMethods = {{
         MethodDesc{
             .name = atoms.intern("FillBall"),
@@ -1107,6 +1107,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "The height of the ground at this column, in metres.\012\012**It answers about the height layer and says nothing about caves**, which is the honest shape of the question: a column with a cave in it has no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first surface along a direction rather than the top of the ground.",
+        },
+        MethodDesc{
+            .name = atoms.intern("WriteHeights"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Writes a heightmap in one call: one height per column, `columns` to a row, row after row along +Z, starting at the column at `corner` (its X and Z; Y is not read). Columns are `VoxelSize` apart, so a 257 by 257 table at a one-metre voxel covers 256 metres with both edges included. Returns how many columns it wrote.\012\012**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where `FillBlock` per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is painted on every column written. A column with a cave in it has no single height and is left as it is, and a height that is not a number is skipped rather than written.",
         },
         MethodDesc{
             .name = atoms.intern("Clear"),

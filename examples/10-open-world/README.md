@@ -62,8 +62,8 @@ on a slow machine.
   It is a hundred streamed cells, so the ground streams in and out like
   everything else. North-east of the spawn, at about (130, -90), a hill has a
   tunnel through it -- walk in with the lantern, since terrain is dark inside.
-  `tools/sculpt-ground` makes the terrain and `tools/merge_ground.luau` puts it
-  in the scene. Both are described at the top of their files.
+  `tools/sculpt-ground` writes the terrain as one heightmap (`WriteHeights`) and
+  `tools/merge_ground.luau` puts it in the scene. Both are described at the top of their files.
 
 ## The world is generated, not committed
 

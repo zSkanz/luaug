@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1057,6 +1058,52 @@ int methodTerrainFillBlock(lua_State* L)
     return 1;
 }
 
+int methodTerrainWriteHeights(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 corner = checkVector3(L, 2);
+    const lua_Integer columns = luaL_checkinteger(L, 3);
+    luaL_checktype(L, 4, LUA_TTABLE);
+    const lua_Integer material = luaL_optinteger(L, 5, 1);
+    const auto count = static_cast<core::usize>(lua_objlen(L, 4));
+    // A 4096-column square is sixteen million heights and the largest thing
+    // this is for; past it a script has a loop that did not stop.
+    constexpr core::usize MaxHeights = 4096u * 4096u;
+    if (columns < 1 || count == 0 || count % static_cast<core::usize>(columns) != 0 || count > MaxHeights) {
+        const core::I18nArg args[] = {{"count", static_cast<core::i64>(count)},
+                                      {"columns", static_cast<core::i64>(columns)}};
+        raise(L, LUAUG_TR("scene.err.terrain_heights_shape"), args);
+    }
+    if (material < 1 || material > 255)
+        luaL_argerror(L, 5, "a material id from 1 to 255");
+
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    std::vector<float> heights(count);
+    for (core::usize at = 0; at < count; ++at) {
+        lua_rawgeti(L, 4, static_cast<int>(at + 1));
+        // World heights, like every other verb's, into the field's own space.
+        heights[at] = lua_isnumber(L, -1) != 0 ? static_cast<float>(lua_tonumber(L, -1) - terrain->origin.y)
+                                               : std::numeric_limits<float>::quiet_NaN();
+        lua_pop(L, 1);
+    }
+
+    // The field's own space, snapped down to its lattice: the first height is
+    // the column at or below the corner, which is what a heightmap's first
+    // pixel means.
+    const double voxel = static_cast<double>(terrain->field.settings().voxelSize);
+    const auto firstX = static_cast<core::i32>(std::floor((static_cast<double>(corner.x) - terrain->origin.x) / voxel));
+    const auto firstZ = static_cast<core::i32>(std::floor((static_cast<double>(corner.z) - terrain->origin.z) / voxel));
+    const asset::EditReport report = asset::writeHeights(
+        terrain->field, firstX, firstZ, static_cast<core::u32>(columns), heights, static_cast<core::u8>(material));
+    terrain->fieldRevision += 1;
+    lua_pushinteger(L, static_cast<int>(report.touched));
+    return 1;
+}
+
 int methodTerrainHeightAt(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
@@ -1170,6 +1217,7 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"Terrain", "FillBlock", methodTerrainFillBlock},
     {"Terrain", "PaintBall", methodTerrainPaintBall},
     {"Terrain", "HeightAt", methodTerrainHeightAt},
+    {"Terrain", "WriteHeights", methodTerrainWriteHeights},
     {"Terrain", "Clear", methodTerrainClear},
     {"Terrain", "Compact", methodTerrainCompact},
 };
