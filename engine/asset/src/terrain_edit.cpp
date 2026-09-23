@@ -98,6 +98,10 @@ struct ColumnView
     bool bricked = false;
 };
 
+// How wide, in voxels, the blend is where an edit meets the surface already
+// there. See `afterEdit`.
+constexpr float SmoothEditVoxels = 2.0f;
+
 [[nodiscard]] ColumnView viewOf(const TerrainField& field, i32 x, i32 z)
 {
     ColumnView view;
@@ -146,12 +150,25 @@ struct ColumnView
     const float inside = depth(at, shape);
     const FieldSample existing = sampleThrough(field, view, x, y, z);
 
+    // **Both verbs blend over a couple of voxels rather than meeting at a
+    // crease** -- the smooth minimum and maximum every signed-distance sculpting
+    // tool uses. A hard union of a ball resting on the ground leaves a crease
+    // under the ball whose gap is thinner than a voxel near the contact; the
+    // lattice catches that gap at some points and not at their neighbours, and
+    // the mesh came out with a fringe of little spikes hanging round the base
+    // of every ball. A fillet two voxels wide closes the crease, and a crater's
+    // lip is rounded instead of a knife edge. Away from where the brush meets
+    // the existing surface both are exactly the hard versions.
+    const float blend = SmoothEditVoxels * static_cast<float>(voxel);
+    const auto mix = [blend](float a, float b) noexcept { return std::max(blend - std::abs(a - b), 0.0f) / blend; };
+
     if (material == 0) {
         // **Removing: the union with the brush's INSIDE becomes air.** A carve
         // is `max(existing, insideness)` on a field where positive is air, so a
         // point already in the air stays in the air and one inside the brush
-        // becomes air by however deep it was.
-        return FieldSample{std::max(existing.distance, inside), existing.material};
+        // becomes air by however deep it was -- smoothed as above.
+        const float h = mix(existing.distance, inside);
+        return FieldSample{std::max(existing.distance, inside) + h * h * blend * 0.25f, existing.material};
     }
 
     // Adding: the union of ground. A point inside the brush is ground, at the
@@ -165,8 +182,16 @@ struct ColumnView
     // sample, so every block placed with a flat top wrote material zero. The
     // boundary belongs to the brush, which is the same convention `distance <= 0`
     // already states everywhere else.
+    const float brush = -inside;
+    const float h = mix(existing.distance, brush);
+    const float blended = std::min(existing.distance, brush) - h * h * blend * 0.25f;
     if (inside >= 0.0f) {
-        return FieldSample{std::min(existing.distance, -inside), material};
+        return FieldSample{blended, material};
+    }
+    if (blended < existing.distance) {
+        // The fillet, outside the brush: ground that was already ground keeps
+        // what it was made of, and air the fillet fills takes the brush's.
+        return FieldSample{blended, existing.distance <= 0.0f ? existing.material : material};
     }
     return existing;
 }
@@ -358,8 +383,12 @@ EditReport applyBrush(TerrainField& field, const core::AABB& bounds, Depth depth
         return report;
     }
 
-    const auto low = [voxel](float metres) { return static_cast<i32>(std::floor(metres / voxel)) - 1; };
-    const auto high = [voxel](float metres) { return static_cast<i32>(std::ceil(metres / voxel)) + 1; };
+    // One voxel of slack as before, plus the blend: `afterEdit` changes the
+    // field up to `SmoothEditVoxels` outside the brush, and a column it would
+    // change that this walk never visits is a step at the edge of the fillet.
+    const auto reach = 1 + static_cast<i32>(std::ceil(SmoothEditVoxels));
+    const auto low = [voxel, reach](float metres) { return static_cast<i32>(std::floor(metres / voxel)) - reach; };
+    const auto high = [voxel, reach](float metres) { return static_cast<i32>(std::ceil(metres / voxel)) + reach; };
 
     const i32 minX = low(bounds.min.x);
     const i32 maxX = high(bounds.max.x);

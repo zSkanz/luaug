@@ -133,24 +133,56 @@ constexpr core::u8 CaveFlag = 0x80;
     return content;
 }
 
-// The region a cave column is meshed over: its footprint plus one lattice
-// column on every side -- the ground's triangles are discarded wherever they
-// touch the column, which takes the quads on both sides of its boundary --
-// and from below its lowest surface to above its highest.
-[[nodiscard]] bool caveRegion(const asset::TerrainField& field, asset::TileKey column,
+// How far a cave column's mesh reaches past each of its four sides, in cells.
+//
+// **It depends on what is on the other side.** Where the neighbour is ground
+// drawn from the atlas, the ground's opening is a cell wider than the column
+// and a surface net stops half a cell short of any region's edge, so the mesh
+// reaches two cells out and the overlap is sunk out of sight. Where the
+// neighbour is another cave, it reaches ONE cell out and nothing is sunk: the
+// two meshes then share a strip of identical geometry from the same field, which
+// closes the seam between them -- and sinking it, as both used to, left a step
+// down the middle of every cave wall that crossed two columns.
+struct CaveRims
+{
+    i32 lowX = CaveRim;
+    i32 highX = CaveRim;
+    i32 lowZ = CaveRim;
+    i32 highZ = CaveRim;
+};
+
+[[nodiscard]] CaveRims caveRimsOf(asset::TileKey column, std::span<const asset::TileKey> columns) noexcept
+{
+    const auto isCave = [&columns](i32 x, i32 z) {
+        return std::binary_search(columns.begin(), columns.end(), asset::TileKey{x, z});
+    };
+    CaveRims rims;
+    rims.lowX = isCave(column.x - 1, column.z) ? 1 : CaveRim;
+    rims.highX = isCave(column.x + 1, column.z) ? 1 : CaveRim;
+    rims.lowZ = isCave(column.x, column.z - 1) ? 1 : CaveRim;
+    rims.highZ = isCave(column.x, column.z + 1) ? 1 : CaveRim;
+    return rims;
+}
+
+// The region a cave column is meshed over: its footprint plus its rims, and
+// from below the lowest surface in reach to above the highest -- the
+// neighbours' bricks included, so a strip two columns share is cut from the
+// same slab on both sides.
+[[nodiscard]] bool caveRegion(const asset::TerrainField& field, asset::TileKey column, const CaveRims& rims,
                               std::span<const asset::BrickKey> bricks, asset::MeshRegion& region) noexcept
 {
     const auto edge = static_cast<i32>(asset::TileEdge);
     const auto brickEdge = static_cast<i32>(asset::BrickEdge);
     const float voxel = field.settings().voxelSize;
-    const i32 minX = column.x * brickEdge - CaveRim;
-    const i32 minZ = column.z * brickEdge - CaveRim;
-    const i32 span = brickEdge + 2 * CaveRim;
+    const i32 minX = column.x * brickEdge - rims.lowX;
+    const i32 minZ = column.z * brickEdge - rims.lowZ;
+    const i32 spanX = brickEdge + rims.lowX + rims.highX;
+    const i32 spanZ = brickEdge + rims.lowZ + rims.highZ;
 
     i32 bottom = std::numeric_limits<i32>::max();
     i32 top = std::numeric_limits<i32>::lowest();
-    for (i32 z = 0; z <= span; ++z) {
-        for (i32 x = 0; x <= span; ++x) {
+    for (i32 z = 0; z <= spanZ; ++z) {
+        for (i32 x = 0; x <= spanX; ++x) {
             const i32 lx = minX + x;
             const i32 lz = minZ + z;
             const asset::HeightTile* tile =
@@ -165,7 +197,7 @@ constexpr core::u8 CaveFlag = 0x80;
         }
     }
     for (const asset::BrickKey brick : bricks) {
-        if (brick.x != column.x || brick.z != column.z)
+        if (brick.x < column.x - 1 || brick.x > column.x + 1 || brick.z < column.z - 1 || brick.z > column.z + 1)
             continue;
         bottom = std::min(bottom, brick.y * brickEdge - CaveMargin);
         top = std::max(top, (brick.y + 1) * brickEdge + CaveMargin);
@@ -176,8 +208,8 @@ constexpr core::u8 CaveFlag = 0x80;
     region.minX = minX;
     region.minZ = minZ;
     region.minY = bottom;
-    region.cellsX = static_cast<u32>(span);
-    region.cellsZ = static_cast<u32>(span);
+    region.cellsX = static_cast<u32>(spanX);
+    region.cellsZ = static_cast<u32>(spanZ);
     region.cellsY = static_cast<u32>(top - bottom);
     region.stride = 1;
     return true;
@@ -310,11 +342,14 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
             MeshHandle handle;
             const core::NameAtom urn = atoms.intern(terrainCaveUrn(id, column));
             asset::MeshRegion region;
-            if (caveRegion(field, column, bricks, region)) {
+            const CaveRims rims = caveRimsOf(column, columns);
+            if (caveRegion(field, column, rims, bricks, region)) {
                 asset::TerrainMesh meshed = asset::meshField(field, region);
-                // Sink the rim: every vertex past the opening in the ground --
-                // more than a cell outside the column, where the ground is still
-                // drawn -- goes a few centimetres down, so the ground covers it.
+                // Sink the rim where it overlaps ground drawn from the atlas:
+                // every vertex more than a cell outside the column, on a side
+                // whose neighbour is not a cave, goes a few centimetres down so
+                // the ground covers it. A side shared with another cave is left
+                // exactly where the field puts it (see `CaveRims`).
                 {
                     const auto brickEdge = static_cast<float>(asset::BrickEdge);
                     const float lowX = (static_cast<float>(column.x) * brickEdge - 1.0f) * voxel;
@@ -323,7 +358,10 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
                     const float highZ = (static_cast<float>(column.z + 1) * brickEdge) * voxel;
                     for (asset::Vertex& vertex : meshed.mesh.vertices) {
                         const core::Vec3& where = vertex.position;
-                        if (where.x < lowX || where.x > highX || where.z < lowZ || where.z > highZ)
+                        const bool outside =
+                            (rims.lowX == CaveRim && where.x < lowX) || (rims.highX == CaveRim && where.x > highX) ||
+                            (rims.lowZ == CaveRim && where.z < lowZ) || (rims.highZ == CaveRim && where.z > highZ);
+                        if (outside)
                             vertex.position.y -= CaveRimSink;
                     }
                 }

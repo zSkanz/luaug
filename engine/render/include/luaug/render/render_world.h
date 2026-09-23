@@ -246,6 +246,10 @@ struct DrawItem
     // False on every frame a game renders, so a packaged build's draw list is
     // the one it always was.
     bool outlined = false;
+    // A terrain cave (ADR 0071): drawn with the terrain's own forward shader,
+    // which takes its material per vertex and its look from the ground's, so
+    // the cave and the ground around its opening are one surface.
+    bool terrainCave = false;
 };
 
 // One terrain the GPU draws from its height atlas (ADR 0071). Filled by

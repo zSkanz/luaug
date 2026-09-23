@@ -47,6 +47,10 @@ constexpr rhi::TextureFormat kOcclusionFormat = rhi::TextureFormat::R8Unorm;
 // shadowing the wall a metre behind it; and past sixty metres the gap is
 // smaller than a pixel.
 constexpr f32 kContactRayMetres = 0.6f;
+
+// The value `drawGeometry` records as the bound material while caves are
+// bound, so the next ordinary draw rebinds its own.
+constexpr u32 kCaveBinding = 0xFFFFFFFEu;
 constexpr f32 kContactThicknessMetres = 0.25f;
 constexpr f32 kContactFadeDistance = 60.0f;
 constexpr rhi::TextureFormat kLuminanceFormat = rhi::TextureFormat::R32Float;
@@ -550,6 +554,10 @@ private:
     rhi::PipelineHandle terrainPipeline_{};
     rhi::PipelineHandle terrainPrepassPipeline_{};
     rhi::PipelineHandle terrainShadowPipeline_{};
+    // Caves: an ordinary static mesh's vertex layout, the terrain's look.
+    rhi::PipelineHandle terrainCavePipeline_{};
+    // The palette the terrain shaders read, filled once a frame.
+    GpuTerrainSurfaceUniforms terrainSurface_{};
     // One grid for every node of every terrain: 33 by 33 lattice points.
     rhi::BufferHandle terrainGridVertices_{};
     rhi::BufferHandle terrainGridIndices_{};
@@ -1384,7 +1392,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(instanceBuffer_);
     instanceBuffer_ = {};
 
-    for (rhi::PipelineHandle* pipeline : {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_}) {
+    for (rhi::PipelineHandle* pipeline :
+         {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1701,8 +1710,13 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // unbound vertex buffer.
         const bool skinnedDraw =
             batch == nullptr && draw.boneCount > 0 && resolved->skin.valid() && skinnedPipeline.valid();
+        // A cave in the opaque pass is drawn with the terrain's look; in every
+        // depth pass it is an ordinary static mesh.
+        const bool caveDraw =
+            selection == Selection::Opaque && batch == nullptr && draw.terrainCave && terrainCavePipeline_.valid();
         const rhi::PipelineHandle wanted = batch != nullptr ? instancedPipeline
                                            : skinnedDraw    ? skinnedPipeline
+                                           : caveDraw       ? terrainCavePipeline_
                                                             : staticPipeline;
         if (!(wanted == currentPipeline)) {
             cmd.setPipeline(wanted);
@@ -1723,7 +1737,32 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             uniforms.instanceAlphaUnused[0] = batch != nullptr ? 1.0f : draw.alpha;
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
 
-            if (draw.material != boundMaterial && draw.material < world.materials.size()) {
+            if (caveDraw) {
+                // The palette at the material slot, and the standard textures
+                // bound to their neutral stand-ins -- once per run of caves.
+                if (boundMaterial != kCaveBinding) {
+                    cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&terrainSurface_, sizeof(terrainSurface_)));
+                    cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(&terrainSurface_, sizeof(terrainSurface_)));
+                    const std::array<rhi::TextureBinding, 13> textures{
+                        rhi::TextureBinding{whitePixel_, linearSampler_},
+                        rhi::TextureBinding{flatNormalPixel_, linearSampler_},
+                        rhi::TextureBinding{whitePixel_, linearSampler_},
+                        rhi::TextureBinding{blackPixel_, linearSampler_},
+                        rhi::TextureBinding{shadowMap_, shadowSampler_},
+                        rhi::TextureBinding{environmentMap_, environmentSampler_},
+                        rhi::TextureBinding{brdfLut_, environmentSampler_},
+                        rhi::TextureBinding{clusterGrid_, pointSampler_},
+                        rhi::TextureBinding{lightIndices_, pointSampler_},
+                        rhi::TextureBinding{lightData_, pointSampler_},
+                        rhi::TextureBinding{occlusion_, linearSampler_},
+                        rhi::TextureBinding{localShadowMap_, shadowSampler_},
+                        rhi::TextureBinding{contact_, pointSampler_},
+                    };
+                    cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+                    boundMaterial = kCaveBinding;
+                }
+            }
+            else if (draw.material != boundMaterial && draw.material < world.materials.size()) {
                 const RenderMaterial& material = world.materials[draw.material];
                 cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&material.uniforms, sizeof(material.uniforms)));
 
@@ -1840,7 +1879,10 @@ bool DefaultRenderer::ensureTerrain(rhi::IDevice& device)
     const rhi::ShaderHandle fragment = load("terrain", rhi::ShaderStage::Fragment);
     const rhi::ShaderHandle depthVertex = load("terrain_depth", rhi::ShaderStage::Vertex);
     const rhi::ShaderHandle depthFragment = load("terrain_depth", rhi::ShaderStage::Fragment);
-    if (!vertex.valid() || !fragment.valid() || !depthVertex.valid() || !depthFragment.valid()) {
+    const rhi::ShaderHandle caveVertex = load("terrain_cave", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle caveFragment = load("terrain_cave", rhi::ShaderStage::Fragment);
+    if (!vertex.valid() || !fragment.valid() || !depthVertex.valid() || !depthFragment.valid() || !caveVertex.valid() ||
+        !caveFragment.valid()) {
         core::logText(core::LogLevel::Warn, error.message);
         return false;
     }
@@ -1892,6 +1934,31 @@ bool DefaultRenderer::ensureTerrain(rhi::IDevice& device)
         .debugName = "terrain_shadow",
     });
 
+    // The cave pipeline: `asset::Vertex`, 48 bytes, the layout every static
+    // mesh has -- a cave is filed in `MeshCache` like one.
+    // Three attributes, not four: the cave shader has no use for the UV, and a
+    // pipeline that declares an input its vertex shader does not read is one
+    // D3D12 refuses to build.
+    const std::array<rhi::VertexAttribute, 3> meshAttributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 12},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 24},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> meshBuffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
+    };
+    terrainCavePipeline_ = device.createGraphicsPipeline({
+        .vertexShader = caveVertex,
+        .fragmentShader = caveFragment,
+        .vertexBuffers = meshBuffers,
+        .vertexAttributes = meshAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "terrain_cave",
+    });
+
     constexpr u32 Points = TerrainGridQuads + 1;
     terrainGridIndexCount_ = TerrainGridQuads * TerrainGridQuads * 6;
     terrainGridVertices_ = device.createBuffer({
@@ -1906,7 +1973,7 @@ bool DefaultRenderer::ensureTerrain(rhi::IDevice& device)
     });
 
     terrainValid_ = terrainPipeline_.valid() && terrainPrepassPipeline_.valid() && terrainShadowPipeline_.valid() &&
-                    terrainGridVertices_.valid() && terrainGridIndices_.valid();
+                    terrainCavePipeline_.valid() && terrainGridVertices_.valid() && terrainGridIndices_.valid();
     return terrainValid_;
 }
 
@@ -2096,6 +2163,12 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // by every pass -- a shadow cast by different geometry than is drawn would
     // not match its caster. The grid goes up the first time, before any pass.
     terrainDraws_.clear();
+    if (!world.terrains.empty()) {
+        for (u32 id = 0; id < kTerrainPaletteSize; ++id) {
+            for (u32 channel = 0; channel < 4; ++channel)
+                terrainSurface_.palette[id][channel] = world.terrains.front().palette[id][channel];
+        }
+    }
     if (!world.terrains.empty() && world.camera.valid && ensureTerrain(device)) {
         if (!terrainGridUploaded_) {
             uploadTerrainGrid(cmd, terrainGridVertices_, terrainGridIndices_);

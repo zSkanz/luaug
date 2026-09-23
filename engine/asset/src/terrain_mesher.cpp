@@ -352,6 +352,17 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                     vertex.uv[1] = position.y;
                 }
 
+                // **The material rides in the tangent's x**, as a number. A
+                // terrain surface has no tangent frame of its own -- the terrain
+                // shaders build one from the normal -- and the vertex layout is a
+                // GPU buffer whose size is asserted, so this is where a per-vertex
+                // material can go without a second stream. It is what lets the
+                // cave shader blend materials across a triangle instead of
+                // changing colour at its edge.
+                vertex.tangent[0] = static_cast<float>(material);
+                vertex.tangent[1] = 0.0f;
+                vertex.tangent[2] = 0.0f;
+                vertex.tangent[3] = 1.0f;
                 cellVertex[cellIndex(cellX, cellY, cellZ)] = static_cast<u32>(out.mesh.vertices.size());
                 out.mesh.vertices.push_back(vertex);
                 out.colliderPoints.push_back(position);

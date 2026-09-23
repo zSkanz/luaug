@@ -675,6 +675,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .firstBone = firstBone,
                 .boneCount = boneCount,
                 .outlined = isOutlined(id),
+                .terrainCave = false,
             });
         }
     });
@@ -773,6 +774,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                     .firstBone = 0,
                     .boneCount = 0,
                     .outlined = isOutlined(id),
+                    .terrainCave = true,
                 });
             }
         }
@@ -885,6 +887,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
             .inCameraFrustum = visible,
             .outlined = isOutlined(id),
+            .terrainCave = false,
         });
     });
 
