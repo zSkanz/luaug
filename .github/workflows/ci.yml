@@ -517,6 +517,21 @@ jobs:
       # excludes them outright rather than skipping them: a pixel golden is tied
       # to the GPU that recorded it, which architecture.md §9 says is why the
       # capture gate and not the image comparison is the blocking render gate.
+      # **The macOS job's shaders come from here** (D167). There is no
+      # DirectXShaderCompiler for macOS, and ADR 0032 says what follows: a Mac's
+      # blobs are compiled on a Tier-1 or Tier-2 host. This build already emits
+      # MSL beside SPIR-V and DXIL, so the whole directory is handed over, and
+      # the macOS job's capture gates run with the pipelines they record rather
+      # than with none. Kept for a day: it is a hand-off, not a release.
+      - name: Hand the compiled shaders to the macOS job
+        if: runner.os == 'Linux' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shaders-for-macos
+          path: ${{ env.LUAUG_BUILD_ROOT }}/${{ matrix.preset }}/engine/app/content/shaders
+          if-no-files-found: error
+          retention-days: 1
+
       - name: No test skipped that was not expected to (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -669,7 +684,11 @@ jobs:
     # errors still builds; a documentation-only push does not build at all; and a
     # tag push is skipped because the tag points at a commit this job already
     # built when it landed.
-    needs: changes
+    # And after `build-test`, whose Linux leg compiles this job's shaders
+    # (D167, ADR 0032). That costs the wall time of the other build before this
+    # one starts; the alternative is capture gates that compare a stream
+    # recorded with no pipelines against one recorded with them.
+    needs: [changes, build-test]
     if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     # Was 45, which at 10x is 450 charged minutes for a job whose observed wall
@@ -755,6 +774,13 @@ jobs:
       #
       # `-LE gpu-golden` for the reason every other tier excludes them: a pixel
       # golden is tied to the GPU that recorded it, and this is not it.
+      # Where the engine looks for them: `content/shaders` beside the host.
+      - name: The shaders a Tier-2 host compiled (D167)
+        uses: actions/download-artifact@v4
+        with:
+          name: shaders-for-macos
+          path: ${{ env.LUAUG_BUILD_ROOT }}/macos-clang-dev/engine/app/content/shaders
+
       - name: Test (non-blocking until green once)
         continue-on-error: true
         shell: bash

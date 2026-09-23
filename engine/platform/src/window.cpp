@@ -21,6 +21,7 @@
 
 #include <span>
 #include <string>
+#include <string_view>
 
 #include "window_impl.h"
 
@@ -96,7 +97,23 @@ WindowPtr createWindow(const WindowDesc& desc, core::EngineError* outError)
     const std::string title =
         desc.title.empty() ? core::engineCatalog().format(desc.titleKey, desc.titleArgs) : std::string(desc.title);
 
-    SDL_Window* handle = SDL_CreateWindow(title.c_str(), desc.width, desc.height, flags);
+    SDL_PropertiesID properties = SDL_CreateProperties();
+    SDL_SetStringProperty(properties, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title.c_str());
+    SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, desc.width);
+    SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, desc.height);
+    SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, static_cast<Sint64>(flags));
+#if defined(__APPLE__)
+    // **A headless window on macOS claims no graphics API of its own** (D166).
+    // SDL gives every macOS window that names no backend `SDL_WINDOW_OPENGL`
+    // by default, and the offscreen driver implements OpenGL through EGL, which
+    // a Mac does not have -- so the window failed to exist at all. Nothing
+    // draws into a headless window through OpenGL, so it is told a graphics
+    // context comes from elsewhere, which is exactly true: the GPU device's.
+    if (const char* driver = SDL_GetCurrentVideoDriver(); driver != nullptr && std::string_view(driver) == "offscreen")
+        SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN, true);
+#endif
+    SDL_Window* handle = SDL_CreateWindowWithProperties(properties);
+    SDL_DestroyProperties(properties);
     if (handle == nullptr) {
         if (outError != nullptr)
             *outError = core::makeError(LUAUG_TR("platform.err.window_failed"), {}, SDL_GetError());
