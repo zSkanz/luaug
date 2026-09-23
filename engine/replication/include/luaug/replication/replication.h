@@ -8,6 +8,7 @@
 // build with socket code nobody reaches (ADR 0070, clause 3).
 #pragma once
 
+#include "luaug/core/id.h"
 #include "luaug/replication/types.h"
 
 #include <memory>
@@ -15,6 +16,10 @@
 
 namespace luaug::core {
 struct EngineError;
+}
+
+namespace luaug::net {
+class ITransport;
 }
 
 namespace luaug::scene {
@@ -40,7 +45,11 @@ public:
     // On an authority that is intent; on a replica it is spawns, despawns and
     // snapshots. **The world is mutated here and nowhere else in this class**,
     // which is what lets `send` take a const world.
-    virtual void receive(scene::World& world) = 0;
+    //
+    // `root` is what is replicated -- the `Workspace` -- passed rather than
+    // looked up, so the module never has to know how a world is arranged above
+    // the part of it that travels.
+    virtual void receive(scene::World& world, core::InstanceId root) = 0;
 
     // Extracts, diffs and sends this tick's state.
     //
@@ -48,7 +57,7 @@ public:
     // told is a function of the operation sequence (R10), and a send rate
     // measured in milliseconds would make the bytes on the wire depend on how
     // fast the machine was.
-    virtual void send(const scene::World& world, u64 tick) = 0;
+    virtual void send(const scene::World& world, core::InstanceId root, u64 tick) = 0;
 
     [[nodiscard]] virtual Status status() const = 0;
     [[nodiscard]] virtual Stats stats() const = 0;
@@ -68,5 +77,13 @@ public:
 // failure to network, it is a game that is not networked.
 [[nodiscard]] std::unique_ptr<IReplication> createReplication(const Config& config,
                                                               std::optional<core::EngineError>& error);
+
+// The same, over a transport the caller made -- the memory transport in a test
+// and in the two-worlds gate, where what arrives must be a function of the
+// operation sequence rather than of a socket. `createReplication` is this over
+// ENet, and it stays the only caller that reaches a real one.
+[[nodiscard]] std::unique_ptr<IReplication> createReplicationOver(std::unique_ptr<net::ITransport> transport,
+                                                                  const Config& config,
+                                                                  std::optional<core::EngineError>& error);
 
 } // namespace luaug::replication

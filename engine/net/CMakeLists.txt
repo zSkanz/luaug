@@ -16,6 +16,7 @@ luaug_add_module(net_api
         src/digest.cpp
         src/enet_transport.cpp
         src/http.cpp
+        src/memory_transport.cpp
         src/tcp.cpp
         src/websocket.cpp
         src/websocket_protocol.cpp
@@ -42,6 +43,7 @@ luaug_add_module_tests(net
         tests/async_client_tests.cpp
         tests/digest_tests.cpp
         tests/http_tests.cpp
+        tests/memory_transport_tests.cpp
         tests/transport_tests.cpp
         tests/websocket_client_tests.cpp
         tests/websocket_protocol_tests.cpp

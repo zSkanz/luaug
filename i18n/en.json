@@ -221,6 +221,7 @@
   "engine.dev.err.not_implemented": "The dev-server command {of} is reserved by the protocol and is not implemented yet.",
   "engine.reload.err.script_failed": "Reload refused: {count} entry script(s) would not compile. The previous world is still running.",
   "engine.reload.err.no_scripts": "Reload refused: no entry scripts were found under {path}. The previous world is still running.",
+  "net.err.replication_peer_cap": "A game cannot accept {count} players; the transport holds between 1 and {cap}.",
   "net.err.transport_init_failed": "The network transport could not be initialised; no connection can be opened.",
   "net.err.transport_open_failed": "The transport could not open on port {port}; the port may already be in use.",
   "net.err.transport_not_open": "The transport is not open.",

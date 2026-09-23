@@ -41,12 +41,15 @@ if(LUAUG_ENABLE_REPLICATION)
         SOURCES
             src/field.cpp
             src/extract.cpp
+            src/replication.cpp
+            src/session.cpp
         DEPS
             core
             scene
-            # `net_api` joins when the transport does. Today this module reads a
-            # world and produces bytes, and a dependency on a seam nothing calls
-            # would be a link edge the layer gate has to justify for nothing.
+            # The transport seam (L2), an ordinary downward edge: the sessions
+            # speak `ITransport`, and `createReplication` is the one place an
+            # ENet transport is made.
+            net_api
         API_DEPS
             replication_api
     )
@@ -73,13 +76,22 @@ luaug_add_module_tests(replication
     SOURCES
         tests/field_tests.cpp
         tests/extract_tests.cpp
+        tests/session_tests.cpp
         ../scene/tests/scene_fixture.cpp
     MODULES
         ${luaug_replication_test_modules}
         scene
+        net_api
 )
 
 if(TARGET luaug_replication_tests)
     target_include_directories(luaug_replication_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 endif()
+endif()
+
+if(TARGET luaug_replication_tests)
+    # The sessions log and refuse through keyed errors, so their tests load the
+    # catalog the way every other module's do.
+    target_compile_definitions(luaug_replication_tests PRIVATE
+        LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
 endif()

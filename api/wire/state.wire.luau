@@ -399,8 +399,10 @@ local Messages: { Schema.Message } = {
         Id = 3,
         Channel = "Control",
         Direction = "ToReplica",
-        Doc = "An instance entering interest, with every field of its class at once. Reliable, "
-            .. "because a diff against a baseline nobody has is a diff against nothing.",
+        Doc = "An instance entering interest: its network id and the class to create. Reliable, "
+            .. "because an instance that is never created is a replica missing part of the world for "
+            .. "good. **Its fields ride the snapshot**, as a whole record against a baseline that "
+            .. "does not have it -- one decoding path for new and changed rather than two.",
     },
     {
         Name = "Despawn",
