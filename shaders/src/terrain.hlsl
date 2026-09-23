@@ -83,13 +83,17 @@ TerrainInterpolants VertexMain(VertexInput input)
 }
 
 // The height at a lattice point, falling back to `fallback` where the field
-// has no ground -- so a normal at the edge of the world is the edge's own
-// slope rather than a cliff down to zero.
+// has no ground -- no tile, or a column with nothing in it -- so a normal at the
+// edge of the ground is the edge's own slope rather than a cliff down to
+// whatever an empty column holds.
 float heightOr(int2 lattice, float fallback)
 {
     bool present;
     const float height = terrainHeight(TileTable, TileTableSampler, Heights, HeightsSampler, Field, lattice, present);
-    return present ? height : fallback;
+    if (!present)
+        return fallback;
+    const uint id = terrainMaterialByte(TileTable, TileTableSampler, Materials, MaterialsSampler, Field, lattice) & 0x7Fu;
+    return id != 0u ? height : fallback;
 }
 
 // The material id at a lattice point, or `fallback` where there is none.

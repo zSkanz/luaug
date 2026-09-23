@@ -117,11 +117,35 @@ TerrainVertex terrainVertex(Texture2D<float> tileTable, SamplerState tileSampler
     const float voxel = params.NodeRelative.w;
     const int2 corner = int2(params.NodeLattice.xy);
 
+    // The two lattice points this vertex lies between: its own, and the even
+    // one it slides onto as it morphs to the next level's grid.
+    const float2 odd = frac(grid * 0.5f) * 2.0f;
+    const int2 fine = corner + int2(grid * step);
+    const int2 coarse = corner + int2((grid - odd) * step);
+    bool finePresent;
+    bool coarsePresent;
+    float fineHeight = terrainHeight(tileTable, tileSampler, heights, heightSampler, params, fine, finePresent);
+    float coarseHeight = terrainHeight(tileTable, tileSampler, heights, heightSampler, params, coarse, coarsePresent);
+    const uint fineMaterial = terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, fine);
+    const uint coarseMaterial =
+        terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, coarse);
+    const bool fineGround = finePresent && (fineMaterial & 0x80u) == 0u && (fineMaterial & 0x7Fu) != 0u;
+    const bool coarseGround = coarsePresent && (coarseMaterial & 0x80u) == 0u && (coarseMaterial & 0x7Fu) != 0u;
+    // **Heights are only taken from ground.** A lattice point with none -- no
+    // tile, a column dug to nothing, a cave's mouth -- holds a height that means
+    // nothing: zero, or the world's floor. A vertex just past the edge of the
+    // ground stops being a hole once it has slid more than halfway onto an even
+    // neighbour that is ground; had it kept its own height it would hang a sheer
+    // sliver down to the floor, and every edge of the ground drew a curtain
+    // wherever a level of detail was mid-morph. So each end borrows the other's
+    // height when it has no ground of its own.
+    if (!fineGround && coarseGround)
+        fineHeight = coarseHeight;
+    if (!coarseGround)
+        coarseHeight = fineHeight;
+
     // Where the vertex would be unmorphed, for the distance the morph is
     // measured by.
-    const int2 fine = corner + int2(grid * step);
-    bool finePresent;
-    const float fineHeight = terrainHeight(tileTable, tileSampler, heights, heightSampler, params, fine, finePresent);
     const float3 unmorphed =
         float3(params.NodeRelative.x + grid.x * step * voxel, params.NodeRelative.y + fineHeight,
                params.NodeRelative.z + grid.y * step * voxel);
@@ -129,11 +153,7 @@ TerrainVertex terrainVertex(Texture2D<float> tileTable, SamplerState tileSampler
 
     // Odd vertices slide onto their even neighbour; at `morph == 1` the grid
     // is the next level's, with degenerate triangles where the odd rows were.
-    const float2 odd = frac(grid * 0.5f) * 2.0f;
     const float2 morphed = grid - odd * morph;
-    const int2 coarse = corner + int2((grid - odd) * step);
-    bool coarsePresent;
-    const float coarseHeight = terrainHeight(tileTable, tileSampler, heights, heightSampler, params, coarse, coarsePresent);
     const float height = lerp(fineHeight, coarseHeight, morph);
 
     TerrainVertex vertex;
@@ -141,12 +161,9 @@ TerrainVertex terrainVertex(Texture2D<float> tileTable, SamplerState tileSampler
                              params.NodeRelative.z + morphed.y * step * voxel);
     vertex.Lattice = float2(corner) + morphed * step;
 
-    const int2 settled = morph < 0.5f ? fine : coarse;
-    const bool present = morph < 0.5f ? finePresent : coarsePresent;
-    const uint material = terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, settled);
     // Material zero is a column with no ground in it (D153): dug out to
     // nothing, or never filled in a tile that holds other ground.
-    vertex.Hole = (!present || (material & 0x80u) != 0u || (material & 0x7Fu) == 0u) ? 1.0f : 0.0f;
+    vertex.Hole = (morph < 0.5f ? fineGround : coarseGround) ? 0.0f : 1.0f;
     return vertex;
 }
 
