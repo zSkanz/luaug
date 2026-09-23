@@ -1177,10 +1177,10 @@ only its position moved.
 
 **Numbering is intent and not a queue.** A phase is OPEN when the owner opens it
 and not before, which is the escalation R15 names — and they are not obliged to
-open them in order. As of 2026-08-27 three are open: **1** (2026-08-22, complete),
-and **2 and 4** (both 2026-08-27, in the same instruction). Phase 3 was skipped
-over rather than dropped: the 2D layer and navmesh stay closed, and so do mobile
-and the ecosystem work.
+open them in order. As of 2026-09-23 four are open: **1** (2026-08-22, complete),
+**2 and 4** (both 2026-08-27, in the same instruction), and **3** (2026-09-23:
+"pode meter marcha na parada do 2D ... 2D e navmesh"). Mobile and the ecosystem
+work stay closed.
 
 1. **Visual editor** — built on the engine (Studio-like, phase 2 of the
    original vision). **Opened 2026-08-22 by human decision** and specified below
@@ -1305,6 +1305,11 @@ and the ecosystem work.
    decision #7 made this the first item; the human moved it to second on
    2026-08-21), together with **navmesh integration**
    (NavigationService over the existing Recast/Detour seam, ADR 0022).
+
+   **Opened 2026-09-23 by human decision**, in the instruction that also asked
+   for every open defect fixed, vertical streaming, multiplayer's named gaps and
+   level-C determinism. The ledger for all of it is
+   [`briefs/mandate-2026-09-23.md`](briefs/mandate-2026-09-23.md).
 4. **Multiplayer/replication** — official server authority + prediction over the
    deterministic fixed-tick foundations; `ITransport` becomes the replication
    channel. **Designed and approved by the human on 2026-08-21**, and ready to

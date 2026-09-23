@@ -89,11 +89,13 @@ without a human-approved ADR.
   (ADR 0022) — was never "forbidden for ever"; it was "not in v1, and a scope
   change is an escalation item". **The escalation mechanism is the post-v1
   phases in `docs/roadmap.md`, opened ONE AT A TIME by human decision**, and
-  three have been:
+  four have been:
 
   - **Phase 1, the visual editor** — opened 2026-08-22. E1 through E9, complete.
   - **Phase 2, effects and world content** — opened 2026-08-27.
   - **Phase 4, multiplayer/replication** — opened 2026-08-27.
+  - **Phase 3, the 2D layer and navmesh** — opened 2026-09-23 ("pode meter
+    marcha na parada do 2D ... 2D e navmesh").
 
   Everything still on the list and not in an opened phase stays closed, and
   opening one is the owner's call and nobody else's. What R15 forbids is taking
