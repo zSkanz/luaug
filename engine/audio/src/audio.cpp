@@ -95,7 +95,19 @@ struct Clip
 {
     std::vector<f32> samples;
     u32 frames = 0;
+    // **A long clip is not decoded** (D129): its ENCODED bytes are kept, and
+    // each voice playing it decodes a window at a time just ahead of the mixer
+    // (`Stream`). Three minutes of music is about 70 MB of f32 and a few MB of
+    // file -- the same trade every engine makes between sound effects, which are
+    // decoded whole, and music, which is streamed.
+    std::vector<std::byte> encoded;
+    bool streamed = false;
 };
+
+// Past this many frames at 48 kHz a clip streams rather than decoding whole:
+// ten seconds, which puts every effect and short ambience on the decoded side
+// and every piece of music on the streamed one.
+constexpr u64 kStreamFrames = static_cast<u64>(kSampleRate) * 10u;
 
 // What a prefetch job reads and writes, in ONE heap allocation.
 //
@@ -108,6 +120,69 @@ struct ClipWork
 {
     std::vector<std::byte> bytes;
     std::shared_ptr<Clip> clip;
+    // The clip's length in frames at 48 kHz, by `prepareClip`'s rule; 0 for a
+    // file that names no sound.
+    u64 length = 0;
+};
+
+// **One voice's decoder over a streamed clip.** Owned by the voice that plays
+// it and carried from frame to frame while the same sound plays the same clip;
+// read by the audio thread only, under the mixer's lock, and made and destroyed
+// by the main thread only.
+//
+// It keeps a window of decoded frames. A cursor inside the window is a copy; one
+// outside it is a read, and one that is not where the decoder stands -- a seek, a
+// loop, a timeline taken back -- is a seek first. miniaudio decodes straight into
+// the mixer's format, as `decodeClip` does, so seeks are in output frames too.
+struct Stream
+{
+    // About forty milliseconds: small enough that a window is a small decode,
+    // large enough that a callback of a few hundred frames is usually a copy.
+    static constexpr ma_uint64 WindowFrames = 2048;
+
+    ma_decoder decoder{};
+    bool open = false;
+    // The output frame the decoder will produce next.
+    u64 next = 0;
+    std::vector<f32> window;
+    u64 start = 0;
+    u64 count = 0;
+
+    explicit Stream(const Clip& clip)
+    {
+        window.resize(static_cast<core::usize>(WindowFrames) * kChannels);
+        const ma_decoder_config config = ma_decoder_config_init(ma_format_f32, kChannels, kSampleRate);
+        open = !clip.encoded.empty() &&
+               ma_decoder_init_memory(clip.encoded.data(), clip.encoded.size(), &config, &decoder) == MA_SUCCESS;
+    }
+    ~Stream()
+    {
+        if (open)
+            ma_decoder_uninit(&decoder);
+    }
+    Stream(const Stream&) = delete;
+    Stream& operator=(const Stream&) = delete;
+
+    // The frame at `index`, decoding it if it is not in the window; null past
+    // the end of what the decoder can give.
+    [[nodiscard]] const f32* frameAt(u64 index) noexcept
+    {
+        if (index >= start && index < start + count)
+            return &window[static_cast<core::usize>(index - start) * kChannels];
+        if (!open)
+            return nullptr;
+        if (index != next) {
+            if (ma_decoder_seek_to_pcm_frame(&decoder, index) != MA_SUCCESS)
+                return nullptr;
+            next = index;
+        }
+        ma_uint64 read = 0;
+        (void)ma_decoder_read_pcm_frames(&decoder, window.data(), WindowFrames, &read);
+        start = index;
+        count = read;
+        next = index + read;
+        return count == 0 ? nullptr : window.data();
+    }
 };
 
 struct Voice
@@ -141,6 +216,8 @@ struct Voice
     // resolved -- which still plays the placeholder tone, because a sound that
     // went silent because a file was missing is a bug report about the sound.
     const Clip* clip = nullptr;
+    // The decoder a streamed clip plays through; null for a decoded one.
+    std::shared_ptr<Stream> stream;
     // Where in the clip this voice is, in FRAMES. **Advanced by the callback and
     // SEEDED from the sound's `TimePosition`**, rather than taken from it afresh
     // every frame.
@@ -194,7 +271,7 @@ struct Voice
 [[nodiscard]] bool mixClip(float* samples, ma_uint32 frameCount, const Clip& clip, f64& cursor, f64 step, f32 leftGain,
                            f32 rightGain, bool downmix, bool looped) noexcept
 {
-    for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
+    for (ma_uint32 frame = 0; frame < frameCount;) {
         // Nearest sample rather than interpolated. At playback speed one --
         // which is every sound in every game most of the time -- the cursor
         // lands exactly on a frame and this is a copy; at other speeds it is a
@@ -209,6 +286,8 @@ struct Voice
             // Wrapped by the CLIP's length rather than reset to zero: a loop
             // that restarted at the buffer boundary would click once per buffer
             // instead of once per loop.
+            // And the same output frame is filled from there: advancing past it
+            // left one frame of silence at every loop point.
             cursor = std::fmod(cursor, static_cast<f64>(clip.frames));
             continue;
         }
@@ -232,6 +311,39 @@ struct Voice
             samples[frame * kChannels + 1] += clip.samples[at + 1] * rightGain;
         }
         cursor += step;
+        ++frame;
+    }
+    return true;
+}
+
+// `mixClip` for a streamed clip: the same cursor, the same fold and the same end,
+// with each frame read through the voice's decoder instead of out of memory.
+[[nodiscard]] bool mixStream(float* samples, ma_uint32 frameCount, const Clip& clip, Stream& stream, f64& cursor,
+                             f64 step, f32 leftGain, f32 rightGain, bool downmix, bool looped) noexcept
+{
+    for (ma_uint32 frame = 0; frame < frameCount;) {
+        const auto index = static_cast<u64>(cursor);
+        const f32* at = index < clip.frames ? stream.frameAt(index) : nullptr;
+        if (at == nullptr) {
+            // The end: the clip's declared length, or the decoder's own end if it
+            // came first. Wrapped by whichever it was, and never from the top of
+            // an empty clip, which would spin here for ever.
+            if (!looped || index == 0)
+                return false;
+            cursor = std::fmod(cursor, static_cast<f64>(std::min<u64>(index, clip.frames)));
+            continue;
+        }
+        if (downmix) {
+            const float mono = (at[0] + at[1]) * 0.5f;
+            samples[frame * kChannels] += mono * leftGain;
+            samples[frame * kChannels + 1] += mono * rightGain;
+        }
+        else {
+            samples[frame * kChannels] += at[0] * leftGain;
+            samples[frame * kChannels + 1] += at[1] * rightGain;
+        }
+        cursor += step;
+        ++frame;
     }
     return true;
 }
@@ -242,6 +354,7 @@ struct Voice
 struct Audition
 {
     const Clip* clip = nullptr;
+    std::shared_ptr<Stream> stream;
     std::string content;
     f64 cursor = 0.0;
     f64 cursorStep = 1.0;
@@ -265,6 +378,8 @@ struct AudioSystem::Impl
     std::atomic<u32> activeVoices{0};
     std::atomic<u32> clipsLoaded{0};
     std::atomic<u32> clipsMissing{0};
+    std::atomic<u32> clipsStreamed{0};
+    std::atomic<u32> tickDecodes{0};
 
     // Where `Sound.Content` is resolved from, and what has been decoded.
     //
@@ -276,18 +391,29 @@ struct AudioSystem::Impl
     // audio rather than a smarter cache.
     const asset::ContentMounts* mounts = nullptr;
     std::vector<std::pair<std::string, std::shared_ptr<Clip>>> clips;
+    // **How long each content is, in frames at 48 kHz** -- what the TICK reads,
+    // kept apart from `clips` because the tick must be able to answer without a
+    // clip: from the file's header, which is a pure function of its bytes. Zero
+    // for a content that names no sound. Sorted by URN, never evicted.
+    std::vector<std::pair<std::string, u64>> lengths;
 
     // Decodes on the first ask and answers from the cache after. Null for a URN
     // that names nothing, which plays the placeholder tone.
     //
-    // **This still decodes on the calling thread when it has to** (D129), and
-    // that is deliberate rather than unfinished. The tick reads it to know how
-    // long a sound is, and the answer decides when `Ended` fires -- which
-    // `replay.cpp` hashes. An answer that arrived a few ticks later on a slow
-    // disk would make the world hash depend on the disk, which R10 forbids
-    // outright. So the synchronous path stays as the floor, and `beginPrefetch`
-    // below is what stops it being reached.
+    // **The frame's floor**: a clip the prefetch has not landed is prepared here,
+    // on the frame -- which for a long file is a read and a header, not a
+    // decode, because a long file streams (D129).
     [[nodiscard]] const Clip* clipFor(std::string_view content);
+
+    // **How long a content is, for the TICK** (D129), in frames at 48 kHz, and 0
+    // for one that names no sound. Read from the file's header, so the tick
+    // never decodes anything a header can answer; a format that declares no
+    // length is decoded to count it, and `tickDecodes` counts that. Every path
+    // measures by `prepareClip`'s one rule, so the answer is the same whichever
+    // of the tick, the frame or the prefetch got there first -- and the world
+    // hash cannot learn anything about the disk (R10).
+    [[nodiscard]] u64 lengthOf(std::string_view content);
+    void recordLength(std::string_view content, u64 length);
 
     // --- Prefetch (D129) ----------------------------------------------------
     //
@@ -328,7 +454,11 @@ struct AudioSystem::Impl
     void beginPrefetch(std::string_view content);
     void pumpPrefetch();
     void releasePrefetch() noexcept;
-    const Clip* install(std::string_view content, std::shared_ptr<Clip> clip);
+    const Clip* install(std::string_view content, std::shared_ptr<Clip> clip, u64 length);
+
+    // Everything the callback mixes, into a cleared buffer. The caller holds the
+    // lock.
+    void mix(float* samples, ma_uint32 frameCount) noexcept;
 
     static void dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
     {
@@ -362,58 +492,76 @@ struct AudioSystem::Impl
             self->underruns.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        self->activeVoices.store(static_cast<u32>(self->voices.size()), std::memory_order_relaxed);
-
-        for (Voice& voice : self->voices) {
-            if (voice.amplitude <= 0.0f)
-                continue;
-
-            if (voice.clip != nullptr) {
-                (void)mixClip(samples, frameCount, *voice.clip, voice.cursor, voice.cursorStep,
-                              voice.amplitude * voice.panLeft, voice.amplitude * voice.panRight, voice.positional,
-                              voice.looped);
-                continue;
-            }
-
-            for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
-                // The widening is written out: `voice.phase` is f64 and the
-                // amplitude f32, and `-Wdouble-promotion` is an error on
-                // `engine/` so that a narrow value entering a wide computation
-                // is a decision rather than an accident.
-                const auto value = static_cast<float>(std::sin(voice.phase) * static_cast<double>(voice.amplitude));
-                samples[frame * kChannels] += value;
-                samples[frame * kChannels + 1] += value;
-                voice.phase += voice.phaseStep;
-                if (voice.phase > 6.283185307179586)
-                    voice.phase -= 6.283185307179586;
-            }
-        }
-
-        // **The audition is mixed whatever the world is doing**, including while
-        // the mixer is suspended -- suspension empties `voices` and the audition
-        // was never in them. That is the point of it: the editor suspends audio
-        // precisely because the world is not ticking, and a preview is what
-        // somebody asks for in exactly that state.
-        //
-        // It is also the one cursor in this file the device advances on its own
-        // authority, which it may do because nothing in the simulation can see
-        // it.
-        if (self->audition.active && self->audition.clip != nullptr) {
-            // Centred and never folded: an audition is the file, and the file
-            // is not anywhere.
-            self->audition.active =
-                mixClip(samples, frameCount, *self->audition.clip, self->audition.cursor, self->audition.cursorStep,
-                        self->audition.amplitude, self->audition.amplitude, false, false);
-        }
-
-        // Soft-clipped rather than left to wrap: a mix past full scale is a game
-        // balance problem, and clipping it is what a mixer does. Wrapping is
-        // what a bug does.
-        const core::usize total = static_cast<core::usize>(frameCount) * kChannels;
-        for (core::usize index = 0; index < total; ++index)
-            samples[index] = std::clamp(samples[index], -1.0f, 1.0f);
+        self->mix(samples, frameCount);
     }
 };
+
+void AudioSystem::Impl::mix(float* samples, ma_uint32 frameCount) noexcept
+{
+    activeVoices.store(static_cast<u32>(voices.size()), std::memory_order_relaxed);
+
+    for (Voice& voice : voices) {
+        if (voice.amplitude <= 0.0f)
+            continue;
+
+        if (voice.clip != nullptr) {
+            if (voice.clip->streamed) {
+                // A streamed clip whose decoder could not open is silent:
+                // its length is real and the tone would be a lie about it.
+                if (voice.stream != nullptr)
+                    (void)mixStream(samples, frameCount, *voice.clip, *voice.stream, voice.cursor, voice.cursorStep,
+                                    voice.amplitude * voice.panLeft, voice.amplitude * voice.panRight, voice.positional,
+                                    voice.looped);
+                continue;
+            }
+            (void)mixClip(samples, frameCount, *voice.clip, voice.cursor, voice.cursorStep,
+                          voice.amplitude * voice.panLeft, voice.amplitude * voice.panRight, voice.positional,
+                          voice.looped);
+            continue;
+        }
+
+        for (ma_uint32 frame = 0; frame < frameCount; ++frame) {
+            // The widening is written out: `voice.phase` is f64 and the
+            // amplitude f32, and `-Wdouble-promotion` is an error on
+            // `engine/` so that a narrow value entering a wide computation
+            // is a decision rather than an accident.
+            const auto value = static_cast<float>(std::sin(voice.phase) * static_cast<double>(voice.amplitude));
+            samples[frame * kChannels] += value;
+            samples[frame * kChannels + 1] += value;
+            voice.phase += voice.phaseStep;
+            if (voice.phase > 6.283185307179586)
+                voice.phase -= 6.283185307179586;
+        }
+    }
+
+    // **The audition is mixed whatever the world is doing**, including while
+    // the mixer is suspended -- suspension empties `voices` and the audition
+    // was never in them. That is the point of it: the editor suspends audio
+    // precisely because the world is not ticking, and a preview is what
+    // somebody asks for in exactly that state.
+    //
+    // It is also the one cursor in this file the device advances on its own
+    // authority, which it may do because nothing in the simulation can see
+    // it.
+    if (audition.active && audition.clip != nullptr) {
+        // Centred and never folded: an audition is the file, and the file
+        // is not anywhere.
+        if (audition.clip->streamed)
+            audition.active = audition.stream != nullptr &&
+                              mixStream(samples, frameCount, *audition.clip, *audition.stream, audition.cursor,
+                                        audition.cursorStep, audition.amplitude, audition.amplitude, false, false);
+        else
+            audition.active = mixClip(samples, frameCount, *audition.clip, audition.cursor, audition.cursorStep,
+                                      audition.amplitude, audition.amplitude, false, false);
+    }
+
+    // Soft-clipped rather than left to wrap: a mix past full scale is a game
+    // balance problem, and clipping it is what a mixer does. Wrapping is
+    // what a bug does.
+    const core::usize total = static_cast<core::usize>(frameCount) * kChannels;
+    for (core::usize index = 0; index < total; ++index)
+        samples[index] = std::clamp(samples[index], -1.0f, 1.0f);
+}
 
 AudioSystem::~AudioSystem()
 {
@@ -654,6 +802,24 @@ void AudioSystem::update(scene::World& world, core::InstanceId listener, const c
         next.resize(kMaxVoices);
     }
 
+    // **A streamed voice keeps its decoder while it plays the same clip**, and a
+    // new one opens its own -- here, before the lock, because opening a decoder
+    // parses a header and the audio thread must not wait on that. Reading the
+    // old list outside the lock is safe: only this thread writes it, and the
+    // callback touches a voice's cursor and phase, never its id, clip or stream.
+    for (Voice& fresh : next) {
+        if (fresh.clip == nullptr || !fresh.clip->streamed)
+            continue;
+        for (const Voice& old : m_impl->voices) {
+            if (old.id == fresh.id && old.clip == fresh.clip) {
+                fresh.stream = old.stream;
+                break;
+            }
+        }
+        if (fresh.stream == nullptr)
+            fresh.stream = std::make_shared<Stream>(*fresh.clip);
+    }
+
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
         // **What a continuing voice keeps from the frame before**, matched by
@@ -824,7 +990,101 @@ namespace {
     return clip;
 }
 
+// **What a file becomes, and how long it is** -- the one function the tick's
+// floor, the frame and the prefetch all call, so they cannot disagree about a
+// length (R10). The length is what the header declares when it declares one,
+// and what the decode produced when it does not.
+//
+// A file declared longer than `kStreamFrames` is not decoded: its bytes are
+// kept for the voices that stream it. `owned`, when it holds `bytes`, is moved
+// from rather than copied.
+[[nodiscard]] std::shared_ptr<Clip> prepareClip(std::span<const std::byte> bytes, std::vector<std::byte>* owned,
+                                                u64& length)
+{
+    length = 0;
+    if (bytes.empty())
+        return nullptr;
+    const std::optional<u64> declared = detail::probeFrames(bytes);
+    if (declared.has_value() && *declared > kStreamFrames) {
+        auto clip = std::make_shared<Clip>();
+        clip->streamed = true;
+        clip->frames = static_cast<u32>(std::min<u64>(*declared, 0xFFFFFFFFu));
+        if (owned != nullptr && owned->data() == bytes.data())
+            clip->encoded = std::move(*owned);
+        else
+            clip->encoded.assign(bytes.begin(), bytes.end());
+        length = *declared;
+        // A header that parsed over a body no decoder will open is not a clip.
+        const Stream probe(*clip);
+        return probe.open ? clip : nullptr;
+    }
+    std::shared_ptr<Clip> clip = decodeClip(bytes);
+    length = declared.has_value() ? *declared : (clip != nullptr ? clip->frames : 0u);
+    return clip;
+}
+
 } // namespace
+
+namespace detail {
+
+std::optional<u64> probeFrames(std::span<const std::byte> bytes)
+{
+    const auto byteAt = [&](core::usize at) { return static_cast<u64>(static_cast<unsigned char>(bytes[at])); };
+    const auto little = [&](core::usize at, core::usize width) {
+        u64 value = 0;
+        for (core::usize index = width; index > 0; --index)
+            value = (value << 8u) | byteAt(at + index - 1);
+        return value;
+    };
+    const auto tagged = [&](core::usize at, const char* tag, core::usize width) {
+        return at + width <= bytes.size() && std::memcmp(bytes.data() + at, tag, width) == 0;
+    };
+
+    // **Ogg Vorbis, read by hand**, because miniaudio's decoder answers no
+    // length for it (D094). The stream's length is the granule position of its
+    // last page -- the sample count at the source rate -- and the rate is in
+    // the identification header, the first packet of the first page.
+    if (tagged(0, "OggS", 4)) {
+        if (bytes.size() < 27)
+            return std::nullopt;
+        const core::usize packet = 27 + static_cast<core::usize>(byteAt(26));
+        if (packet + 16 > bytes.size() || byteAt(packet) != 1 || !tagged(packet + 1, "vorbis", 6))
+            return std::nullopt;
+        const u64 rate = little(packet + 12, 4);
+        if (rate == 0)
+            return std::nullopt;
+        // Backwards to the last page that finishes a packet: a page with no
+        // packet ending in it carries a granule of all ones.
+        for (core::usize at = bytes.size() - 27;; --at) {
+            if (tagged(at, "OggS", 4)) {
+                const u64 granule = little(at + 6, 8);
+                if (granule != ~u64{0}) {
+                    if (granule == 0)
+                        return std::nullopt;
+                    return (granule * kSampleRate + rate / 2) / rate;
+                }
+            }
+            if (at == 0)
+                break;
+        }
+        return std::nullopt;
+    }
+
+    // Everything else says how long it is, through the decoder, in the output
+    // format -- so the answer is already in frames at 48 kHz.
+    const ma_decoder_config config = ma_decoder_config_init(ma_format_f32, kChannels, kSampleRate);
+    ma_decoder decoder{};
+    if (ma_decoder_init_memory(bytes.data(), bytes.size(), &config, &decoder) != MA_SUCCESS)
+        return std::nullopt;
+    ma_uint64 frames = 0;
+    const bool known = ma_decoder_get_length_in_pcm_frames(&decoder, &frames) == MA_SUCCESS && frames > 0;
+    ma_decoder_uninit(&decoder);
+    if (!known)
+        return std::nullopt;
+    return static_cast<u64>(frames);
+}
+
+} // namespace detail
 
 bool AudioSystem::Impl::resident(std::string_view content) const noexcept
 {
@@ -839,8 +1099,52 @@ bool AudioSystem::Impl::prefetchInFlight(std::string_view content) const noexcep
                        [content](const Prefetch& entry) { return entry.urn == content; });
 }
 
-const Clip* AudioSystem::Impl::install(std::string_view content, std::shared_ptr<Clip> clip)
+void AudioSystem::Impl::recordLength(std::string_view content, u64 length)
 {
+    const auto at = std::lower_bound(lengths.begin(), lengths.end(), content,
+                                     [](const auto& entry, std::string_view key) { return entry.first < key; });
+    if (at != lengths.end() && at->first == content)
+        return;
+    lengths.insert(at, {std::string(content), length});
+}
+
+u64 AudioSystem::Impl::lengthOf(std::string_view content)
+{
+    const auto at = std::lower_bound(lengths.begin(), lengths.end(), content,
+                                     [](const auto& entry, std::string_view key) { return entry.first < key; });
+    if (at != lengths.end() && at->first == content)
+        return at->second;
+    if (mounts == nullptr)
+        return 0;
+
+    const asset::ResolvedContent resolved = mounts->resolve(content);
+    std::vector<std::byte> owned;
+    std::span<const std::byte> bytes = resolved.bytes;
+    if (bytes.empty() && resolved.source == asset::ResolvedContent::Source::Loose &&
+        platform::readFile(resolved.path, owned))
+        bytes = owned;
+    if (bytes.empty()) {
+        recordLength(content, 0);
+        return 0;
+    }
+    // The header, when it says. Nothing is decoded and nothing is installed:
+    // the frame or the prefetch makes the clip, and measures it the same way.
+    if (const std::optional<u64> declared = detail::probeFrames(bytes)) {
+        recordLength(content, *declared);
+        return *declared;
+    }
+    // The floor: a format that declares no length is decoded to count it, and
+    // the clip that decode made is kept rather than made twice.
+    u64 length = 0;
+    std::shared_ptr<Clip> clip = prepareClip(bytes, &owned, length);
+    tickDecodes.fetch_add(1, std::memory_order_relaxed);
+    (void)install(content, std::move(clip), length);
+    return length;
+}
+
+const Clip* AudioSystem::Impl::install(std::string_view content, std::shared_ptr<Clip> clip, u64 length)
+{
+    recordLength(content, length);
     const auto at = std::lower_bound(clips.begin(), clips.end(), content,
                                      [](const auto& entry, std::string_view key) { return entry.first < key; });
     // Already there because the synchronous path won the race, which is not an
@@ -851,6 +1155,8 @@ const Clip* AudioSystem::Impl::install(std::string_view content, std::shared_ptr
         return at->second.get();
 
     const bool decoded = clip != nullptr;
+    if (decoded && clip->streamed)
+        clipsStreamed.fetch_add(1, std::memory_order_relaxed);
     const auto inserted = clips.insert(at, {std::string(content), std::move(clip)});
     if (decoded)
         clipsLoaded.fetch_add(1, std::memory_order_relaxed);
@@ -879,8 +1185,9 @@ void AudioSystem::Impl::beginPrefetch(std::string_view content)
         // as the mount is. Straight to the decode; there is nothing to read.
         ClipWork* work = entry.work.get();
         const std::span<const std::byte> packed = resolved.bytes;
-        entry.decode = jobs::schedule("audio.clip.decode", jobs::Domain::AssetIo,
-                                      [work, packed]() noexcept { work->clip = decodeClip(packed); });
+        entry.decode = jobs::schedule("audio.clip.decode", jobs::Domain::AssetIo, [work, packed]() noexcept {
+            work->clip = prepareClip(packed, nullptr, work->length);
+        });
     }
     else if (resolved.source == asset::ResolvedContent::Source::Loose) {
         // `Low`, because this is speculation by definition: nothing is waiting
@@ -916,8 +1223,9 @@ void AudioSystem::Impl::pumpPrefetch()
                 if (platform::takeIoResult(entry.read, entry.work->bytes)) {
                     entry.read = {};
                     ClipWork* work = entry.work.get();
-                    entry.decode = jobs::schedule("audio.clip.decode", jobs::Domain::AssetIo,
-                                                  [work]() noexcept { work->clip = decodeClip(work->bytes); });
+                    entry.decode = jobs::schedule("audio.clip.decode", jobs::Domain::AssetIo, [work]() noexcept {
+                        work->clip = prepareClip(work->bytes, &work->bytes, work->length);
+                    });
                 }
                 else {
                     done = true;
@@ -932,7 +1240,7 @@ void AudioSystem::Impl::pumpPrefetch()
             }
         }
         else if (entry.decode.valid() && jobs::finished(entry.decode)) {
-            (void)install(entry.urn, std::move(entry.work->clip));
+            (void)install(entry.urn, std::move(entry.work->clip), entry.work->length);
             done = true;
         }
         else if (!entry.decode.valid()) {
@@ -985,8 +1293,9 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
     }
 
     std::shared_ptr<Clip> clip;
+    u64 length = 0;
     if (!bytes.empty()) {
-        clip = decodeClip(bytes);
+        clip = prepareClip(bytes, &owned, length);
         if (clip == nullptr) {
             const core::I18nArg args[] = {{"content", std::string(content)}};
             core::log(core::LogLevel::Warn, LUAUG_TR("audio.warn.undecodable"), args);
@@ -997,7 +1306,7 @@ const Clip* AudioSystem::Impl::clipFor(std::string_view content)
         core::log(core::LogLevel::Warn, LUAUG_TR("audio.warn.content_missing"), args);
     }
 
-    return install(content, std::move(clip));
+    return install(content, std::move(clip), length);
 }
 
 f64 AudioSystem::clipDuration(std::string_view content)
@@ -1005,12 +1314,12 @@ f64 AudioSystem::clipDuration(std::string_view content)
     if (m_impl == nullptr) {
         return kPlaceholderDuration;
     }
-    const Clip* clip = m_impl->clipFor(content);
-    if (clip == nullptr || clip->frames == 0) {
+    const u64 length = m_impl->lengthOf(content);
+    if (length == 0) {
         // The tone's length, because the tone is what such a sound plays.
         return kPlaceholderDuration;
     }
-    return static_cast<f64>(clip->frames) / static_cast<f64>(kSampleRate);
+    return static_cast<f64>(length) / static_cast<f64>(kSampleRate);
 }
 
 void AudioSystem::audition(std::string_view content, f32 volume, f32 speed)
@@ -1021,9 +1330,14 @@ void AudioSystem::audition(std::string_view content, f32 volume, f32 speed)
     // Decoded outside the lock, like `update` does and for the same reason: a
     // decode is file I/O and the audio callback must never wait on one.
     const Clip* clip = m_impl->clipFor(content);
+    // A streamed clip is auditioned through a decoder of its own, opened here
+    // and not under the lock.
+    std::shared_ptr<Stream> stream =
+        clip != nullptr && clip->streamed ? std::make_shared<Stream>(*clip) : std::shared_ptr<Stream>();
 
     const std::lock_guard<std::mutex> lock(m_impl->mutex);
     m_impl->audition.clip = clip;
+    m_impl->audition.stream.swap(stream);
     m_impl->audition.content.assign(content);
     m_impl->audition.cursor = 0.0;
     m_impl->audition.cursorStep = static_cast<f64>(std::fmax(speed, 0.01f));
@@ -1042,6 +1356,7 @@ void AudioSystem::stopAudition() noexcept
     const std::lock_guard<std::mutex> lock(m_impl->mutex);
     m_impl->audition.active = false;
     m_impl->audition.clip = nullptr;
+    m_impl->audition.stream.reset();
     m_impl->audition.content.clear();
 }
 
@@ -1076,10 +1391,13 @@ void AudioSystem::setContentMounts(const asset::ContentMounts* mounts) noexcept
     // The audition holds one of those pointers too.
     m_impl->audition.active = false;
     m_impl->audition.clip = nullptr;
+    m_impl->audition.stream.reset();
     m_impl->audition.content.clear();
     m_impl->clips.clear();
+    m_impl->lengths.clear();
     m_impl->clipsLoaded.store(0, std::memory_order_relaxed);
     m_impl->clipsMissing.store(0, std::memory_order_relaxed);
+    m_impl->clipsStreamed.store(0, std::memory_order_relaxed);
 }
 
 AudioStats AudioSystem::stats() const noexcept
@@ -1090,10 +1408,21 @@ AudioStats AudioSystem::stats() const noexcept
     out.underruns = m_impl->underruns.load(std::memory_order_relaxed);
     out.clipsLoaded = m_impl->clipsLoaded.load(std::memory_order_relaxed);
     out.clipsMissing = m_impl->clipsMissing.load(std::memory_order_relaxed);
+    out.clipsStreamed = m_impl->clipsStreamed.load(std::memory_order_relaxed);
+    out.tickDecodes = m_impl->tickDecodes.load(std::memory_order_relaxed);
     out.droppedCommands = m_impl->dropped.load(std::memory_order_relaxed);
     out.activeVoices = m_impl->activeVoices.load(std::memory_order_relaxed);
     out.deviceOpen = m_impl->deviceStarted;
     return out;
+}
+
+void AudioSystem::renderInto(std::span<f32> interleaved)
+{
+    std::fill(interleaved.begin(), interleaved.end(), 0.0f);
+    if (m_impl == nullptr)
+        return;
+    const std::lock_guard<std::mutex> lock(m_impl->mutex);
+    m_impl->mix(interleaved.data(), static_cast<ma_uint32>(interleaved.size() / kChannels));
 }
 
 } // namespace luaug::audio

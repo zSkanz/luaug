@@ -342,6 +342,12 @@ int debugServiceGetStat(lua_State* L)
         lua_pushnumber(L, frame.audioClipsMissing);
         return 1;
     }
+    if (name == "AudioClipsStreamed") {
+        // Of `AudioClipsLoaded`, the ones long enough that the file stays
+        // encoded and plays through a decoder rather than being held whole.
+        lua_pushnumber(L, frame.audioClipsStreamed);
+        return 1;
+    }
     if (name == "VisibleObjects") {
         // Not the same number as `DrawCalls` since M7.5, and the difference is
         // the point: a run of objects sharing a mesh and a material is one call.

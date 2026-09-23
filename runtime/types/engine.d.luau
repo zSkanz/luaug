@@ -1502,18 +1502,20 @@ declare extern type AudioGroup extends Instance with
 end
 
 declare extern type Sound extends Instance with
-    --- The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound
-    --- does not re-read its file sixty times a second. A URI that names nothing still PLAYS, as a
-    --- generated tone whose pitch comes from a hash of the id. A sound that went silent because a file
-    --- was missing is a bug report about the sound; a placeholder that is audibly a placeholder is one
-    --- about the file. `DebugService:GetStat("AudioClipsMissing")` is how a script asks which it got.
-    --- **The file's length is the sound's length.** `Ended` fires when `TimePosition` reaches it, so a
-    --- two-minute track plays for two minutes; a content that names nothing is one second long, because
-    --- that is how long the placeholder tone is. The mixer keeps its own cursor and takes
-    --- `TimePosition` whenever the two part company -- a seek, a rewind, a sound stopped and started.
-    --- It has to: the timeline moves in whole ticks and a device moves in buffers, so a cursor re-read
-    --- every frame stutters between them. Nothing in the simulation reads that cursor, which is what
-    --- keeps a replay exact (R10).
+    --- The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis. A file of up to ten seconds is
+    --- decoded once and held; a longer one STREAMS -- its encoded bytes are kept and each voice decodes
+    --- just ahead of the speakers, so three minutes of music costs the file's size rather than about 70
+    --- MB. Either way a sound does not re-read its file sixty times a second. A URI that names nothing
+    --- still PLAYS, as a generated tone whose pitch comes from a hash of the id. A sound that went
+    --- silent because a file was missing is a bug report about the sound; a placeholder that is audibly
+    --- a placeholder is one about the file. `DebugService:GetStat("AudioClipsMissing")` is how a script
+    --- asks which it got. **The file's length is the sound's length**, read from its header rather than
+    --- by decoding it. `Ended` fires when `TimePosition` reaches it, so a two-minute track plays for
+    --- two minutes; a content that names nothing is one second long, because that is how long the
+    --- placeholder tone is. The mixer keeps its own cursor and takes `TimePosition` whenever the two
+    --- part company -- a seek, a rewind, a sound stopped and started. It has to: the timeline moves in
+    --- whole ticks and a device moves in buffers, so a cursor re-read every frame stutters between
+    --- them. Nothing in the simulation reads that cursor, which is what keeps a replay exact (R10).
     Content: Content
     --- Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, and
     --- reading it is how a script asks without keeping its own flag.

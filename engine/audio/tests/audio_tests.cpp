@@ -1,14 +1,17 @@
 #include "luaug/audio/audio.h"
 #include "luaug/audio/scene_types.h"
 #include "luaug/platform/async_io.h"
+#include "luaug/platform/file.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <thread>
@@ -186,7 +189,8 @@ namespace {
 // ADR 0032 exists to keep out, and a tone is forty lines of arithmetic. It also
 // means the test states its own expectations -- the length below is not a fact
 // about a file somebody has to go and open.
-void writeTone(const std::filesystem::path& path, luaug::core::u32 rate, luaug::core::u32 frames)
+void writeTone(const std::filesystem::path& path, luaug::core::u32 rate, luaug::core::u32 frames,
+               luaug::core::u32 firstFrame = 0)
 {
     std::vector<char> bytes;
     const auto put = [&bytes](const void* data, std::size_t size) {
@@ -211,7 +215,10 @@ void writeTone(const std::filesystem::path& path, luaug::core::u32 rate, luaug::
     put("data", 4);
     putU32(dataBytes);
     for (luaug::core::u32 frame = 0; frame < frames; ++frame) {
-        const double phase = 2.0 * 3.14159265358979 * 440.0 * frame / static_cast<double>(rate);
+        // `firstFrame` starts the tone part-way through, so a short file can
+        // hold exactly the samples a long one has at some later point.
+        const double phase =
+            2.0 * 3.14159265358979 * 440.0 * static_cast<double>(frame + firstFrame) / static_cast<double>(rate);
         const auto sample = static_cast<luaug::core::i16>(20000.0 * std::sin(phase));
         putU16(static_cast<luaug::core::u16>(sample));
     }
@@ -727,4 +734,185 @@ TEST_CASE("tearing down with a fetch in flight leaves nothing behind")
     }
     // Reaching here without a fault is the assertion.
     CHECK(true);
+}
+
+// --- The rest of D129: a header for the tick, and a stream for long files ------
+//
+// The prefetch left two things. A sound made and played on one tick still made
+// the TICK decode its file, because the tick needs its length; and a long file
+// was decoded whole and held, seventy megabytes of f32 for three minutes. The
+// tick reads the file's header now, and a long file streams.
+
+namespace {
+
+// A content directory with a long file, and short ones holding exactly the
+// samples the long one has at its start and at five seconds in.
+struct StreamFixture
+{
+    std::filesystem::path root;
+    luaug::asset::ContentMounts mounts;
+
+    StreamFixture()
+    {
+        std::error_code ec;
+        root = std::filesystem::temp_directory_path(ec) / "luaug-audio-stream";
+        std::filesystem::remove_all(root, ec);
+        // 48 kHz, so nothing is resampled and two decodes of the same samples
+        // are the same numbers.
+        writeTone(root / "music" / "song.wav", 48000u, 48000u * 12u);
+        writeTone(root / "sfx" / "head.wav", 48000u, 48000u);
+        writeTone(root / "sfx" / "five.wav", 48000u, 48000u, 48000u * 5u);
+        mounts.mountDirectory(root);
+    }
+
+    ~StreamFixture()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+};
+
+// What one sound sounds like for `frames` frames from `at` seconds in.
+std::vector<float> listen(const luaug::asset::ContentMounts& mounts, const char* content, double at, core::u32 frames,
+                          bool looped = false)
+{
+    Fixture fixture;
+    fixture.system.setContentMounts(&mounts);
+    const InstanceId id = fixture.make("Sound");
+    fixture.sound(id).content = content;
+    fixture.sound(id).timePosition = at;
+    fixture.sound(id).looped = looped;
+    fixture.sound(id).playing = true;
+    fixture.system.update(*fixture.world, InstanceId{});
+    std::vector<float> out(static_cast<std::size_t>(frames) * 2u);
+    fixture.system.renderInto(out);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("a sound made and played on one tick is timed from its header, and the tick decodes nothing")
+{
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    fixture.sound(id).content = "asset://sfx/long.wav";
+    fixture.sound(id).playing = true;
+    fixture.system.tick(*fixture.world, Tick);
+
+    // The length came from the WAV header: nothing was decoded, by the tick or
+    // by anything else.
+    CHECK(fixture.system.stats().tickDecodes == 0);
+    CHECK(fixture.system.stats().clipsLoaded == 0);
+    CHECK(fixture.system.clipDuration("asset://sfx/long.wav") == doctest::Approx(3.0).epsilon(0.001));
+}
+
+TEST_CASE("a file's declared length is read from its header, Ogg Vorbis included")
+{
+    // A WAV, through the decoder's header.
+    {
+        StreamFixture content;
+        std::vector<std::byte> bytes;
+        REQUIRE(luaug::platform::readFile(content.root / "sfx" / "head.wav", bytes));
+        const std::optional<core::u64> frames = audio::detail::probeFrames(bytes);
+        REQUIRE(frames.has_value());
+        CHECK(*frames == 48000u);
+    }
+
+    // An Ogg Vorbis stream, by hand: an identification header on the first
+    // page saying 44.1 kHz, and a last page whose granule is ten seconds of
+    // source samples. Nothing here decodes; the probe reads two numbers.
+    std::vector<std::byte> ogg;
+    const auto put = [&ogg](std::initializer_list<int> values) {
+        for (const int value : values)
+            ogg.push_back(static_cast<std::byte>(value));
+    };
+    const auto putLe = [&ogg](core::u64 value, int width) {
+        for (int index = 0; index < width; ++index)
+            ogg.push_back(static_cast<std::byte>((value >> (8 * index)) & 0xFFu));
+    };
+    const auto page = [&](core::u64 granule, std::initializer_list<int> segments) {
+        put({'O', 'g', 'g', 'S', 0, 2});
+        putLe(granule, 8);
+        putLe(1, 4);
+        putLe(0, 4);
+        putLe(0, 4);
+        ogg.push_back(static_cast<std::byte>(segments.size()));
+        put(segments);
+    };
+    page(0, {30});
+    put({1, 'v', 'o', 'r', 'b', 'i', 's'});
+    putLe(0, 4);
+    put({2});
+    putLe(44100, 4);
+    putLe(0, 12);
+    // A page no packet ends in carries a granule of all ones and is skipped.
+    page(441000, {});
+    page(~core::u64{0}, {});
+    const std::optional<core::u64> vorbis = audio::detail::probeFrames(ogg);
+    REQUIRE(vorbis.has_value());
+    CHECK(*vorbis == 480000u);
+
+    // And a file that says nothing is nothing, not a guess.
+    const std::vector<std::byte> noise(64, std::byte{0x5A});
+    CHECK_FALSE(audio::detail::probeFrames(noise).has_value());
+}
+
+TEST_CASE("a long file streams: it is not decoded whole, and it sounds the same")
+{
+    StreamFixture content;
+
+    {
+        Fixture fixture;
+        fixture.system.setContentMounts(&content.mounts);
+        const InstanceId id = fixture.make("Sound");
+        fixture.sound(id).content = "asset://music/song.wav";
+        fixture.sound(id).playing = true;
+        fixture.system.tick(*fixture.world, Tick);
+        fixture.system.update(*fixture.world, InstanceId{});
+        CHECK(fixture.system.stats().clipsLoaded == 1);
+        CHECK(fixture.system.stats().clipsStreamed == 1);
+        CHECK(fixture.system.clipDuration("asset://music/song.wav") == doctest::Approx(12.0).epsilon(0.0001));
+    }
+
+    // The first tenth of a second of the streamed song is the same samples as
+    // the decoded file holding the same tone.
+    const std::vector<float> streamed = listen(content.mounts, "asset://music/song.wav", 0.0, 4800u);
+    const std::vector<float> decoded = listen(content.mounts, "asset://sfx/head.wav", 0.0, 4800u);
+    CHECK(streamed == decoded);
+    CHECK(std::ranges::any_of(streamed, [](float sample) { return std::abs(sample) > 0.1f; }));
+}
+
+TEST_CASE("a streamed sound seeks: five seconds in is what the file holds at five seconds")
+{
+    StreamFixture content;
+    const std::vector<float> seeked = listen(content.mounts, "asset://music/song.wav", 5.0, 4800u);
+    const std::vector<float> expected = listen(content.mounts, "asset://sfx/five.wav", 0.0, 4800u);
+    CHECK(seeked == expected);
+}
+
+TEST_CASE("a streamed sound that is looped wraps at the file's end and keeps playing")
+{
+    StreamFixture content;
+    // A tenth of a second before the end, and a fifth of a second of output:
+    // half of it is the tail and half is the head again.
+    const std::vector<float> once = listen(content.mounts, "asset://music/song.wav", 11.9, 9600u);
+    CHECK(std::all_of(once.begin() + 4800 * 2, once.end(), [](float sample) { return sample == 0.0f; }));
+
+    const std::vector<float> looped = listen(content.mounts, "asset://music/song.wav", 11.9, 9600u, true);
+    const std::vector<float> head = listen(content.mounts, "asset://sfx/head.wav", 0.0, 4800u);
+    CHECK(std::equal(head.begin(), head.end(), looped.begin() + 4800 * 2));
+}
+
+TEST_CASE("a decoded sound that is looped loses no frame at the loop point")
+{
+    // Found writing the streamed case above: wrapping the cursor skipped the
+    // output frame it happened on, so every loop of every looped sound had one
+    // frame of silence in it -- a click, sixty times a minute on a short loop.
+    StreamFixture content;
+    const std::vector<float> looped = listen(content.mounts, "asset://sfx/head.wav", 0.9, 9600u, true);
+    const std::vector<float> head = listen(content.mounts, "asset://sfx/head.wav", 0.0, 4800u);
+    CHECK(std::equal(head.begin(), head.end(), looped.begin() + 4800 * 2));
 }

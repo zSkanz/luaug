@@ -1184,6 +1184,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             .audioVoices = static_cast<f64>(host->audio().stats().activeVoices),
             .audioClipsLoaded = static_cast<f64>(host->audio().stats().clipsLoaded),
             .audioClipsMissing = static_cast<f64>(host->audio().stats().clipsMissing),
+            .audioClipsStreamed = static_cast<f64>(host->audio().stats().clipsStreamed),
             .meshLodDraws = static_cast<f64>(frameLodDraws),
             .visibleObjects = static_cast<f64>(frameVisibleObjects),
             .instancedDraws = static_cast<f64>(frameInstancedDraws),

@@ -76,27 +76,30 @@ and a replay reproduces both exactly.
 
 What the speakers do is downstream of the simulation and never an input to it.
 
-### The limit to know about
+### How long a sound is
 
-**Every sound's simulation timeline is one second long, whatever the file
-actually is.**
+**A sound is as long as its file.** `Sound.Ended` fires when `TimePosition`
+reaches the file's length, and a `Looped` sound wraps there.
 
-That is a real constraint of this release, and it has three visible effects:
+The length is read from the file's header, not from decoding it, so the tick
+that plays a sound never waits for a decode. The header is part of the file's
+bytes, so every machine reads the same length and a replay is exact. A format
+that declares no length is decoded once to count it.
 
-- `Sound.Ended` fires one second after `Play` at normal speed, whatever the
-  clip.
-- A `Looped` sound wraps at one second, so **only the first second of a longer
-  file is ever heard on loop**.
-- A file shorter than a second goes quiet at its real end but `Ended` still
-  waits for the full second.
+## Formats, memory, and the placeholder tone
 
-Decoding is real — the file is read and played — but the timeline the engine
-counts against is not yet taken from it.
+WAV, MP3, FLAC and Ogg Vorbis. A sound does not re-read its file sixty times a
+second:
 
-## Formats, and the placeholder tone
+- **Up to ten seconds, a file is decoded once and held.** That covers effects
+  and short ambiences, and playing one is a copy.
+- **Longer than that, a file streams.** Its encoded bytes are kept, and each
+  voice playing it decodes a few milliseconds ahead of the speakers. Three
+  minutes of music costs the size of the file rather than about 70 MB.
+  Seeking with `TimePosition` and looping both work the same way on a stream.
 
-WAV, MP3, FLAC and Ogg Vorbis, decoded once and cached: a sound does not re-read
-its file sixty times a second.
+Sounds authored in a scene are fetched in the background from the first frame
+the scene is alive, so they are ready before anything plays them.
 
 **A URI that names nothing still plays**, as a generated tone whose pitch comes
 from a hash of the id — deliberately, so that a missing asset is audible rather
@@ -110,6 +113,7 @@ number that can:
 --!strict
 local DebugService = game:GetService("DebugService")
 print(DebugService:GetStat("AudioClipsLoaded"), DebugService:GetStat("AudioClipsMissing"))
+print(DebugService:GetStat("AudioClipsStreamed")) -- of the loaded ones, how many stream
 ```
 
 ## Voices
@@ -117,9 +121,10 @@ print(DebugService:GetStat("AudioClipsLoaded"), DebugService:GetStat("AudioClips
 Sixty-four at once. Past that the **quietest** are dropped rather than the
 newest — a footstep lost under an explosion is the right thing to lose.
 
-`Sound.Loaded` fires on the first tick after creation, unconditionally, whether
-or not the file decoded. It is declared now so that code written today does not
-change when it becomes meaningful.
+`Sound.Loaded` fires on the first tick after creation, unconditionally. It
+means "this sound exists and names its content", not "the bytes have arrived":
+waiting for the bytes would make the tick it fires on depend on the disk, and a
+replay has to reproduce it exactly.
 
 ## Where to look next
 

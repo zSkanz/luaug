@@ -31,7 +31,9 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace luaug::scene {
@@ -91,6 +93,13 @@ namespace detail {
 // the sum of squares at one wherever it is.
 void panGains(f32 pan, f32& left, f32& right) noexcept;
 
+// **How long a sound file is, from what it SAYS** -- in frames at the mixer's
+// 48 kHz, or nothing when the file declares no length. Ogg Vorbis is read by hand
+// (its last page's granule over the identification header's rate), everything
+// else through its decoder's header. A pure function of the bytes, which is why
+// the tick may use it: two machines agree on it however fast their disks are.
+[[nodiscard]] std::optional<u64> probeFrames(std::span<const std::byte> bytes);
+
 } // namespace detail
 
 struct AudioStats
@@ -111,6 +120,14 @@ struct AudioStats
     // short tone are hard to tell apart on laptop speakers -- and a number is.
     u32 clipsLoaded = 0;
     u32 clipsMissing = 0;
+    // Of `clipsLoaded`, how many are STREAMED: long enough that the encoded bytes
+    // are kept and each voice decodes a little ahead of the mixer, rather than
+    // the whole file being decoded and held (D129).
+    u32 clipsStreamed = 0;
+    // How many times the TICK had to decode a file itself, because the file's
+    // header did not say how long it is. Zero for every format that declares a
+    // length -- which is the point: the tick reads a header, never a decode.
+    u32 tickDecodes = 0;
     bool deviceOpen = false;
 };
 
@@ -142,8 +159,11 @@ public:
     // on the world's change queue. Called from the sim tick.
     void tick(scene::World& world, f64 fixedDt);
 
-    // How long the sound this content names is, in seconds -- decoding it on the
-    // first ask, like `update` does, and answering from the same cache after.
+    // How long the sound this content names is, in seconds -- read from the
+    // file's HEADER on the first ask and answered from a cache after (D129). The
+    // header is a pure function of the bytes, so the answer is the same whether
+    // or not anything has been decoded yet; only a format that declares no
+    // length is decoded to count it, and `AudioStats::tickDecodes` says so.
     //
     // **This is what the timeline is measured against**, which is why it is here
     // rather than inside the mixer: `Ended` fires when `TimePosition` reaches a
@@ -209,6 +229,12 @@ public:
     [[nodiscard]] bool suspended() const noexcept { return m_suspended; }
 
     [[nodiscard]] AudioStats stats() const noexcept;
+
+    // **The audio callback's work, run on the caller's thread**, into
+    // `interleaved` (stereo f32 at 48 kHz, cleared first). What a test uses to
+    // hear what the mixer would play without a device; a device callback and
+    // this take the same lock, so the two never mix at once.
+    void renderInto(std::span<f32> interleaved);
 
 private:
     bool m_suspended = false;

@@ -152,6 +152,15 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Fixed
 
+- **A long sound streams instead of being decoded whole** (D129). Past ten
+  seconds a file's encoded bytes are kept and each voice decodes just ahead of
+  the speakers: three minutes of music costs the file's size, not about 70 MB.
+  Seeking and looping work the same on a stream.
+- **The tick reads a sound's length from its file's header** (D129), so a sound
+  made and played on the same tick no longer decodes its whole file on the
+  tick. Ogg Vorbis is included: its length is read from its last page.
+- A looped sound lost one frame at every loop point, a faint click on every
+  loop.
 - A ball of terrain on the side of a cliff no longer stands a dark stripe down
   the wall under it. The terrain's sky term marches rays, so an overhang shades
   what is near it, not everything below it.

@@ -92,6 +92,8 @@ struct FrameStats
     f64 audioVoices = 0.0;
     f64 audioClipsLoaded = 0.0;
     f64 audioClipsMissing = 0.0;
+    // Of the loaded ones, how many are long enough to stream (D129).
+    f64 audioClipsStreamed = 0.0;
 
     // How many of this frame's draws used a level of detail COARSER than zero
     // (roadmap M7: "basic LOD switching").

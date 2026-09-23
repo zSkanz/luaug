@@ -2737,13 +2737,17 @@ local Classes: { Schema.Class } = {
                 Type = "Content",
                 ContentKind = "Audio",
                 Default = '""',
-                Doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis, decoded once and "
-                    .. "cached: a sound does not re-read its file sixty times a second.\n\nA URI that "
+                Doc = "The audio, as an `asset://` URI. WAV, MP3, FLAC and Ogg Vorbis. A file of up to "
+                    .. "ten seconds is decoded once and held; a longer one STREAMS -- its encoded bytes "
+                    .. "are kept and each voice decodes just ahead of the speakers, so three minutes of "
+                    .. "music costs the file's size rather than about 70 MB. Either way a sound does not "
+                    .. "re-read its file sixty times a second.\n\nA URI that "
                     .. "names nothing still PLAYS, as a generated tone whose pitch comes from a hash of the "
                     .. "id. A sound that went silent because a file was missing is a bug report about the "
                     .. "sound; a placeholder that is audibly a placeholder is one about the file. "
                     .. '`DebugService:GetStat("AudioClipsMissing")` is how a script asks which it '
-                    .. "got.\n\n**The file's length is the sound's length.** `Ended` fires when "
+                    .. "got.\n\n**The file's length is the sound's length**, read from its header "
+                    .. "rather than by decoding it. `Ended` fires when "
                     .. "`TimePosition` reaches it, so a two-minute track plays for two minutes; a "
                     .. "content that names nothing is one second long, because that is how long the "
                     .. "placeholder tone is.\n\nThe mixer keeps its own cursor and takes "

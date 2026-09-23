@@ -44,7 +44,7 @@ print(DebugService:GetStat("DrawCalls"), DebugService:GetStat("VisibleObjects"))
 | `DrawCalls` · `VisibleObjects` · `InstancedDraws` · `MeshLodDraws` | The renderer. |
 | `InstanceCount` · `PhysicsBodies` | The world. |
 | `LuaMemoryKB` | The script heap. |
-| `AudioVoices` · `AudioUnderruns` · `AudioClipsLoaded` · `AudioClipsMissing` | Audio. |
+| `AudioVoices` · `AudioUnderruns` · `AudioClipsLoaded` · `AudioClipsMissing` · `AudioClipsStreamed` | Audio. |
 
 **An unregistered name raises** rather than returning zero — a stat that
 silently reads zero is a measurement nobody can trust. A stat that is
