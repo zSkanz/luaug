@@ -539,7 +539,7 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     // **The ground, because a sculpted world is somebody's afternoon.**
     //
     // Terrain is the one piece of world state that is not a property: a field is
-    // tiles and bricks rather than a number, so nothing in the property loop
+    // chunks of voxels rather than a number, so nothing in the property loop
     // above can reach it, and for one commit a save wrote every instance in the
     // scene and none of the ground.
     //
@@ -557,7 +557,7 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     // cells. A field with nothing in it writes nothing, which is what keeps
     // every existing scene byte-identical.
     if (const TerrainComponent* terrain = world.terrains().find(id); terrain != nullptr) {
-        if (terrain->field.tileCount() > 0 || terrain->field.brickCount() > 0) {
+        if (!terrain->field.empty()) {
             asset::TerrainCell cell;
             cell.settings = terrain->field.settings();
             cell.field = terrain->field;
@@ -816,9 +816,8 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
                 // **The settings ride with the field**, so `MinHeight` and
                 // `MaxHeight` are whatever the ground was actually sculpted
                 // under rather than whatever the properties happened to say.
-                // They cannot be widened after a collider is built (ADR 0066),
-                // and a reserved range that disagreed with the ground in it
-                // would clamp every later edit to the wrong band.
+                // A terrain saved before the voxel grid (ADR 0082) arrives
+                // here already converted, at its own voxel size.
                 component->minHeight = component->field.settings().minHeight;
                 component->maxHeight = component->field.settings().maxHeight;
                 component->fieldRevision += 1;

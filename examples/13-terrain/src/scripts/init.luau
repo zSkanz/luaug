@@ -59,10 +59,9 @@ local height = terrain:HeightAt(0, 0)
 
 -- **Painting, which is the third verb and the one that changes nothing about
 -- where the ground is.** It writes material where there is already ground and
--- nowhere else -- so it creates no voxel brick, promotes no column, and leaves
--- this hill exactly as cheap as it was a line ago. That is why it is a verb of
--- its own rather than a `FillBall` with a different number: sculpting and
--- recolouring are two gestures a person makes for two reasons.
+-- nowhere else, and leaves every voxel exactly as full as it was. That is why it
+-- is a verb of its own rather than a `FillBall` with a different number:
+-- sculpting and recolouring are two gestures a person makes for two reasons.
 --
 -- Material zero is refused here rather than treated as erase. Zero means erase
 -- to `FillBall`, and picking the first entry of a material list must not delete

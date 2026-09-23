@@ -487,10 +487,12 @@ rigid weld — no `HingeConstraint`, `SpringConstraint` or `Motor6D`, and no
 solver joint of any kind", and `HingeConstraint`, `BallSocketConstraint` and
 `FixedConstraint` now ship over `Attachment` pairs, with a `Ragdoll` assembled
 from them rather than owning bodies of its own. `SpringConstraint` and `Motor6D`
-are still absent. And **Terrain** did: one signed-distance field under two
-encodings (ADR 0067), sculpted from a script through `FillBall`/`FillBlock`/
-`PaintBall` or from the editor's brush, meshed, collided, saved with the scene
-and reached as `workspace.Terrain`. `ParticleEmitter` did (F2, ADR 0072), and
+are still absent. And **Terrain** did: one grid of voxels, each a material and
+an occupancy (ADR 0082, which replaced ADR 0067's two encodings), sculpted from
+a script through `FillBall`/`FillBlock`/`FillCylinder`/`RaiseBall`/`PaintBall`,
+read and written whole through `ReadVoxels`/`WriteVoxels`, or from the editor's
+brush -- meshed, collided, saved with the scene and reached as
+`workspace.Terrain`. `ParticleEmitter` did (F2, ADR 0072), and
 so did rich text: `TextLabel.RichText` reads its text as markup, so one label
 changes colour, size and weight part-way through (F3). And world-space UI did:
 a `SurfaceGui` on a face of a part and a `BillboardGui` over a point, both laid

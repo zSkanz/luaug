@@ -1842,267 +1842,197 @@ TEST_CASE("a mesh whose points have not arrived falls back to the box, whatever 
     CHECK(shapeOfLast(mirror) == physics::ShapeType::Box);
 }
 
-// --- Terrain colliders (F1 C4, ADR 0066 and 0067) ---------------------------
+// --- Terrain colliders (ADR 0082) ---------------------------------------------
 
 namespace {
 
-// A `Terrain` in the mirror's world, with one tile of flat ground.
-[[nodiscard]] core::InstanceId terrainWith(Mirror& mirror, float height)
+// A `Terrain` in the mirror's world: flat ground `height` high over x and z in
+// [-64, 64), at a metre voxel.
+[[nodiscard]] core::InstanceId terrainWith(Mirror& mirror, float height, float size = 128.0f)
 {
     const core::InstanceId id = mirror.fixture.folder("Terrain");
     TerrainComponent terrain;
-    terrain.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(asset::TileArea, height);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    terrain.field.setTile(asset::TileKey{0, 0}, heights, materials);
+    terrain.field =
+        asset::TerrainField(asset::FieldSettings{.voxelSize = 1.0f, .minHeight = -64.0f, .maxHeight = 64.0f});
+    (void)asset::fillFlat(terrain.field, core::DVec3{0.0, 0.0, 0.0}, size, height, 1);
     terrain.fieldRevision = 1;
     mirror.fixture.world.terrains().add(id, terrain);
     REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
     return id;
 }
 
+[[nodiscard]] core::usize meshesMade(const Mirror& mirror)
+{
+    core::usize count = 0;
+    for (const auto& made : mirror.backend.created)
+        count += made.desc.shape.type == physics::ShapeType::TriangleMesh ? 1u : 0u;
+    return count;
+}
+
+// Steps long enough for every collider in reach to have been built at the
+// budget. A fixed count: a tick that builds a chunk with no surface creates no
+// body, so "nothing new this tick" is not "nothing left to do".
+void settle(Mirror& mirror)
+{
+    for (int tick = 0; tick < 30; ++tick)
+        mirror.step();
+}
+
 } // namespace
 
-TEST_CASE("a terrain's tiles become static height-field colliders")
+TEST_CASE("ground collides only near something that moves")
 {
+    // **Collision is built where it can be reached.** A chunk's collider is its
+    // surface meshed and handed over as triangles, a millisecond or two apiece;
+    // a world with nothing moving in it needs none.
     Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    (void)terrainWith(mirror, 3.0f);
     mirror.step();
+    CHECK(meshesMade(mirror) == 0);
 
-    // One tile, one body. **`Static` however it was asked for**: ADR 0066's rule
-    // is enforced by the backend, and asking for anything else would be a
-    // one-gram body carrying a kilometre of ground.
-    REQUIRE(mirror.backend.created.size() == 1);
-    const physics::BodyDesc& desc = mirror.backend.created.front().desc;
-    CHECK(desc.shape.type == physics::ShapeType::HeightField);
-    CHECK(desc.motion == physics::MotionType::Static);
-    CHECK(desc.shape.heightSampleCount == asset::TileEdge + 1);
-
-    // **The reservation is handed over**, which is what makes the terrain
-    // diggable later: a height field's precision is spread across this range at
-    // build time and cannot be widened afterwards.
-    CHECK(desc.shape.heightMin < 0.0f);
-    CHECK(desc.shape.heightMax > 0.0f);
-
-    // And a second tick with nothing changed builds nothing new.
+    // An anchored part does not move, so it does not count either.
+    const core::InstanceId post = mirror.part("Post", {4.0, 6.0, 4.0});
+    mirror.body(post).anchored = true;
     mirror.step();
-    CHECK(mirror.backend.created.size() == 1);
+    CHECK(meshesMade(mirror) == 0);
 
-    (void)terrain;
-}
-
-TEST_CASE("the ground under something that moves gets its collider first")
-{
-    // **Found by dropping a crate on a streamed kilometre of ground**: the few
-    // collider builds a tick went in key order, and the crate's tile came round
-    // after it had fallen through the world. Nearest to a mover first.
-    Mirror mirror;
-    const core::InstanceId id = mirror.fixture.folder("Terrain");
-    TerrainComponent terrain;
-    terrain.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(asset::TileArea, 0.0f);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    for (core::i32 z = 0; z < 12; ++z) {
-        for (core::i32 x = 0; x < 12; ++x)
-            terrain.field.setTile(asset::TileKey{x, z}, heights, materials);
-    }
-    terrain.fieldRevision = 1;
-    mirror.fixture.world.terrains().add(id, terrain);
-    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
-
-    // Over the far corner's tile: key (11, 11), sixteen-metre tiles.
-    (void)mirror.part("Crate", {11.5 * 16.0, 4.0, 11.5 * 16.0});
-    mirror.step();
-
-    bool underCrate = false;
-    for (const auto& made : mirror.backend.created) {
-        if (made.desc.shape.type != physics::ShapeType::HeightField)
-            continue;
-        if (made.desc.transform.position.x > 11.0 * 16.0 && made.desc.transform.position.z > 11.0 * 16.0)
-            underCrate = true;
-    }
-    CHECK(underCrate);
-}
-
-TEST_CASE("a sculpted tile is edited in place rather than rebuilt")
-{
-    // **The reason a height field is its own kind** (ADR 0066). A3 measured
-    // `SetHeights` 58 times cheaper than a rebuild at this size, and it keeps the
-    // body, its id and its contacts -- so a character standing on ground being
-    // dragged is not handed a new body under its feet every frame.
-    Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
-    mirror.step();
-    REQUIRE(mirror.backend.created.size() == 1);
-    REQUIRE(mirror.backend.heightEdits.empty());
-
-    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
-    REQUIRE(component != nullptr);
-    const std::vector<float> raised(asset::TileArea, 5.0f);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    component->field.setTile(asset::TileKey{0, 0}, raised, materials);
-    component->fieldRevision += 1;
-
-    mirror.step();
-
-    // Edited, not recreated.
-    CHECK(mirror.backend.created.size() == 1);
-    REQUIRE(mirror.backend.heightEdits.size() == 1);
-    CHECK(mirror.backend.heightEdits.front().sizeX == asset::TileEdge + 1);
-    CHECK(mirror.backend.heightEdits.front().sizeZ == asset::TileEdge + 1);
-}
-
-TEST_CASE("a terrain that is cleared takes its colliders with it")
-{
-    Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
-    mirror.step();
-    REQUIRE(mirror.backend.created.size() == 1);
-
-    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
-    REQUIRE(component != nullptr);
-    component->field = asset::TerrainField(component->field.settings());
-    component->fieldRevision += 1;
-
-    const core::usize destroyedBefore = mirror.backend.destroyed.size();
-    mirror.step();
-
-    // The tile is gone, so its collider is -- a collider for ground that is not
-    // there is a wall somebody walks into.
-    CHECK(mirror.backend.destroyed.size() > destroyedBefore);
-}
-
-TEST_CASE("a height tile's collider reaches its neighbour's first column, as the drawn tile does")
-{
-    // A tile is 32 columns and 32 intervals wide once its neighbour's first
-    // column is counted. The collider used to have 32 samples stretched over
-    // it -- 31 intervals -- which put the ground it collided with up to a voxel
-    // sideways of the ground that was drawn.
-    Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
-    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
-    REQUIRE(component != nullptr);
-    const std::vector<float> higher(asset::TileArea, 7.0f);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    component->field.setTile(asset::TileKey{1, 0}, higher, materials);
-    component->fieldRevision += 1;
-    mirror.step();
-
-    REQUIRE(mirror.backend.created.size() == 2);
-    const std::vector<float>& heights = mirror.backend.created.front().heights;
-    constexpr core::u32 Samples = asset::TileEdge + 1;
-    REQUIRE(heights.size() == Samples * Samples);
-    // Its own columns, then the +x neighbour's first.
-    CHECK(heights[0] == doctest::Approx(3.0));
-    CHECK(heights[asset::TileEdge - 1] == doctest::Approx(3.0));
-    CHECK(heights[asset::TileEdge] == doctest::Approx(7.0));
-    // No +z neighbour: the last row is no collision, so the ground stops where
-    // the drawn ground stops.
-    CHECK(heights[asset::TileEdge * Samples] > 1e30f);
-    // And a quad is a voxel wide.
-    CHECK(mirror.backend.created.front().desc.shape.size.x == doctest::Approx(asset::TileEdge * 0.5));
-}
-
-TEST_CASE("an edit to one tile does not rebuild the colliders of tiles it did not touch")
-{
-    // `fieldRevision` is one counter for the whole terrain. Before colliders
-    // were keyed by what they were built from, a brush stroke on one tile sent
-    // every tile in the world back to the backend, four a tick.
-    Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
-    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
-    REQUIRE(component != nullptr);
-    const std::vector<float> flat(asset::TileArea, 3.0f);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    component->field.setTile(asset::TileKey{5, 5}, flat, materials);
-    component->fieldRevision += 1;
-    mirror.step();
-    REQUIRE(mirror.backend.created.size() == 2);
-
-    const std::vector<float> raised(asset::TileArea, 5.0f);
-    component->field.setTile(asset::TileKey{5, 5}, raised, materials);
-    component->fieldRevision += 1;
-    mirror.step();
-
-    CHECK(mirror.backend.heightEdits.size() == 1);
-    CHECK(mirror.backend.created.size() == 2);
-}
-
-TEST_CASE("a cave is a hole in the height field and a mesh in its place")
-{
-    // A height field cannot say "ground, then air, then ground". A bricked
-    // column's samples are no-collision, and the column's surface -- the
-    // cave's roof and floor as well as the ground above -- is a triangle mesh.
-    Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 0.0f);
-    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
-    REQUIRE(component != nullptr);
-    (void)asset::fillBall(component->field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
-    component->fieldRevision += 1;
-    REQUIRE(component->field.brickCount() > 0);
-    // Something that moves, near the cave: collision is built where it can be
-    // reached and nowhere else.
     (void)mirror.part("Crate", {4.0, 6.0, 4.0});
-    mirror.step();
+    settle(mirror);
+    CHECK(meshesMade(mirror) >= 1);
+    for (const auto& made : mirror.backend.created) {
+        if (made.desc.shape.type != physics::ShapeType::TriangleMesh)
+            continue;
+        // **Static however it was asked for** (ADR 0066), and never a skirt:
+        // every point is on the ground's surface.
+        CHECK(made.desc.motion == physics::MotionType::Static);
+        CHECK(made.indexCount >= 3);
+        for (const core::Vec3& point : made.points)
+            CHECK(static_cast<double>(point.y) == doctest::Approx(3.0).epsilon(0.01));
+    }
 
-    // Every height tile first, then the cave: the order bodies are created in
-    // is the order the backend numbers them (R10).
-    REQUIRE(mirror.backend.created.size() >= 2);
-    const auto& height = mirror.backend.created.front();
-    REQUIRE(height.desc.shape.type == physics::ShapeType::HeightField);
-    constexpr core::u32 Samples = asset::TileEdge + 1;
-    // Column (8, 8) is inside brick column (0, 0) at half a metre; column 20
-    // is outside it.
-    CHECK(height.heights[8 * Samples + 8] > 1e30f);
-    CHECK(height.heights[20 * Samples + 20] == doctest::Approx(0.0));
-
-    const auto caveAt =
-        std::find_if(mirror.backend.created.begin(), mirror.backend.created.end(),
-                     [](const auto& made) { return made.desc.shape.type == physics::ShapeType::TriangleMesh; });
-    REQUIRE(caveAt != mirror.backend.created.end());
-    const auto& cave = *caveAt;
-    CHECK(cave.desc.motion == physics::MotionType::Static);
-    CHECK(cave.indexCount >= 3);
-    CHECK_FALSE(cave.points.empty());
-
-    // A tick with nothing written builds nothing.
+    // Nothing written: nothing built.
     const core::usize before = mirror.backend.created.size();
     mirror.step();
     CHECK(mirror.backend.created.size() == before);
 }
 
-TEST_CASE("a cave nothing moving is near has no collider")
+TEST_CASE("the ground under something that moves gets its collider first")
 {
-    // **Collision is built where it can be reached.** A cave's collider is a
-    // mesh built from the field, a millisecond or two apiece; a sculpting
-    // bench that dug a cave every tick in a world with no bodies was spending
-    // four milliseconds a tick on colliders nothing would ever touch.
+    // **Found by dropping a crate on a streamed kilometre of ground**: the few
+    // collider builds a tick went in key order, and the crate's ground came
+    // round after it had fallen through the world. Nearest to a mover first.
     Mirror mirror;
-    const core::InstanceId terrain = terrainWith(mirror, 0.0f);
-    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
-    REQUIRE(component != nullptr);
-    (void)asset::fillBall(component->field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
-    component->fieldRevision += 1;
-    // Right above the cave, and anchored -- so it does not move and does not
-    // count.
-    const core::InstanceId post = mirror.part("Post", {4.0, 6.0, 4.0});
-    mirror.body(post).anchored = true;
+    (void)terrainWith(mirror, 0.0f);
+    (void)mirror.part("Crate", {40.0, 4.0, -50.0});
     mirror.step();
-
-    for (const auto& made : mirror.backend.created)
-        CHECK(made.desc.shape.type != physics::ShapeType::TriangleMesh);
+    bool under = false;
+    for (const auto& made : mirror.backend.created) {
+        if (made.desc.shape.type != physics::ShapeType::TriangleMesh)
+            continue;
+        for (const core::Vec3& point : made.points) {
+            if (std::abs(point.x - 40.0f) < 1.0f && std::abs(point.z + 50.0f) < 1.0f)
+                under = true;
+        }
+    }
+    CHECK(under);
 }
 
-TEST_CASE("two terrains with a tile at the same key each get their collider")
+TEST_CASE("a dig rebuilds the collider under it and not the ones beside it")
+{
+    // Keyed on the chunk and the FACES of its neighbours -- what its mesh
+    // reads -- not on whole neighbours: a dig in the middle of one chunk used
+    // to send all twenty-six round it back to the backend.
+    // The ground at 10, so the dig is inside one chunk rather than on the face
+    // between two.
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 10.0f);
+    (void)mirror.part("Crate", {16.0, 14.0, 16.0});
+    settle(mirror);
+    const core::usize built = mirror.backend.created.size();
+    const core::usize destroyed = mirror.backend.destroyed.size();
+
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    (void)asset::fillBall(component->field, core::DVec3{16.0, 10.0, 16.0}, 3.0, 0);
+    component->fieldRevision += 1;
+    settle(mirror);
+    CHECK(mirror.backend.created.size() - built == 1);
+    CHECK(mirror.backend.destroyed.size() - destroyed == 1);
+}
+
+TEST_CASE("a cave is collided with from inside")
+{
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 10.0f);
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    (void)asset::fillBall(component->field, core::DVec3{16.0, -6.0, 16.0}, 4.0, 0);
+    component->fieldRevision += 1;
+    (void)mirror.part("Crate", {16.0, -6.0, 16.0});
+    settle(mirror);
+
+    // Its floor and its roof: points under the crate and over it.
+    bool floor = false;
+    bool roof = false;
+    for (const auto& made : mirror.backend.created) {
+        for (const core::Vec3& point : made.points) {
+            if (std::abs(point.x - 16.0f) > 1.0f || std::abs(point.z - 16.0f) > 1.0f)
+                continue;
+            floor = floor || (point.y < -9.0f && point.y > -11.0f);
+            roof = roof || (point.y > -3.0f && point.y < -1.0f);
+        }
+    }
+    CHECK(floor);
+    CHECK(roof);
+}
+
+TEST_CASE("a terrain that is cleared, or moved, takes its colliders with it")
+{
+    Mirror mirror;
+    const core::InstanceId terrain = terrainWith(mirror, 3.0f);
+    (void)mirror.part("Crate", {4.0, 6.0, 4.0});
+    settle(mirror);
+    REQUIRE(meshesMade(mirror) >= 1);
+
+    TerrainComponent* component = mirror.fixture.world.terrains().find(terrain);
+    REQUIRE(component != nullptr);
+    // Moved: rebuilt where it now is.
+    const core::usize before = mirror.backend.created.size();
+    component->origin = core::DVec3{0.0, 1.0, 0.0};
+    component->fieldRevision += 1;
+    settle(mirror);
+    CHECK(mirror.backend.created.size() > before);
+    CHECK(mirror.backend.created.back().desc.transform.position.y == doctest::Approx(1.0));
+
+    // Cleared: gone, because a collider for ground that is not there is a wall
+    // somebody walks into.
+    component->field = asset::TerrainField(component->field.settings());
+    component->fieldRevision += 1;
+    const core::usize destroyedBefore = mirror.backend.destroyed.size();
+    mirror.step();
+    CHECK(mirror.backend.destroyed.size() > destroyedBefore);
+}
+
+TEST_CASE("two terrains in one place each get their colliders")
 {
     Mirror mirror;
     (void)terrainWith(mirror, 3.0f);
     (void)terrainWith(mirror, 9.0f);
+    (void)mirror.part("Crate", {4.0, 12.0, 4.0});
+    settle(mirror);
+    bool low = false;
+    bool high = false;
+    for (const auto& made : mirror.backend.created) {
+        for (const core::Vec3& point : made.points) {
+            low = low || std::abs(point.y - 3.0f) < 0.05f;
+            high = high || std::abs(point.y - 9.0f) < 0.05f;
+        }
+    }
+    CHECK(low);
+    CHECK(high);
+    const core::usize before = mirror.backend.created.size();
     mirror.step();
-    CHECK(mirror.backend.created.size() == 2);
-    mirror.step();
-    CHECK(mirror.backend.created.size() == 2);
-    CHECK(mirror.backend.destroyed.empty());
+    CHECK(mirror.backend.created.size() == before);
 }
 
 TEST_CASE("a block world collides near what moves, and nowhere else")

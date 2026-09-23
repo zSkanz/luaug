@@ -1,4 +1,4 @@
-// Terrain and block worlds cut into streaming cells (ADR 0075).
+// Terrain and block worlds cut into streaming cells (ADR 0075, ADR 0082).
 //
 // The two properties the streamer rests on are asserted here rather than
 // trusted: a field cut into cells and put back is the same field, and an edit
@@ -9,6 +9,7 @@
 #include "luaug/core/i18n.h"
 
 #include <doctest/doctest.h>
+#include <memory>
 #include <vector>
 
 using namespace luaug;
@@ -34,13 +35,13 @@ void seedCatalog()
 
 } // namespace
 
-TEST_CASE("a cell is the whole number of tiles nearest sixty-four metres")
+TEST_CASE("a cell is the whole number of chunk columns nearest sixty-four metres")
 {
-    CHECK(terrainCellTiles(0.5f) == 4);
-    CHECK(terrainCellTiles(1.0f) == 2);
-    CHECK(terrainCellTiles(2.0f) == 1);
-    // A tile wider than a cell is a cell.
-    CHECK(terrainCellTiles(4.0f) == 1);
+    CHECK(terrainCellChunks(0.5f) == 4);
+    CHECK(terrainCellChunks(1.0f) == 2);
+    CHECK(terrainCellChunks(2.0f) == 1);
+    // A chunk wider than a cell is a cell.
+    CHECK(terrainCellChunks(4.0f) == 1);
     CHECK(voxelCellChunks(1.0f) == 4);
     CHECK(voxelCellChunks(4.0f) == 1);
 }
@@ -48,10 +49,9 @@ TEST_CASE("a cell is the whole number of tiles nearest sixty-four metres")
 TEST_CASE("a field cut into cells and put back together is the same field")
 {
     const TerrainField field = groundWithCave(256.0);
-    REQUIRE(field.brickCount() > 0);
     const std::vector<TerrainCell> cells = splitTerrain(field);
-    // 256 m of 32 m tiles, two to a cell: at least four cells a side, and the
-    // ring of tiles a fill touches at its edge can add a row.
+    // 256 m of 32 m chunk columns, two to a cell: at least four cells a side,
+    // and the ramp a fill writes past its edge can add a row.
     CHECK(cells.size() >= 16);
 
     TerrainField rebuilt(field.settings());
@@ -61,20 +61,17 @@ TEST_CASE("a field cut into cells and put back together is the same field")
         REQUIRE_FALSE(decodeTerrainCell(encodeTerrainCell(cell), decoded).has_value());
         rebuilt.shareFrom(decoded.field);
     }
-    CHECK(rebuilt.tileCount() == field.tileCount());
-    CHECK(rebuilt.brickCount() == field.brickCount());
+    CHECK(rebuilt.chunkCount() == field.chunkCount());
     CHECK(rebuilt.digest() == field.digest());
 }
 
-TEST_CASE("every tile and brick is filed in the cell under it")
+TEST_CASE("every chunk is filed in the cell of its column")
 {
     const TerrainField field = groundWithCave(256.0);
-    const core::u32 across = terrainCellTiles(field.settings().voxelSize);
+    const core::u32 across = terrainCellChunks(field.settings().voxelSize);
     for (const TerrainCell& cell : splitTerrain(field)) {
         const ChunkId id{cell.x, cell.z, FieldLayerTerrain};
-        for (const TileKey key : cell.field.tileKeys())
-            CHECK(terrainCellOf(key, across) == id);
-        for (const BrickKey key : cell.field.brickKeys())
+        for (const ChunkKey key : cell.field.chunkKeys())
             CHECK(terrainCellOf(key, across) == id);
     }
 }
@@ -82,7 +79,7 @@ TEST_CASE("every tile and brick is filed in the cell under it")
 TEST_CASE("a cell nobody touched may be dropped, and one somebody dug into may not")
 {
     const TerrainField source = groundWithCave(256.0);
-    const core::u32 across = terrainCellTiles(source.settings().voxelSize);
+    const core::u32 across = terrainCellChunks(source.settings().voxelSize);
     const std::vector<TerrainCell> cells = splitTerrain(source);
 
     TerrainField world(source.settings());
@@ -92,19 +89,21 @@ TEST_CASE("a cell nobody touched may be dropped, and one somebody dug into may n
         CHECK(terrainCellUntouched(world, cell, across));
 
     // **An edit is visible because the streamer holds a second reference**:
-    // the write clones the tile rather than changing the one the cell shares.
+    // the write clones the chunk rather than changing the one the cell shares.
     const TerrainCell& far = cells.back();
-    const TileKey key = far.field.tileKeys().front();
-    const float height = world.findTile(key)->height[0];
-    world.setColumn(key.x * static_cast<core::i32>(TileEdge), key.z * static_cast<core::i32>(TileEdge), height + 1.0f,
-                    1);
+    const ChunkKey key = far.field.chunkKeys().front();
+    const core::i32 x = key.x * static_cast<core::i32>(ChunkEdge);
+    const core::i32 y = key.y * static_cast<core::i32>(ChunkEdge);
+    const core::i32 z = key.z * static_cast<core::i32>(ChunkEdge);
+    const Voxel was = world.voxel(x, y, z);
+    (void)world.setVoxel(x, y, z, Voxel{static_cast<core::u8>(was.occupancy == 0 ? 200 : 0), 2});
     CHECK_FALSE(terrainCellUntouched(world, far, across));
     CHECK(terrainCellUntouched(world, cells.front(), across));
 
     // And the one that may be dropped goes cleanly.
     removeTerrainCell(world, cells.front());
-    for (const TileKey gone : cells.front().field.tileKeys())
-        CHECK(world.findTile(gone) == nullptr);
+    for (const ChunkKey gone : cells.front().field.chunkKeys())
+        CHECK(world.findChunk(gone) == nullptr);
 }
 
 TEST_CASE("a cell that loads after ground was made there keeps the newer ground")
@@ -114,13 +113,12 @@ TEST_CASE("a cell that loads after ground was made there keeps the newer ground"
     REQUIRE_FALSE(cells.empty());
 
     TerrainField world(source.settings());
-    const TileKey key = cells.front().field.tileKeys().front();
-    std::vector<float> heights(TileArea, 5.0f);
-    std::vector<core::u8> materials(TileArea, 2);
-    world.setTile(key, heights, materials);
+    const ChunkKey key = cells.front().field.chunkKeys().front();
+    world.setChunk(key, std::make_shared<TerrainChunk>(Voxel{FullOccupancy, 6}));
 
     world.shareFrom(cells.front().field);
-    CHECK(world.findTile(key)->height[0] == doctest::Approx(5.0));
+    REQUIRE(world.findChunk(key) != nullptr);
+    CHECK(world.findChunk(key)->value() == Voxel{FullOccupancy, 6});
 }
 
 TEST_CASE("a block-world cell round-trips through its file")

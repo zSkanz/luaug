@@ -1,15 +1,19 @@
-// The terrain mesher (ADR 0067, F1 B2).
+// The terrain mesher (ADR 0082).
 //
-// **What is worth asserting is watertightness, placement and winding**, because
-// each fails silently in its own way: a crack is a hole somebody falls through,
-// a misplaced surface looks like a modelling mistake, and a backwards triangle
-// is a floor you fall through while looking at it.
+// **What is worth asserting is placement, watertightness and winding**, because
+// each fails silently in its own way: a surface a voxel off looks like a
+// modelling mistake, a crack between two regions is a hole somebody falls
+// through, and a backwards triangle is a floor you fall through while looking at
+// it. And terraces: a steep heightmap meshed as a staircase is what the first
+// voxel grid did before its ramp was widened, so it has a test of its own.
 #include "luaug/asset/terrain_mesher.h"
 
 #include <algorithm>
 #include <cmath>
 #include <doctest/doctest.h>
 #include <map>
+#include <set>
+#include <tuple>
 #include <vector>
 
 using namespace luaug;
@@ -17,246 +21,235 @@ using namespace luaug::asset;
 
 namespace {
 
-constexpr float kVoxel = 0.5f;
-
-// A field whose ground is a flat plane at `height`, covering the tiles a small
-// region needs.
-[[nodiscard]] TerrainField flatGround(float height)
+[[nodiscard]] FieldSettings settingsOf(float voxel = 1.0f)
 {
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    const std::vector<float> heights(TileArea, height);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    for (const TileKey key : {TileKey{-1, -1}, TileKey{-1, 0}, TileKey{0, -1}, TileKey{0, 0}}) {
-        field.setTile(key, heights, materials);
-    }
+    return FieldSettings{.voxelSize = voxel, .minHeight = -64.0f, .maxHeight = 64.0f};
+}
+
+[[nodiscard]] TerrainField flatGround(float height, float voxel = 1.0f)
+{
+    TerrainField field(settingsOf(voxel));
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 128.0f * voxel, height, 1);
     return field;
 }
 
-[[nodiscard]] MeshRegion regionAround(core::i32 minY, core::u32 cells)
+// One chunk's worth of region, owning lattice points from `(x, y, z)`.
+[[nodiscard]] MeshRegion regionAt(core::i32 x, core::i32 y, core::i32 z, core::u32 cells = 32, core::u32 level = 0)
 {
-    return MeshRegion{.minX = 0, .minY = minY, .minZ = 0, .cellsX = cells, .cellsY = cells, .cellsZ = cells};
+    return MeshRegion{
+        .minX = x, .minY = y, .minZ = z, .cellsX = cells, .cellsY = cells, .cellsZ = cells, .level = level};
 }
 
-// Every edge of every triangle, counted. A closed surface has each interior edge
-// used exactly twice, once in each direction.
-[[nodiscard]] std::map<std::pair<core::u32, core::u32>, int> edgeUse(const Mesh& mesh)
+// Every edge of every triangle, counted by the positions at its ends -- so two
+// regions' copies of the same vertex count as one.
+using Point = std::tuple<float, float, float>;
+[[nodiscard]] Point pointOf(const core::Vec3& p)
 {
-    std::map<std::pair<core::u32, core::u32>, int> uses;
-    for (core::usize at = 0; at + 2 < mesh.indices.size(); at += 3) {
-        const core::u32 tri[3] = {mesh.indices[at], mesh.indices[at + 1], mesh.indices[at + 2]};
+    const auto snap = [](float v) { return std::round(v * 1024.0f) / 1024.0f; };
+    return {snap(p.x), snap(p.y), snap(p.z)};
+}
+
+void countEdges(const TerrainMesh& meshed, std::map<std::pair<Point, Point>, int>& uses)
+{
+    const std::vector<core::Vec3>& points = meshed.colliderPoints;
+    const std::vector<core::u32>& indices = meshed.colliderIndices;
+    for (core::usize at = 0; at + 2 < indices.size(); at += 3) {
         for (int e = 0; e < 3; ++e) {
-            const core::u32 a = tri[e];
-            const core::u32 b = tri[(e + 1) % 3];
+            const Point a = pointOf(points[indices[at + static_cast<core::usize>(e)]]);
+            const Point b = pointOf(points[indices[at + static_cast<core::usize>((e + 1) % 3)]]);
             uses[{std::min(a, b), std::max(a, b)}] += 1;
         }
     }
-    return uses;
 }
 
 } // namespace
 
-TEST_CASE("a field with no sign change produces no triangles")
+TEST_CASE("a field with no surface produces no triangles")
 {
-    // All air above the ground, so no cell straddles the surface. A mesher that
-    // emitted anything here would be putting a surface through empty space.
-    const TerrainField field = flatGround(0.0f);
-    const TerrainMesh above = meshField(field, regionAround(10, 4));
-    CHECK(above.mesh.vertices.empty());
-    CHECK(above.mesh.indices.empty());
-    CHECK(above.mesh.submeshes.empty());
-
-    // And all solid below it.
-    const TerrainMesh below = meshField(field, regionAround(-20, 4));
-    CHECK(below.mesh.indices.empty());
+    const TerrainField empty(settingsOf());
+    CHECK(meshField(empty, regionAt(0, 0, 0)).mesh.indices.empty());
+    // All ground is no surface either.
+    const TerrainField buried = flatGround(40.0f);
+    CHECK(meshField(buried, regionAt(0, -32, 0)).mesh.indices.empty());
 }
 
-TEST_CASE("a flat ground meshes as a plane at exactly the height it was given")
+TEST_CASE("flat ground meshes as a plane at the height it was given, facing up")
 {
-    // **The equality ADR 0067 rests on.** `sd(p) = p.y - H` puts the vertical
-    // edge crossing at exactly `y = H`, so every vertex of a flat field's
-    // surface is at that height -- not near it. A mesher that interpolated
-    // wrongly, or a sampler that was off by a lattice step, lands somewhere
-    // plausible and this is what catches it.
-    // A `double` because `doctest::Approx` takes one, and an `f32` compared
-    // against it is a promotion only Clang diagnoses.
-    const double height = 1.25;
-    const TerrainField field = flatGround(static_cast<float>(height));
-    const TerrainMesh meshed = meshField(field, regionAround(-4, 8));
-
+    const TerrainField field = flatGround(3.3f);
+    const TerrainMesh meshed = meshField(field, regionAt(0, 0, 0));
     REQUIRE_FALSE(meshed.mesh.vertices.empty());
     for (const Vertex& vertex : meshed.mesh.vertices) {
-        CHECK(static_cast<double>(vertex.position.y) == doctest::Approx(height).epsilon(0.001));
+        CHECK(static_cast<double>(vertex.position.y) == doctest::Approx(3.3).epsilon(0.002));
+        CHECK(static_cast<double>(vertex.normal.y) > 0.999);
     }
+    // And the triangles face up too, by their winding.
+    const std::vector<Vertex>& v = meshed.mesh.vertices;
+    for (core::usize at = 0; at + 2 < meshed.mesh.indices.size(); at += 3) {
+        const core::Vec3 a = v[meshed.mesh.indices[at]].position;
+        const core::Vec3 b = v[meshed.mesh.indices[at + 1]].position;
+        const core::Vec3 c = v[meshed.mesh.indices[at + 2]].position;
+        const float ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+        CHECK(ny > 0.0f);
+    }
+}
 
-    // And it faces UP, because the field's gradient does. Winding is derived
-    // from the gradient rather than from a table precisely so this cannot be
-    // backwards.
+TEST_CASE("a steep heightmap meshes as a slope, not a staircase")
+{
+    // Sixty degrees. With a one-voxel ramp this came out as terraces a voxel
+    // high: the voxel beside one on the slope was clamped, and the crossing
+    // between them landed in the wrong place (`RampVoxels`).
+    TerrainField field(settingsOf());
+    constexpr core::u32 Columns = 64;
+    constexpr float Rise = 1.732f;
+    std::vector<float> heights(Columns * Columns);
+    for (core::u32 z = 0; z < Columns; ++z) {
+        for (core::u32 x = 0; x < Columns; ++x)
+            heights[z * Columns + x] = Rise * (static_cast<float>(x) - 32.0f) + 0.5f * Rise;
+    }
+    (void)writeHeights(field, -32, -32, Columns, heights, 1);
+    // A column's height is at its centre, so the plane is y = Rise * x.
+    MeshRegion region = regionAt(-8, -32, -8, 16);
+    region.cellsY = 64;
+    const TerrainMesh meshed = meshField(field, region);
+    REQUIRE(meshed.mesh.vertices.size() > 100);
+    double worst = 0.0;
     for (const Vertex& vertex : meshed.mesh.vertices) {
-        CHECK(vertex.normal.y > 0.9f);
+        // Distance from the plane, measured along its normal.
+        const double off = (static_cast<double>(vertex.position.y) - static_cast<double>(Rise * vertex.position.x)) /
+                           std::sqrt(1.0 + static_cast<double>(Rise * Rise));
+        worst = std::max(worst, std::abs(off));
     }
+    CHECK(worst < 0.1);
 }
 
-TEST_CASE("the surface is watertight: every interior edge is shared by two triangles")
+TEST_CASE("two regions side by side meet with no crack")
 {
-    // **A crack in terrain is a hole somebody falls through**, and it is
-    // invisible in a screenshot until they do. Two tetrahedra sharing a face see
-    // the same two samples on every edge of it, place the same vertex, and the
-    // vertex cache makes it literally the same index -- so a shared edge is used
-    // exactly twice.
-    //
-    // The field is sloped rather than flat, so cells straddle the surface in
-    // several orientations and the 1-3 and 2-2 tetrahedron splits both occur.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    std::vector<float> heights(TileArea);
-    std::vector<core::u8> materials(TileArea, core::u8{1});
-    for (core::u32 z = 0; z < TileEdge; ++z) {
-        for (core::u32 x = 0; x < TileEdge; ++x) {
-            heights[z * TileEdge + x] = 0.4f * static_cast<float>(x) + 0.25f * static_cast<float>(z);
-        }
+    TerrainField field = flatGround(0.0f);
+    (void)raiseBall(field, core::DVec3{32.0, 0.0, 16.0}, 12.0, 8.0f);
+    (void)fillBall(field, core::DVec3{32.0, 2.0, 16.0}, 5.0, 0);
+
+    std::map<std::pair<Point, Point>, int> uses;
+    MeshRegion left = regionAt(0, -8, 0);
+    MeshRegion right = regionAt(32, -8, 0);
+    const TerrainMesh a = meshField(field, left);
+    const TerrainMesh b = meshField(field, right);
+    countEdges(a, uses);
+    countEdges(b, uses);
+
+    // An edge on the seam at x = 32 used once is a crack. The seam's shared
+    // ring of vertices is built by both regions from the same samples, so the
+    // union uses every interior edge twice.
+    int cracks = 0;
+    for (const auto& [edge, count] : uses) {
+        const float ax = std::get<0>(edge.first);
+        const float bx = std::get<0>(edge.second);
+        const bool onSeam = ax > 30.0f && ax < 34.0f && bx > 30.0f && bx < 34.0f;
+        const float az = std::get<2>(edge.first);
+        const bool inside = az > 2.0f && az < 30.0f;
+        if (onSeam && inside && count == 1)
+            ++cracks;
     }
-    field.setTile(TileKey{0, 0}, heights, materials);
-
-    // Interior only: a region's boundary edges are legitimately used once,
-    // because the surface continues into the cell next door.
-    const TerrainMesh meshed = meshField(
-        field, MeshRegion{.minX = 2, .minY = -2, .minZ = 2, .cellsX = 12, .cellsY = 24, .cellsZ = 12, .stride = 1});
-    REQUIRE(meshed.mesh.indices.size() >= 9);
-
-    const auto uses = edgeUse(meshed.mesh);
-    int once = 0;
-    int twice = 0;
-    int more = 0;
-    for (const auto& entry : uses) {
-        if (entry.second == 1) {
-            ++once;
-        }
-        else if (entry.second == 2) {
-            ++twice;
-        }
-        else {
-            ++more;
-        }
-    }
-
-    // **No edge is used more than twice**, which is the non-manifold failure --
-    // the one that means two surfaces were emitted through the same place.
-    CHECK(more == 0);
-    // And the overwhelming majority are interior and shared. The ones used once
-    // are the region's own border.
-    CHECK(twice > once);
+    CHECK(cracks == 0);
 }
 
-TEST_CASE("a cave is a surface, which is the whole reason the representation is a volume")
+TEST_CASE("a cave is a surface, which is the whole reason terrain is a volume")
 {
-    // Solid ground, with a brick of air carved out inside it. The height layer
-    // alone cannot express this -- it is single-valued -- so a surface appearing
-    // here at all is the hybrid doing the thing it exists for.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    const std::vector<float> heights(TileArea, 20.0f);
-    const std::vector<core::u8> tileMaterials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, tileMaterials);
-
-    // A brick whose middle is air and whose shell is solid: a bubble.
-    std::vector<core::u8> distances(BrickVolume);
-    const std::vector<core::u8> brickMaterials(BrickVolume, core::u8{2});
-    for (core::u32 y = 0; y < BrickEdge; ++y) {
-        for (core::u32 z = 0; z < BrickEdge; ++z) {
-            for (core::u32 x = 0; x < BrickEdge; ++x) {
-                const float dx = static_cast<float>(x) - 7.5f;
-                const float dy = static_cast<float>(y) - 7.5f;
-                const float dz = static_cast<float>(z) - 7.5f;
-                const float radius = std::sqrt(dx * dx + dy * dy + dz * dz);
-                // Positive (air) inside the sphere, negative (solid) outside it.
-                const float metres = (4.0f - radius) * kVoxel;
-                distances[(y * BrickEdge + z) * BrickEdge + x] = quantiseDistance(metres, kVoxel);
-            }
-        }
-    }
-    field.setBrick(BrickKey{0, 0, 0}, distances, brickMaterials);
-
-    const TerrainMesh meshed =
-        meshField(field, MeshRegion{.minX = 0, .minY = 0, .minZ = 0, .cellsX = 15, .cellsY = 15, .cellsZ = 15});
-
-    // There is a surface, and it is the bubble's wall.
-    REQUIRE_FALSE(meshed.mesh.vertices.empty());
-
-    // Every vertex is on the sphere of radius 4 voxels about the brick's middle,
-    // which is where the sign changes. Within one voxel, because that is the
-    // resolution the crossing is found at.
+    TerrainField field = flatGround(10.0f);
+    (void)fillBall(field, core::DVec3{16.0, -6.0, 16.0}, 5.0, 0);
+    MeshRegion region = regionAt(0, -32, 0);
+    region.cellsY = 64;
+    const TerrainMesh meshed = meshField(field, region);
+    bool ceiling = false;
     for (const Vertex& vertex : meshed.mesh.vertices) {
-        const float dx = vertex.position.x / kVoxel - 7.5f;
-        const float dy = vertex.position.y / kVoxel - 7.5f;
-        const float dz = vertex.position.z / kVoxel - 7.5f;
-        const float radius = std::sqrt(dx * dx + dy * dy + dz * dz);
-        CHECK(radius > 3.0f);
-        CHECK(radius < 5.0f);
+        // A vertex near the ball's top faces down, into the cave.
+        if (vertex.position.y > -2.0f && vertex.position.y < 0.0f && std::abs(vertex.position.x - 16.0f) < 1.0f &&
+            std::abs(vertex.position.z - 16.0f) < 1.0f && vertex.normal.y < -0.8f)
+            ceiling = true;
     }
+    CHECK(ceiling);
+    // And a vertex deep in a cave sees less sky than one in the open.
+    float cave = 1.0f;
+    float open = 0.0f;
+    for (const Vertex& vertex : meshed.mesh.vertices) {
+        if (vertex.position.y < -8.0f)
+            cave = std::min(cave, vertex.tangent[1]);
+        if (vertex.position.y > 9.0f)
+            open = std::max(open, vertex.tangent[1]);
+    }
+    CHECK(cave < 0.5f);
+    CHECK(open > 0.99f);
 }
 
-TEST_CASE("the collider is the same surface as the render mesh")
+TEST_CASE("the collider is the render surface, without the skirts")
 {
-    // **Not shared with it, and that is deliberate**: sharing would make the
-    // collider track the render mesh's LOD, and a collider that gets coarser as
-    // you walk away is a character falling through the world. What has to hold
-    // is that at the level actually meshed they are the same triangles.
-    const TerrainField field = flatGround(0.75f);
-    const TerrainMesh meshed = meshField(field, regionAround(-4, 8));
-
-    REQUIRE_FALSE(meshed.mesh.indices.empty());
-    CHECK(meshed.colliderPoints.size() == meshed.mesh.vertices.size());
-    CHECK(meshed.colliderIndices == meshed.mesh.indices);
-    for (core::usize at = 0; at < meshed.colliderPoints.size(); ++at) {
-        CHECK(meshed.colliderPoints[at].x == meshed.mesh.vertices[at].position.x);
-        CHECK(meshed.colliderPoints[at].y == meshed.mesh.vertices[at].position.y);
-        CHECK(meshed.colliderPoints[at].z == meshed.mesh.vertices[at].position.z);
-    }
-
-    // Triples, and every index in range -- which is what `ShapeType::TriangleMesh`
-    // refuses a description for rather than clamping.
-    REQUIRE(meshed.colliderIndices.size() % 3 == 0);
-    for (const core::u32 index : meshed.colliderIndices) {
-        CHECK(index < meshed.colliderPoints.size());
-    }
+    TerrainField field = flatGround(2.0f);
+    (void)raiseBall(field, core::DVec3{16.0, 2.0, 16.0}, 8.0, 5.0f);
+    MeshRegion region = regionAt(0, -8, 0);
+    const TerrainMesh plain = meshField(field, region);
+    region.skirt = 2.0f;
+    const TerrainMesh skirted = meshField(field, region);
+    CHECK(skirted.mesh.indices.size() > plain.mesh.indices.size());
+    CHECK(skirted.colliderIndices.size() == plain.colliderIndices.size());
+    CHECK(plain.colliderIndices.size() == plain.mesh.indices.size());
 }
 
-TEST_CASE("a coarser stride is the same surface with fewer triangles")
+TEST_CASE("a coarser level is the same surface with fewer triangles")
 {
-    // LOD is a residency decision baked into what was meshed, not a renderer
-    // one: `selectMeshLod` picks per draw from camera distance, and two
-    // neighbouring cells picking different levels on different frames is a crack
-    // that appears and disappears.
-    const TerrainField field = flatGround(1.0f);
-    const TerrainMesh fine = meshField(
-        field, MeshRegion{.minX = 0, .minY = -4, .minZ = 0, .cellsX = 16, .cellsY = 8, .cellsZ = 16, .stride = 1});
-    const TerrainMesh coarse = meshField(
-        field, MeshRegion{.minX = 0, .minY = -4, .minZ = 0, .cellsX = 8, .cellsY = 4, .cellsZ = 8, .stride = 2});
-
-    REQUIRE_FALSE(fine.mesh.indices.empty());
+    TerrainField field = flatGround(4.0f);
+    (void)raiseBall(field, core::DVec3{32.0, 4.0, 32.0}, 20.0, 10.0f);
+    const TerrainMesh fine = meshField(field, regionAt(0, -8, 0, 64));
+    const TerrainMesh coarse = meshField(field, regionAt(0, -4, 0, 32, 1));
     REQUIRE_FALSE(coarse.mesh.indices.empty());
-    CHECK(coarse.mesh.indices.size() < fine.mesh.indices.size());
-
-    // **And it is the same plane**, at the same height. A coarser mesh that
-    // drifted would show as a step between two LOD rings.
+    CHECK(coarse.mesh.indices.size() * 3 < fine.mesh.indices.size());
+    // Its vertices are on the fine surface to within a coarse cell -- away
+    // from the edge of the ground, where the surface turns down its side.
     for (const Vertex& vertex : coarse.mesh.vertices) {
-        CHECK(static_cast<double>(vertex.position.y) == doctest::Approx(1.0).epsilon(0.001));
+        if (vertex.position.x < 4.0f || vertex.position.x > 60.0f || vertex.position.z < 4.0f ||
+            vertex.position.z > 60.0f)
+            continue;
+        const std::optional<float> height =
+            heightAt(field, static_cast<double>(vertex.position.x), static_cast<double>(vertex.position.z));
+        REQUIRE(height.has_value());
+        CHECK(std::abs(static_cast<double>(vertex.position.y - *height)) < 2.0);
     }
+}
+
+TEST_CASE("one section per material, in id order")
+{
+    TerrainField field = flatGround(0.0f);
+    (void)paintBall(field, core::DVec3{8.0, 0.0, 8.0}, 4.0, 3);
+    (void)paintBall(field, core::DVec3{24.0, 0.0, 24.0}, 4.0, 2);
+    const TerrainMesh meshed = meshField(field, regionAt(0, -8, 0));
+    REQUIRE(meshed.sectionMaterials.size() == 3);
+    CHECK(std::is_sorted(meshed.sectionMaterials.begin(), meshed.sectionMaterials.end()));
+    CHECK(meshed.mesh.submeshes.size() == meshed.sectionMaterials.size());
 }
 
 TEST_CASE("meshing the same field twice produces the same bytes")
 {
-    // **R10.** The walk order decides the vertex order, which decides the mesh's
-    // bytes, which reaches a content hash. A `std::map` rather than a hash map
-    // is what makes this true, and this is the assertion that says so.
-    const TerrainField field = flatGround(2.0f);
-    const TerrainMesh first = meshField(field, regionAround(-4, 10));
-    const TerrainMesh second = meshField(field, regionAround(-4, 10));
-
-    REQUIRE_FALSE(first.mesh.vertices.empty());
-    REQUIRE(first.mesh.vertices.size() == second.mesh.vertices.size());
-    CHECK(first.mesh.indices == second.mesh.indices);
-    for (core::usize at = 0; at < first.mesh.vertices.size(); ++at) {
-        CHECK(first.mesh.vertices[at].position.x == second.mesh.vertices[at].position.x);
-        CHECK(first.mesh.vertices[at].position.y == second.mesh.vertices[at].position.y);
-        CHECK(first.mesh.vertices[at].position.z == second.mesh.vertices[at].position.z);
+    TerrainField field = flatGround(1.0f);
+    (void)fillBall(field, core::DVec3{10.0, 1.0, 10.0}, 6.0, 0);
+    const TerrainMesh a = meshField(field, regionAt(0, -8, 0));
+    const TerrainMesh b = meshField(field, regionAt(0, -8, 0));
+    REQUIRE(a.mesh.vertices.size() == b.mesh.vertices.size());
+    CHECK(std::equal(a.mesh.indices.begin(), a.mesh.indices.end(), b.mesh.indices.begin()));
+    for (core::usize at = 0; at < a.mesh.vertices.size(); ++at) {
+        CHECK(a.mesh.vertices[at].position == b.mesh.vertices[at].position);
+        CHECK(a.mesh.vertices[at].tangent[1] == b.mesh.vertices[at].tangent[1]);
     }
+}
+
+TEST_CASE("the rows a column of chunks can have a surface in")
+{
+    const TerrainField empty(settingsOf());
+    CHECK_FALSE(activeRows(empty, 0, 0, 1).has_value());
+
+    const TerrainField field = flatGround(40.0f);
+    const std::optional<std::pair<core::i32, core::i32>> rows = activeRows(field, 0, 0, 1);
+    REQUIRE(rows.has_value());
+    // The surface is in the chunk from 32 to 63; the floor is not a surface,
+    // and neither are the solid chunks between.
+    CHECK(rows->first <= 38);
+    CHECK(rows->second >= 42);
+    CHECK(rows->first >= 29);
 }

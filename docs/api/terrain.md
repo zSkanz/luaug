@@ -7,11 +7,13 @@
 
 A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.
 
-**It is a volume and not a height map**, which is what makes caves and overhangs possible. Underneath, one signed-distance field is stored two ways -- a height layer for the ground that is a single-valued height function, which is most of it, and voxel bricks where it stops being one. Nothing you write here has to know which: `FillBall` through a hillside converts what it needs to and leaves the rest cheap.
+**It is a grid of voxels.** Space is cut into cubes `VoxelSize` on a side, and each one holds a material and an occupancy -- how full of that material it is, from 0 to 1. The surface is wherever the occupancy crosses one half, found by interpolating between neighbouring voxels, so a ball carved out of a hillside lands where you put it rather than on a grid line. Caves, arches, overhangs and flat ground are all the same data.
+
+Materials are numbered: 0 is air, and 1 to 8 are Grass, Sand, Rock, Snow, Mud, Sandstone, Basalt and Ice.
 
 There is one per `Workspace`, reached as `workspace.Terrain`, because a world has one ground. Creating a second is legal and it simply is not the one the workspace names.
 
-**Every verb here is a write to the field**, and the field is part of the world -- so a sculpt is undoable in the editor, it moves the world hash, and it saves with the project.
+**Every verb here is a write to the voxels**, and the voxels are part of the world -- so a sculpt is undoable in the editor, it moves the world hash, and it saves with the project.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on
@@ -21,57 +23,91 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `CellCount` | `number` | — | read-only | How many cells of terrain currently hold anything. Zero for a terrain nobody has sculpted, which is what `Clear` returns it to. |
-| `CellSize` | `number` | `64` | read-only, **inert** | How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own spacing, and a terrain that disagreed with it would have cells that load and unload on different boundaries from everything else in the world.<br><br>**What a saved terrain streams by.** A terrain written with a scene and large enough to span sixteen cells or more is cut into cells of this size, rounded to whole tiles at its `VoxelSize`, and each one is loaded and dropped around `StreamingService`'s foci on its terrain radii. A cell somebody changed is never dropped. The number is the grid's rather than this terrain's, which is why it is read-only and why nothing reads it back from here. |
-| `MaxHeight` | `number` | `256` | read/write | The highest this terrain may ever be raised to, in metres. The upper half of the same reservation `MinHeight` describes. |
-| `MinHeight` | `number` | `-256` | read/write | The lowest this terrain may ever be dug to, in metres.<br><br>**Decided once and reserved, rather than measured as you go.** A collider's height precision is spread across this range when the cell is built and cannot be widened afterwards, so digging past it does not deepen the world -- it stops. Set it to the deepest cave you will ever want before you start. |
-| `Position` | `vector` | `vector.zero` | read/write | Where this terrain's own origin sits in the world, in metres.<br><br>**A terrain is an instance and it can be moved.** Every sample, every collider and every brush stroke is offset by this rather than baked into the field, so moving a sculpted world is one number rather than a rewrite of every tile.<br><br>**It translates and does not turn, and that is the encoding rather than an omission.** The cheap half of the field is a height layer, and `H(x, z)` has no meaning under a rotation; the collider is a height field, which is axis-aligned too. There is no `CFrame` here because a rotation this could not keep would be worse than not offering one. |
-| `VoxelSize` | `number` | `0.5` | read/write | How coarse the field is, in metres. Half a metre resolves a doorway; two metres resolves a hillside and costs a sixteenth as much.<br><br>**Only settable while the terrain is empty.** Changing it under a sculpted world would mean resampling every tile and brick onto a different lattice, which is a lossy operation nobody asked for -- so it is refused, by name, rather than done quietly. Clear it first if that is really what you want. |
+| `CellCount` | `number` | — | read-only | How many chunks of 32 by 32 by 32 voxels currently hold anything. Air is never stored, so zero is a terrain nobody has sculpted, which is what `Clear` returns it to. |
+| `CellSize` | `number` | `64` | read-only, **inert** | How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own spacing, and a terrain that disagreed with it would have cells that load and unload on different boundaries from everything else in the world.<br><br>**What a saved terrain streams by.** A terrain written with a scene and large enough to span sixteen cells or more is cut into cells of this size, rounded to whole columns of 32-voxel chunks, and each one is loaded and dropped around `StreamingService`'s foci on its terrain radii. A cell somebody changed is never dropped. |
+| `MaxHeight` | `number` | `256` | read/write | The world's ceiling, in metres: no voxel above it is ever written. |
+| `MinHeight` | `number` | `-256` | read/write | The world's floor, in metres: no voxel below it is ever written.<br><br>**It is also where ground starts.** `WriteHeights`, Generate Flat Ground and a first raise on empty terrain lay ground from here up to the surface, so a hill is solid all the way down and a tunnel dug into it has ground under its floor. |
+| `Position` | `vector` | `vector.zero` | read/write | Where this terrain's own origin sits in the world, in metres.<br><br>**A terrain is an instance and it can be moved.** Every voxel, every collider and every brush stroke is offset by this rather than baked into the grid, so moving a sculpted world is one number rather than a rewrite of every voxel. It translates and does not turn. |
+| `VoxelSize` | `number` | `1` | read/write | How big one voxel is, in metres. One metre resolves a doorway and a path; two metres resolves a hillside and costs an eighth as much.<br><br>**Only settable while the terrain is empty.** Changing it under a sculpted world would mean resampling every voxel onto a different grid, which is a lossy operation nobody asked for -- so it is refused, by name, rather than done quietly. Clear it first if that is really what you want. |
 
 ## Methods
 
+### `CellCenterToWorld(cell: vector): vector`
+
+The world position of a voxel's centre, from its index on each axis.
+
 ### `Clear()`
 
-Removes every cell. The terrain is empty afterwards and `VoxelSize` becomes settable again.
+Removes every voxel. The terrain is empty afterwards and `VoxelSize` becomes settable again.
 
 ### `Compact(): number`
 
-Converts back to the cheap encoding every column that no longer needs voxels, and returns how many it converted.
+Does nothing and returns 0.
 
-**Nothing does this automatically, deliberately.** Which columns carry voxels is part of the world's state -- it is saved, and it is in the world hash -- so a terrain that quietly recompacted itself would be a world that changed when nobody touched it. Filling a cave back in leaves the bricks behind until you ask.
+It converted the old terrain's voxel columns back to heights. Every edit now leaves the voxels as compact as they can be, so there is nothing left for it to do. It stays so scripts that call it keep running.
 
 ### `FillBall(center: vector, radius: number, material: number): number`
 
-Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it changed.
+Adds a ball of ground, or removes one when `material` is zero. Returns how many voxels it changed.
 
-This is the verb a sculpting brush is made of, and it is the same one a script uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.
+Adding never takes ground away and removing never adds it: a voxel ends up as full as the fuller of it and the ball (adding), or as empty as the ball leaves it (removing). An explosion crater is `FillBall(hit.Position, 4, 0)`.
 
 ### `FillBlock(center: vector, size: vector, material: number): number`
 
-The same, as an axis-aligned box. Returns how many cells it changed.
+The same, as an axis-aligned box `size` across. Returns how many voxels it changed.
+
+### `FillCylinder(center: vector, height: number, radius: number, material: number): number`
+
+The same, as an upright cylinder `height` tall. Returns how many voxels it changed. A well is `FillCylinder(top - vector.create(0, 10, 0), 20, 1.5, 0)`.
+
+### `FlattenBall(center: vector, radius: number, height: number, strength: number?): number`
+
+Pulls the ground in a ball towards a level plane at `height` -- taking away what is above it and filling what is below it -- by `strength` (0 to 1, default 1), less towards the rim. Returns how many voxels it changed.
 
 ### `HeightAt(x: number, z: number): number`
 
-The height of the ground at this column, in metres.
+The height of the top of the ground here, in metres, or nil where there is none.
 
-**It answers about the height layer and says nothing about caves**, which is the honest shape of the question: a column with a cave in it has no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first surface along a direction rather than the top of the ground.
+**The top, over caves as well**: the highest surface in the column, which is where a tree is planted or a player lands from above. Cast a ray with `Workspace:Raycast` when what you want is the first surface along a direction.
 
 ### `PaintBall(center: vector, radius: number, material: number): number`
 
-Changes what the ground is MADE OF, without changing where it is. Returns how many cells it changed.
-
-**It edits no distance at all**, which is the whole difference between this and `FillBall`. It writes material where there is already ground and nowhere else, creates no voxel brick and promotes no column -- so painting a hillside leaves the hillside exactly as cheap as it was.
+Changes what the ground is MADE OF in a ball, without moving it. Returns how many voxels it changed.
 
 A `material` of zero is refused rather than treated as erase. Zero means erase to `FillBall`, and picking the first entry of a material list must not delete the ground you were about to paint.
 
 ### `RaiseBall(center: vector, radius: number, amount: number): number`
 
-Raises the ground under a disc by `amount` metres at the centre, falling smoothly to nothing at the rim -- or lowers it, when `amount` is negative. Returns how many columns it changed.
+Raises the ground around `center` by `amount` metres at the middle, falling smoothly to nothing at `radius` -- or lowers it, when `amount` is negative. Returns how many voxels it changed.
 
-This is the heightmap sculpting brush, and it is what to reach for to shape hills and valleys: it only ever moves the surface, so it never creates an overhang. `FillBall` adds a real ball, which near its rim hangs over the ground below it -- the right verb for a boulder or a tunnel, and the wrong one for a hill.
+**It moves the surface rather than adding a ball**: the ground within `radius` above and below `center` is pushed up, so a hill rises without an overhang at its rim, and a tunnel further down stays where it is. This is the verb for shaping hills and valleys; `FillBall` is the one for a boulder or a tunnel.
+
+### `ReadVoxels(minCorner: vector, maxCorner: vector): ({ number }, { number }, vector)`
+
+Reads every voxel the box between the two corners touches, snapped outward to the grid. Returns their materials, their occupancies (0 to 1) and how many there are on each axis.
+
+**The tables are flat**: the voxel at `x, y, z` (counting from 0 at the low corner) is at index `1 + x + size.X * (y + size.Y * z)`. At most 256 cubed voxels at once; read a larger region in pieces.
+
+### `ReplaceMaterial(minCorner: vector, maxCorner: vector, from: number, to: number): number`
+
+Every voxel of material `from` in the box between the two corners becomes `to`. Returns how many it changed. Zero for either is refused: this changes what ground is made of, never whether it is there.
+
+### `SmoothBall(center: vector, radius: number, strength: number?): number`
+
+Softens the ground in a ball: every voxel moves towards the average of its neighbours by `strength` (0 to 1, default 0.5), less towards the rim. Returns how many voxels it changed.
+
+### `WorldToCell(position: vector): vector`
+
+Which voxel a world position falls in, as its whole-number index on each axis.
 
 ### `WriteHeights(corner: vector, columns: number, heights: { number }, material: number?): number`
 
-Writes a heightmap in one call: one height per column, `columns` to a row, row after row along +Z, starting at the column at `corner` (its X and Z; Y is not read). Columns are `VoxelSize` apart, so a 257 by 257 table at a one-metre voxel covers 256 metres with both edges included. Returns how many columns it wrote.
+Writes a heightmap in one call: one height per column of voxels, `columns` to a row, row after row along +Z, starting at the column `corner` falls in (its X and Z; Y is not read). Returns how many voxels it changed.
 
-**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where `FillBlock` per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is painted on every column written. A column with a cave in it has its top moved to the height and keeps the cave under it, and a height that is not a number is skipped rather than written.
+**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where a brush per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is what new ground is made of. Each column's top moves to its height -- ground added from the old top up, or taken from it down -- and a cave under the top stays. A column with no ground at all is filled from `MinHeight`. A height that is not a number is skipped.
+
+### `WriteVoxels(corner: vector, size: vector, materials: { number }, occupancies: { number }): number`
+
+Writes a box of voxels in one call, laid out as `ReadVoxels` returns them: `corner` is a point in the first voxel, `size` how many voxels on each axis, and both tables hold one entry per voxel. Returns how many it changed.
+
+A material of zero, or an occupancy of zero, is air. What `ReadVoxels` reads, `WriteVoxels` puts back exactly -- the verb for copying a piece of terrain, generating one voxel by voxel, or undoing a script's own change.

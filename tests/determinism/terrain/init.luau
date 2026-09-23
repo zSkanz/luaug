@@ -1,17 +1,18 @@
 --!strict
 --- Terrain under R10 (F1's declared verification).
 ---
---- **What this catches that nothing else does.** A terrain field is two sorted
---- vectors of tiles and bricks, and the whole reason it is sorted vectors rather
---- than hash maps is R10: a hash map's iteration order is a fact about its
+--- **What this catches that nothing else does.** A terrain field is a sorted
+--- vector of chunks of voxels, and the whole reason it is a sorted vector rather
+--- than a hash map is R10: a hash map's iteration order is a fact about its
 --- allocator, and the world hash walks that order. Every claim below rests on
 --- it, and none of them can be asserted from a single process:
 ---
---- * the field's digest is over tiles, bricks and their KEYS, walked in order;
---- * which columns carry voxels is part of the world's state, because promotion
----   is decided by examining the resulting field and is therefore hashed;
+--- * the field's digest is over chunks and their KEYS, walked in order;
+--- * a chunk's bytes are canonical after every edit -- rows of one value
+---   collapsed, a chunk of one value stored as that value -- so the same edits
+---   hash the same however the storage happened to grow;
 --- * the collider rebuild is budgeted by a COUNT per tick and never by a clock,
----   so which tiles are current on tick N is a property of the operation
+---   so which chunks are current on tick N is a property of the operation
 ---   sequence rather than of how fast the machine was;
 --- * and a body resting on ground built by one order of edits has to rest in
 ---   exactly the same place as one resting on ground built by the same order on
@@ -20,8 +21,8 @@
 --- **The edits are driven by seeded randomness, on purpose.** A fixed script of
 --- twenty balls would exercise twenty shapes; a seeded walk exercises whatever
 --- the seed says, including the cases nobody would think to write -- a ball that
---- straddles a tile boundary, one that reaches the floor, one that hollows a
---- column that a previous ball had just promoted. `Random.new(seed)` is the
+--- straddles a chunk boundary, one that reaches the floor, one that hollows
+--- ground a previous ball had just laid. `Random.new(seed)` is the
 --- engine's own generator and is part of the recorded state.
 ---
 --- `sameBuildOnly`, like `character` and `ragdoll`: this settles rigid bodies
@@ -43,16 +44,14 @@ local Sand = 2
 
 local terrain = Instance.new("Terrain")
 terrain.Name = "Ground"
--- Reserved before anything is sculpted and never widened afterwards: a
--- collider's height precision is spread across this range at construction
--- (ADR 0066).
+-- The world's floor and ceiling: no voxel is written outside them.
 terrain.MinHeight = -48
 terrain.MaxHeight = 48
 terrain.Parent = workspace
 
--- **A plateau standing on the world's floor**, which is what makes the bulk of
--- this world height-encoded. Past the floor rather than onto it: a brush that
--- stops exactly at the floor leaves the sample there outside itself.
+-- **A plateau standing on the world's floor**, most of it whole chunks of one
+-- value. Past the floor rather than onto it: a brush that stops exactly at the
+-- floor leaves the voxel there outside itself.
 terrain:FillBlock(vector.create(0, -60, 0), vector.create(96, 120, 96), Rock)
 
 if terrain:HeightAt(0, 0) == nil then
@@ -60,9 +59,8 @@ if terrain:HeightAt(0, 0) == nil then
 end
 
 -- **Twenty-four edits from the seed**, half adding and half removing, over a
--- region wide enough to cross tile and brick boundaries in both axes. The
--- promotion rule is what is under test: which of these columns end up carrying
--- voxels has to be the same on every run and on every machine.
+-- region wide enough to cross chunk boundaries in both axes. What the chunks
+-- hold afterwards, byte for byte, has to be the same on every run.
 for _ = 1, 24 do
     local x = Rng:NextNumber(-36, 36)
     local z = Rng:NextNumber(-36, 36)
@@ -76,7 +74,7 @@ for _ = 1, 24 do
 end
 
 -- Painting, which must change the hash -- a material is world state -- while
--- changing no distance and promoting no column.
+-- leaving every voxel exactly as full as it was.
 for _ = 1, 6 do
     local x = Rng:NextNumber(-30, 30)
     local z = Rng:NextNumber(-30, 30)
@@ -89,8 +87,8 @@ end
 
 -- **Twelve crates dropped onto the sculpted ground**, which is the half a field
 -- digest cannot assert on its own. A hash proves the FIELD is the same; a body
--- coming to rest in the same place proves the collider built from it is, tile
--- by tile, including which tiles the per-tick budget got to first.
+-- coming to rest in the same place proves the collider built from it is, chunk
+-- by chunk, including which chunks the per-tick budget got to first.
 --
 -- Placed in a fixed lattice rather than randomly, so a divergence names a crate
 -- rather than a seed.
@@ -107,7 +105,7 @@ end
 
 -- **And an edit while the world is running**, at a tick chosen so that bodies
 -- have already settled. Digging the ground out from under a resting crate is
--- what exercises the rebuild path rather than only the initial build: the tile's
+-- what exercises the rebuild path rather than only the initial build: the chunk's
 -- collider has to be replaced, the body has to wake, and both have to happen on
 -- the same tick every run.
 --- 600 of the scenario's 1200 ticks, so there are six hundred more in which a

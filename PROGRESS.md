@@ -102,6 +102,15 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   vertex), open per pixel so they are drawn to 256 m, and stop streaking on
   steep walls (triplanar detail). `examples/17-cave` flies through one.
 
+  **Terrain became one grid of voxels on 2026-09-23** ([ADR 0082](docs/decisions/0082-terrain-is-a-grid-of-voxels.md)),
+  on the owner's word after building caves kept breaking and digging lagged
+  (D164). Each voxel is a material and an occupancy, stored in row-packed
+  32-cubed chunks. It is drawn as a quadtree of CPU meshes built from each
+  chunk's mips, and collided chunk by chunk near things that move. It
+  supersedes ADR 0067's two encodings and ADR 0071's height atlas, and a
+  world saved before it opens converted. A dig now rebuilds one mesh and one
+  collider; the sculpting bench went from 4.27 to 0.19 ms a tick.
+
   **Terrain and block worlds stream from disk since 2026-09-23** (ADR 0075,
   Part E): a saved field of sixteen 64 m cells or more is cut into cells at
   play, streamed by a second manager on the terrain radii, and never evicted
@@ -341,6 +350,25 @@ make room for the next. Session 29's -- the ground, and two ways a brush can lie
 and a block world -- went to
 [`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
 2026-09-23.
+
+- **Session 32 — terrain becomes a grid of voxels, 2026-09-23.** The owner
+  asked for the reference platform's terrain after D161 to D163 and a dig that
+  lagged. ADR 0082 records what that platform does and what was taken from it.
+
+  **Three findings the rewrite paid for.**
+  - **A one-voxel occupancy ramp terraces every slope past 45 degrees**, once
+    ground is laid from heights. The ramp is four voxels, and `writeHeights`
+    divides by the slope.
+  - **Taking the larger or smaller of two ramps misplaces the surface** when
+    their slopes differ. Moving a column's top writes the ramp exactly near the
+    target.
+  - **A level-of-detail ancestor let go while its children were drawn came
+    back as "ready"** and covered the close-up, coarse, every few seconds. That
+    was the flicker the owner saw in `17-cave`. Nodes on the selection's path
+    are kept, and "ready" means covered all the way down.
+
+  A dig now rebuilds one mesh (2.2 ms) and one collider. Each is keyed on only
+  the two layers of each neighbour it reads.
 
 - **Session 31 — releases, a cave you can dig and see, and a benchmark decided
   by measurement, 2026-09-23.** The owner delegated the sign-offs, the tags and

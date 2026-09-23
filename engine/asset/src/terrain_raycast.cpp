@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace luaug::asset {
 namespace {
@@ -33,8 +34,8 @@ FieldSample sampleField(const TerrainField& field, DVec3 at)
     // A field with no lattice has no surface anywhere: air.
     if (!(voxel > 0.0))
         return FieldSample{1.0f, 0};
-    // **Trilinear between the eight surrounding samples, never snapped to the
-    // nearest one.**
+    // **Trilinear between the eight surrounding voxel centres, never snapped to
+    // the nearest one.**
     //
     // Snapping was the first version and it is wrong in a way that looks almost
     // right: it makes the field a STEP function with steps one voxel wide, so a
@@ -46,9 +47,10 @@ FieldSample sampleField(const TerrainField& field, DVec3 at)
     // by linear interpolation along an edge for the same reason -- so a hit sits
     // on the triangle that was drawn there, and a decal placed at one is flush
     // with the ground rather than sunk into it.
-    const double gridX = at.x / voxel;
-    const double gridY = at.y / voxel;
-    const double gridZ = at.z / voxel;
+    // Voxel centres sit half a voxel in, so the lattice is shifted by that.
+    const double gridX = at.x / voxel - 0.5;
+    const double gridY = at.y / voxel - 0.5;
+    const double gridZ = at.z / voxel - 0.5;
     const double baseX = std::floor(gridX);
     const double baseY = std::floor(gridY);
     const double baseZ = std::floor(gridZ);
@@ -121,14 +123,58 @@ std::optional<TerrainHit> raycastField(const TerrainField& field, DVec3 origin, 
         return TerrainHit{origin, normal, 0.0, previous.material};
     }
 
+    // **Chunks of air are crossed in one step.** A point is in air for certain
+    // when no chunk holds anything within a voxel of it, which is most of the
+    // sky and most of a long ray; there the march jumps to where the ray
+    // leaves that chunk, less a voxel so a surface on its far side is not
+    // stepped over.
+    const double chunkMetres = voxel * static_cast<double>(ChunkEdge);
+    const auto emptyAround = [&](double along) {
+        const DVec3 p{origin.x + step.x * along, origin.y + step.y * along, origin.z + step.z * along};
+        for (int corner = 0; corner < 8; ++corner) {
+            const double ox = (corner & 1) != 0 ? voxel : -voxel;
+            const double oy = (corner & 2) != 0 ? voxel : -voxel;
+            const double oz = (corner & 4) != 0 ? voxel : -voxel;
+            const ChunkKey key{static_cast<core::i32>(std::floor((p.x + ox) / chunkMetres)),
+                               static_cast<core::i32>(std::floor((p.y + oy) / chunkMetres)),
+                               static_cast<core::i32>(std::floor((p.z + oz) / chunkMetres))};
+            if (field.findChunk(key) != nullptr)
+                return false;
+        }
+        return true;
+    };
+    // How far along the ray it leaves the chunk it is in at `along`.
+    const auto chunkExit = [&](double along) {
+        const DVec3 p{origin.x + step.x * along, origin.y + step.y * along, origin.z + step.z * along};
+        double exit = std::numeric_limits<double>::max();
+        const double axes[3][2] = {{p.x, step.x}, {p.y, step.y}, {p.z, step.z}};
+        for (const auto& axis : axes) {
+            if (std::abs(axis[1]) < 1e-12)
+                continue;
+            const double cell = std::floor(axis[0] / chunkMetres);
+            const double wall = axis[1] > 0.0 ? (cell + 1.0) * chunkMetres : cell * chunkMetres;
+            exit = std::min(exit, (wall - axis[0]) / axis[1]);
+        }
+        return along + std::max(exit, 0.0);
+    };
+
     double previousAlong = 0.0;
     for (double along = marchStep; along <= maxDistance; along += marchStep) {
+        if (emptyAround(along)) {
+            // Landing inside ground is possible beside a perpendicular wall;
+            // then the march just carries on in small steps from here.
+            const double leap = std::min(chunkExit(along) - voxel, maxDistance);
+            if (leap > along && distanceAt(leap).distance > 0.0f) {
+                previousAlong = leap;
+                along = leap;
+                continue;
+            }
+        }
         const FieldSample current = distanceAt(along);
         if (current.distance <= 0.0f) {
             // Bracketed between `previousAlong` (air) and `along` (ground).
-            // Bisected rather than interpolated linearly: the field is only
-            // approximately linear between samples, and near a brick boundary it
-            // is not linear at all.
+            // Bisected rather than interpolated linearly: trilinear is not
+            // linear along a diagonal ray.
             double low = previousAlong;
             double high = along;
             for (int refine = 0; refine < RefineSteps; ++refine) {
@@ -145,19 +191,14 @@ std::optional<TerrainHit> raycastField(const TerrainField& field, DVec3 origin, 
             const DVec3 position{origin.x + step.x * hitAlong, origin.y + step.y * hitAlong,
                                  origin.z + step.z * hitAlong};
 
-            // The gradient by central differences, one voxel apart, which is the
-            // same normal the mesher gives that surface -- so a decal placed on a
-            // raycast hit sits flush with the triangle under it.
-            const auto latticeX = static_cast<core::i32>(std::lround(position.x / voxel));
-            const auto latticeY = static_cast<core::i32>(std::lround(position.y / voxel));
-            const auto latticeZ = static_cast<core::i32>(std::lround(position.z / voxel));
-            const float dx = field.sample(latticeX + 1, latticeY, latticeZ).distance -
-                             field.sample(latticeX - 1, latticeY, latticeZ).distance;
-            const float dy = field.sample(latticeX, latticeY + 1, latticeZ).distance -
-                             field.sample(latticeX, latticeY - 1, latticeZ).distance;
-            const float dz = field.sample(latticeX, latticeY, latticeZ + 1).distance -
-                             field.sample(latticeX, latticeY, latticeZ - 1).distance;
-            Vec3 normal{dx, dy, dz};
+            // The gradient of the interpolated field, a voxel either side: the
+            // same surface the mesher interpolates, so a decal placed on a hit
+            // sits flush with the triangle under it.
+            const auto at = [&](double dx, double dy, double dz) {
+                return sampleField(field, DVec3{position.x + dx, position.y + dy, position.z + dz}).distance;
+            };
+            Vec3 normal{at(voxel, 0.0, 0.0) - at(-voxel, 0.0, 0.0), at(0.0, voxel, 0.0) - at(0.0, -voxel, 0.0),
+                        at(0.0, 0.0, voxel) - at(0.0, 0.0, -voxel)};
             const float normalLength = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
             if (normalLength < 1e-8f) {
                 normal = Vec3{0.0f, 1.0f, 0.0f};

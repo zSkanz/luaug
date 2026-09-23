@@ -554,53 +554,19 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
     character.moveDirection = core::Vec3{0.0f, 0.0f, 0.0f};
 }
 
-// --- Terrain colliders (ADR 0066, ADR 0067) ----------------------------------
+// --- Terrain colliders (ADR 0082) --------------------------------------------
 //
-// **One static `HeightField` body per height tile**, and **one static
-// `TriangleMesh` body per bricked column.**
+// **One static `TriangleMesh` body per chunk, and only near things that move.**
+// A chunk's collider is its surface meshed at full detail by the mesher the
+// renderer uses, so what a body stands on is what is drawn, to within the
+// renderer's level of detail. Meshing a chunk and handing Jolt a few thousand
+// triangles is a millisecond or two, so a chunk nothing can reach has none --
+// the bargain the reference platform strikes by building terrain collision
+// lazily around bodies, and the one this engine's caves already struck.
 //
-// A height tile is 32 by 32 columns, and its collider has 33 samples a side:
-// its own 32 and the first row and column of its +x and +z neighbours, so the
-// last quad reaches the neighbour's first column exactly as the drawn tile does.
-// It used to be 32 samples stretched over the same 32 columns -- thirty-one
-// intervals where the ground has thirty-two -- which put every collider up to a
-// voxel sideways of the ground drawn over it, and on a slope that is a
-// character standing in the air or sunk into the hill. Jolt pads 33 up to its
-// block size with no-collision samples, so the odd count costs nothing.
-//
-// **A bricked column is a hole in the height field and a mesh in its place.**
-// Bricks are where the field stops being a height function -- a cave, an
-// overhang, a tunnel -- and a height field cannot say "ground, then air, then
-// ground". So every sample inside a bricked column is no-collision, and the
-// column's whole surface, height layer and bricks alike, is meshed from the
-// field by the same mesher the renderer uses and handed over as triangles. The
-// mesh reaches one lattice column past the footprint on every side, because a
-// hole sample takes the quads on both sides of it: without the overlap there
-// would be a one-voxel gap round every cave mouth.
-//
-// A column's mesh is a few thousand triangles at most, which A3's measurement
-// (12 ms for 32,000) puts near a millisecond, and the shared budget caps how
-// many are rebuilt in one tick.
+// It replaced a `HeightField` per height tile plus a mesh per bricked column
+// (ADR 0066, 0067), whose seam was one more place the two encodings met.
 namespace {
-
-constexpr f32 HeightNoCollision = std::numeric_limits<f32>::max();
-
-// How far above and below the surface a column's mesh looks, in lattice steps.
-// The render loader's margin, for the same reason: a crossing needs a cell on
-// each side of it.
-constexpr i32 ColumnMargin = 2;
-
-// How many lattice cells a cave collider reaches past its column on every side.
-// The height field is open over the column and the quads either side of it, and
-// a surface net's vertices sit at cell centres -- so the mesh has to reach two
-// cells out to cover the opening, overlapping the height field beyond it.
-constexpr i32 CaveRim = 2;
-
-[[nodiscard]] i32 floorDivide(i32 value, i32 divisor) noexcept
-{
-    const i32 quotient = value / divisor;
-    return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient;
-}
 
 // Order-sensitive, which is what a key built from an ordered walk wants.
 [[nodiscard]] u64 combine(u64 seed, u64 value) noexcept
@@ -611,31 +577,57 @@ constexpr i32 CaveRim = 2;
     return z ^ (z >> 31);
 }
 
-[[nodiscard]] u64 packKey(i32 a, i32 b) noexcept
+[[nodiscard]] u64 packKey(asset::ChunkKey key) noexcept
 {
-    return (static_cast<u64>(static_cast<u32>(a)) << 32) | static_cast<u32>(b);
+    return combine(combine(static_cast<u64>(static_cast<u32>(key.x)), static_cast<u64>(static_cast<u32>(key.y))),
+                   static_cast<u64>(static_cast<u32>(key.z)));
 }
 
-// The height of one lattice column, or nothing where no tile holds it.
-[[nodiscard]] std::optional<f32> columnHeight(const asset::TerrainField& field, i32 x, i32 z) noexcept
+// Whether a chunk can hold none of the surface its mesh would own: it and all
+// twenty-six round it are one solid value, or it is air and so is everything
+// its mesh reads above and beside it.
+[[nodiscard]] bool buried(const asset::TerrainField& field, asset::ChunkKey key) noexcept
 {
-    const auto edge = static_cast<i32>(asset::TileEdge);
-    const i32 tileX = floorDivide(x, edge);
-    const i32 tileZ = floorDivide(z, edge);
-    const asset::HeightTile* tile = field.findTile(asset::TileKey{tileX, tileZ});
-    if (tile == nullptr)
-        return std::nullopt;
-    const auto localX = static_cast<usize>(x - tileX * edge);
-    const auto localZ = static_cast<usize>(z - tileZ * edge);
-    return tile->height[localZ * asset::TileEdge + localX];
+    const asset::TerrainChunk* own = field.findChunk(key);
+    const bool solid = own != nullptr && own->uniform() && own->value().occupancy >= 128;
+    if (own != nullptr && !solid)
+        return false;
+    for (i32 dz = -1; dz <= 1; ++dz) {
+        for (i32 dy = -1; dy <= 1; ++dy) {
+            for (i32 dx = -1; dx <= 1; ++dx) {
+                const asset::TerrainChunk* near = field.findChunk(asset::ChunkKey{key.x + dx, key.y + dy, key.z + dz});
+                const bool nearSolid = near != nullptr && near->uniform() && near->value().occupancy >= 128;
+                if (solid ? !nearSolid : near != nullptr)
+                    return false;
+            }
+        }
+    }
+    return true;
 }
 
-// The digest of a tile, or a fixed marker where there is none -- a neighbour
-// appearing changes this tile's collider though this tile did not change.
-[[nodiscard]] u64 tileDigestOr(const asset::TerrainField& field, asset::TileKey key) noexcept
+// **Everything a chunk's mesh reads**: itself whole, and of each of the
+// twenty-six round it only the layers against it -- the mesher reaches two
+// voxels past a region's side. Keyed on whole neighbours, a dig in the middle of
+// one chunk rebuilt the colliders of all twenty-six round it. A missing
+// neighbour counts, because one appearing changes the mesh.
+[[nodiscard]] u64 chunkContent(const asset::TerrainField& field, asset::ChunkKey key) noexcept
 {
-    const asset::HeightTile* tile = field.findTile(key);
-    return tile == nullptr ? 0x6E6F74696C65ull : asset::digestOf(*tile);
+    u64 content = packKey(key);
+    for (i32 dz = -1; dz <= 1; ++dz) {
+        for (i32 dy = -1; dy <= 1; ++dy) {
+            for (i32 dx = -1; dx <= 1; ++dx) {
+                const asset::TerrainChunk* near = field.findChunk(asset::ChunkKey{key.x + dx, key.y + dy, key.z + dz});
+                if (near == nullptr) {
+                    content = combine(content, 0x6E6F6E65ull);
+                    continue;
+                }
+                // What of the neighbour this chunk's mesh reads: its layers
+                // that face back this way (a face, an edge or a corner).
+                content = combine(content, near->borderDigest(-dx, -dy, -dz));
+            }
+        }
+    }
+    return content;
 }
 
 } // namespace
@@ -646,40 +638,26 @@ void PhysicsSync::applyTerrain()
         collider.seen = false;
 
     // **A count, never a clock.** How many colliders get rebuilt in a tick is
-    // part of the operation sequence, so it cannot depend on how fast the
-    // machine was: streaming's wall-clock exemption says "nothing measured
-    // reaches the world hash", and a collider is the world hash.
+    // part of the operation sequence: a collider is part of the world, so it
+    // cannot depend on how fast the machine was (R10).
     u32 rebuilt = 0;
-    u32 caves = 0;
 
-    // Sorted by (terrain, kind, key): the order the walk below meets them in,
-    // which is the order bodies are created in, which decides the ids the
-    // backend hands out (R10). It used to compare the key alone, which put two
-    // terrains' tiles in one interleaved run and could find the other
-    // terrain's entry.
-    const auto locate = [this](core::InstanceId id, bool bricked, asset::TileKey key) {
+    // Sorted by (terrain, key): the order the walk below meets them in, which
+    // is the order bodies are created in, which decides the ids the backend
+    // hands out.
+    const auto locate = [this](core::InstanceId id, asset::ChunkKey key) {
         const auto at = std::lower_bound(m_terrainColliders.begin(), m_terrainColliders.end(), key,
-                                         [&](const TerrainCollider& entry, const asset::TileKey& probe) {
+                                         [&](const TerrainCollider& entry, const asset::ChunkKey& probe) {
                                              if (entry.terrain.index != id.index)
                                                  return entry.terrain.index < id.index;
-                                             if (entry.bricked != bricked)
-                                                 return !entry.bricked;
                                              return entry.key < probe;
                                          });
-        const bool exists =
-            at != m_terrainColliders.end() && at->terrain == id && at->bricked == bricked && at->key == key;
+        const bool exists = at != m_terrainColliders.end() && at->terrain == id && at->key == key;
         return std::pair{at, exists};
     };
 
-    std::vector<f32> heights;
-    std::vector<asset::TileKey> brickedColumns;
-
-    // **Where cave collision is wanted: near things that move.** A cave's
-    // collider is a triangle mesh built from the field, a millisecond or two
-    // apiece, and a column nothing can reach does not need one -- the same
-    // bargain the voxel engines strike by generating terrain collision lazily
-    // around bodies, and Terrain3D's "dynamic collision" strikes for its height
-    // fields. Gathered once per tick, and only when some terrain has bricks.
+    // Where collision is wanted: near bodies that are not anchored, and
+    // characters. Gathered once per tick.
     std::vector<core::DVec3> movers;
     bool moversGathered = false;
     const auto gatherMovers = [&] {
@@ -696,350 +674,124 @@ void PhysicsSync::applyTerrain()
     };
 
     m_scene.terrains().forEach([&](core::InstanceId id, TerrainComponent& terrain) {
-        if (!inWorld(id))
+        if (!inWorld(id) || terrain.field.empty())
+            return;
+        gatherMovers();
+        if (movers.empty())
             return;
 
         const asset::TerrainField& field = terrain.field;
-        const f32 voxel = field.settings().voxelSize;
-        const auto edge = static_cast<i32>(asset::TileEdge);
-        const auto brickEdge = static_cast<i32>(asset::BrickEdge);
+        const f64 chunkMetres = static_cast<f64>(asset::ChunkEdge) * static_cast<f64>(field.settings().voxelSize);
         const u64 placement =
-            combine(combine(combine(std::bit_cast<u64>(terrain.origin.x), std::bit_cast<u64>(terrain.origin.y)),
-                            std::bit_cast<u64>(terrain.origin.z)),
-                    packKey(std::bit_cast<i32>(terrain.minHeight), std::bit_cast<i32>(terrain.maxHeight)));
-        const std::vector<asset::BrickKey> bricks = field.brickKeys();
-        // The same bricks ordered by column, then height, so one column's are a
-        // contiguous run found by binary search.
-        std::vector<asset::BrickKey> byColumn = bricks;
-        std::sort(byColumn.begin(), byColumn.end(), [](const asset::BrickKey& a, const asset::BrickKey& b) {
-            if (a.x != b.x)
-                return a.x < b.x;
-            if (a.z != b.z)
-                return a.z < b.z;
-            return a.y < b.y;
-        });
-        const auto bricksOf = [&byColumn](i32 x, i32 z) {
-            const auto before = [](const asset::BrickKey& brick, std::pair<i32, i32> key) {
-                return brick.x != key.first ? brick.x < key.first : brick.z < key.second;
-            };
-            const auto after = [](std::pair<i32, i32> key, const asset::BrickKey& brick) {
-                return key.first != brick.x ? key.first < brick.x : key.second < brick.z;
-            };
-            const auto first = std::lower_bound(byColumn.begin(), byColumn.end(), std::pair{x, z}, before);
-            const auto last = std::upper_bound(first, byColumn.end(), std::pair{x, z}, after);
-            return std::span<const asset::BrickKey>(first, last);
-        };
+            combine(combine(std::bit_cast<u64>(terrain.origin.x), std::bit_cast<u64>(terrain.origin.y)),
+                    std::bit_cast<u64>(terrain.origin.z));
 
-        // The bricked columns, sorted and unique.
-        brickedColumns.clear();
-        for (const asset::BrickKey brick : bricks)
-            brickedColumns.push_back(asset::TileKey{brick.x, brick.z});
-        std::sort(brickedColumns.begin(), brickedColumns.end());
-        brickedColumns.erase(std::unique(brickedColumns.begin(), brickedColumns.end()), brickedColumns.end());
-        const auto columnBricked = [&](i32 x, i32 z) {
-            return std::binary_search(brickedColumns.begin(), brickedColumns.end(),
-                                      asset::TileKey{floorDivide(x, brickEdge), floorDivide(z, brickEdge)});
-        };
-
-        // Whether a collider still describes the field -- cheaply first, then
-        // by what it was built from. Answers true when nothing needs sending.
-        const auto current = [&](TerrainCollider& collider, u64 content) {
-            collider.seen = true;
-            if (collider.placement != placement)
-                return false;
-            if (collider.revision == terrain.fieldRevision)
-                return true;
-            if (collider.content == content) {
-                collider.revision = terrain.fieldRevision;
-                return true;
+        // The chunks within reach of any mover, sorted and unique: a box of
+        // `TerrainCollisionReach` round each, in the field's own space.
+        std::vector<asset::ChunkKey> wanted;
+        for (const core::DVec3& mover : movers) {
+            const core::DVec3 local{mover.x - terrain.origin.x, mover.y - terrain.origin.y, mover.z - terrain.origin.z};
+            const auto low = [&](f64 value) {
+                return static_cast<i32>(std::floor((value - TerrainCollisionReach) / chunkMetres));
+            };
+            const auto high = [&](f64 value) {
+                return static_cast<i32>(std::floor((value + TerrainCollisionReach) / chunkMetres));
+            };
+            for (i32 z = low(local.z); z <= high(local.z); ++z) {
+                for (i32 y = low(local.y); y <= high(local.y); ++y) {
+                    for (i32 x = low(local.x); x <= high(local.x); ++x)
+                        wanted.push_back(asset::ChunkKey{x, y, z});
+                }
             }
-            return false;
-        };
+        }
+        std::sort(wanted.begin(), wanted.end());
+        wanted.erase(std::unique(wanted.begin(), wanted.end()), wanted.end());
 
-        // --- Height tiles ---------------------------------------------------
-        //
-        // **Two passes: what needs a collider, then the nearest of those.** The
-        // budget is a few rebuilds a tick, and it used to be spent in key order
-        // -- so a terrain of ten thousand tiles, arriving whole from a scene or
-        // streaming in, built its colliders from one corner, and a crate
-        // dropped in the middle fell through the ground for twenty seconds
-        // before its tile's turn came. Nearest to something that moves first,
-        // ties by key, which is a function of the world and nothing else (R10).
-        struct PendingTile
+        struct Pending
         {
-            asset::TileKey key;
+            asset::ChunkKey key;
             u64 content = 0;
             f64 distance = 0.0;
         };
-        std::vector<PendingTile> pending;
-
-        // Sorted, because `tileKeys()` answers sorted.
-        for (const asset::TileKey key : field.tileKeys()) {
-            const asset::HeightTile* tile = field.findTile(key);
-            if (tile == nullptr)
+        std::vector<Pending> pending;
+        for (const asset::ChunkKey key : wanted) {
+            if (buried(field, key))
                 continue;
-            auto [at, exists] = locate(id, false, key);
-            // Nothing written and nothing moved: the tick's common case, and
-            // answered before any key is built.
+            auto [at, exists] = locate(id, key);
+            // Nothing written and nothing moved: the common case, answered
+            // before any digest is read.
             if (exists && at->revision == terrain.fieldRevision && at->placement == placement) {
                 at->seen = true;
                 continue;
             }
-
-            const i32 firstColumn = key.x * edge;
-            const i32 firstRow = key.z * edge;
-            u64 content = asset::digestOf(*tile);
-            content = combine(content, tileDigestOr(field, asset::TileKey{key.x + 1, key.z}));
-            content = combine(content, tileDigestOr(field, asset::TileKey{key.x, key.z + 1}));
-            content = combine(content, tileDigestOr(field, asset::TileKey{key.x + 1, key.z + 1}));
-            // The bricked columns this tile's samples reach: a window of three
-            // by three brick columns at most.
-            for (i32 bz = floorDivide(firstRow, brickEdge); bz <= floorDivide(firstRow + edge, brickEdge); ++bz) {
-                for (i32 bx = floorDivide(firstColumn, brickEdge); bx <= floorDivide(firstColumn + edge, brickEdge);
-                     ++bx) {
-                    if (std::binary_search(brickedColumns.begin(), brickedColumns.end(), asset::TileKey{bx, bz}))
-                        content = combine(content, packKey(bx, bz));
-                }
-            }
-
-            if (exists && current(*at, content))
-                continue;
-            // Kept, and marked seen, until its rebuild comes round: retiring a
-            // stale collider would destroy one somebody is standing on in order
-            // to rebuild it.
-            if (exists)
+            const u64 content = chunkContent(field, key);
+            if (exists) {
+                // Kept, and seen, until its rebuild comes round: retiring a
+                // stale collider would drop somebody standing on it.
                 at->seen = true;
-            pending.push_back(PendingTile{key, content, 0.0});
-        }
-
-        if (pending.size() > static_cast<usize>(TerrainRebuildsPerTick - rebuilt)) {
-            gatherMovers();
-            const f64 tileMetres = static_cast<f64>(edge) * static_cast<f64>(voxel);
-            for (PendingTile& tile : pending) {
-                const f64 centreX = terrain.origin.x + (static_cast<f64>(tile.key.x) + 0.5) * tileMetres;
-                const f64 centreZ = terrain.origin.z + (static_cast<f64>(tile.key.z) + 0.5) * tileMetres;
-                tile.distance = movers.empty() ? 0.0 : std::numeric_limits<f64>::max();
-                for (const core::DVec3& mover : movers) {
-                    const f64 dx = centreX - mover.x;
-                    const f64 dz = centreZ - mover.z;
-                    tile.distance = std::min(tile.distance, dx * dx + dz * dz);
+                if (at->placement == placement && at->content == content) {
+                    at->revision = terrain.fieldRevision;
+                    continue;
                 }
             }
-            std::stable_sort(pending.begin(), pending.end(), [](const PendingTile& a, const PendingTile& b) {
-                return a.distance != b.distance ? a.distance < b.distance : a.key < b.key;
-            });
+            // Nearest to a mover first, ties by key: a function of the world.
+            f64 nearest = std::numeric_limits<f64>::max();
+            for (const core::DVec3& mover : movers) {
+                const f64 cx = terrain.origin.x + (static_cast<f64>(key.x) + 0.5) * chunkMetres - mover.x;
+                const f64 cy = terrain.origin.y + (static_cast<f64>(key.y) + 0.5) * chunkMetres - mover.y;
+                const f64 cz = terrain.origin.z + (static_cast<f64>(key.z) + 0.5) * chunkMetres - mover.z;
+                nearest = std::min(nearest, cx * cx + cy * cy + cz * cz);
+            }
+            pending.push_back(Pending{key, content, nearest});
         }
+        std::stable_sort(pending.begin(), pending.end(), [](const Pending& a, const Pending& b) {
+            return a.distance != b.distance ? a.distance < b.distance : a.key < b.key;
+        });
 
-        for (const PendingTile& next : pending) {
+        for (const Pending& next : pending) {
             if (rebuilt >= TerrainRebuildsPerTick)
                 break;
-            const asset::TileKey key = next.key;
-            const u64 content = next.content;
-            const asset::HeightTile* tile = field.findTile(key);
-            auto [at, exists] = locate(id, false, key);
-            const i32 firstColumn = key.x * edge;
-            const i32 firstRow = key.z * edge;
-
-            // Row-major, `Samples` on a side. The last row and column come from
-            // the neighbours, and are holes where there is no neighbour -- the
-            // ground stops where the drawn ground stops.
-            constexpr u32 Samples = asset::TileEdge + 1;
-            heights.assign(static_cast<usize>(Samples) * Samples, HeightNoCollision);
-            for (u32 z = 0; z < Samples; ++z) {
-                for (u32 x = 0; x < Samples; ++x) {
-                    const i32 column = firstColumn + static_cast<i32>(x);
-                    const i32 row = firstRow + static_cast<i32>(z);
-                    if (columnBricked(column, row))
-                        continue;
-                    if (x < asset::TileEdge && z < asset::TileEdge) {
-                        heights[z * Samples + x] = tile->height[z * asset::TileEdge + x];
-                        continue;
-                    }
-                    if (const std::optional<f32> height = columnHeight(field, column, row))
-                        heights[z * Samples + x] = *height;
-                }
-            }
-
-            physics::BodyDesc desc;
-            desc.shape.type = physics::ShapeType::HeightField;
-            desc.shape.size = core::Vec3{static_cast<f32>(edge) * voxel, 1.0f, static_cast<f32>(edge) * voxel};
-            desc.shape.heights = heights;
-            desc.shape.heightSampleCount = Samples;
-            // **The reservation, and it is why a terrain has Min/MaxHeight at
-            // all**: the collider's precision is spread across this range when
-            // the shape is built and cannot be widened afterwards, so digging
-            // past it does not deepen the world.
-            desc.shape.heightMin = terrain.minHeight;
-            desc.shape.heightMax = terrain.maxHeight;
-            desc.shape.geometryRevision = content;
-            desc.motion = physics::MotionType::Static;
-
-            // The shape centres itself on its footprint, which runs from the
-            // tile's first column to its neighbour's first -- so the body sits
-            // at the tile's middle. **Offset by the terrain's own origin**, which
-            // is what makes a terrain a thing you can move: the field is
-            // untouched, and every consumer applies the offset instead.
-            const f32 originX = (static_cast<f32>(firstColumn) + static_cast<f32>(edge) * 0.5f) * voxel;
-            const f32 originZ = (static_cast<f32>(firstRow) + static_cast<f32>(edge) * 0.5f) * voxel;
-            desc.transform.position = core::DVec3{static_cast<f64>(originX) + terrain.origin.x, terrain.origin.y,
-                                                  static_cast<f64>(originZ) + terrain.origin.z};
-
-            if (exists) {
-                // **`updateHeightField` while the reservation holds**, which is
-                // the whole reason a height field is its own kind: A3 measured
-                // it 58 times cheaper than a rebuild at this size, and it keeps
-                // the body, its id and its contacts. A changed reservation
-                // cannot be edited into a built shape, so it is a rebuild.
-                const bool edited = at->placement == placement &&
-                                    m_backend.updateHeightField(m_world, at->body, 0, 0, Samples, Samples, heights);
-                if (!edited) {
-                    m_backend.destroyBody(m_world, at->body);
-                    at->body = m_backend.createBody(m_world, desc);
-                }
-                at->revision = terrain.fieldRevision;
-                at->content = content;
-                at->placement = placement;
-                at->seen = true;
-                rebuilt += 1;
-                continue;
-            }
-
-            const physics::BodyHandle handle = m_backend.createBody(m_world, desc);
-            if (!handle.valid())
-                continue;
-            m_terrainColliders.insert(
-                at, TerrainCollider{id, false, key, handle, terrain.fieldRevision, content, placement, true});
-            rebuilt += 1;
-        }
-
-        // --- Bricked columns ------------------------------------------------
-        if (!brickedColumns.empty())
-            gatherMovers();
-        const double columnMetres = static_cast<double>(brickEdge) * static_cast<double>(voxel);
-        for (const asset::TileKey column : brickedColumns) {
-            // Not near anything that moves: no collider, and one that was
-            // built while something was near is retired by not being seen.
-            const double columnX = terrain.origin.x + static_cast<double>(column.x) * columnMetres;
-            const double columnZ = terrain.origin.z + static_cast<double>(column.z) * columnMetres;
-            bool near = false;
-            for (const core::DVec3& mover : movers) {
-                const double dx = std::max({columnX - mover.x, 0.0, mover.x - (columnX + columnMetres)});
-                const double dz = std::max({columnZ - mover.z, 0.0, mover.z - (columnZ + columnMetres)});
-                if (dx * dx + dz * dz <= CaveCollisionReach * CaveCollisionReach) {
-                    near = true;
-                    break;
-                }
-            }
-            if (!near)
-                continue;
-
-            auto [at, exists] = locate(id, true, column);
-            if (exists && at->revision == terrain.fieldRevision && at->placement == placement) {
-                at->seen = true;
-                continue;
-            }
-
-            // The region: the column's footprint plus one lattice column on
-            // every side, from below its lowest surface to above its highest.
-            const i32 minX = column.x * brickEdge - CaveRim;
-            const i32 minZ = column.z * brickEdge - CaveRim;
-            const i32 span = brickEdge + 2 * CaveRim;
-
-            u64 content = 0;
-            for (i32 tz = floorDivide(minZ, edge); tz <= floorDivide(minZ + span, edge); ++tz) {
-                for (i32 tx = floorDivide(minX, edge); tx <= floorDivide(minX + span, edge); ++tx)
-                    content = combine(content, tileDigestOr(field, asset::TileKey{tx, tz}));
-            }
-            // Every brick the region reaches -- its own column's and its
-            // neighbours' rims -- read through the per-column index rather than
-            // by walking every brick in the terrain for every column, which was
-            // quadratic and was most of a sculpting tick.
-            const i32 reachMinX = floorDivide(minX, brickEdge);
-            const i32 reachMaxX = floorDivide(minX + span, brickEdge);
-            const i32 reachMinZ = floorDivide(minZ, brickEdge);
-            const i32 reachMaxZ = floorDivide(minZ + span, brickEdge);
-            for (i32 bx = reachMinX; bx <= reachMaxX; ++bx) {
-                for (i32 bz = reachMinZ; bz <= reachMaxZ; ++bz) {
-                    for (const asset::BrickKey brick : bricksOf(bx, bz)) {
-                        if (const asset::Brick* found = field.findBrick(brick)) {
-                            content = combine(content, packKey(brick.x, brick.z));
-                            content = combine(content, static_cast<u64>(static_cast<u32>(brick.y)));
-                            content = combine(content, asset::digestOf(*found));
-                        }
-                    }
-                }
-            }
-
-            if (exists && current(*at, content))
-                continue;
-            if (caves >= CaveRebuildsPerTick) {
-                if (exists)
-                    at->seen = true;
-                continue;
-            }
-
-            // Only now, for a column that is actually being rebuilt: the slab
-            // its surfaces live in.
-            f32 lowest = std::numeric_limits<f32>::max();
-            f32 highest = std::numeric_limits<f32>::lowest();
-            for (i32 z = 0; z <= span; ++z) {
-                for (i32 x = 0; x <= span; ++x) {
-                    if (const std::optional<f32> height = columnHeight(field, minX + x, minZ + z)) {
-                        lowest = std::min(lowest, *height);
-                        highest = std::max(highest, *height);
-                    }
-                }
-            }
-            const bool anyHeight = lowest <= highest;
-            i32 bottom = anyHeight ? static_cast<i32>(std::floor(lowest / voxel)) - ColumnMargin
-                                   : std::numeric_limits<i32>::max();
-            i32 top = anyHeight ? static_cast<i32>(std::ceil(highest / voxel)) + ColumnMargin
-                                : std::numeric_limits<i32>::lowest();
-            for (const asset::BrickKey brick : bricksOf(column.x, column.z)) {
-                bottom = std::min(bottom, brick.y * brickEdge - ColumnMargin);
-                top = std::max(top, (brick.y + 1) * brickEdge + ColumnMargin);
-            }
+            asset::MeshRegion region;
+            region.minX = next.key.x * static_cast<i32>(asset::ChunkEdge);
+            region.minY = next.key.y * static_cast<i32>(asset::ChunkEdge);
+            region.minZ = next.key.z * static_cast<i32>(asset::ChunkEdge);
+            region.cellsX = asset::ChunkEdge;
+            region.cellsY = asset::ChunkEdge;
+            region.cellsZ = asset::ChunkEdge;
+            const asset::TerrainMesh meshed = asset::meshField(field, region);
 
             physics::BodyHandle handle{};
-            if (bottom < top) {
-                asset::MeshRegion region;
-                region.minX = minX;
-                region.minZ = minZ;
-                region.minY = bottom;
-                region.cellsX = static_cast<u32>(span);
-                region.cellsZ = static_cast<u32>(span);
-                region.cellsY = static_cast<u32>(top - bottom);
-                const asset::TerrainMesh meshed = asset::meshField(field, region);
-
-                if (meshed.colliderIndices.size() >= 3) {
-                    physics::BodyDesc desc;
-                    desc.shape.type = physics::ShapeType::TriangleMesh;
-                    desc.shape.points = meshed.colliderPoints;
-                    desc.shape.indices = meshed.colliderIndices;
-                    desc.shape.pointsRevision = content;
-                    desc.shape.geometryRevision = content;
-                    desc.motion = physics::MotionType::Static;
-                    desc.transform.position = terrain.origin;
-                    handle = m_backend.createBody(m_world, desc);
-                }
+            if (meshed.colliderIndices.size() >= 3) {
+                physics::BodyDesc desc;
+                desc.shape.type = physics::ShapeType::TriangleMesh;
+                desc.shape.points = meshed.colliderPoints;
+                desc.shape.indices = meshed.colliderIndices;
+                desc.shape.pointsRevision = next.content;
+                desc.shape.geometryRevision = next.content;
+                desc.motion = physics::MotionType::Static;
+                // **Offset by the terrain's own origin**, which is what makes a
+                // terrain a thing you can move: the field is untouched.
+                desc.transform.position = terrain.origin;
+                handle = m_backend.createBody(m_world, desc);
             }
 
-            // Kept even with no body -- a column dug out to nothing is a column
-            // whose collider is current -- so it is not remeshed every tick.
+            // Kept even with no body -- a chunk dug to nothing is a chunk whose
+            // collider is current -- so it is not remeshed every tick.
+            auto [at, exists] = locate(id, next.key);
             if (exists) {
                 if (at->body.valid())
                     m_backend.destroyBody(m_world, at->body);
                 at->body = handle;
                 at->revision = terrain.fieldRevision;
-                at->content = content;
+                at->content = next.content;
                 at->placement = placement;
                 at->seen = true;
             }
             else {
                 m_terrainColliders.insert(
-                    at, TerrainCollider{id, true, column, handle, terrain.fieldRevision, content, placement, true});
+                    at, TerrainCollider{id, next.key, handle, terrain.fieldRevision, next.content, placement, true});
             }
-            caves += 1;
+            rebuilt += 1;
         }
     });
 

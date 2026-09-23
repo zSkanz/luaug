@@ -138,7 +138,7 @@ void FieldStreamer::evict(asset::ChunkId id)
         if (held == m_terrainCells.end())
             return;
         if (scene::TerrainComponent* component = terrain(); component != nullptr) {
-            const core::u32 across = asset::terrainCellTiles(held->second.settings.voxelSize);
+            const core::u32 across = asset::terrainCellChunks(held->second.settings.voxelSize);
             if (asset::terrainCellUntouched(component->field, held->second, across)) {
                 asset::removeTerrainCell(component->field, held->second);
                 component->fieldRevision += 1;

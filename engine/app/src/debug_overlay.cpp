@@ -5738,16 +5738,15 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
             ImGui::TextWrapped("This world has no terrain yet.");
         }
         else {
-            ImGui::TextDisabled("%zu cell(s)", terrain->field.tileCount() + terrain->field.brickCount());
+            ImGui::TextDisabled("%zu chunk(s)", terrain->field.chunkCount());
         }
 
         ImGui::Separator();
         // **A flat square, from the world's floor up.** The one
         // generator worth having before a noise one: it is what a person
-        // needs to start sculpting, and it is the case that proves the
-        // cheap encoding works -- ground that reaches the floor is a
-        // height function and costs no voxels.
-        // **256 m, which is 512 columns square at the default voxel.**
+        // needs to start sculpting, and ground that reaches the floor is
+        // mostly whole chunks of one value, which cost next to nothing.
+        // **256 m, which is 256 columns square at the default voxel.**
         //
         // Matched to the reference engines on SAMPLE COUNT rather than on
         // metres: they ship grids of about 512 squared and spread them over five
@@ -5774,11 +5773,14 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         // editor stalled. A size field with no cost readout is one that only
         // reports its mistake afterwards.
         {
-            const f32 voxel = terrain != nullptr ? terrain->field.settings().voxelSize : 0.5f;
+            const f32 voxel = terrain != nullptr ? terrain->field.settings().voxelSize : 1.0f;
             const auto columns = static_cast<int>(groundSize / std::max(voxel, 0.01f));
-            const auto side = static_cast<long long>(columns / 32 + 1);
-            const auto kilobytes = side * side * static_cast<long long>(sizeof(asset::HeightTile)) / 1024;
-            ImGui::TextDisabled("%d x %d columns  |  %lld tiles  |  %lld KB", columns, columns, side * side, kilobytes);
+            const auto side = static_cast<long long>(columns / static_cast<int>(asset::ChunkEdge) + 1);
+            // Flat ground is about four kilobytes a chunk column: one row of
+            // voxels in thirty-two is not all ground or all air (ADR 0082).
+            const auto kilobytes = side * side * 4;
+            ImGui::TextDisabled("%d x %d columns  |  %lld chunk columns  |  ~%lld KB", columns, columns, side * side,
+                                kilobytes);
         }
 
         // **One button, because it is one intention.**

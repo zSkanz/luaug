@@ -63,7 +63,7 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | signed off, `milestone/m7.5` |
 | ✅ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | released `v1.0.0` |
 | ✅ | **E1–E9** — the visual editor: explorer, properties, manipulators, content, stamps, launcher, script editor and debugger | released `v1.1.0` |
-| ✅ | **F1** — sculpted terrain: a GPU height atlas, caves as surface nets, a brush that digs into walls, streaming in cells | built; the flagship stands on it |
+| ✅ | **F1** — sculpted terrain: a grid of voxels with a material and an occupancy each, meshed with level of detail, a brush that digs into walls, streaming in cells | built; the flagship stands on it |
 | ✅ | **V1** — `VoxelService`: blocks with images, see-through blocks, flowing and reacting fluids, streaming, an editor tool | built |
 | ✅ | **F2** — `ParticleEmitter` and projected `Decal`s, soft particles | built |
 | ✅ | **F3** — `SurfaceGui`, `BillboardGui` and rich text: UI drawn and pressed in the world | built |

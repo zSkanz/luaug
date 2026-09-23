@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <doctest/doctest.h>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1065,10 +1066,9 @@ TEST_CASE("the query and the save agree about what an override is")
 
 namespace {
 
-// A sculpted world: ground that reaches the floor, which is height tiles, and a
-// cave through it, which is voxel bricks. Both encodings, because the format has
-// to carry both and a fixture with only one would pass while half of it was
-// broken.
+// A sculpted world: ground that reaches the floor, which is whole chunks of one
+// value, a surface through them, which is rows, and a cave, which is air inside
+// ground -- every shape a chunk is stored in.
 core::InstanceId terrainUnder(Fixture& fixture, core::InstanceId parent)
 {
     const core::InstanceId id = fixture.world.create(fixture.schema.terrainClass);
@@ -1079,8 +1079,8 @@ core::InstanceId terrainUnder(Fixture& fixture, core::InstanceId parent)
     REQUIRE(component != nullptr);
     component->field =
         asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    asset::fillBlock(component->field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{48.0f, 40.0f, 48.0f}, 1);
-    asset::fillBall(component->field, core::DVec3{0.0, -3.0, 0.0}, 4.0, 0);
+    (void)asset::fillFlat(component->field, core::DVec3{0.0, 0.0, 0.0}, 48.0f, 0.0f, 1);
+    (void)asset::fillBall(component->field, core::DVec3{0.0, -3.0, 0.0}, 4.0, 0);
     component->minHeight = -32.0f;
     component->maxHeight = 32.0f;
     return id;
@@ -1091,15 +1091,21 @@ core::InstanceId terrainUnder(Fixture& fixture, core::InstanceId parent)
 TEST_CASE("a terrain larger than a streamed cell survives a save and a load")
 {
     // **D159**: a scene carries its whole field as one cell, and the reader held
-    // it to a STREAMED cell's ceiling of 4,096 tiles -- so a terrain past about a
-    // square kilometre saved, and reopened empty.
+    // it to a STREAMED cell's ceiling -- so a terrain past about a square
+    // kilometre saved, and reopened empty.
     Fixture fixture;
     const core::InstanceId workspace = makeWorkspace(fixture);
     const core::InstanceId ground = terrainUnder(fixture, workspace);
     scene::TerrainComponent* component = fixture.world.terrains().find(ground);
     REQUIRE(component != nullptr);
-    (void)asset::fillBlock(component->field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{1100.0f, 40.0f, 1100.0f}, 1);
-    REQUIRE(component->field.tileCount() > asset::MaxCellTiles);
+    // More chunks than a streamed cell may hold, laid whole: ground under a
+    // square of 130 by 130 chunk columns.
+    for (core::i32 z = 0; z < 130; ++z) {
+        for (core::i32 x = 0; x < 130; ++x)
+            component->field.setChunk(asset::ChunkKey{x, -1, z},
+                                      std::make_shared<asset::TerrainChunk>(asset::Voxel{asset::FullOccupancy, 1}));
+    }
+    REQUIRE(component->field.chunkCount() > asset::MaxCellChunks);
     const core::u64 digest = component->field.digest();
 
     const std::string text = scene::writeScene(fixture.world);
@@ -1129,8 +1135,7 @@ TEST_CASE("a sculpted world survives a save and a load")
 
     const scene::TerrainComponent* before = fixture.world.terrains().find(ground);
     REQUIRE(before != nullptr);
-    REQUIRE(before->field.tileCount() > 0);
-    REQUIRE(before->field.brickCount() > 0);
+    REQUIRE(before->field.chunkCount() > 0);
     const core::u64 digest = before->field.digest();
 
     const std::string text = scene::writeScene(fixture.world);
@@ -1150,13 +1155,11 @@ TEST_CASE("a sculpted world survives a save and a load")
     const scene::TerrainComponent* after = reloaded.world.terrains().find(loaded);
     REQUIRE(after != nullptr);
     CHECK(after->field.digest() == digest);
-    CHECK(after->field.tileCount() == before->field.tileCount());
-    CHECK(after->field.brickCount() == before->field.brickCount());
+    CHECK(after->field.chunkCount() == before->field.chunkCount());
 
-    // **The reserved range rides with the field**, because a height field's
-    // precision is spread across it when a collider is built and cannot be
-    // widened afterwards (ADR 0066). A load that kept the property's value and
-    // the ground's range apart would clamp every later edit to the wrong band.
+    // **The world's floor and ceiling ride with the field**: a load that kept
+    // the property's value and the ground's range apart would clamp every later
+    // edit to the wrong band.
     CHECK(after->minHeight == before->minHeight);
     CHECK(after->maxHeight == before->maxHeight);
     CHECK(after->field.settings().voxelSize == before->field.settings().voxelSize);

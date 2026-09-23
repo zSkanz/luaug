@@ -1,14 +1,12 @@
 --!strict
 --[[
-	A cave dug into the side of a mountain (F1, ADR 0067).
+	A cave dug into the side of a mountain (F1, ADR 0082).
 
 	**What a height map cannot hold.** A tunnel has rock above it and floor
-	below it, so the ground there is not one height per column. The terrain
-	notices that where it happens and keeps those columns as voxels, and
-	nowhere else -- the mountain's outside and the plain around it stay the
-	cheap encoding. Nothing in this file asks for any of that: every hole is a
-	`FillBall` with material zero, which is exactly what the editor's carving
-	brush does one stamp at a time.
+	below it, so the ground there is not one height per column. Terrain is a
+	grid of voxels, so a tunnel is the same data as the hillside it runs into:
+	every hole here is a `FillBall` with material zero, which is exactly what
+	the editor's carving brush does one stamp at a time.
 
 	The camera flies from the plain, through the mouth, down the tunnel and into
 	the chamber, and back, so the whole shape can be seen without a mouse.

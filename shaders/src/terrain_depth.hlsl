@@ -1,71 +1,45 @@
-// GPU terrain into a depth-only target: the sun's cascades, the local shadow
-// atlas and the camera's depth prepass (ADR 0071).
+// Terrain into the sun's cascades and the local shadow atlas (ADR 0082).
 //
-// The same vertex stage as `terrain.hlsl`, so a shadow is cast by exactly the
-// surface that is drawn -- the same morph, the same level, the same holes. The
-// fragment stage exists only to discard the holes and the cave openings: a cave
-// opening that still cast a shadow would be a patch of darkness over a hole in
-// the ground, and one still in the prepass would hide the cave behind it.
+// **The ground has no far side**, so it is drawn with no culling and pushed
+// away from the light instead. Every other mesh culls its front faces in the
+// shadow pass and stores the back of a solid, so a lit surface never shadows
+// itself (D051). The ground is one surface, and drawn as it is the map would hold
+// exactly the depth the ground is then compared against: the whole terrain would
+// acne into a dark rectangle the size of the cascade. The renderer's cascade
+// loop says how far to push; a local light pushes nothing.
 
-#include "luaug_terrain.hlsli"
-
-Texture2D<float> VertexTileTable : register(t0, space0);
-SamplerState VertexTileTableSampler : register(s0, space0);
-Texture2D<float> VertexHeights : register(t1, space0);
-SamplerState VertexHeightsSampler : register(s1, space0);
-Texture2D<float> VertexMaterials : register(t2, space0);
-SamplerState VertexMaterialsSampler : register(s2, space0);
-
-cbuffer GpuTerrainUniforms : register(b0, space1)
+cbuffer GpuShadowUniforms : register(b0, space1)
 {
     column_major float4x4 ViewProjection;
-    TerrainParams Node;
+    column_major float4x4 Model;
 };
 
-// Fragment resources: what a cave opening is read from. Only `Atlas` and
-// `AtlasSize` of the block are read.
-Texture2D<float> TileTable : register(t0, space2);
-SamplerState TileTableSampler : register(s0, space2);
-Texture2D<float> Materials : register(t1, space2);
-SamplerState MaterialsSampler : register(s1, space2);
-
-cbuffer GpuTerrainFieldUniforms : register(b0, space3)
+// x: how far to push, in the light's clip depth.
+cbuffer GpuTerrainShadowPush : register(b1, space1)
 {
-    TerrainParams Field;
+    float4 Push;
 };
 
 struct VertexInput
 {
-    float2 Grid : TEXCOORD0;
+    float3 Position : TEXCOORD0;
 };
 
 struct Interpolants
 {
-    float Hole : TEXCOORD0;
-    float2 Lattice : TEXCOORD1;
     float4 Position : SV_Position;
 };
 
 Interpolants VertexMain(VertexInput input)
 {
-    const TerrainVertex vertex = terrainVertex(VertexTileTable, VertexTileTableSampler, VertexHeights, VertexHeightsSampler,
-                                                VertexMaterials, VertexMaterialsSampler, Node, input.Grid);
     Interpolants output;
-    // `precise`: the colour pass is tested against this one's depth.
-    precise const float4 clipPosition = mul(ViewProjection, float4(vertex.Position, 1.0f));
-    output.Position = clipPosition;
-    // Away from the light, in a cascade (see the renderer's cascade loop); zero
-    // in the camera's prepass. Scaled by w so it is the same depth offset for a
-    // perspective projection as for an orthographic one.
-    output.Position.z += Node.Morph.w * output.Position.w;
-    output.Hole = vertex.Hole;
-    output.Lattice = vertex.Lattice;
+    output.Position = mul(ViewProjection, mul(Model, float4(input.Position, 1.0f)));
+    // Scaled by w so it is the same depth offset for a perspective projection
+    // as for an orthographic one.
+    output.Position.z += Push.x * output.Position.w;
     return output;
 }
 
 void FragmentMain(Interpolants input)
 {
-    clip(0.001f - input.Hole);
-    if (terrainCaveAt(TileTable, TileTableSampler, Materials, MaterialsSampler, Field, input.Lattice))
-        discard;
 }

@@ -3110,13 +3110,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // **The stage, when one is open.** A prefab is looked at on its
             // own; drawing it inside the game's scene is what a person saw and
             // called wrong, and it was.
+            // The terrain nodes the loader chose for this camera (ADR 0082).
+            const std::vector<render::TerrainNodeDraw> terrainNodes = terrainLoader.draws(authored());
             render::extract(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
                             stageOf() != nullptr ? stageOf()->lighting() : host->lighting(), meshLibrary, aspect,
                             shadowRadius, host->animation(), renderAlpha, &transformHistory, snapshot,
-                            useEditorView ? &editorView : nullptr, outlined, &textureLibrary);
-            // The GPU terrains (ADR 0071): not `DrawItem`s, so not `extract`'s --
-            // the loader owns their atlases and names them into the same
-            // snapshot, for the same world and the same root.
+                            useEditorView ? &editorView : nullptr, outlined, &textureLibrary, terrainNodes);
+            // The terrains' palettes, which their shader reads, for the same
+            // world and the same root.
             terrainLoader.appendRenderTerrains(
                 authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(), snapshot);
             // **Particles, on the render clock** (F2): advanced by this frame's

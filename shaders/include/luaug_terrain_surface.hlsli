@@ -1,10 +1,8 @@
 // What the ground looks like, shared by every shader that draws terrain.
 //
-// **One look, whichever encoding drew it.** The ground is drawn from its height
-// atlas (`terrain.hlsl`) and a cave from a CPU mesh (`terrain_cave.hlsl`), and
-// the two meet at the edge of every cave opening. When they were shaded by
-// different code the opening showed as a square of flat colour in varied grass;
-// both now take their colour variation, their rock and their grain from here.
+// **One look for all of it.** Terrain is one kind of mesh now (ADR 0082); this
+// was split out when the ground and the caves were drawn by different shaders
+// and had to agree, and it stays the place the look is defined.
 //
 // Until the terrain has texture sets, the variation is procedural: three
 // octaves of value noise, laid triplanar and pinned to the FIELD's own coordinates so nothing swims

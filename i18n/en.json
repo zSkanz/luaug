@@ -180,6 +180,8 @@
   "scene.err.terrain_not_empty": "VoxelSize can only be set while the terrain is empty. Clear it first.",
   "scene.err.voxel_unknown_block": "No block type has id {id}: {count} are registered, and 0 is air.",
   "scene.err.terrain_heights_shape": "WriteHeights needs whole rows: {count} height(s) do not make rows of {columns} column(s). The table holds one height per column, row after row.",
+  "scene.err.terrain_region_too_large": "That region is {count} voxel(s), and ReadVoxels reads at most {limit} at once. Read it in pieces.",
+  "scene.err.terrain_voxels_shape": "WriteVoxels needs one material and one occupancy per voxel: the region is {count} voxel(s), and the tables hold {materials} material(s) and {occupancies} occupancy(ies).",
   "scene.err.voxel_fluid_reach": "A fluid spreads 0 to {max} blocks sideways, not {reach}. 0 makes it an ordinary block again.",
   "scene.err.voxel_reaction_not_fluid": "A reaction is between two fluids, and block types {from} and {touching} are not both one: SetBlockFluid them first.",
   "scene.err.voxel_fluid_ticks": "A fluid moves once every 1 to 65535 ticks, not {ticks}.",

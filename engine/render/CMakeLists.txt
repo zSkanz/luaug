@@ -28,7 +28,6 @@ luaug_add_module(render
         src/transform_history.cpp
         src/mesh_loader.cpp
         src/terrain_loader.cpp
-        src/terrain_lod.cpp
         src/particles.cpp
         src/voxel_loader.cpp
         src/scene_types.cpp

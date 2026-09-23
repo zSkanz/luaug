@@ -367,57 +367,41 @@ private:
     // body per height tile plus one per bricked region, and every one of them
     // outlives the tick that made it.
     //
-    // Keyed by tile and kept SORTED, never in a hash map (R10): this decides the
-    // order bodies are created in, and therefore the order the backend assigns
-    // its own ids in.
+    // Keyed by chunk and kept SORTED, never in a hash map (R10): this decides
+    // the order bodies are created in, and therefore the order the backend
+    // assigns its own ids in.
     struct TerrainCollider
     {
         core::InstanceId terrain;
-        // False: a `HeightField` over one height tile, keyed by the tile.
-        // True: a `TriangleMesh` over one bricked column -- a 16 by 16 footprint
-        // carrying at least one brick -- keyed by the brick's x and z. Height
-        // colliders sort first, so within a terrain every height body is
-        // created before every cave body.
-        bool bricked = false;
-        asset::TileKey key;
+        // A `TriangleMesh` over one chunk's surface.
+        asset::ChunkKey key;
+        // Invalid when the chunk has no surface: remembered, so it is not
+        // remeshed every tick to find nothing again.
         physics::BodyHandle body;
         // `fieldRevision` when this was last checked, which answers "nothing
         // was written" for the cost of a compare.
         core::u64 revision = 0;
-        // **What the collider was built FROM**: the digests of every tile and
-        // brick it read and the bricked columns that punch holes in it. A write
-        // anywhere bumps `fieldRevision` for the whole terrain, and before this
-        // key existed that rebuilt every collider in the world, four a tick, to
-        // change the one a brush touched.
+        // **What the collider was built FROM**: the digests of the chunk and
+        // the twenty-six round it, which its mesh reads. A write anywhere
+        // bumps `fieldRevision` for the whole terrain; this is what keeps a
+        // brush from rebuilding every collider in the world.
         core::u64 content = 0;
-        // The terrain's origin and height reservation, folded, so a moved
-        // terrain moves its bodies without re-sending their samples.
+        // The terrain's origin, folded, so a moved terrain moves its bodies.
         core::u64 placement = 0;
         bool seen = false;
     };
     std::vector<TerrainCollider> m_terrainColliders;
 
-    // **A count, never a millisecond budget.** Streaming's wall-clock exemption
-    // says "nothing measured reaches the world hash", and that explicitly does
-    // not extend to a collider -- a collider IS part of the world, so how many
-    // get rebuilt in a tick has to be a fact about the operation sequence rather
-    // than about how fast the machine was that day. Shared by both kinds.
+    // **A count, never a millisecond budget.** A collider is part of the world,
+    // so how many get rebuilt in a tick has to be a fact about the operation
+    // sequence rather than about how fast the machine was that day.
     static constexpr core::u32 TerrainRebuildsPerTick = 4;
-    // Cave colliders separately, and one a tick. A cave column is meshed from
-    // the field and handed to the backend as triangles -- a millisecond or two
-    // where a height tile's in-place edit is microseconds -- and a brush that
-    // digs every tick would otherwise spend four of them every tick. A cave
-    // whose collider is a few ticks late is a wall that solidifies a few ticks
-    // after it was carved; the old one stays until then.
-    static constexpr core::u32 CaveRebuildsPerTick = 1;
-    // How close, in metres horizontally, something that moves has to be to a
-    // cave column for the column to have a collider. Wide enough that a body
-    // arriving at running speed finds it built, at one a tick, before it gets
-    // there. **A raycast far from every moving body passes through a cave
-    // opening** -- the height field is open there and nothing fills it -- which
-    // is the price of not meshing every cave in the world every time one is
-    // dug.
-    static constexpr double CaveCollisionReach = 32.0;
+    // How close, in metres on every axis, something that moves has to be to a
+    // chunk for the chunk to have a collider. Wide enough that a body arriving
+    // at running speed finds it built before it gets there. A raycast far from
+    // every moving body meets no collider -- which is why `Workspace:Raycast`
+    // also asks the field itself (ADR 0082).
+    static constexpr double TerrainCollisionReach = 24.0;
 
     void applyTerrain();
     void retireUnseenTerrain();

@@ -2,7 +2,11 @@
 
 #include "luaug/core/i18n.h"
 
+#include <algorithm>
+#include <array>
 #include <cstring>
+#include <limits>
+#include <memory>
 
 namespace luaug::asset {
 namespace {
@@ -10,6 +14,7 @@ namespace {
 using core::f32;
 using core::I18nArg;
 using core::i32;
+using core::u16;
 using core::u32;
 using core::u64;
 using core::u8;
@@ -32,12 +37,6 @@ void writeF32(std::vector<std::byte>& out, f32 value)
     u32 bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     writeU32(out, bits);
-}
-
-void writeBytes(std::vector<std::byte>& out, const void* data, usize count)
-{
-    const auto* const first = static_cast<const std::byte*>(data);
-    out.insert(out.end(), first, first + count);
 }
 
 class Reader
@@ -103,9 +102,8 @@ private:
 // and one at or above it means "the next byte repeats 257 - n times", which is
 // 2 to 129.
 //
-// The smallest run coder that does not make incompressible data twice its size,
-// and the shape this data wants: a brick is mostly saturated distance and a
-// tile's materials are usually one value.
+// The smallest run coder that does not make incompressible data twice its size.
+// Over the voxel runs it mostly finds repeated keys and counts.
 void packBits(std::span<const std::byte> plain, std::vector<std::byte>& out)
 {
     usize at = 0;
@@ -142,8 +140,8 @@ void packBits(std::span<const std::byte> plain, std::vector<std::byte>& out)
 }
 
 // **Into a buffer whose size the caller already validated**, which is the whole
-// reason the header is never compressed: the counts are checked against
-// `MaxCellTiles` and `MaxCellBricks` first, so `plainSize` here is a number this
+// reason the header is never compressed: the counts are checked against the
+// format's ceilings first, so `plainSize` here is a number this
 // format already agreed to allocate rather than one a corrupt file chose.
 [[nodiscard]] bool unpackBits(std::span<const std::byte> packed, usize plainSize, std::vector<std::byte>& out)
 {
@@ -172,85 +170,386 @@ void packBits(std::span<const std::byte> plain, std::vector<std::byte>& out)
     return out.size() == plainSize;
 }
 
+void writeU16(std::vector<std::byte>& out, u16 value)
+{
+    out.push_back(static_cast<std::byte>(value & 0xFFu));
+    out.push_back(static_cast<std::byte>((value >> 8) & 0xFFu));
+}
+
+// Upper bound of one chunk's voxel runs: a run per voxel, four bytes each.
+constexpr u64 MaxChunkPayload = static_cast<u64>(ChunkVolume) * 4;
+
+// One chunk's voxels as (packed, count) runs in storage order -- y, then z, then
+// x innermost, the order a chunk's rows lie in.
+void encodeChunk(const TerrainChunk& chunk, std::vector<std::byte>& out)
+{
+    if (chunk.uniform()) {
+        writeU16(out, packVoxel(chunk.value()));
+        // A run is at most 65,535; a chunk is 32,768 voxels, so one run is it.
+        writeU16(out, static_cast<u16>(ChunkVolume));
+        return;
+    }
+    std::array<u16, ChunkEdge> row{};
+    u16 current = 0;
+    u32 run = 0;
+    for (u32 y = 0; y < ChunkEdge; ++y) {
+        for (u32 z = 0; z < ChunkEdge; ++z) {
+            chunk.readRow(y, z, row);
+            for (const u16 value : row) {
+                if (run > 0 && value == current && run < 0xFFFFu) {
+                    ++run;
+                    continue;
+                }
+                if (run > 0) {
+                    writeU16(out, current);
+                    writeU16(out, static_cast<u16>(run));
+                }
+                current = value;
+                run = 1;
+            }
+        }
+    }
+    writeU16(out, current);
+    writeU16(out, static_cast<u16>(run));
+}
+
+// The inverse, into a fresh chunk. False when the runs do not cover exactly one
+// chunk or name a voxel that is not canonical -- air with a material, which no
+// writer produces and a reader must not invent.
+[[nodiscard]] bool decodeChunk(std::span<const std::byte> bytes, std::shared_ptr<TerrainChunk>& out)
+{
+    if (bytes.size() % 4 != 0 || bytes.empty())
+        return false;
+    const auto read16 = [&](usize at) {
+        return static_cast<u16>(static_cast<unsigned>(static_cast<u8>(bytes[at])) |
+                                (static_cast<unsigned>(static_cast<u8>(bytes[at + 1])) << 8));
+    };
+    if (bytes.size() == 4) {
+        const u16 value = read16(0);
+        if (read16(2) != ChunkVolume || packVoxel(canonical(unpackVoxel(value))) != value)
+            return false;
+        out = std::make_shared<TerrainChunk>(unpackVoxel(value));
+        return true;
+    }
+    auto chunk = std::make_shared<TerrainChunk>();
+    std::array<u16, ChunkEdge> row{};
+    u32 written = 0;
+    for (usize at = 0; at < bytes.size(); at += 4) {
+        const u16 value = read16(at);
+        const u32 count = read16(at + 2);
+        if (count == 0 || written + count > ChunkVolume || packVoxel(canonical(unpackVoxel(value))) != value)
+            return false;
+        for (u32 n = 0; n < count; ++n) {
+            const u32 index = written + n;
+            row[index % ChunkEdge] = value;
+            if (index % ChunkEdge == ChunkEdge - 1) {
+                const u32 rowIndex = index / ChunkEdge;
+                chunk->writeRow(rowIndex / ChunkEdge, rowIndex % ChunkEdge, row);
+            }
+        }
+        written += count;
+    }
+    if (written != ChunkVolume)
+        return false;
+    chunk->normalize();
+    out = std::move(chunk);
+    return true;
+}
+
+// --- Version 2: the hybrid, read and resampled --------------------------------
+//
+// ADR 0067's field -- height tiles of 32 by 32 columns and voxel bricks of 16
+// cubed holding a quantised distance -- exactly as its reader understood it,
+// kept only to turn a saved world into voxels. Its lattice sits ON multiples of
+// the voxel size where the grid's centres sit half a voxel in; each new voxel's
+// fullness is the old field at its centre, which is the mean of the eight
+// lattice samples round it.
+namespace legacy {
+
+constexpr u32 TileEdge = 32;
+constexpr u32 TileArea = TileEdge * TileEdge;
+constexpr u32 BrickEdge = 16;
+constexpr u32 BrickVolume = BrickEdge * BrickEdge * BrickEdge;
+constexpr u64 TileBytes = static_cast<u64>(TileArea) * 5;
+constexpr u64 BrickBytes = static_cast<u64>(BrickVolume) * 2;
+constexpr u32 MaxTiles = 1u << 20;
+constexpr u32 MaxBricks = 1u << 22;
+
+struct Key2
+{
+    i32 x = 0;
+    i32 z = 0;
+    [[nodiscard]] constexpr auto operator<=>(const Key2&) const noexcept = default;
+};
+
+struct Key3
+{
+    i32 x = 0;
+    i32 y = 0;
+    i32 z = 0;
+    [[nodiscard]] constexpr auto operator<=>(const Key3&) const noexcept = default;
+};
+
+struct Tile
+{
+    std::array<float, TileArea> height{};
+    std::array<u8, TileArea> material{};
+};
+
+struct Brick
+{
+    std::array<u8, BrickVolume> distance{};
+    std::array<u8, BrickVolume> material{};
+};
+
+template <class Vector, class Key>
+[[nodiscard]] const auto* findIn(const Vector& entries, const Key& key)
+{
+    const auto at = std::lower_bound(entries.begin(), entries.end(), key,
+                                     [](const auto& entry, const Key& probe) { return entry.first < probe; });
+    return (at != entries.end() && at->first == key) ? &at->second : nullptr;
+}
+
+struct Field
+{
+    float voxel = 0.5f;
+    std::vector<std::pair<Key2, Tile>> tiles;
+    std::vector<std::pair<Key3, Brick>> bricks;
+
+    // The old `TerrainField::sample`: a brick if one covers the point, else the
+    // height layer's `y - H`, else air.
+    [[nodiscard]] std::pair<float, u8> sample(i32 x, i32 y, i32 z) const
+    {
+        constexpr auto brickEdge = static_cast<i32>(BrickEdge);
+        if (const Brick* brick =
+                findIn(bricks, Key3{floorDiv(x, brickEdge), floorDiv(y, brickEdge), floorDiv(z, brickEdge)})) {
+            const auto index = static_cast<usize>(
+                (floorMod(y, brickEdge) * brickEdge + floorMod(z, brickEdge)) * brickEdge + floorMod(x, brickEdge));
+            const float voxels = ((static_cast<float>(brick->distance[index]) - 128.0f) / 128.0f) * 4.0f;
+            return {voxels * voxel, brick->material[index]};
+        }
+        const auto [height, material] = column(x, z);
+        if (material == 0)
+            return {4.0f * voxel, 0};
+        return {static_cast<float>(y) * voxel - height, material};
+    }
+
+    // The column's height and material; material zero is no ground.
+    [[nodiscard]] std::pair<float, u8> column(i32 x, i32 z) const
+    {
+        constexpr auto tileEdge = static_cast<i32>(TileEdge);
+        const Tile* tile = findIn(tiles, Key2{floorDiv(x, tileEdge), floorDiv(z, tileEdge)});
+        if (tile == nullptr)
+            return {0.0f, 0};
+        const auto index = static_cast<usize>(floorMod(z, tileEdge) * tileEdge + floorMod(x, tileEdge));
+        return {tile->height[index], tile->material[index]};
+    }
+};
+
+// Lays the old field into `into`: the height layer first, a tile at a time as
+// a block of heights, then every brick's neighbourhood voxel by voxel.
+void resample(const Field& old, TerrainField& into)
+{
+    // A voxel column's centre is between four old columns: its height is the
+    // mean of those that hold ground, its material the first that does.
+    constexpr auto tileEdge = static_cast<i32>(TileEdge);
+    std::vector<float> heights(TileArea);
+    std::vector<u8> materials(TileArea);
+    for (const auto& entry : old.tiles) {
+        const i32 firstX = entry.first.x * tileEdge;
+        const i32 firstZ = entry.first.z * tileEdge;
+        for (i32 localZ = 0; localZ < tileEdge; ++localZ) {
+            for (i32 localX = 0; localX < tileEdge; ++localX) {
+                float sum = 0.0f;
+                int count = 0;
+                u8 material = 0;
+                for (int corner = 0; corner < 4; ++corner) {
+                    const auto [height, got] =
+                        old.column(firstX + localX + (corner & 1), firstZ + localZ + ((corner >> 1) & 1));
+                    if (got == 0)
+                        continue;
+                    sum += height;
+                    count += 1;
+                    if (material == 0)
+                        material = got;
+                }
+                const auto slot = static_cast<usize>(localZ * tileEdge + localX);
+                heights[slot] = count > 0 ? sum / static_cast<float>(count) : 0.0f;
+                materials[slot] = count > 0 ? material : u8{0};
+            }
+        }
+        (void)writeHeights(into, firstX, firstZ, TileEdge, heights, materials);
+    }
+
+    // Where a brick is, the height layer's answer above was not the old
+    // surface: every voxel whose eight lattice corners touch one is the old
+    // field at its centre.
+    constexpr auto brickEdge = static_cast<i32>(BrickEdge);
+    FieldWriter writer(into);
+    const float voxel = old.voxel;
+    for (const auto& entry : old.bricks) {
+        const i32 baseX = entry.first.x * brickEdge;
+        const i32 baseY = entry.first.y * brickEdge;
+        const i32 baseZ = entry.first.z * brickEdge;
+        for (i32 z = baseZ - 1; z < baseZ + brickEdge; ++z) {
+            for (i32 y = baseY - 1; y < baseY + brickEdge; ++y) {
+                for (i32 x = baseX - 1; x < baseX + brickEdge; ++x) {
+                    float sum = 0.0f;
+                    float nearest = std::numeric_limits<float>::max();
+                    u8 material = 0;
+                    for (int corner = 0; corner < 8; ++corner) {
+                        const auto [distance, got] =
+                            old.sample(x + (corner & 1), y + ((corner >> 1) & 1), z + ((corner >> 2) & 1));
+                        sum += distance;
+                        if (got != 0 && distance < nearest) {
+                            nearest = distance;
+                            material = got;
+                        }
+                    }
+                    const float distance = sum / 8.0f;
+                    const u8 occupancy =
+                        quantiseOccupancy(rampOccupancy(static_cast<double>(distance), static_cast<double>(voxel)));
+                    writer.set(x, y, z, Voxel{occupancy, material == 0 ? u8{1} : material});
+                }
+            }
+        }
+    }
+    writer.finish();
+}
+
+} // namespace legacy
+
+[[nodiscard]] std::optional<core::EngineError> decodeLegacyCell(std::span<const std::byte> bytes, TerrainCell& out)
+{
+    Reader reader(bytes);
+    (void)reader.u32v(); // Magic, checked by the caller.
+    (void)reader.u32v(); // Version, likewise.
+    if (reader.u32v() != 0)
+        return malformed();
+    const auto cellX = static_cast<i32>(reader.u32v());
+    const auto cellZ = static_cast<i32>(reader.u32v());
+    FieldSettings settings;
+    settings.voxelSize = reader.f32v();
+    settings.minHeight = reader.f32v();
+    settings.maxHeight = reader.f32v();
+    (void)reader.u32v(); // How many steep columns before a promotion: nothing now.
+    const u32 tileCount = reader.u32v();
+    const u32 brickCount = reader.u32v();
+    const u32 compression = reader.u32v();
+    if (!reader.ok())
+        return malformed();
+    if (compression != static_cast<u32>(TerrainCellCompression::None) &&
+        compression != static_cast<u32>(TerrainCellCompression::RunLength))
+        return malformed();
+    if (tileCount > legacy::MaxTiles || brickCount > legacy::MaxBricks)
+        return core::makeError(LUAUG_TR("asset.terrain.err.too_large"));
+    if (!(settings.voxelSize > 0.0f) || !(settings.maxHeight > settings.minHeight))
+        return malformed();
+
+    const u64 needed = static_cast<u64>(tileCount) * (8 + legacy::TileBytes) +
+                       static_cast<u64>(brickCount) * (12 + legacy::BrickBytes);
+    std::vector<std::byte> body;
+    std::span<const std::byte> bodyBytes;
+    if (compression == static_cast<u32>(TerrainCellCompression::RunLength)) {
+        if (needed > static_cast<u64>(reader.remaining()) * 128u)
+            return malformed();
+        if (!unpackBits(bytes.subspan(reader.at()), static_cast<usize>(needed), body))
+            return malformed();
+        bodyBytes = body;
+    }
+    else {
+        if (needed > reader.remaining())
+            return malformed();
+        bodyBytes = bytes.subspan(reader.at(), static_cast<usize>(needed));
+    }
+    reader = Reader(bodyBytes);
+
+    legacy::Field old;
+    old.voxel = settings.voxelSize;
+    old.tiles.resize(tileCount);
+    old.bricks.resize(brickCount);
+    for (u32 at = 0; at < tileCount; ++at) {
+        const auto x = static_cast<i32>(reader.u32v());
+        const auto z = static_cast<i32>(reader.u32v());
+        old.tiles[at].first = legacy::Key2{x, z};
+        if (at > 0 && !(old.tiles[at - 1].first < old.tiles[at].first))
+            return malformed();
+    }
+    for (u32 at = 0; at < brickCount; ++at) {
+        const auto x = static_cast<i32>(reader.u32v());
+        const auto y = static_cast<i32>(reader.u32v());
+        const auto z = static_cast<i32>(reader.u32v());
+        old.bricks[at].first = legacy::Key3{x, y, z};
+        if (at > 0 && !(old.bricks[at - 1].first < old.bricks[at].first))
+            return malformed();
+    }
+    for (auto& entry : old.tiles) {
+        if (!reader.blob(entry.second.height.data(), sizeof(float) * legacy::TileArea) ||
+            !reader.blob(entry.second.material.data(), legacy::TileArea))
+            return malformed();
+    }
+    for (auto& entry : old.bricks) {
+        if (!reader.blob(entry.second.distance.data(), legacy::BrickVolume) ||
+            !reader.blob(entry.second.material.data(), legacy::BrickVolume))
+            return malformed();
+    }
+    if (!reader.ok())
+        return malformed();
+
+    TerrainField field(settings);
+    legacy::resample(old, field);
+    out.x = cellX;
+    out.z = cellZ;
+    out.settings = settings;
+    out.field = std::move(field);
+    return std::nullopt;
+}
+
 } // namespace
 
 std::vector<std::byte> encodeTerrainCell(const TerrainCell& cell, TerrainCellCompression compression)
 {
     std::vector<std::byte> out;
 
-    const std::vector<TileKey> tileKeys = cell.field.tileKeys();
-    const std::vector<BrickKey> brickKeys = cell.field.brickKeys();
+    // The body first, plain, so the header can say how long it is.
+    //
+    // **The directory comes first and is key-sorted**, mirroring `.lchunk`'s
+    // table of contents: a reader can then refuse a file whose keys are not
+    // sorted, which is a corrupt file rather than an exotic one.
+    std::vector<std::byte> body;
+    const std::span<const TerrainField::Entry> chunks = cell.field.chunks();
+    for (const TerrainField::Entry& entry : chunks) {
+        writeU32(body, static_cast<u32>(entry.first.x));
+        writeU32(body, static_cast<u32>(entry.first.y));
+        writeU32(body, static_cast<u32>(entry.first.z));
+    }
+    std::vector<std::byte> payload;
+    for (const TerrainField::Entry& entry : chunks) {
+        payload.clear();
+        encodeChunk(*entry.second, payload);
+        writeU32(body, static_cast<u32>(payload.size()));
+        body.insert(body.end(), payload.begin(), payload.end());
+    }
 
-    // The header. A `flags` word that must decode as exactly zero, which is
-    // `chunk.cpp`'s rule and worth keeping: it is the cheapest possible
-    // forward-compatibility trap, because a future writer that sets a bit makes
-    // every older reader refuse rather than misread.
+    // The header. `flags` and the last word must decode as exactly zero:
+    // `chunk.cpp`'s rule, and the cheapest forward-compatibility trap there is.
     writeU32(out, Magic);
     writeU32(out, TerrainCellFormatVersion);
     writeU32(out, 0);
     writeU32(out, static_cast<u32>(cell.x));
     writeU32(out, static_cast<u32>(cell.z));
     writeF32(out, cell.settings.voxelSize);
-    // **The reserved range, which version 1 dropped.** It is not a description
-    // of the ground -- it is what the ground may ever be dug or raised to, and a
-    // collider's height precision is spread across it at construction and cannot
-    // be widened afterwards (ADR 0066). A file that omitted it reloaded as the
-    // default band and clamped every later edit to it, silently.
     writeF32(out, cell.settings.minHeight);
     writeF32(out, cell.settings.maxHeight);
-    writeU32(out, cell.settings.giveUpColumns);
-    writeU32(out, static_cast<u32>(tileKeys.size()));
-    writeU32(out, static_cast<u32>(brickKeys.size()));
+    writeU32(out, static_cast<u32>(chunks.size()));
     writeU32(out, static_cast<u32>(compression));
+    writeU32(out, static_cast<u32>(body.size()));
+    writeU32(out, 0);
 
-    // **The body is assembled plain and then coded as one stream.** One coder
-    // over one stream rather than one per array: the runs that matter cross the
-    // boundaries anyway -- a tile of flat ground is a run of heights followed by
-    // a run of materials -- and one is one thing to get right.
-    //
-    // The header stays uncompressed, always, because a reader has to be able to
-    // check the counts against this format's ceilings BEFORE it allocates
-    // anything to decompress into. That is the same rule the ceilings exist for.
-    std::vector<std::byte> body;
-
-    // **The directories come first and are key-sorted**, mirroring `.lchunk`'s
-    // table of contents. Sorted because `tileKeys()` answers sorted, and a
-    // reader that can rely on that can also detect a file whose keys are not --
-    // which is a corrupt file rather than an exotic one.
-    for (const TileKey key : tileKeys) {
-        writeU32(body, static_cast<u32>(key.x));
-        writeU32(body, static_cast<u32>(key.z));
-    }
-    for (const BrickKey key : brickKeys) {
-        writeU32(body, static_cast<u32>(key.x));
-        writeU32(body, static_cast<u32>(key.y));
-        writeU32(body, static_cast<u32>(key.z));
-    }
-
-    // Then the payloads, in the same order.
-    for (const TileKey key : tileKeys) {
-        const HeightTile* tile = cell.field.findTile(key);
-        if (tile == nullptr) {
-            continue; // Unreachable: the key came from the field.
-        }
-        writeBytes(body, tile->height, sizeof(tile->height));
-        writeBytes(body, tile->material, sizeof(tile->material));
-    }
-    for (const BrickKey key : brickKeys) {
-        const Brick* brick = cell.field.findBrick(key);
-        if (brick == nullptr) {
-            continue;
-        }
-        writeBytes(body, brick->sd, sizeof(brick->sd));
-        writeBytes(body, brick->material, sizeof(brick->material));
-    }
-
-    if (compression == TerrainCellCompression::RunLength) {
+    if (compression == TerrainCellCompression::RunLength)
         packBits(body, out);
-    }
-    else {
+    else
         out.insert(out.end(), body.begin(), body.end());
-    }
     return out;
 }
 
@@ -259,18 +558,18 @@ std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> by
 {
     Reader reader(bytes);
 
-    if (reader.u32v() != Magic) {
+    if (reader.u32v() != Magic)
         return malformed();
-    }
     const u32 version = reader.u32v();
+    if (version == TerrainCellLegacyVersion && reader.ok())
+        return decodeLegacyCell(bytes, out);
     if (version != TerrainCellFormatVersion) {
         const I18nArg args[] = {{"found", static_cast<core::i64>(version)},
                                 {"expected", static_cast<core::i64>(TerrainCellFormatVersion)}};
         return core::makeError(LUAUG_TR("asset.terrain.err.version"), args);
     }
-    if (reader.u32v() != 0) {
+    if (reader.u32v() != 0)
         return malformed();
-    }
 
     const auto cellX = static_cast<i32>(reader.u32v());
     const auto cellZ = static_cast<i32>(reader.u32v());
@@ -278,136 +577,82 @@ std::optional<core::EngineError> decodeTerrainCell(std::span<const std::byte> by
     settings.voxelSize = reader.f32v();
     settings.minHeight = reader.f32v();
     settings.maxHeight = reader.f32v();
-    settings.giveUpColumns = reader.u32v();
-
-    const u32 tileCount = reader.u32v();
-    const u32 brickCount = reader.u32v();
+    const u32 chunkCount = reader.u32v();
     const u32 compression = reader.u32v();
-    if (!reader.ok()) {
+    const u32 bodySize = reader.u32v();
+    const u32 reserved = reader.u32v();
+    if (!reader.ok() || reserved != 0)
         return malformed();
-    }
     if (compression != static_cast<u32>(TerrainCellCompression::None) &&
-        compression != static_cast<u32>(TerrainCellCompression::RunLength)) {
-        // A coder this build does not have is refused rather than guessed at,
-        // for the same reason a version is.
+        compression != static_cast<u32>(TerrainCellCompression::RunLength))
         return malformed();
-    }
 
-    // **Counted before it is believed.** A corrupt `tileCount` of four billion
-    // would otherwise reserve sixteen gigabytes before the first read failed,
-    // which is the exact failure `chunk.cpp` documents.
-    if (tileCount > limits.tiles || brickCount > limits.bricks) {
+    // **Counted before it is believed**: a corrupt count must not reserve
+    // gigabytes before the first read fails.
+    if (chunkCount > limits.chunks)
         return core::makeError(LUAUG_TR("asset.terrain.err.too_large"));
-    }
-
-    // And checked against what is actually left, so a truncated file is refused
-    // at the header rather than partway through a payload.
-    constexpr u64 TileBytes = sizeof(HeightTile::height) + sizeof(HeightTile::material);
-    constexpr u64 BrickBytes = sizeof(Brick::sd) + sizeof(Brick::material);
-    constexpr u64 TileKeyBytes = 8;
-    constexpr u64 BrickKeyBytes = 12;
-    const u64 needed = static_cast<u64>(tileCount) * (TileKeyBytes + TileBytes) +
-                       static_cast<u64>(brickCount) * (BrickKeyBytes + BrickBytes);
-
     // A settings block that cannot describe a field is refused rather than
-    // clamped: a zero voxel size divides by zero in every sampler above this,
-    // and an inverted range makes every promotion examination empty -- whose
-    // symptom would be terrain that cannot be sculpted rather than an error.
-    if (!(settings.voxelSize > 0.0f) || !(settings.maxHeight > settings.minHeight)) {
+    // clamped: a zero voxel size divides by zero in every sampler above this.
+    if (!(settings.voxelSize > 0.0f) || !(settings.maxHeight > settings.minHeight))
         return malformed();
-    }
+    // The body cannot be longer than its chunks could ever code to, nor shorter
+    // than their directory and one run each.
+    const u64 ceiling = static_cast<u64>(chunkCount) * (12 + 4 + MaxChunkPayload);
+    if (bodySize > ceiling || bodySize < static_cast<u64>(chunkCount) * 20)
+        return malformed();
 
-    // **The body, decoded before it is read, into a buffer the counts already
-    // bounded.** `needed` came from counts checked against `MaxCellTiles` and
-    // `MaxCellBricks` above, so this is a size the format already agreed to
-    // allocate rather than one a corrupt file chose -- which is the whole reason
-    // the header is never itself compressed.
     std::vector<std::byte> body;
     std::span<const std::byte> bodyBytes;
     if (compression == static_cast<u32>(TerrainCellCompression::RunLength)) {
         // PackBits expands a byte into at most 128, so a body larger than that
-        // many times what is left in the file cannot be in it -- which bounds the
-        // allocation by the file whatever ceiling the counts were held to.
-        if (needed > static_cast<u64>(reader.remaining()) * 128u) {
+        // many times what is left cannot be in the file: the allocation is
+        // bounded by the bytes that are actually there.
+        if (static_cast<u64>(bodySize) > static_cast<u64>(reader.remaining()) * 128u)
             return malformed();
-        }
-        if (!unpackBits(bytes.subspan(reader.at()), static_cast<usize>(needed), body)) {
+        if (!unpackBits(bytes.subspan(reader.at()), bodySize, body))
             return malformed();
-        }
         bodyBytes = body;
     }
     else {
-        // Uncompressed, which is what a version-1 file was and what a writer
-        // may still choose. Checked against what is actually left, so a
-        // truncated file is refused at the header rather than partway through a
-        // payload.
-        if (needed > reader.remaining()) {
+        if (bodySize > reader.remaining())
             return malformed();
-        }
-        bodyBytes = bytes.subspan(reader.at(), static_cast<usize>(needed));
+        bodyBytes = bytes.subspan(reader.at(), bodySize);
     }
-
-    // From here down the reader walks the decoded body rather than the file, so
-    // every offset below is relative to it and neither branch above changes a
-    // line of what follows.
     reader = Reader(bodyBytes);
 
-    std::vector<TileKey> tileKeys;
-    tileKeys.reserve(tileCount);
-    for (u32 at = 0; at < tileCount; ++at) {
-        TileKey key;
-        key.x = static_cast<i32>(reader.u32v());
-        key.z = static_cast<i32>(reader.u32v());
-        // **Sorted, or the file is corrupt.** The writer emits sorted keys
-        // because the field answers sorted; a reader that accepted any order
-        // would accept a file whose directory and payloads disagree, and the
-        // failure would be terrain in the wrong place rather than an error.
-        if (at > 0 && !(tileKeys[at - 1] < key)) {
-            return malformed();
-        }
-        tileKeys.push_back(key);
-    }
-
-    std::vector<BrickKey> brickKeys;
-    brickKeys.reserve(brickCount);
-    for (u32 at = 0; at < brickCount; ++at) {
-        BrickKey key;
+    std::vector<ChunkKey> keys;
+    keys.reserve(chunkCount);
+    for (u32 at = 0; at < chunkCount; ++at) {
+        ChunkKey key;
         key.x = static_cast<i32>(reader.u32v());
         key.y = static_cast<i32>(reader.u32v());
         key.z = static_cast<i32>(reader.u32v());
-        if (at > 0 && !(brickKeys[at - 1] < key)) {
+        if (at > 0 && !(keys[at - 1] < key))
             return malformed();
-        }
-        brickKeys.push_back(key);
+        keys.push_back(key);
     }
-    if (!reader.ok()) {
+    if (!reader.ok())
         return malformed();
-    }
 
     TerrainField field(settings);
-    std::vector<float> heights(TileArea);
-    std::vector<u8> materials(TileArea);
-    for (const TileKey key : tileKeys) {
-        if (!reader.blob(heights.data(), sizeof(HeightTile::height)) ||
-            !reader.blob(materials.data(), sizeof(HeightTile::material))) {
+    std::vector<std::byte> payload;
+    for (const ChunkKey key : keys) {
+        const u32 size = reader.u32v();
+        if (!reader.ok() || size > MaxChunkPayload || size > reader.remaining())
             return malformed();
-        }
-        field.setTile(key, heights, materials);
-    }
-
-    std::vector<u8> distances(BrickVolume);
-    std::vector<u8> brickMaterials(BrickVolume);
-    for (const BrickKey key : brickKeys) {
-        if (!reader.blob(distances.data(), sizeof(Brick::sd)) ||
-            !reader.blob(brickMaterials.data(), sizeof(Brick::material))) {
+        payload.resize(size);
+        if (!reader.blob(payload.data(), size))
             return malformed();
-        }
-        field.setBrick(key, distances, brickMaterials);
+        std::shared_ptr<TerrainChunk> chunk;
+        if (!decodeChunk(payload, chunk))
+            return malformed();
+        // An empty chunk is never written; one in a file is a corrupt file.
+        if (chunk->empty())
+            return malformed();
+        field.setChunk(key, std::move(chunk));
     }
-
-    if (!reader.ok()) {
+    if (reader.remaining() != 0)
         return malformed();
-    }
 
     out.x = cellX;
     out.z = cellZ;

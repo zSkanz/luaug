@@ -373,50 +373,21 @@ struct GpuContactUniforms
 
 static_assert(sizeof(GpuContactUniforms) == 48, "GpuContactUniforms is a cbuffer layout");
 
-// --- GPU terrain (ADR 0071) ---------------------------------------------------
-
-// `TerrainParams` in `shaders/include/luaug_terrain.hlsli`, field for field.
-struct GpuTerrainParams
-{
-    // xyz: the node's lattice corner relative to the viewer, in metres (y is
-    // the terrain's origin height). w: the lattice step in metres.
-    f32 nodeRelative[4]{};
-    // xy: the node's lattice corner in lattice steps; z: steps per grid step.
-    f32 nodeLattice[4]{};
-    // x: morph start, y: morph end, z: 1 / (end - start), w: clip-depth push
-    // (shadow passes only).
-    f32 morph[4]{};
-    // x: slots per atlas row, y: tile table edge, zw: the tile key at table
-    // entry (0, 0).
-    f32 atlas[4]{};
-    // xy: atlas size in texels, zw: its reciprocal.
-    f32 atlasSize[4]{};
-};
-
-static_assert(sizeof(GpuTerrainParams) == 80, "GpuTerrainParams is a cbuffer layout");
-
-// Vertex stage, `b0 space1`, for `terrain` and `terrain_depth`. Per node.
-struct GpuTerrainUniforms
-{
-    core::Mat4 viewProjection;
-    GpuTerrainParams node;
-};
-
-static_assert(sizeof(GpuTerrainUniforms) == 64 + 80, "GpuTerrainUniforms is a cbuffer layout");
+// --- Terrain (ADR 0082) ------------------------------------------------------
 
 // The number of palette entries the terrain shader carries. Material ids past
 // it wrap, which the palette's own size makes unreachable today.
 inline constexpr u32 kTerrainPaletteSize = 32;
 
-// Fragment stage, `b1 space3`, for `terrain`. Per terrain.
+// `b1` of both stages, for `terrain`: a colour per material id. The vertex
+// stage turns a vertex's material into its colour; the fragment stage reads
+// the rock's for the slope rule.
 struct GpuTerrainSurfaceUniforms
 {
     f32 palette[kTerrainPaletteSize][4]{};
-    // Only `atlas`, `atlasSize` and `nodeRelative[3]` are read.
-    GpuTerrainParams field;
 };
 
-static_assert(sizeof(GpuTerrainSurfaceUniforms) == 32 * 16 + 80, "GpuTerrainSurfaceUniforms is a cbuffer layout");
+static_assert(sizeof(GpuTerrainSurfaceUniforms) == 32 * 16, "GpuTerrainSurfaceUniforms is a cbuffer layout");
 
 // Vertex stage, `b0 space1`, for `decal` (F2).
 struct GpuDecalUniforms

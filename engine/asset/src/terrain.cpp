@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #define XXH_INLINE_ALL
 #include "xxhash.h"
@@ -10,391 +11,503 @@ namespace luaug::asset {
 namespace {
 
 using core::i32;
+using core::u16;
 using core::u32;
 using core::u64;
 using core::u8;
 using core::usize;
 
-// Which brick a lattice point falls in, and where inside it.
-//
-// **Floor division rather than truncation**, which is the bug this function
-// exists to have exactly once: `-1 / 16` is `0` in C++ and the brick containing
-// x = -1 is brick -1. A world with an origin in the middle of it has negative
-// coordinates everywhere, so getting this wrong would put the left half of every
-// cave in the wrong brick.
-[[nodiscard]] i32 floorDiv(i32 value, i32 divisor) noexcept
+constexpr u32 DenseFlag = 0x80000000u;
+constexpr auto Edge = static_cast<i32>(ChunkEdge);
+
+[[nodiscard]] bool isDense(u32 row) noexcept
 {
-    const i32 quotient = value / divisor;
-    return (value % divisor != 0 && ((value < 0) != (divisor < 0))) ? quotient - 1 : quotient;
+    return (row & DenseFlag) != 0;
 }
 
-[[nodiscard]] i32 floorMod(i32 value, i32 divisor) noexcept
+// The lower bound of a key in the sorted chunk list.
+template <class Vector>
+[[nodiscard]] auto lowerBound(Vector& entries, const ChunkKey& key)
 {
-    const i32 remainder = value % divisor;
-    return remainder < 0 ? remainder + divisor : remainder;
-}
-
-[[nodiscard]] u64 digestOf(const void* first, usize firstBytes, const void* second, usize secondBytes) noexcept
-{
-    XXH3_state_t state;
-    XXH3_64bits_reset(&state);
-    XXH3_64bits_update(&state, first, firstBytes);
-    XXH3_64bits_update(&state, second, secondBytes);
-    return XXH3_64bits_digest(&state);
-}
-
-// A sorted-vector lookup, which is what this container is instead of a hash map
-// (R10: a hash map's iteration order is a fact about its allocator).
-template <class Vector, class Key>
-[[nodiscard]] auto findEntry(Vector& entries, const Key& key)
-{
-    const auto at = std::lower_bound(entries.begin(), entries.end(), key,
-                                     [](const auto& entry, const Key& probe) { return entry.first < probe; });
-    return (at != entries.end() && at->first == key) ? at : entries.end();
-}
-
-template <class Vector, class Key, class Value>
-void insertOrReplace(Vector& entries, const Key& key, Value value)
-{
-    const auto at = std::lower_bound(entries.begin(), entries.end(), key,
-                                     [](const auto& entry, const Key& probe) { return entry.first < probe; });
-    if (at != entries.end() && at->first == key) {
-        at->second = std::move(value);
-        return;
-    }
-    entries.insert(at, {key, std::move(value)});
+    return std::lower_bound(entries.begin(), entries.end(), key,
+                            [](const auto& entry, const ChunkKey& probe) { return entry.first < probe; });
 }
 
 } // namespace
 
-u8 quantiseDistance(float metres, float voxelSize) noexcept
+u8 quantiseOccupancy(float fraction) noexcept
 {
-    if (!(voxelSize > 0.0f)) {
-        return SurfaceLevel;
+    if (!(fraction > 0.0f))
+        return 0;
+    if (fraction >= 1.0f)
+        return FullOccupancy;
+    return static_cast<u8>(std::lround(fraction * static_cast<float>(FullOccupancy)));
+}
+
+// --- TerrainChunk --------------------------------------------------------------
+
+Voxel TerrainChunk::get(u32 x, u32 y, u32 z) const noexcept
+{
+    if (m_rows.empty())
+        return unpackVoxel(m_value);
+    const u32 row = m_rows[rowIndex(y, z)];
+    if (!isDense(row))
+        return unpackVoxel(static_cast<u16>(row));
+    return unpackVoxel(m_dense[static_cast<usize>(row & ~DenseFlag) * ChunkEdge + x]);
+}
+
+void TerrainChunk::readRow(u32 y, u32 z, std::span<u16, ChunkEdge> out) const noexcept
+{
+    if (m_rows.empty()) {
+        std::fill(out.begin(), out.end(), m_value);
+        return;
     }
-    // In voxels, then into the `u8` range centred on `SurfaceLevel`. The
-    // saturating clamp is deliberate: the field is only ever read near the
-    // surface, so a sample far from it saturates rather than wrapping, and a
-    // saturated sample still has the right SIGN -- which is the only thing a
-    // mesher asks of a distant one.
-    const float voxels = metres / voxelSize;
-    const float scaled = static_cast<float>(SurfaceLevel) + (voxels / DistanceRange) * static_cast<float>(SurfaceLevel);
-    return static_cast<u8>(std::clamp(scaled, 0.0f, 255.0f));
-}
-
-float dequantiseDistance(u8 quantised, float voxelSize) noexcept
-{
-    const float voxels =
-        ((static_cast<float>(quantised) - static_cast<float>(SurfaceLevel)) / static_cast<float>(SurfaceLevel)) *
-        DistanceRange;
-    return voxels * voxelSize;
-}
-
-u64 digestOf(const HeightTile& tile) noexcept
-{
-    if (!tile.digestValid) {
-        tile.digest = digestOf(tile.height, sizeof(tile.height), tile.material, sizeof(tile.material));
-        tile.digestValid = true;
+    const u32 row = m_rows[rowIndex(y, z)];
+    if (!isDense(row)) {
+        std::fill(out.begin(), out.end(), static_cast<u16>(row));
+        return;
     }
-    return tile.digest;
+    const u16* first = &m_dense[static_cast<usize>(row & ~DenseFlag) * ChunkEdge];
+    std::copy(first, first + ChunkEdge, out.begin());
 }
 
-u64 digestOf(const Brick& brick) noexcept
+void TerrainChunk::invalidate() noexcept
 {
-    if (!brick.digestValid) {
-        brick.digest = digestOf(brick.sd, sizeof(brick.sd), brick.material, sizeof(brick.material));
-        brick.digestValid = true;
+    m_digestValid = false;
+    m_bordersValid = 0;
+    for (std::vector<u16>& level : m_mips)
+        level.clear();
+}
+
+void TerrainChunk::expand()
+{
+    if (!m_rows.empty())
+        return;
+    m_rows.assign(ChunkRows, static_cast<u32>(m_value));
+}
+
+bool TerrainChunk::set(u32 x, u32 y, u32 z, Voxel voxel)
+{
+    const u16 packed = packVoxel(canonical(voxel));
+    if (m_rows.empty()) {
+        if (packed == m_value)
+            return false;
+        expand();
     }
-    return brick.digest;
-}
-
-std::shared_ptr<HeightTile> makeHeightTile(std::span<const float> heights, std::span<const u8> materials)
-{
-    auto tile = std::make_shared<HeightTile>();
-    const usize count = std::min<usize>(TileArea, heights.size());
-    for (usize at = 0; at < count; ++at) {
-        tile->height[at] = heights[at];
+    u32& row = m_rows[rowIndex(y, z)];
+    if (!isDense(row)) {
+        if (static_cast<u16>(row) == packed)
+            return false;
+        // The row becomes voxel by voxel, appended; `normalize` puts the dense
+        // rows back in row order.
+        const auto index = static_cast<u32>(m_dense.size() / ChunkEdge);
+        m_dense.insert(m_dense.end(), ChunkEdge, static_cast<u16>(row));
+        row = DenseFlag | index;
     }
-    const usize materialCount = std::min<usize>(TileArea, materials.size());
-    for (usize at = 0; at < materialCount; ++at) {
-        tile->material[at] = materials[at];
+    u16& slot = m_dense[static_cast<usize>(row & ~DenseFlag) * ChunkEdge + x];
+    if (slot == packed)
+        return false;
+    slot = packed;
+    invalidate();
+    return true;
+}
+
+void TerrainChunk::writeRow(u32 y, u32 z, std::span<const u16, ChunkEdge> values)
+{
+    const u16 first = values[0];
+    const bool same = std::all_of(values.begin(), values.end(), [first](u16 value) { return value == first; });
+    if (m_rows.empty()) {
+        if (same && first == m_value)
+            return;
+        expand();
     }
-    // Left stale, and `digestOf` computes it when somebody asks. A tile built
-    // and then edited a hundred times would otherwise hash itself a hundred and
-    // one times.
-    return tile;
-}
-
-std::shared_ptr<Brick> makeBrick(std::span<const u8> distances, std::span<const u8> materials)
-{
-    auto brick = std::make_shared<Brick>();
-    const usize count = std::min<usize>(BrickVolume, distances.size());
-    for (usize at = 0; at < count; ++at) {
-        brick->sd[at] = distances[at];
+    u32& row = m_rows[rowIndex(y, z)];
+    if (same) {
+        // Left as a stale dense row if it was one; `normalize` drops it.
+        row = static_cast<u32>(first);
     }
-    const usize materialCount = std::min<usize>(BrickVolume, materials.size());
-    for (usize at = 0; at < materialCount; ++at) {
-        brick->material[at] = materials[at];
+    else {
+        if (!isDense(row)) {
+            const auto index = static_cast<u32>(m_dense.size() / ChunkEdge);
+            m_dense.insert(m_dense.end(), ChunkEdge, 0);
+            row = DenseFlag | index;
+        }
+        std::copy(values.begin(), values.end(), m_dense.begin() + static_cast<std::ptrdiff_t>(row & ~DenseFlag) * Edge);
     }
-    return brick;
+    invalidate();
 }
 
-const HeightTile* TerrainField::findTile(TileKey key) const noexcept
+void TerrainChunk::normalize()
 {
-    const auto at = findEntry(m_tiles, key);
-    return at == m_tiles.end() ? nullptr : at->second.get();
-}
-
-const Brick* TerrainField::findBrick(BrickKey key) const noexcept
-{
-    const auto at = findEntry(m_bricks, key);
-    return at == m_bricks.end() ? nullptr : at->second.get();
-}
-
-bool TerrainField::isBricked(i32 x, i32 z) const noexcept
-{
-    // A column is bricked when any brick covers it, at any height. Linear in the
-    // bricks of that column rather than a separate marker set, because the
-    // bricks ARE the state -- a second structure saying the same thing is a
-    // second thing that can disagree after a load.
-    const i32 brickX = floorDiv(x, static_cast<i32>(BrickEdge));
-    const i32 brickZ = floorDiv(z, static_cast<i32>(BrickEdge));
-    for (const auto& entry : m_bricks) {
-        if (entry.first.x == brickX && entry.first.z == brickZ) {
-            return true;
+    if (m_rows.empty())
+        return;
+    std::vector<u16> dense;
+    dense.reserve(m_dense.size());
+    bool allSame = true;
+    u32 firstValue = 0xFFFFFFFFu;
+    for (u32& row : m_rows) {
+        if (isDense(row)) {
+            const u16* voxels = &m_dense[static_cast<usize>(row & ~DenseFlag) * ChunkEdge];
+            const u16 head = voxels[0];
+            if (std::all_of(voxels, voxels + ChunkEdge, [head](u16 value) { return value == head; })) {
+                row = static_cast<u32>(head);
+            }
+            else {
+                const auto index = static_cast<u32>(dense.size() / ChunkEdge);
+                dense.insert(dense.end(), voxels, voxels + ChunkEdge);
+                row = DenseFlag | index;
+            }
+        }
+        if (isDense(row)) {
+            allSame = false;
+        }
+        else if (firstValue == 0xFFFFFFFFu) {
+            firstValue = row;
+        }
+        else if (row != firstValue) {
+            allSame = false;
         }
     }
-    return false;
+    if (allSame) {
+        m_value = static_cast<u16>(firstValue);
+        m_rows.clear();
+        m_rows.shrink_to_fit();
+        m_dense.clear();
+        m_dense.shrink_to_fit();
+    }
+    else {
+        m_dense = std::move(dense);
+    }
+    // The bytes are the same voxels either way; only the digest's input moved.
+    m_digestValid = false;
+    m_bordersValid = 0;
+}
+
+usize TerrainChunk::bytes() const noexcept
+{
+    usize total = sizeof(TerrainChunk) + m_rows.capacity() * sizeof(u32) + m_dense.capacity() * sizeof(u16);
+    for (const std::vector<u16>& level : m_mips)
+        total += level.capacity() * sizeof(u16);
+    return total;
+}
+
+u64 TerrainChunk::digest() const noexcept
+{
+    if (!m_digestValid) {
+        // Over the canonical form: a uniform chunk is its value, and a rowed one
+        // is its row table and its dense rows. Two chunks with the same voxels
+        // only share a digest once both are normalised, which every write path
+        // does before anything reads this.
+        XXH3_state_t state;
+        XXH3_64bits_reset(&state);
+        const u8 kind = m_rows.empty() ? 0 : 1;
+        XXH3_64bits_update(&state, &kind, 1);
+        if (m_rows.empty()) {
+            XXH3_64bits_update(&state, &m_value, sizeof(m_value));
+        }
+        else {
+            XXH3_64bits_update(&state, m_rows.data(), m_rows.size() * sizeof(u32));
+            XXH3_64bits_update(&state, m_dense.data(), m_dense.size() * sizeof(u16));
+        }
+        m_digest = XXH3_64bits_digest(&state);
+        m_digestValid = true;
+    }
+    return m_digest;
+}
+
+u64 TerrainChunk::borderDigest(i32 dx, i32 dy, i32 dz) const noexcept
+{
+    if (dx < -1 || dx > 1 || dy < -1 || dy > 1 || dz < -1 || dz > 1)
+        return 0;
+    if (dx == 0 && dy == 0 && dz == 0)
+        return digest();
+    const auto slot = static_cast<u32>((dx + 1) + 3 * (dy + 1) + 9 * (dz + 1));
+    if ((m_bordersValid & (1u << slot)) == 0) {
+        XXH3_state_t state;
+        XXH3_64bits_reset(&state);
+        XXH3_64bits_update(&state, &slot, sizeof(slot));
+        if (m_rows.empty()) {
+            XXH3_64bits_update(&state, &m_value, sizeof(m_value));
+        }
+        else {
+            // The layers the neighbour at that offset reads: the two against
+            // it on an axis it is offset along -- low layers for a neighbour on
+            // the low side -- and every layer on the others. Read voxel by
+            // voxel in a fixed order, never the row table, so the answer does
+            // not depend on how they happen to be stored.
+            const auto range = [](i32 offset) {
+                if (offset < 0)
+                    return std::pair<u32, u32>{0, 2};
+                if (offset > 0)
+                    return std::pair<u32, u32>{ChunkEdge - 2, ChunkEdge};
+                return std::pair<u32, u32>{0, ChunkEdge};
+            };
+            const auto [x0, x1] = range(dx);
+            const auto [y0, y1] = range(dy);
+            const auto [z0, z1] = range(dz);
+            std::vector<u16> part;
+            part.reserve(static_cast<usize>(x1 - x0) * (y1 - y0) * (z1 - z0));
+            for (u32 y = y0; y < y1; ++y) {
+                for (u32 z = z0; z < z1; ++z) {
+                    for (u32 x = x0; x < x1; ++x)
+                        part.push_back(packVoxel(get(x, y, z)));
+                }
+            }
+            XXH3_64bits_update(&state, part.data(), part.size() * sizeof(u16));
+        }
+        m_borders[slot] = XXH3_64bits_digest(&state);
+        m_bordersValid |= 1u << slot;
+    }
+    return m_borders[slot];
+}
+
+void TerrainChunk::prepareMip(u32 level) const
+{
+    if (level == 0 || level >= ChunkLevels || m_rows.empty() || !m_mips[level].empty())
+        return;
+    const u32 edge = ChunkEdge >> level;
+    const u32 span = 1u << level;
+    std::vector<u16>& out = m_mips[level];
+    out.assign(static_cast<usize>(edge) * edge * edge, 0);
+    // Sums per level cell, read row by row so the rows' own storage is walked
+    // once in order.
+    std::vector<u32> sums(out.size(), 0);
+    std::vector<u8> best(out.size(), 0);
+    std::vector<u8> material(out.size(), 0);
+    std::array<u16, ChunkEdge> row{};
+    for (u32 y = 0; y < ChunkEdge; ++y) {
+        for (u32 z = 0; z < ChunkEdge; ++z) {
+            readRow(y, z, row);
+            const usize base = (static_cast<usize>(y / span) * edge + z / span) * edge;
+            for (u32 x = 0; x < ChunkEdge; ++x) {
+                const Voxel voxel = unpackVoxel(row[x]);
+                const usize cell = base + x / span;
+                sums[cell] += voxel.occupancy;
+                // The fullest voxel's material, the first one met on a tie: the
+                // walk order is fixed, so so is the answer.
+                if (voxel.occupancy > best[cell]) {
+                    best[cell] = voxel.occupancy;
+                    material[cell] = voxel.material;
+                }
+            }
+        }
+    }
+    const u32 count = span * span * span;
+    for (usize at = 0; at < out.size(); ++at) {
+        const auto occupancy = static_cast<u8>((sums[at] + count / 2) / count);
+        out[at] = packVoxel(canonical(Voxel{occupancy, material[at]}));
+    }
+}
+
+Voxel TerrainChunk::mip(u32 level, u32 x, u32 y, u32 z) const noexcept
+{
+    if (level == 0)
+        return get(x, y, z);
+    if (m_rows.empty())
+        return unpackVoxel(m_value);
+    if (m_mips[level].empty())
+        prepareMip(level);
+    const u32 edge = ChunkEdge >> level;
+    return unpackVoxel(m_mips[level][(static_cast<usize>(y) * edge + z) * edge + x]);
+}
+
+// --- TerrainField --------------------------------------------------------------
+
+i32 TerrainField::voxelIndex(double metres) const noexcept
+{
+    return static_cast<i32>(std::floor(metres / static_cast<double>(m_settings.voxelSize)));
+}
+
+const TerrainChunk* TerrainField::findChunk(ChunkKey key) const noexcept
+{
+    const auto at = lowerBound(m_chunks, key);
+    return (at != m_chunks.end() && at->first == key) ? at->second.get() : nullptr;
+}
+
+Voxel TerrainField::voxel(i32 x, i32 y, i32 z) const noexcept
+{
+    const TerrainChunk* chunk = findChunk(chunkOf(x, y, z));
+    if (chunk == nullptr)
+        return Voxel{};
+    return chunk->get(static_cast<u32>(floorMod(x, Edge)), static_cast<u32>(floorMod(y, Edge)),
+                      static_cast<u32>(floorMod(z, Edge)));
 }
 
 FieldSample TerrainField::sample(i32 x, i32 y, i32 z) const noexcept
 {
-    // **The brick answers first when there is one.** That is the whole
-    // resolution rule, and everything above this function is written so it never
-    // needs to know which branch ran.
-    const BrickKey brickKey{floorDiv(x, static_cast<i32>(BrickEdge)), floorDiv(y, static_cast<i32>(BrickEdge)),
-                            floorDiv(z, static_cast<i32>(BrickEdge))};
-    if (const Brick* brick = findBrick(brickKey); brick != nullptr) {
-        const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(BrickEdge)));
-        const auto localY = static_cast<u32>(floorMod(y, static_cast<i32>(BrickEdge)));
-        const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(BrickEdge)));
-        const u32 index = (localY * BrickEdge + localZ) * BrickEdge + localX;
-        return FieldSample{dequantiseDistance(brick->sd[index], m_settings.voxelSize), brick->material[index]};
-    }
-
-    // **`sd(p) = p.y - H(x, z)`**, which is the identity the whole hybrid rests
-    // on: its vertical-edge crossing is at exactly `y = H`, and that is the
-    // height grid's own vertex. So a Marching Cubes edge between a sample below
-    // the surface and one above it lands on the height, not near it -- the seam
-    // between the two encodings is an equality rather than a stitch.
-    const TileKey tileKey{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
-    const HeightTile* tile = findTile(tileKey);
-    if (tile == nullptr) {
-        // No tile is air, not a hole. A field with nothing in it is a world with
-        // no ground yet, and a mesher walking it finds no sign change and emits
-        // nothing -- which is the right picture of an empty cell.
-        return FieldSample{DistanceRange * m_settings.voxelSize, 0};
-    }
-
-    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
-    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
-    const u32 index = localZ * TileEdge + localX;
-    if (tile->material[index] == 0) {
-        // **Material zero means there is no ground in this column** (D153), and
-        // without this rule creating a tile creates a plane.
-        //
-        // A tile is 32 by 32 columns and is written one column at a time, so the
-        // moment the first column of one is filled the other 1023 exist with a
-        // height of zero and a material of zero. Reading that as a surface put a
-        // flat plane at y = 0 across a thousand columns nobody touched -- and
-        // made the first column written into a tile behave differently from
-        // every column after it, which is how this was found.
-        //
-        // Zero is the right sentinel rather than a NaN or a separate mask:
-        // material zero already means "nothing" to every other verb here --
-        // `fillBall` erases with it and `paintBall` refuses it -- so the encoding
-        // gains no new state, only a rule it was already implying.
-        return FieldSample{DistanceRange * m_settings.voxelSize, 0};
-    }
-    const float height = tile->height[index];
-    return FieldSample{static_cast<float>(y) * m_settings.voxelSize - height, tile->material[index]};
+    const Voxel got = voxel(x, y, z);
+    return FieldSample{(0.5f - occupancyOf(got)) * RampVoxels * m_settings.voxelSize, got.material};
 }
 
-std::vector<TileKey> TerrainField::tileKeys() const
+Voxel TerrainField::voxelAt(u32 level, i32 x, i32 y, i32 z) const noexcept
 {
-    std::vector<TileKey> keys;
-    keys.reserve(m_tiles.size());
-    for (const auto& entry : m_tiles) {
+    if (level == 0)
+        return voxel(x, y, z);
+    const i32 edge = Edge >> level;
+    const TerrainChunk* chunk = findChunk(ChunkKey{floorDiv(x, edge), floorDiv(y, edge), floorDiv(z, edge)});
+    if (chunk == nullptr)
+        return Voxel{};
+    return chunk->mip(level, static_cast<u32>(floorMod(x, edge)), static_cast<u32>(floorMod(y, edge)),
+                      static_cast<u32>(floorMod(z, edge)));
+}
+
+std::vector<ChunkKey> TerrainField::chunkKeys() const
+{
+    std::vector<ChunkKey> keys;
+    keys.reserve(m_chunks.size());
+    for (const Entry& entry : m_chunks)
         keys.push_back(entry.first);
-    }
     return keys;
 }
 
-std::vector<BrickKey> TerrainField::brickKeys() const
+std::span<const TerrainField::Entry> TerrainField::column(i32 chunkX, i32 chunkZ) const noexcept
 {
-    std::vector<BrickKey> keys;
-    keys.reserve(m_bricks.size());
-    for (const auto& entry : m_bricks) {
-        keys.push_back(entry.first);
+    const ChunkKey low{chunkX, std::numeric_limits<i32>::min(), chunkZ};
+    const auto first = lowerBound(m_chunks, low);
+    auto last = first;
+    while (last != m_chunks.end() && last->first.x == chunkX && last->first.z == chunkZ)
+        ++last;
+    return std::span<const Entry>(first, last);
+}
+
+std::optional<float> TerrainField::columnTop(i32 x, i32 z) const noexcept
+{
+    const std::span<const Entry> chunks = column(floorDiv(x, Edge), floorDiv(z, Edge));
+    const auto localX = static_cast<u32>(floorMod(x, Edge));
+    const auto localZ = static_cast<u32>(floorMod(z, Edge));
+    const float voxel = m_settings.voxelSize;
+    // Walked top down: the first voxel at least half full is the top, and the
+    // crossing is between it and the one above it.
+    float above = 0.0f; // Occupancy of the voxel above the one being read.
+    for (auto at = chunks.rbegin(); at != chunks.rend(); ++at) {
+        const TerrainChunk& chunk = *at->second;
+        const i32 baseY = at->first.y * Edge;
+        // A chunk directly under a gap in the column starts from air above.
+        const auto next = at.base();
+        if (next == chunks.end() || next->first.y != at->first.y + 1)
+            above = 0.0f;
+        if (chunk.uniform() && chunk.value().occupancy < 128) {
+            above = occupancyOf(chunk.value());
+            continue;
+        }
+        for (i32 y = Edge - 1; y >= 0; --y) {
+            const float here = occupancyOf(chunk.get(localX, static_cast<u32>(y), localZ));
+            if (here >= 0.5f) {
+                // Between this centre and the one above, where occupancy
+                // passes one half.
+                const float t = here - above > 1e-6f ? (here - 0.5f) / (here - above) : 0.0f;
+                return (static_cast<float>(baseY + y) + 0.5f + t) * voxel;
+            }
+            above = here;
+        }
     }
-    return keys;
+    return std::nullopt;
 }
 
 u64 TerrainField::digest() const noexcept
 {
-    // **O(objects), not O(bytes)**, which is the reason every tile and brick
-    // carries a digest of its own. A cell of a hundred tiles is a hundred
-    // eight-byte reads here rather than half a megabyte.
-    //
-    // The KEY goes in beside the digest: two fields holding the same tiles at
-    // different coordinates are different fields, and a digest over contents
-    // alone could not tell them apart.
     XXH3_state_t state;
     XXH3_64bits_reset(&state);
-    for (const auto& entry : m_tiles) {
+    for (const Entry& entry : m_chunks) {
         XXH3_64bits_update(&state, &entry.first, sizeof(entry.first));
-        const u64 tile = digestOf(*entry.second);
-        XXH3_64bits_update(&state, &tile, sizeof(u64));
-    }
-    for (const auto& entry : m_bricks) {
-        XXH3_64bits_update(&state, &entry.first, sizeof(entry.first));
-        const u64 brick = digestOf(*entry.second);
-        XXH3_64bits_update(&state, &brick, sizeof(u64));
+        const u64 chunk = entry.second->digest();
+        XXH3_64bits_update(&state, &chunk, sizeof(chunk));
     }
     return XXH3_64bits_digest(&state);
 }
 
-void TerrainField::setTile(TileKey key, std::span<const float> heights, std::span<const u8> materials)
+usize TerrainField::bytes() const noexcept
 {
-    insertOrReplace(m_tiles, key, makeHeightTile(heights, materials));
+    usize total = m_chunks.capacity() * sizeof(Entry);
+    for (const Entry& entry : m_chunks)
+        total += entry.second->bytes();
+    return total;
 }
 
-void TerrainField::setBrick(BrickKey key, std::span<const u8> distances, std::span<const u8> materials)
+TerrainChunk* TerrainField::chunkFor(ChunkKey key)
 {
-    insertOrReplace(m_bricks, key, makeBrick(distances, materials));
-}
-
-// The tile a column belongs to, cloned first when anything else still holds it.
-//
-// **Copy-on-write is what makes both promises true at once**: a snapshot is a
-// vector of shared pointers and costs nothing, and writing a column into a tile
-// this field alone owns costs four bytes rather than five kilobytes.
-HeightTile* TerrainField::tileFor(TileKey key)
-{
-    const auto at = std::lower_bound(m_tiles.begin(), m_tiles.end(), key,
-                                     [](const auto& entry, const TileKey& probe) { return entry.first < probe; });
-    if (at != m_tiles.end() && at->first == key) {
-        if (at->second.use_count() > 1) {
-            at->second = std::make_shared<HeightTile>(*at->second);
-        }
-        at->second->digestValid = false;
+    const auto at = lowerBound(m_chunks, key);
+    if (at != m_chunks.end() && at->first == key) {
+        if (at->second.use_count() > 1)
+            at->second = std::make_shared<TerrainChunk>(*at->second);
         return at->second.get();
     }
-    const auto inserted = m_tiles.insert(at, {key, std::make_shared<HeightTile>()});
-    return inserted->second.get();
+    return m_chunks.insert(at, {key, std::make_shared<TerrainChunk>()})->second.get();
 }
 
-Brick* TerrainField::brickFor(BrickKey key)
+void TerrainField::finishChunk(ChunkKey key)
 {
-    const auto at = std::lower_bound(m_bricks.begin(), m_bricks.end(), key,
-                                     [](const auto& entry, const BrickKey& probe) { return entry.first < probe; });
-    if (at != m_bricks.end() && at->first == key) {
-        if (at->second.use_count() > 1) {
-            at->second = std::make_shared<Brick>(*at->second);
-        }
-        at->second->digestValid = false;
-        return at->second.get();
-    }
-    const auto inserted = m_bricks.insert(at, {key, std::make_shared<Brick>()});
-    return inserted->second.get();
+    const auto at = lowerBound(m_chunks, key);
+    if (at == m_chunks.end() || at->first != key)
+        return;
+    at->second->normalize();
+    if (at->second->empty())
+        m_chunks.erase(at);
 }
 
-void TerrainField::setColumn(i32 x, i32 z, float height, u8 material)
+bool TerrainField::setVoxel(i32 x, i32 y, i32 z, Voxel voxel)
 {
-    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
-    HeightTile* tile = tileFor(key);
-    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
-    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
-    const u32 index = localZ * TileEdge + localX;
-    tile->height[index] = height;
-    tile->material[index] = material;
+    const ChunkKey key = chunkOf(x, y, z);
+    if (canonical(voxel) == Voxel{} && findChunk(key) == nullptr)
+        return false;
+    TerrainChunk* chunk = chunkFor(key);
+    const bool changed = chunk->set(static_cast<u32>(floorMod(x, Edge)), static_cast<u32>(floorMod(y, Edge)),
+                                    static_cast<u32>(floorMod(z, Edge)), voxel);
+    finishChunk(key);
+    return changed;
 }
 
-void TerrainField::setVoxel(i32 x, i32 y, i32 z, u8 distance, u8 material)
+void TerrainField::setChunk(ChunkKey key, std::shared_ptr<TerrainChunk> chunk)
 {
-    const BrickKey key{floorDiv(x, static_cast<i32>(BrickEdge)), floorDiv(y, static_cast<i32>(BrickEdge)),
-                       floorDiv(z, static_cast<i32>(BrickEdge))};
-    const auto at = findEntry(m_bricks, key);
-    if (at == m_bricks.end()) {
+    const auto at = lowerBound(m_chunks, key);
+    const bool exists = at != m_chunks.end() && at->first == key;
+    if (chunk == nullptr || chunk->empty()) {
+        if (exists)
+            m_chunks.erase(at);
         return;
     }
-    if (at->second.use_count() > 1) {
-        at->second = std::make_shared<Brick>(*at->second);
-    }
-    at->second->digestValid = false;
-    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(BrickEdge)));
-    const auto localY = static_cast<u32>(floorMod(y, static_cast<i32>(BrickEdge)));
-    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(BrickEdge)));
-    const u32 index = (localY * BrickEdge + localZ) * BrickEdge + localX;
-    at->second->sd[index] = distance;
-    at->second->material[index] = material;
+    if (exists)
+        at->second = std::move(chunk);
+    else
+        m_chunks.insert(at, {key, std::move(chunk)});
 }
 
-void TerrainField::setHeightRange(float minHeight, float maxHeight) noexcept
+void TerrainField::removeChunk(ChunkKey key)
 {
-    // Refused rather than clamped if it is not a range: an inverted one would
-    // make every examination empty, and the symptom would be terrain that
-    // cannot be sculpted rather than an error.
-    if (!(maxHeight > minHeight))
+    const auto at = lowerBound(m_chunks, key);
+    if (at != m_chunks.end() && at->first == key)
+        m_chunks.erase(at);
+}
+
+void TerrainField::shareFrom(const TerrainField& from)
+{
+    // One merge of the two sorted lists rather than an insertion per chunk:
+    // a cell streamed into a large field would otherwise shift the tail of the
+    // vector once per chunk it brings.
+    if (from.m_chunks.empty())
         return;
-    m_settings.minHeight = minHeight;
-    m_settings.maxHeight = maxHeight;
-}
-
-void TerrainField::removeTile(TileKey key)
-{
-    const auto at = findEntry(m_tiles, key);
-    if (at != m_tiles.end()) {
-        m_tiles.erase(at);
-    }
-}
-
-namespace {
-
-// **One pass over both sorted lists, not an insertion per object.** A cell
-// streamed into a field of ten thousand tiles inserted each of its tiles into the
-// middle of the vector, shifting the rest every time -- measured, a kilometre
-// and a half of ground took seconds to arrive. A merge is linear in the two.
-template <typename Entries>
-void mergeMissing(Entries& into, const Entries& source)
-{
-    if (source.empty())
-        return;
-    Entries merged;
-    merged.reserve(into.size() + source.size());
-    auto held = into.begin();
-    for (const auto& entry : source) {
-        while (held != into.end() && held->first < entry.first)
+    std::vector<Entry> merged;
+    merged.reserve(m_chunks.size() + from.m_chunks.size());
+    auto held = m_chunks.begin();
+    for (const Entry& entry : from.m_chunks) {
+        while (held != m_chunks.end() && held->first < entry.first)
             merged.push_back(std::move(*held++));
-        if (held != into.end() && held->first == entry.first)
+        if (held != m_chunks.end() && held->first == entry.first)
             continue;
         merged.push_back(entry);
     }
-    while (held != into.end())
+    while (held != m_chunks.end())
         merged.push_back(std::move(*held++));
-    into = std::move(merged);
+    m_chunks = std::move(merged);
 }
 
-// Compacts `entries` in place, dropping every one whose key is in the sorted
-// `keys`: one walk down both.
-template <typename Entries, typename Key>
-void removeSorted(Entries& entries, std::span<const Key> keys)
+void TerrainField::removeAll(std::span<const ChunkKey> keys)
 {
     if (keys.empty())
         return;
     auto key = keys.begin();
-    auto kept = entries.begin();
-    for (auto at = entries.begin(); at != entries.end(); ++at) {
+    auto kept = m_chunks.begin();
+    for (auto at = m_chunks.begin(); at != m_chunks.end(); ++at) {
         while (key != keys.end() && *key < at->first)
             ++key;
         if (key != keys.end() && *key == at->first)
@@ -403,29 +516,46 @@ void removeSorted(Entries& entries, std::span<const Key> keys)
             *kept = std::move(*at);
         ++kept;
     }
-    entries.erase(kept, entries.end());
+    m_chunks.erase(kept, m_chunks.end());
 }
 
-} // namespace
-
-void TerrainField::shareFrom(const TerrainField& from)
+void TerrainField::setHeightRange(float minHeight, float maxHeight) noexcept
 {
-    mergeMissing(m_tiles, from.m_tiles);
-    mergeMissing(m_bricks, from.m_bricks);
+    if (!(maxHeight > minHeight))
+        return;
+    m_settings.minHeight = minHeight;
+    m_settings.maxHeight = maxHeight;
 }
 
-void TerrainField::removeAll(std::span<const TileKey> tiles, std::span<const BrickKey> bricks)
-{
-    removeSorted(m_tiles, tiles);
-    removeSorted(m_bricks, bricks);
-}
+// --- FieldWriter ---------------------------------------------------------------
 
-void TerrainField::removeBrick(BrickKey key)
+bool FieldWriter::set(i32 x, i32 y, i32 z, Voxel voxel)
 {
-    const auto at = findEntry(m_bricks, key);
-    if (at != m_bricks.end()) {
-        m_bricks.erase(at);
+    const ChunkKey key = chunkOf(x, y, z);
+    if (m_last == nullptr || !(key == m_lastKey)) {
+        const bool air = canonical(voxel) == Voxel{};
+        if (air && m_field.findChunk(key) == nullptr)
+            return false;
+        m_last = m_field.chunkFor(key);
+        m_lastKey = key;
+        const auto at = std::lower_bound(m_touched.begin(), m_touched.end(), key);
+        if (at == m_touched.end() || !(*at == key))
+            m_touched.insert(at, key);
     }
+    const bool changed = m_last->set(static_cast<u32>(floorMod(x, Edge)), static_cast<u32>(floorMod(y, Edge)),
+                                     static_cast<u32>(floorMod(z, Edge)), voxel);
+    if (changed)
+        m_changed += 1;
+    return changed;
+}
+
+void FieldWriter::finish()
+{
+    // `chunkFor` may have inserted chunks and moved the others, so the cached
+    // pointer is dropped before anything else.
+    m_last = nullptr;
+    for (const ChunkKey key : m_touched)
+        m_field.finishChunk(key);
 }
 
 } // namespace luaug::asset

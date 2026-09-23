@@ -3220,14 +3220,12 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
     }
     else {
         switch (m_brush.op) {
-        // **The round brush raises and lowers heights; the box one carves
-        // volume.** A ball added to flat ground overhangs it at the rim, and
-        // an overhang is voxels -- so a round `fillBall` brush dragged across a
-        // field left a trail of bricks along both edges of every stroke, each
-        // one a cave to mesh on the CPU and a seam between two encodings. The
-        // heightmap editors all sculpt with a height brush for exactly that
-        // reason. The box keeps the volumetric fill, which is what carving a
-        // tunnel or building a ledge actually needs.
+        // **The round brush grows and erodes the surface; the box one adds
+        // and takes away volume.** A ball added to flat ground overhangs it at
+        // the rim, so a round `fillBall` dragged across a field leaves a ridge
+        // of overhang along both edges of every stroke -- which is why the
+        // sculpting editors grow the surface instead. The box keeps the plain
+        // fill, which is what building a ledge or cutting a doorway needs.
         case BrushOp::Add:
             if (box)
                 asset::fillBlock(terrain.field, at, extent, m_brush.material);
@@ -3245,9 +3243,8 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
                 asset::raiseBall(terrain.field, at, radius, -raiseAmount(m_brush));
             break;
         case BrushOp::Smooth:
-            // **Round whichever shape is selected.** Smoothing walks columns
-            // rather than filling a volume, and a square blur leaves visible
-            // corners in ground that is supposed to be getting softer.
+            // **Round whichever shape is selected.** A square blur leaves
+            // visible corners in ground that is supposed to be getting softer.
             asset::smoothBall(terrain.field, at, radius, m_brush.strength);
             break;
         case BrushOp::Flatten:
@@ -3580,16 +3577,10 @@ bool Editor::generateGround(scene::World& world, core::InstanceId rootOrWorkspac
 
     m_history.record(world, "Generate Ground");
 
-    // **Written into the height layer directly rather than carved as a box.**
-    //
-    // The box was the obvious thing and it was two hundred times slower: making
-    // ground that reaches the floor means a block reaching below it, which makes
-    // every column's promotion examination walk the whole reserved range for a
-    // result that is one number. A 128 m square took 225 milliseconds.
-    //
-    // `fillFlat` says the same thing in the encoding's own terms -- one column,
-    // one height, one material -- and produces a field identical to what the box
-    // produced.
+    // **Laid with `fillFlat` rather than carved as a box.** Ground reaching the
+    // world's floor is thousands of voxels a column; `fillFlat` lays the chunks
+    // the ground covers entirely as one value each, and writes voxels only
+    // where the surface passes.
     const core::DVec3 centre{terrain->origin.x, 0.0, terrain->origin.z};
     asset::fillFlat(terrain->field, core::DVec3{centre.x - terrain->origin.x, 0.0, centre.z - terrain->origin.z}, size,
                     height, material);
@@ -3607,7 +3598,7 @@ bool Editor::clearTerrain(scene::World& world, core::InstanceId root, Inspector&
     if (terrain == nullptr) {
         return false;
     }
-    if (terrain->field.tileCount() == 0 && terrain->field.brickCount() == 0) {
+    if (terrain->field.empty()) {
         // Nothing to clear. Refused rather than recorded, because a step that
         // undoes nothing eats a press of ctrl-Z.
         return false;

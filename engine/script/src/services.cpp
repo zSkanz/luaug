@@ -1,5 +1,6 @@
 #include "luaug/script/services.h"
 
+#include "luaug/asset/terrain.h"
 #include "luaug/asset/voxel_mesher.h"
 #include "luaug/input/input.h"
 #include "luaug/platform/event.h"
@@ -710,9 +711,55 @@ int physicsGetRegisteredCollisionGroups(lua_State* L)
     return filter;
 }
 
+// **The nearest terrain surface along a ray, asked of the voxels themselves**
+// (ADR 0082). A terrain only has colliders near things that move, so a ray far
+// from every body would pass through ground that has none; the field answers
+// everywhere. Honours the instance filter: an excluded terrain is not hit, and
+// an include list that does not name it leaves it out.
+struct TerrainRayHit
+{
+    core::InstanceId terrain;
+    core::DVec3 position;
+    core::Vec3 normal;
+    f64 distance = std::numeric_limits<f64>::max();
+};
+
+[[nodiscard]] TerrainRayHit raycastTerrains(lua_State* L, core::InstanceId workspace, core::Vec3 origin,
+                                            core::Vec3 direction, const physics::QueryFilter& filter)
+{
+    TerrainRayHit best;
+    const f64 reach = static_cast<f64>(core::length(direction));
+    if (!(reach > 0.0))
+        return best;
+    World& w = world(L);
+    const scene::PhysicsSync* sync = services(L).physics;
+    w.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
+        if (terrain.field.empty() || !w.isAncestorOf(workspace, id))
+            return;
+        if (sync != nullptr) {
+            const u64 mine = sync->userDataOf(id);
+            const bool named = std::find(filter.userData.begin(), filter.userData.end(), mine) != filter.userData.end();
+            if (filter.mode == physics::QueryFilter::Mode::Include ? !named : named)
+                return;
+        }
+        const core::DVec3 local{static_cast<f64>(origin.x) - terrain.origin.x,
+                                static_cast<f64>(origin.y) - terrain.origin.y,
+                                static_cast<f64>(origin.z) - terrain.origin.z};
+        const std::optional<asset::TerrainHit> hit = asset::raycastField(terrain.field, local, direction, reach);
+        if (!hit.has_value() || hit->distance >= best.distance)
+            return;
+        best.terrain = id;
+        best.position = core::DVec3{hit->position.x + terrain.origin.x, hit->position.y + terrain.origin.y,
+                                    hit->position.z + terrain.origin.z};
+        best.normal = hit->normal;
+        best.distance = hit->distance;
+    });
+    return best;
+}
+
 int workspaceRaycast(lua_State* L)
 {
-    (void)checkInstance(L, 1);
+    const core::InstanceId workspace = checkInstance(L, 1);
     const core::Vec3 origin = checkVector3(L, 2);
     const core::Vec3 direction = checkVector3(L, 3);
 
@@ -730,7 +777,16 @@ int workspaceRaycast(lua_State* L)
     ray.direction = direction;
 
     physics::RayHit hit;
-    if (!sync->backend().raycast(sync->worldHandle(), ray, filter, hit)) {
+    const bool bodyHit = sync->backend().raycast(sync->worldHandle(), ray, filter, hit);
+    const TerrainRayHit ground = raycastTerrains(L, workspace, origin, direction, filter);
+    // Whichever is nearer. A terrain's own collider, where it has one, and
+    // the field agree to within the mesh; the body wins a tie so a part lying
+    // on the ground is what a ray at it meets.
+    if (ground.terrain.valid() && (!bodyHit || ground.distance < static_cast<f64>(hit.distance))) {
+        pushRaycastResult(L, ground.terrain, ground.position, ground.normal, static_cast<f32>(ground.distance));
+        return 1;
+    }
+    if (!bodyHit) {
         lua_pushnil(L);
         return 1;
     }

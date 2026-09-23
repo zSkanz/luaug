@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -11,402 +12,364 @@ namespace luaug::asset {
 namespace {
 
 using core::i32;
+using core::u16;
 using core::u32;
 using core::u8;
 using core::usize;
 using core::Vec3;
 
-// The eight corners of a lattice cell, indexed so that bit 0 is x, bit 1 is y
-// and bit 2 is z. Written as a table rather than computed inline because every
-// cell's edges index it, and one transposed literal here would be a surface
-// subtly in the wrong place everywhere.
+// The eight corners of a lattice cell: bit 0 is x, bit 1 is y, bit 2 is z.
 constexpr std::array<std::array<i32, 3>, 8> CornerOffsets{{
-    {0, 0, 0}, // 0
-    {1, 0, 0}, // 1
-    {0, 1, 0}, // 2
-    {1, 1, 0}, // 3
-    {0, 0, 1}, // 4
-    {1, 0, 1}, // 5
-    {0, 1, 1}, // 6
-    {1, 1, 1}, // 7
+    {0, 0, 0},
+    {1, 0, 0},
+    {0, 1, 0},
+    {1, 1, 0},
+    {0, 0, 1},
+    {1, 0, 1},
+    {0, 1, 1},
+    {1, 1, 1},
 }};
 
-// One sampled lattice point.
-struct Corner
-{
-    i32 x = 0;
-    i32 y = 0;
-    i32 z = 0;
-    float distance = 0.0f;
-    core::u8 material = 0;
-};
+// The twelve edges of a cell, as corner pairs.
+constexpr std::array<std::array<int, 2>, 12> CellEdges{{
+    {0, 1},
+    {2, 3},
+    {4, 5},
+    {6, 7}, // along x
+    {0, 2},
+    {1, 3},
+    {4, 6},
+    {5, 7}, // along y
+    {0, 4},
+    {1, 5},
+    {2, 6},
+    {3, 7}, // along z
+}};
 
-// Where along the edge the surface crosses.
-//
-// **Guarded against a zero denominator**, which happens when both endpoints sit
-// exactly on the surface -- and that is not a pathological case here, it is what
-// `sd(p) = p.y - H` produces whenever the ground passes exactly through a
-// lattice plane. Half is the honest answer when the field says the whole edge is
-// the surface.
+// Where along an edge occupancy passes one half. Guarded for two equal ends,
+// which cannot straddle the half -- but a caller that asks should get the
+// middle, not a division by zero.
 [[nodiscard]] float crossingAt(float a, float b) noexcept
 {
     const float delta = b - a;
-    if (std::abs(delta) < 1e-12f) {
+    if (std::abs(delta) < 1e-6f)
         return 0.5f;
-    }
-    return std::clamp(-a / delta, 0.0f, 1.0f);
+    return std::clamp((0.5f - a) / delta, 0.0f, 1.0f);
 }
 
-// **How much of the sky a cave vertex sees**, from 0 (buried) to 1 (open).
-//
-// A heightfield estimate, and deliberately so: the field's top surface --
-// `heightAt`, which over a cave is the roof's top and over a shaft is the floor
-// it falls to -- sampled on a fixed disc around the point, and each sample
-// counts as blocking by how far the ground there stands above the point. Deep
-// in a tunnel every sample is roof, at its mouth the plain outside is not, and
-// under a shaft the shaft is not: the light fades in over a few metres from
-// each opening, which is what a cave looks like.
-//
-// Rays through the volume would see around corners this cannot, at a hundred
-// times the cost, on a path that runs every time a brush touches a cave --
-// the engines that do light caves properly bake it or trace it on the GPU,
-// and until this one does either, the sky is the light that must not get in.
-// A fixed pattern, so the same field meshes to the same bytes.
-[[nodiscard]] float skyVisibility(const TerrainField& field, core::Vec3 position, core::Vec3 normal) noexcept
+// **The voxels of a box, at one level, read a chunk at a time.** Sampling voxel
+// by voxel through the field is a binary search per sample; a node is tens of
+// thousands of samples, and this is one search per chunk the box touches.
+void gather(const TerrainField& field, u32 level, i32 x0, i32 y0, i32 z0, i32 sizeX, i32 sizeY, i32 sizeZ,
+            std::vector<u16>& out)
 {
-    struct Tap
-    {
-        float x;
-        float z;
+    out.assign(static_cast<usize>(sizeX) * static_cast<usize>(sizeY) * static_cast<usize>(sizeZ), 0);
+    const i32 edge = static_cast<i32>(ChunkEdge) >> level;
+    const auto slot = [&](i32 x, i32 y, i32 z) {
+        return (static_cast<usize>(z - z0) * static_cast<usize>(sizeY) + static_cast<usize>(y - y0)) *
+                   static_cast<usize>(sizeX) +
+               static_cast<usize>(x - x0);
     };
-    // The point itself, six at 2.5 m and eight at 5 m.
-    static constexpr std::array<Tap, 15> Taps{{
-        {0.0f, 0.0f},
-        {2.5f, 0.0f},
-        {1.25f, 2.165f},
-        {-1.25f, 2.165f},
-        {-2.5f, 0.0f},
-        {-1.25f, -2.165f},
-        {1.25f, -2.165f},
-        {4.619f, 1.913f},
-        {1.913f, 4.619f},
-        {-1.913f, 4.619f},
-        {-4.619f, 1.913f},
-        {-4.619f, -1.913f},
-        {-1.913f, -4.619f},
-        {1.913f, -4.619f},
-        {4.619f, -1.913f},
-    }};
-    // Ground this far above the point blocks fully; less, partly. The start
-    // is a little above zero so a vertex ON the top surface is not shadowed
-    // by the ground it is part of.
-    constexpr float Clear = 0.5f;
-    constexpr float Solid = 3.0f;
-    // **Measured from a point lifted off the surface along its normal**, which
-    // is where the light arriving at it comes from. On the mountain's outside
-    // that point is in the open air; in a tunnel it is in the tunnel, under the
-    // roof -- whichever wall, floor or ceiling the vertex is on. Measured from
-    // the vertex itself, a steep outside face disagreed with the height of its
-    // own column by most of a metre and drew a staircase of shadow.
-    constexpr float Lift = 1.5f;
-    const Vec3 from{position.x + normal.x * Lift, position.y + normal.y * Lift, position.z + normal.z * Lift};
-    // **A point with no ground over it sees the sky, full stop** -- the same
-    // answer the height-map ground beside it gets, which has no term for this
-    // at all. Counting the uphill taps of a steep slope as a roof is truer in
-    // a sense, and it drew every cave column's patch of the mountain's outside
-    // darker than the ground around it.
-    const std::optional<float> own = heightAt(field, static_cast<double>(from.x), static_cast<double>(from.z));
-    if (!own.has_value() || *own <= from.y)
-        return 1.0f;
-    float blocked = 0.0f;
-    for (const Tap& tap : Taps) {
-        const std::optional<float> top =
-            heightAt(field, static_cast<double>(from.x + tap.x), static_cast<double>(from.z + tap.z));
-        if (!top.has_value())
-            continue;
-        blocked += std::clamp((*top - from.y - Clear) / (Solid - Clear), 0.0f, 1.0f);
+    std::array<u16, ChunkEdge> row{};
+    for (i32 cz = floorDiv(z0, edge); cz <= floorDiv(z0 + sizeZ - 1, edge); ++cz) {
+        for (i32 cx = floorDiv(x0, edge); cx <= floorDiv(x0 + sizeX - 1, edge); ++cx) {
+            // One column of chunks: its entries in y order, walked alongside.
+            const std::span<const TerrainField::Entry> column = field.column(cx, cz);
+            for (const TerrainField::Entry& entry : column) {
+                const i32 cy = entry.first.y;
+                const i32 lowY = std::max(y0, cy * edge);
+                const i32 highY = std::min(y0 + sizeY, (cy + 1) * edge);
+                if (lowY >= highY)
+                    continue;
+                const i32 lowX = std::max(x0, cx * edge);
+                const i32 highX = std::min(x0 + sizeX, (cx + 1) * edge);
+                const i32 lowZ = std::max(z0, cz * edge);
+                const i32 highZ = std::min(z0 + sizeZ, (cz + 1) * edge);
+                const TerrainChunk& chunk = *entry.second;
+                if (chunk.uniform()) {
+                    const u16 value = packVoxel(chunk.value());
+                    for (i32 z = lowZ; z < highZ; ++z) {
+                        for (i32 y = lowY; y < highY; ++y) {
+                            u16* first = &out[slot(lowX, y, z)];
+                            std::fill(first, first + (highX - lowX), value);
+                        }
+                    }
+                    continue;
+                }
+                if (level > 0)
+                    chunk.prepareMip(level);
+                for (i32 z = lowZ; z < highZ; ++z) {
+                    for (i32 y = lowY; y < highY; ++y) {
+                        const auto ly = static_cast<u32>(y - cy * edge);
+                        const auto lz = static_cast<u32>(z - cz * edge);
+                        if (level == 0) {
+                            chunk.readRow(ly, lz, row);
+                            for (i32 x = lowX; x < highX; ++x)
+                                out[slot(x, y, z)] = row[static_cast<usize>(x - cx * edge)];
+                        }
+                        else {
+                            for (i32 x = lowX; x < highX; ++x)
+                                out[slot(x, y, z)] =
+                                    packVoxel(chunk.mip(level, static_cast<u32>(x - cx * edge), ly, lz));
+                        }
+                    }
+                }
+            }
+        }
     }
-    return 1.0f - blocked / static_cast<float>(Taps.size());
 }
 
 } // namespace
 
-TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
+std::optional<std::pair<i32, i32>> activeRows(const TerrainField& field, i32 chunkX, i32 chunkZ, i32 across)
 {
-    TerrainMesh out;
-    const float voxel = field.settings().voxelSize;
-    const auto stride = static_cast<i32>(std::max(region.stride, 1u));
-
-    // The surface is INSIDE where distance is negative, so a corner is "solid"
-    // when its distance is below zero. Zero counts as solid, which puts a sample
-    // sitting exactly on the surface on the inside -- an arbitrary choice that
-    // has to be made consistently, because two cells disagreeing about a
-    // shared corner is a crack.
-    const auto solid = [](const Corner& corner) noexcept { return corner.distance <= 0.0f; };
-
-    // **The lattice, sampled once.**
-    //
-    // Every cell wants its eight corners and every corner is shared by eight
-    // cells, so sampling per cell asks the field for the same point eight times
-    // -- 262,000 lookups for a 32-cubed region where 36,000 would do. Each
-    // lookup is two binary searches and a pair of floor-divisions, and together
-    // they were most of the ten milliseconds a tile cost to mesh.
-    //
-    // Read straight through, in x-fastest order, which is also the order the
-    // walk below asks for them in.
-    //
-    // The gradient reaches one step OUTSIDE this grid at its faces, and that
-    // falls back to the field -- a surface of the region's own edge rather than
-    // a special case in the hot path.
-    const usize gridX = static_cast<usize>(region.cellsX) + 1;
-    const usize gridY = static_cast<usize>(region.cellsY) + 1;
-    const usize gridZ = static_cast<usize>(region.cellsZ) + 1;
-    std::vector<FieldSample> lattice(gridX * gridY * gridZ);
-    for (usize iz = 0; iz < gridZ; ++iz) {
-        for (usize iy = 0; iy < gridY; ++iy) {
-            for (usize ix = 0; ix < gridX; ++ix) {
-                lattice[(iz * gridY + iy) * gridX + ix] =
-                    field.sample(region.minX + static_cast<i32>(ix) * static_cast<i32>(stride),
-                                 region.minY + static_cast<i32>(iy) * static_cast<i32>(stride),
-                                 region.minZ + static_cast<i32>(iz) * static_cast<i32>(stride));
+    constexpr auto edge = static_cast<i32>(ChunkEdge);
+    i32 low = std::numeric_limits<i32>::max();
+    i32 high = std::numeric_limits<i32>::lowest();
+    const auto solid = [](const TerrainChunk& chunk) { return chunk.uniform() && chunk.value().occupancy >= 128; };
+    // Whether one layer of a chunk is ground all the way across: a solid chunk
+    // under a chunk whose bottom layer is all ground has no surface on its top
+    // face, whatever is further up.
+    const auto layerSolid = [](const TerrainChunk& chunk, core::u32 y) {
+        if (chunk.uniform())
+            return chunk.value().occupancy >= 128;
+        std::array<u16, ChunkEdge> row{};
+        for (core::u32 z = 0; z < ChunkEdge; ++z) {
+            chunk.readRow(y, z, row);
+            for (const u16 value : row) {
+                if ((value & 0xFF) < 128)
+                    return false;
+            }
+        }
+        return true;
+    };
+    for (i32 cz = chunkZ - 1; cz <= chunkZ + across; ++cz) {
+        for (i32 cx = chunkX - 1; cx <= chunkX + across; ++cx) {
+            const std::span<const TerrainField::Entry> column = field.column(cx, cz);
+            for (usize at = 0; at < column.size(); ++at) {
+                const TerrainField::Entry& entry = column[at];
+                const TerrainChunk& chunk = *entry.second;
+                bool interesting = !chunk.uniform();
+                if (!interesting && solid(chunk)) {
+                    // Solid, and what is above it is not: its top is a surface.
+                    const bool above = at + 1 < column.size() && column[at + 1].first.y == entry.first.y + 1 &&
+                                       layerSolid(*column[at + 1].second, 0);
+                    // Air under it and not the floor of the world: an underside.
+                    const bool below = at == 0 || (column[at - 1].first.y == entry.first.y - 1 &&
+                                                   layerSolid(*column[at - 1].second, ChunkEdge - 1));
+                    interesting = !above || !below;
+                }
+                if (!interesting)
+                    continue;
+                low = std::min(low, entry.first.y * edge);
+                high = std::max(high, entry.first.y * edge + edge - 1);
             }
         }
     }
+    if (low > high)
+        return std::nullopt;
+    // A voxel either side: a surface on a chunk's face is between its last
+    // voxel and the next chunk's first.
+    return std::pair{low - 2, high + 2};
+}
 
-    // A lattice point's sample, from the grid when it is in it and from the
-    // field when it is not.
-    const auto sampleOf = [&](i32 x, i32 y, i32 z) noexcept -> FieldSample {
-        const i32 dx = x - region.minX;
-        const i32 dy = y - region.minY;
-        const i32 dz = z - region.minZ;
-        const auto step = static_cast<i32>(stride);
-        if (dx < 0 || dy < 0 || dz < 0 || dx % step != 0 || dy % step != 0 || dz % step != 0) {
-            return field.sample(x, y, z);
-        }
-        const auto ix = static_cast<usize>(dx / step);
-        const auto iy = static_cast<usize>(dy / step);
-        const auto iz = static_cast<usize>(dz / step);
-        if (ix >= gridX || iy >= gridY || iz >= gridZ) {
-            return field.sample(x, y, z);
-        }
-        return lattice[(iz * gridY + iy) * gridX + ix];
+TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
+{
+    TerrainMesh out;
+    if (region.cellsX == 0 || region.cellsY == 0 || region.cellsZ == 0 || region.level >= ChunkLevels)
+        return out;
+    const u32 level = region.level;
+    const float step = field.settings().voxelSize * static_cast<float>(1u << level);
+    const auto nx = static_cast<i32>(region.cellsX);
+    const auto ny = static_cast<i32>(region.cellsY);
+    const auto nz = static_cast<i32>(region.cellsZ);
+
+    // **The samples: the owned points, a cell ring below them, and one more on
+    // every side for the gradient.** Owned points are `[min, min + n)`; cells
+    // run from `min - 1` to `min + n - 1` and read points `min - 1` to
+    // `min + n`; the gradient at those reads one further out.
+    const i32 sx0 = region.minX - 2;
+    const i32 sy0 = region.minY - 2;
+    const i32 sz0 = region.minZ - 2;
+    const i32 sizeX = nx + 4;
+    const i32 sizeY = ny + 4;
+    const i32 sizeZ = nz + 4;
+    std::vector<u16> samples;
+    gather(field, level, sx0, sy0, sz0, sizeX, sizeY, sizeZ, samples);
+    const auto sampleIndex = [&](i32 sx, i32 sy, i32 sz) {
+        return (static_cast<usize>(sz) * static_cast<usize>(sizeY) + static_cast<usize>(sy)) *
+                   static_cast<usize>(sizeX) +
+               static_cast<usize>(sx);
+    };
+    // Local sample coordinates throughout: `s = lattice - (min - 2)`.
+    const auto occupancy = [&](i32 sx, i32 sy, i32 sz) {
+        return static_cast<float>(samples[sampleIndex(sx, sy, sz)] & 0xFF) / static_cast<float>(FullOccupancy);
+    };
+    const auto materialAt = [&](i32 sx, i32 sy, i32 sz) {
+        return static_cast<u8>(samples[sampleIndex(sx, sy, sz)] >> 8);
+    };
+    // The surface normal at a sample: the negative gradient of occupancy, by
+    // central differences. Read from the field rather than from the triangles,
+    // so it is smooth across them -- and the same in two neighbouring regions,
+    // which read the same samples.
+    const auto normalAt = [&](i32 sx, i32 sy, i32 sz) {
+        return Vec3{occupancy(sx - 1, sy, sz) - occupancy(sx + 1, sy, sz),
+                    occupancy(sx, sy - 1, sz) - occupancy(sx, sy + 1, sz),
+                    occupancy(sx, sy, sz - 1) - occupancy(sx, sy, sz + 1)};
     };
 
-    const auto sampleAt = [&](i32 x, i32 y, i32 z) noexcept {
-        const FieldSample got = sampleOf(x, y, z);
-        return Corner{x, y, z, got.distance, got.material};
-    };
-
-    // The gradient, by central differences, which is the surface normal. Read
-    // from the FIELD rather than computed from the triangle: a triangle normal
-    // is faceted and a field gradient is smooth, and the gradient is also what
-    // decides the winding below.
-    const auto gradientAt = [&](i32 x, i32 y, i32 z) noexcept {
-        const auto step = static_cast<i32>(stride);
-        const float dx = sampleOf(x + step, y, z).distance - sampleOf(x - step, y, z).distance;
-        const float dy = sampleOf(x, y + step, z).distance - sampleOf(x, y - step, z).distance;
-        const float dz = sampleOf(x, y, z + step).distance - sampleOf(x, y, z - step).distance;
-        const Vec3 gradient{dx, dy, dz};
-        const float length = std::sqrt(gradient.x * gradient.x + gradient.y * gradient.y + gradient.z * gradient.z);
-        if (length < 1e-8f) {
-            return Vec3{0.0f, 1.0f, 0.0f};
+    // **The column tops the sky term reads**, one per level column over the
+    // region and far enough round it for the widest tap. Built once, where a
+    // search per tap per vertex was most of a region's cost.
+    const i32 margin = static_cast<i32>(std::ceil(6.5f / step)) + 1;
+    const i32 mapX0 = region.minX - margin;
+    const i32 mapZ0 = region.minZ - margin;
+    const i32 mapW = nx + 2 * margin;
+    const i32 mapD = nz + 2 * margin;
+    std::vector<float> tops(static_cast<usize>(mapW) * static_cast<usize>(mapD));
+    const auto half = static_cast<i32>((1u << level) / 2);
+    for (i32 z = 0; z < mapD; ++z) {
+        for (i32 x = 0; x < mapW; ++x) {
+            const i32 columnX = (mapX0 + x) * static_cast<i32>(1u << level) + half;
+            const i32 columnZ = (mapZ0 + z) * static_cast<i32>(1u << level) + half;
+            tops[static_cast<usize>(z) * static_cast<usize>(mapW) + static_cast<usize>(x)] =
+                field.columnTop(columnX, columnZ).value_or(std::numeric_limits<float>::quiet_NaN());
         }
-        return Vec3{gradient.x / length, gradient.y / length, gradient.z / length};
+    }
+    const auto topAt = [&](float x, float z) {
+        const i32 kx = std::clamp(static_cast<i32>(std::floor(x / step)) - mapX0, 0, mapW - 1);
+        const i32 kz = std::clamp(static_cast<i32>(std::floor(z / step)) - mapZ0, 0, mapD - 1);
+        return tops[static_cast<usize>(kz) * static_cast<usize>(mapW) + static_cast<usize>(kx)];
     };
 
-    // What each vertex is the surface of, parallel to `out.mesh.vertices`. Not a
-    // member of `Vertex`: that struct is a GPU buffer layout and its size is
-    // asserted, so a material byte in it would change every world shader.
+    // **How much of the sky a vertex sees**, from 0 to 1: the column tops on a
+    // fixed disc round it, each counted as blocking by how far it stands above
+    // the point, measured from a point lifted off the surface along its normal.
+    // Deep in a tunnel every tap is roof, at its mouth the plain outside is not.
+    // A fixed pattern, so the same field meshes to the same bytes.
+    const auto skyVisibility = [&](Vec3 position, Vec3 normal) {
+        struct Tap
+        {
+            float x;
+            float z;
+        };
+        static constexpr std::array<Tap, 15> Taps{{
+            {0.0f, 0.0f},
+            {2.5f, 0.0f},
+            {1.25f, 2.165f},
+            {-1.25f, 2.165f},
+            {-2.5f, 0.0f},
+            {-1.25f, -2.165f},
+            {1.25f, -2.165f},
+            {4.619f, 1.913f},
+            {1.913f, 4.619f},
+            {-1.913f, 4.619f},
+            {-4.619f, 1.913f},
+            {-4.619f, -1.913f},
+            {-1.913f, -4.619f},
+            {1.913f, -4.619f},
+            {4.619f, -1.913f},
+        }};
+        constexpr float Clear = 0.5f;
+        constexpr float Solid = 3.0f;
+        constexpr float Lift = 1.5f;
+        const Vec3 from{position.x + normal.x * Lift, position.y + normal.y * Lift, position.z + normal.z * Lift};
+        // A point with no ground over it sees the sky, full stop.
+        const float own = topAt(from.x, from.z);
+        if (std::isnan(own) || own <= from.y)
+            return 1.0f;
+        float blocked = 0.0f;
+        for (const Tap& tap : Taps) {
+            const float top = topAt(from.x + tap.x, from.z + tap.z);
+            if (std::isnan(top))
+                continue;
+            blocked += std::clamp((top - from.y - Clear) / (Solid - Clear), 0.0f, 1.0f);
+        }
+        return 1.0f - blocked / static_cast<float>(Taps.size());
+    };
+
+    // --- Vertices: one per cell the surface passes through ---------------
+    //
+    // Cells `[min - 1, min + n)` on each axis, n + 1 of them; a cell's local
+    // index `c` has its low corner at local sample `c + 1`.
+    const i32 cellsX = nx + 1;
+    const i32 cellsY = ny + 1;
+    const i32 cellsZ = nz + 1;
+    constexpr u32 NoVertex = 0xFFFFFFFFu;
+    std::vector<u32> cellVertex(static_cast<usize>(cellsX) * static_cast<usize>(cellsY) * static_cast<usize>(cellsZ),
+                                NoVertex);
+    const auto cellIndex = [&](i32 x, i32 y, i32 z) {
+        return (static_cast<usize>(z) * static_cast<usize>(cellsY) + static_cast<usize>(y)) *
+                   static_cast<usize>(cellsX) +
+               static_cast<usize>(x);
+    };
+    // Which of the region's four sides a vertex's cell is on the outer ring
+    // of: 1 low x, 2 high x, 4 low z, 8 high z. What the skirts hang from.
+    std::vector<u8> vertexRing;
     std::vector<u8> vertexMaterial;
 
-    // Triangles by material, ordered so the sections come out the same way on
-    // every machine.
-    std::map<u8, std::vector<u32>> buckets;
-
-    // **Winding is derived from the field, not from a case table.** The triangle
-    // is emitted, its geometric normal computed, and the order reversed when it
-    // disagrees with the gradient -- so "which way does this face" stops being
-    // something a table can have backwards. That class of bug already cost this
-    // milestone a failing test in the physics seam, where a quad wound the wrong
-    // way was a floor that a cube fell through.
-    const auto emitTriangle = [&](u32 a, u32 b, u32 c) {
-        if (a == b || b == c || a == c) {
-            return; // Degenerate: two crossings landed on the same point.
-        }
-        const Vec3& pa = out.mesh.vertices[a].position;
-        const Vec3& pb = out.mesh.vertices[b].position;
-        const Vec3& pc = out.mesh.vertices[c].position;
-        const Vec3 ab{pb.x - pa.x, pb.y - pa.y, pb.z - pa.z};
-        const Vec3 ac{pc.x - pa.x, pc.y - pa.y, pc.z - pa.z};
-        const Vec3 face{ab.y * ac.z - ab.z * ac.y, ab.z * ac.x - ab.x * ac.z, ab.x * ac.y - ab.y * ac.x};
-
-        const Vec3& reference = out.mesh.vertices[a].normal;
-        const float agreement = face.x * reference.x + face.y * reference.y + face.z * reference.z;
-        const u32 second = agreement < 0.0f ? c : b;
-        const u32 third = agreement < 0.0f ? b : c;
-
-        // **Bucketed by material rather than appended**, which is what makes a
-        // painted hillside look painted: one section per material, each drawn
-        // with its own colour. The triangle takes the majority of its three
-        // vertices, and a three-way tie takes the lowest id -- an arbitrary rule
-        // that has to be a rule, because a tie broken by iteration order would
-        // put the visit order into the mesh (R10).
-        const u8 ma = vertexMaterial[a];
-        const u8 mb = vertexMaterial[second];
-        const u8 mc = vertexMaterial[third];
-        u8 material = ma;
-        if (mb == mc && mb != ma) {
-            material = mb;
-        }
-        else if (ma != mb && ma != mc && mb != mc) {
-            material = std::min({ma, mb, mc});
-        }
-
-        std::vector<u32>& bucket = buckets[material];
-        bucket.push_back(a);
-        bucket.push_back(second);
-        bucket.push_back(third);
-
-        // **The collider is one surface and stays one.** What a body stands on
-        // does not depend on what it is made of, and splitting it would build a
-        // separate `TriangleMesh` per material for no gain.
-        out.colliderIndices.push_back(a);
-        out.colliderIndices.push_back(second);
-        out.colliderIndices.push_back(third);
-    };
-
-    // **Surface nets: one vertex per cell the surface passes through, one quad
-    // per lattice edge it crosses.**
-    //
-    // This replaced marching tetrahedra, and a person looking at a cave wall is
-    // why. Six tetrahedra around each cube's main diagonal put that diagonal
-    // into the surface: every curved wall came out as a zig-zag of long thin
-    // triangles leaning the same way, and interpolated normals could soften the
-    // shading but not the silhouette. A surface net places each vertex at the
-    // average of the crossings on its cell's twelve edges -- the centre of the
-    // little patch of surface inside the cell -- and joins the four cells
-    // around every crossed edge with a quad. The result follows the field
-    // without a preferred direction, and has roughly a third of the triangles.
-    //
-    // What it gives up is exact vertices on the lattice's edges, which marching
-    // methods have: two regions meshed side by side do not share vertices along
-    // their seam. Nothing here needs them to -- a cave region overlaps the
-    // ground it replaces by a cell -- and the collider tolerates the overlap.
-    const usize cellsX = region.cellsX;
-    const usize cellsY = region.cellsY;
-    const usize cellsZ = region.cellsZ;
-    constexpr u32 NoVertex = 0xFFFFFFFFu;
-    std::vector<u32> cellVertex(cellsX * cellsY * cellsZ, NoVertex);
-    const auto cellIndex = [&](usize x, usize y, usize z) noexcept { return (z * cellsY + y) * cellsX + x; };
-    const auto latticeSolid = [&](usize x, usize y, usize z) noexcept {
-        return lattice[(z * gridY + y) * gridX + x].distance <= 0.0f;
-    };
-
-    // The twelve edges of a cell, as corner-index pairs (bit 0 x, bit 1 y,
-    // bit 2 z).
-    constexpr std::array<std::array<int, 2>, 12> CellEdges{{
-        {0, 1},
-        {2, 3},
-        {4, 5},
-        {6, 7}, // along x
-        {0, 2},
-        {1, 3},
-        {4, 6},
-        {5, 7}, // along y
-        {0, 4},
-        {1, 5},
-        {2, 6},
-        {3, 7}, // along z
-    }};
-
-    for (usize cellZ = 0; cellZ < cellsZ; ++cellZ) {
-        for (usize cellY = 0; cellY < cellsY; ++cellY) {
-            for (usize cellX = 0; cellX < cellsX; ++cellX) {
-                const i32 baseX = region.minX + static_cast<i32>(cellX) * stride;
-                const i32 baseY = region.minY + static_cast<i32>(cellY) * stride;
-                const i32 baseZ = region.minZ + static_cast<i32>(cellZ) * stride;
-
-                std::array<Corner, 8> corners{};
+    for (i32 cz = 0; cz < cellsZ; ++cz) {
+        for (i32 cy = 0; cy < cellsY; ++cy) {
+            for (i32 cx = 0; cx < cellsX; ++cx) {
+                std::array<float, 8> corner{};
                 int inside = 0;
                 for (int at = 0; at < 8; ++at) {
-                    corners[static_cast<usize>(at)] =
-                        sampleAt(baseX + CornerOffsets[static_cast<usize>(at)][0] * stride,
-                                 baseY + CornerOffsets[static_cast<usize>(at)][1] * stride,
-                                 baseZ + CornerOffsets[static_cast<usize>(at)][2] * stride);
-                    if (solid(corners[static_cast<usize>(at)]))
+                    const auto& offset = CornerOffsets[static_cast<usize>(at)];
+                    corner[static_cast<usize>(at)] =
+                        occupancy(cx + 1 + offset[0], cy + 1 + offset[1], cz + 1 + offset[2]);
+                    if (corner[static_cast<usize>(at)] >= 0.5f)
                         inside |= 1 << at;
                 }
                 if (inside == 0 || inside == 0xFF)
-                    continue; // Wholly solid or wholly air: no surface here.
+                    continue;
 
-                // The vertex: the mean of the crossings, and the gradient
-                // interpolated to each crossing, summed.
                 float sumX = 0.0f;
                 float sumY = 0.0f;
                 float sumZ = 0.0f;
                 Vec3 normalSum{0.0f, 0.0f, 0.0f};
                 int crossings = 0;
-                for (const std::array<int, 2>& edge : CellEdges) {
-                    const Corner& a = corners[static_cast<usize>(edge[0])];
-                    const Corner& b = corners[static_cast<usize>(edge[1])];
-                    if (solid(a) == solid(b))
+                for (const std::array<int, 2>& edgeCorners : CellEdges) {
+                    const auto a = static_cast<usize>(edgeCorners[0]);
+                    const auto b = static_cast<usize>(edgeCorners[1]);
+                    if (((inside >> a) & 1) == ((inside >> b) & 1))
                         continue;
-                    const float t = crossingAt(a.distance, b.distance);
-                    sumX += static_cast<float>(a.x) + (static_cast<float>(b.x) - static_cast<float>(a.x)) * t;
-                    sumY += static_cast<float>(a.y) + (static_cast<float>(b.y) - static_cast<float>(a.y)) * t;
-                    sumZ += static_cast<float>(a.z) + (static_cast<float>(b.z) - static_cast<float>(a.z)) * t;
-                    const Vec3 ga = gradientAt(a.x, a.y, a.z);
-                    const Vec3 gb = gradientAt(b.x, b.y, b.z);
-                    normalSum.x += ga.x + (gb.x - ga.x) * t;
-                    normalSum.y += ga.y + (gb.y - ga.y) * t;
-                    normalSum.z += ga.z + (gb.z - ga.z) * t;
+                    const float t = crossingAt(corner[a], corner[b]);
+                    const auto& oa = CornerOffsets[a];
+                    const auto& ob = CornerOffsets[b];
+                    sumX += static_cast<float>(oa[0]) + static_cast<float>(ob[0] - oa[0]) * t;
+                    sumY += static_cast<float>(oa[1]) + static_cast<float>(ob[1] - oa[1]) * t;
+                    sumZ += static_cast<float>(oa[2]) + static_cast<float>(ob[2] - oa[2]) * t;
+                    const Vec3 na = normalAt(cx + 1 + oa[0], cy + 1 + oa[1], cz + 1 + oa[2]);
+                    const Vec3 nb = normalAt(cx + 1 + ob[0], cy + 1 + ob[1], cz + 1 + ob[2]);
+                    normalSum.x += na.x + (nb.x - na.x) * t;
+                    normalSum.y += na.y + (nb.y - na.y) * t;
+                    normalSum.z += na.z + (nb.z - na.z) * t;
                     ++crossings;
                 }
                 const float inverse = 1.0f / static_cast<float>(crossings);
-                Vec3 position{sumX * inverse * voxel, sumY * inverse * voxel, sumZ * inverse * voxel};
-
-                // On a side that meets a height field, the outer ring snaps to
-                // the lattice point where that field's last vertex is: the
-                // cell's inner corner on the snapped axis, and on the other axis
-                // its far corner, so a row of ring cells lands on every lattice
-                // point along the side exactly once -- the height field's own
-                // vertices, one for one.
-                {
-                    const bool lowX = cellX == 0 && (region.snapSides & 1u) != 0;
-                    const bool highX = cellX + 1 == cellsX && (region.snapSides & 2u) != 0;
-                    const bool lowZ = cellZ == 0 && (region.snapSides & 4u) != 0;
-                    const bool highZ = cellZ + 1 == cellsZ && (region.snapSides & 8u) != 0;
-                    if (lowX || highX || lowZ || highZ) {
-                        const i32 atX = highX ? baseX : baseX + stride;
-                        const i32 atZ = highZ ? baseZ : baseZ + stride;
-                        // The height layer's height there, read back from its own
-                        // identity `sd = y - H`. A column with no ground in it
-                        // has no height to meet, and keeps its own vertex.
-                        const FieldSample there = sampleOf(atX, baseY, atZ);
-                        if (there.material != 0) {
-                            position = Vec3{static_cast<float>(atX) * voxel,
-                                            static_cast<float>(baseY) * voxel - there.distance,
-                                            static_cast<float>(atZ) * voxel};
-                        }
-                    }
-                }
+                // The cell's low corner is lattice point `min - 1 + c`, whose
+                // centre is half a step in.
+                const Vec3 position{
+                    (static_cast<float>(region.minX - 1 + cx) + sumX * inverse + 0.5f) * step,
+                    (static_cast<float>(region.minY - 1 + cy) + sumY * inverse + 0.5f) * step,
+                    (static_cast<float>(region.minZ - 1 + cz) + sumZ * inverse + 0.5f) * step,
+                };
                 const float normalLength =
                     std::sqrt(normalSum.x * normalSum.x + normalSum.y * normalSum.y + normalSum.z * normalSum.z);
                 const Vec3 normal = normalLength < 1e-8f ? Vec3{0.0f, 1.0f, 0.0f}
                                                          : Vec3{normalSum.x / normalLength, normalSum.y / normalLength,
                                                                 normalSum.z / normalLength};
 
-                // **What the cell is made of: the commonest material among its
-                // SOLID corners**, lowest id on a tie. The air corners' material
-                // is whatever the ground there used to be, and a hole's colour on
-                // the wall around it is the mistake that rule avoids.
+                // **The commonest material among the cell's SOLID corners**,
+                // lowest id on a tie. An air corner has no material.
                 std::array<u8, 8> seen{};
                 std::array<int, 8> votes{};
                 int kinds = 0;
                 for (int at = 0; at < 8; ++at) {
                     if ((inside & (1 << at)) == 0)
                         continue;
-                    const u8 material = corners[static_cast<usize>(at)].material;
+                    const auto& offset = CornerOffsets[static_cast<usize>(at)];
+                    const u8 material = materialAt(cx + 1 + offset[0], cy + 1 + offset[1], cz + 1 + offset[2]);
                     int slot = 0;
                     while (slot < kinds && seen[static_cast<usize>(slot)] != material)
                         ++slot;
@@ -430,10 +393,9 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                 Vertex vertex;
                 vertex.position = position;
                 vertex.normal = normal;
-                // **Triplanar UVs are the terrain's business and not this
-                // function's.** What goes here is the world position on the two
-                // axes the normal is least aligned with, which is the same answer
-                // for the same point however it was reached.
+                // The world position on the two axes the normal is least
+                // aligned with. The terrain shader lays its own triplanar
+                // detail; this is for whatever reads a mesh's UVs.
                 const float ax = std::abs(normal.x);
                 const float ay = std::abs(normal.y);
                 const float az = std::abs(normal.z);
@@ -449,98 +411,114 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                     vertex.uv[0] = position.x;
                     vertex.uv[1] = position.y;
                 }
-
-                // **The material rides in the tangent's x**, as a number. A
-                // terrain surface has no tangent frame of its own -- the terrain
-                // shaders build one from the normal -- and the vertex layout is a
-                // GPU buffer whose size is asserted, so this is where a per-vertex
-                // material can go without a second stream. It is what lets the
-                // cave shader blend materials across a triangle instead of
-                // changing colour at its edge.
+                // **The material rides in the tangent's x and the sky in its
+                // y.** A terrain has no tangent frame of its own -- its shader
+                // builds one -- and `Vertex` is a GPU layout whose size is
+                // asserted, so this is where they fit without a second stream.
                 vertex.tangent[0] = static_cast<float>(material);
-                // And the sky it sees, in the y, for the same reason.
-                vertex.tangent[1] = skyVisibility(field, position, normal);
+                vertex.tangent[1] = skyVisibility(position, normal);
                 vertex.tangent[2] = 0.0f;
                 vertex.tangent[3] = 1.0f;
-                cellVertex[cellIndex(cellX, cellY, cellZ)] = static_cast<u32>(out.mesh.vertices.size());
+
+                u8 ring = 0;
+                if (cx == 0)
+                    ring |= 1;
+                if (cx == cellsX - 1)
+                    ring |= 2;
+                if (cz == 0)
+                    ring |= 4;
+                if (cz == cellsZ - 1)
+                    ring |= 8;
+
+                cellVertex[cellIndex(cx, cy, cz)] = static_cast<u32>(out.mesh.vertices.size());
                 out.mesh.vertices.push_back(vertex);
                 out.colliderPoints.push_back(position);
                 vertexMaterial.push_back(material);
+                vertexRing.push_back(ring);
             }
         }
     }
 
-    // The quads. A lattice edge the surface crosses is shared by four cells,
-    // and their four vertices are the quad around it -- emitted only where all
-    // four cells are inside the region. `emitTriangle` derives each triangle's
-    // winding from the field, so the order around the edge does not matter.
-    const auto quad = [&](usize x0, usize y0, usize z0, usize x1, usize y1, usize z1, usize x2, usize y2, usize z2,
-                          usize x3, usize y3, usize z3) {
-        const u32 a = cellVertex[cellIndex(x0, y0, z0)];
-        const u32 b = cellVertex[cellIndex(x1, y1, z1)];
-        const u32 c = cellVertex[cellIndex(x2, y2, z2)];
-        const u32 d = cellVertex[cellIndex(x3, y3, z3)];
+    // --- Quads: one round each crossed edge that starts on an owned point --
+    std::map<u8, std::vector<u32>> buckets;
+    // **Winding from the field, not from a table**: the triangle is emitted,
+    // its face normal compared with the field's, and its order reversed when
+    // they disagree. A table can have a case backwards; this cannot.
+    const auto emitTriangle = [&](u32 a, u32 b, u32 c) {
+        if (a == b || b == c || a == c)
+            return;
+        const Vec3& pa = out.mesh.vertices[a].position;
+        const Vec3& pb = out.mesh.vertices[b].position;
+        const Vec3& pc = out.mesh.vertices[c].position;
+        const Vec3 ab{pb.x - pa.x, pb.y - pa.y, pb.z - pa.z};
+        const Vec3 ac{pc.x - pa.x, pc.y - pa.y, pc.z - pa.z};
+        const Vec3 face{ab.y * ac.z - ab.z * ac.y, ab.z * ac.x - ab.x * ac.z, ab.x * ac.y - ab.y * ac.x};
+        const Vec3 reference{
+            out.mesh.vertices[a].normal.x + out.mesh.vertices[b].normal.x + out.mesh.vertices[c].normal.x,
+            out.mesh.vertices[a].normal.y + out.mesh.vertices[b].normal.y + out.mesh.vertices[c].normal.y,
+            out.mesh.vertices[a].normal.z + out.mesh.vertices[b].normal.z + out.mesh.vertices[c].normal.z};
+        const float agreement = face.x * reference.x + face.y * reference.y + face.z * reference.z;
+        const u32 second = agreement < 0.0f ? c : b;
+        const u32 third = agreement < 0.0f ? b : c;
+
+        // The majority of the three vertices' materials, lowest on a three-way
+        // tie: a rule, so the visit order never reaches the mesh (R10).
+        const u8 ma = vertexMaterial[a];
+        const u8 mb = vertexMaterial[second];
+        const u8 mc = vertexMaterial[third];
+        u8 material = ma;
+        if (mb == mc && mb != ma)
+            material = mb;
+        else if (ma != mb && ma != mc && mb != mc)
+            material = std::min({ma, mb, mc});
+
+        std::vector<u32>& bucket = buckets[material];
+        bucket.push_back(a);
+        bucket.push_back(second);
+        bucket.push_back(third);
+        out.colliderIndices.push_back(a);
+        out.colliderIndices.push_back(second);
+        out.colliderIndices.push_back(third);
+    };
+    const auto quad = [&](std::array<i32, 3> c0, std::array<i32, 3> c1, std::array<i32, 3> c2, std::array<i32, 3> c3) {
+        const u32 a = cellVertex[cellIndex(c0[0], c0[1], c0[2])];
+        const u32 b = cellVertex[cellIndex(c1[0], c1[1], c1[2])];
+        const u32 c = cellVertex[cellIndex(c2[0], c2[1], c2[2])];
+        const u32 d = cellVertex[cellIndex(c3[0], c3[1], c3[2])];
         if (a == NoVertex || b == NoVertex || c == NoVertex || d == NoVertex)
             return;
         emitTriangle(a, b, c);
         emitTriangle(a, c, d);
     };
-    for (usize z = 0; z < gridZ; ++z) {
-        for (usize y = 0; y < gridY; ++y) {
-            for (usize x = 0; x < gridX; ++x) {
-                const bool here = latticeSolid(x, y, z);
-                // Along x: the cells around it are y-1..y by z-1..z.
-                if (x < cellsX && y >= 1 && y < cellsY && z >= 1 && z < cellsZ && here != latticeSolid(x + 1, y, z))
-                    quad(x, y - 1, z - 1, x, y, z - 1, x, y, z, x, y - 1, z);
-                // Along y: x-1..x by z-1..z.
-                if (y < cellsY && x >= 1 && x < cellsX && z >= 1 && z < cellsZ && here != latticeSolid(x, y + 1, z))
-                    quad(x - 1, y, z - 1, x, y, z - 1, x, y, z, x - 1, y, z);
-                // Along z: x-1..x by y-1..y.
-                if (z < cellsZ && x >= 1 && x < cellsX && y >= 1 && y < cellsY && here != latticeSolid(x, y, z + 1))
-                    quad(x - 1, y - 1, z, x, y - 1, z, x, y, z, x - 1, y, z);
+    // Owned point `p` (local `o` in [0, n)) is sample `o + 2`, and the cell
+    // whose low corner is point `p - 1 + k` has local index `o + k`.
+    for (i32 oz = 0; oz < nz; ++oz) {
+        for (i32 oy = 0; oy < ny; ++oy) {
+            for (i32 ox = 0; ox < nx; ++ox) {
+                const bool here = occupancy(ox + 2, oy + 2, oz + 2) >= 0.5f;
+                // Along x: cells (x) by (y-1, y) by (z-1, z).
+                if (here != (occupancy(ox + 3, oy + 2, oz + 2) >= 0.5f))
+                    quad({ox + 1, oy, oz}, {ox + 1, oy + 1, oz}, {ox + 1, oy + 1, oz + 1}, {ox + 1, oy, oz + 1});
+                // Along y: (x-1, x) by (y) by (z-1, z).
+                if (here != (occupancy(ox + 2, oy + 3, oz + 2) >= 0.5f))
+                    quad({ox, oy + 1, oz}, {ox + 1, oy + 1, oz}, {ox + 1, oy + 1, oz + 1}, {ox, oy + 1, oz + 1});
+                // Along z: (x-1, x) by (y-1, y) by (z).
+                if (here != (occupancy(ox + 2, oy + 2, oz + 3) >= 0.5f))
+                    quad({ox, oy, oz + 1}, {ox + 1, oy, oz + 1}, {ox + 1, oy + 1, oz + 1}, {ox, oy + 1, oz + 1});
             }
         }
     }
 
-    // **Skirts, hung from every edge the region's own side cuts.**
+    // --- Skirts ------------------------------------------------------------
     //
-    // A boundary edge is one exactly one triangle uses; in a surface cut by a
-    // box, those are the edges on the box's faces. Only the four SIDE faces
-    // matter -- a skirt on the top or bottom face would hang into the surface
-    // it belongs to -- so an edge counts only when both its ends lie on the same
-    // side plane.
-    //
-    // Emitted both windings, because which side of a skirt faces the camera
-    // depends on which neighbour is the coarse one, and a skirt culled from the
-    // side that matters is no skirt.
-    // The buckets and not `out.mesh.indices`: the index buffer is assembled
-    // from them further down, so at this point it is still empty.
+    // A boundary edge is one a single triangle uses. One whose two ends are on
+    // the same side's outer ring of cells is where this region meets its
+    // neighbour; a strip hung from it along the negative normal covers a crack
+    // to a neighbour meshed at another level. Both windings, because which face
+    // a camera sees depends on which neighbour is the coarse one.
     if (region.skirt > 0.0f && !buckets.empty()) {
-        const auto step = static_cast<float>(stride) * voxel;
-        const float sideMinX = static_cast<float>(region.minX) * voxel;
-        const float sideMinZ = static_cast<float>(region.minZ) * voxel;
-        const float sideMaxX = sideMinX + static_cast<float>(region.cellsX) * step;
-        const float sideMaxZ = sideMinZ + static_cast<float>(region.cellsZ) * step;
-        const float tolerance = voxel * 1e-3f;
-
-        // Which side plane a point lies on, or -1.
-        const auto sideOf = [&](const Vec3& p) noexcept -> int {
-            if (std::abs(p.x - sideMinX) < tolerance)
-                return 0;
-            if (std::abs(p.x - sideMaxX) < tolerance)
-                return 1;
-            if (std::abs(p.z - sideMinZ) < tolerance)
-                return 2;
-            if (std::abs(p.z - sideMaxZ) < tolerance)
-                return 3;
-            return -1;
-        };
-
-        // Edge use counts, keyed by the ordered index pair. Only read by key
-        // and then walked in the ORDER THE TRIANGLES WERE EMITTED below, so the
-        // container's own order never reaches the mesh.
         std::unordered_map<core::u64, u32> uses;
-        const auto edgeKey = [](u32 a, u32 b) noexcept {
+        const auto edgeKey = [](u32 a, u32 b) {
             const u32 lo = std::min(a, b);
             const u32 hi = std::max(a, b);
             return (static_cast<core::u64>(lo) << 32) | hi;
@@ -553,21 +531,11 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                 ++uses[edgeKey(list[at + 2], list[at])];
             }
         }
-
-        // The lowered copy of a vertex, made once per vertex.
+        // Lowered copies, made once per vertex and looked up by index only.
         std::unordered_map<u32, u32> lowered;
         const auto lowerOf = [&](u32 index) {
             if (const auto at = lowered.find(index); at != lowered.end())
                 return at->second;
-            // **Against the surface normal, not straight down.** Straight down
-            // is the textbook skirt and it only covers the crack a HEIGHT FIELD
-            // has, which is a vertical gap under a horizontal edge. A volume
-            // has cliffs, and the crack between two levels on a cliff face is a
-            // horizontal gap that a skirt hanging downward runs parallel to and
-            // never fills -- the first render with levels on showed exactly that,
-            // a sliver of sky down the side of the example's plateau. Hung
-            // against the normal, the same strip goes down under flat ground and
-            // into the rock behind a cliff.
             Vertex copy = out.mesh.vertices[index];
             copy.position.x -= copy.normal.x * region.skirt;
             copy.position.y -= copy.normal.y * region.skirt;
@@ -575,22 +543,19 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
             const auto made = static_cast<u32>(out.mesh.vertices.size());
             out.mesh.vertices.push_back(copy);
             vertexMaterial.push_back(vertexMaterial[index]);
+            vertexRing.push_back(0);
             lowered.emplace(index, made);
             return made;
         };
-
         for (auto& entry : buckets) {
             std::vector<u32>& list = entry.second;
             const usize triangles = list.size();
             for (usize at = 0; at + 2 < triangles; at += 3) {
                 const u32 corners[3] = {list[at], list[at + 1], list[at + 2]};
-                for (int edge = 0; edge < 3; ++edge) {
-                    const u32 a = corners[edge];
-                    const u32 b = corners[(edge + 1) % 3];
-                    if (uses[edgeKey(a, b)] != 1)
-                        continue;
-                    const int side = sideOf(out.mesh.vertices[a].position);
-                    if (side < 0 || side != sideOf(out.mesh.vertices[b].position))
+                for (int edgeIndex = 0; edgeIndex < 3; ++edgeIndex) {
+                    const u32 a = corners[edgeIndex];
+                    const u32 b = corners[(edgeIndex + 1) % 3];
+                    if ((vertexRing[a] & vertexRing[b]) == 0 || uses[edgeKey(a, b)] != 1)
                         continue;
                     const u32 la = lowerOf(a);
                     const u32 lb = lowerOf(b);
@@ -601,7 +566,6 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         }
     }
 
-    // The bounds every consumer of an `asset::Mesh` expects to be filled.
     if (!out.mesh.vertices.empty()) {
         Vec3 min = out.mesh.vertices.front().position;
         Vec3 max = min;
@@ -616,18 +580,11 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         out.mesh.bounds = core::AABB{min, max};
     }
 
-    // **One section per material, in id order.** A `std::map` rather than an
-    // unordered one for the reason everything in this module is ordered: the
-    // section order reaches a GPU buffer and a world hash, and an allocator's
-    // iteration order is not a fact about the world (R10).
-    //
-    // The index buffer is assembled here rather than as it goes, because a
-    // section is a contiguous run and triangles arrive interleaved -- a cell
-    // straddling grass and rock emits both within three lines of each other.
+    // **One section per material, in id order** -- a `std::map`, because the
+    // section order reaches a GPU buffer and a world hash (R10).
     for (const auto& entry : buckets) {
-        if (entry.second.empty()) {
+        if (entry.second.empty())
             continue;
-        }
         Submesh section;
         section.firstIndex = static_cast<u32>(out.mesh.indices.size());
         section.indexCount = static_cast<u32>(entry.second.size());
@@ -635,7 +592,6 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         out.mesh.submeshes.push_back(section);
         out.sectionMaterials.push_back(entry.first);
     }
-
     return out;
 }
 

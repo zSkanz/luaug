@@ -1251,7 +1251,7 @@ TEST_CASE("a taken texture is loaded again, because the library is what says it 
     CHECK(textures.find(urn).id == 6u);
 }
 
-// --- Terrain (F1 Part D, ADR 0067) ------------------------------------------
+// --- Terrain (ADR 0082) ------------------------------------------
 
 TEST_CASE("a world with no terrain extracts exactly what it did before")
 {
@@ -1269,7 +1269,7 @@ TEST_CASE("a world with no terrain extracts exactly what it did before")
     CHECK(snapshot.draws.empty());
 }
 
-TEST_CASE("a terrain cave draws once its mesh is in the library")
+TEST_CASE("a terrain node draws once the loader has chosen it and its mesh is in the library")
 {
     // A workspace with a camera, because that is what a draw needs: `extract`
     // builds its frustum from `Workspace.CurrentCamera` and a world with no
@@ -1281,27 +1281,24 @@ TEST_CASE("a terrain cave draws once its mesh is in the library")
 
     const core::InstanceId terrain = fixture.world.create(fixture.folderClass);
     scene::TerrainComponent component;
-    component.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(asset::TileArea, 2.0f);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    component.field.setTile(asset::TileKey{0, 0}, heights, materials);
-    // A pocket of air under the ground: the one thing on terrain that is a mesh
-    // (ADR 0071). The ground itself is drawn from the height atlas and is never
-    // a `DrawItem`.
+    component.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 1.0f});
+    (void)asset::fillFlat(component.field, core::DVec3{0.0, 0.0, 0.0}, 32.0f, 2.0f, 1);
     (void)asset::fillBall(component.field, core::DVec3{4.0, -1.0, 4.0}, 1.5, 0);
-    REQUIRE(component.field.brickCount() > 0);
     component.fieldRevision = 1;
     fixture.world.terrains().add(terrain, component);
     REQUIRE(fixture.world.setParent(terrain, root) == std::nullopt);
 
+    const core::NameAtom urn = fixture.atoms.intern(render::terrainNodeUrn(terrain, render::TerrainNodeKey{0, 0, 0}));
+    const std::array<render::TerrainNodeDraw, 1> chosen{render::TerrainNodeDraw{terrain, urn}};
+
     // **Nothing yet**, because the geometry has not been built. Skipped rather
-    // than substituted: a cave whose mesh is a frame behind is ground that is
-    // not there for a frame, and a placeholder for it is a hole nobody notices.
+    // than substituted: ground whose mesh is a frame behind is ground that is not
+    // there for a frame, and a placeholder for it is a hole nobody notices.
     render::RenderWorld before;
-    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, before);
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, before,
+                    nullptr, {}, nullptr, chosen);
     CHECK(before.draws.empty());
 
-    // The loader files it under the URN both halves agree on.
     render::MeshLibrary library;
     render::MeshLibrary::Entry entry;
     entry.mesh = render::MeshHandle{1, 1};
@@ -1309,13 +1306,19 @@ TEST_CASE("a terrain cave draws once its mesh is in the library")
     entry.sectionCount = 1;
     entry.sectionMaterial.assign(1, 0u);
     entry.materials.push_back(render::RenderMaterial{});
-    library.set(fixture.atoms.intern(render::terrainCaveUrn(terrain, asset::TileKey{0, 0})), std::move(entry));
+    library.set(urn, std::move(entry));
+
+    // Not chosen: not drawn, whatever is in the library.
+    render::RenderWorld unchosen;
+    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, unchosen);
+    CHECK(unchosen.draws.empty());
 
     render::RenderWorld after;
-    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, after);
-
+    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, after,
+                    nullptr, {}, nullptr, chosen);
     REQUIRE(after.draws.size() == 1);
     CHECK(after.draws[0].mesh.index == 1);
+    CHECK(after.draws[0].terrain);
     // **Opaque and unskinned**, which terrain always is: there is no
     // `Transparency` on ground and no rig under it.
     CHECK_FALSE(after.draws[0].transparent);
@@ -1325,16 +1328,15 @@ TEST_CASE("a terrain cave draws once its mesh is in the library")
     // made of `MeshPart`s: no phantom body, no Explorer row, no snapshot cost.
     CHECK(after.parts.empty());
 
-    // **A selected terrain outlines nothing.** The outline pass draws through
-    // everything in front of it, and a cave mesh is the part of the ground
-    // that is NOT the ground: its sides and skirt sit buried under the height
-    // layer. Outlined, they showed through a dug crater as a tinted lid and a
+    // **A selected terrain outlines nothing** (D161). The outline pass draws
+    // through everything in front of it, and a node's skirts are buried in the
+    // ground: outlined, they showed through a dug crater as a tinted lid and a
     // row of boxes -- which is what selecting a terrain looked like, and
     // `Create Terrain` selects the terrain it makes.
     const std::array<core::InstanceId, 1> selection{terrain};
     render::RenderWorld selected;
     render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, selected,
-                    nullptr, selection);
+                    nullptr, selection, nullptr, chosen);
     REQUIRE(selected.draws.size() == 1);
     CHECK_FALSE(selected.draws[0].outlined);
 }
@@ -1349,24 +1351,24 @@ TEST_CASE("terrain outside the root is not in the world")
 
     const core::InstanceId terrain = fixture.world.create(fixture.folderClass);
     scene::TerrainComponent component;
-    component.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(asset::TileArea, 2.0f);
-    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
-    component.field.setTile(asset::TileKey{0, 0}, heights, materials);
-    (void)asset::fillBall(component.field, core::DVec3{4.0, -1.0, 4.0}, 1.5, 0);
+    component.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 1.0f});
+    (void)asset::fillFlat(component.field, core::DVec3{0.0, 0.0, 0.0}, 32.0f, 2.0f, 1);
     fixture.world.terrains().add(terrain, component);
     REQUIRE(fixture.world.setParent(terrain, elsewhere) == std::nullopt);
 
+    const core::NameAtom urn = fixture.atoms.intern(render::terrainNodeUrn(terrain, render::TerrainNodeKey{0, 0, 0}));
     render::MeshLibrary library;
     render::MeshLibrary::Entry entry;
     entry.mesh = render::MeshHandle{1, 1};
     entry.sectionCount = 1;
     entry.sectionMaterial.assign(1, 0u);
     entry.materials.push_back(render::RenderMaterial{});
-    library.set(fixture.atoms.intern(render::terrainCaveUrn(terrain, asset::TileKey{0, 0})), std::move(entry));
+    library.set(urn, std::move(entry));
+    const std::array<render::TerrainNodeDraw, 1> chosen{render::TerrainNodeDraw{terrain, urn}};
 
     render::RenderWorld snapshot;
-    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
+    render::extract(fixture.world, root, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
+                    nullptr, {}, nullptr, chosen);
 
     // Whatever is parented under the root is in the world and whatever is not,
     // is not -- and terrain is not an exception to that.

@@ -980,7 +980,7 @@ int methodRagdollBuild(lua_State* L)
 // What `Instance` and `Model` declare. `WaitForChild` is absent on purpose: it
 // parks on a tree state rather than on a value this file can produce, so it is
 // implemented beside the services that make the tree move.
-// --- Terrain (ADR 0067) ------------------------------------------------------
+// --- Terrain (ADR 0082) ------------------------------------------------------
 //
 // **Every verb here writes the field, and the field is part of the world.** So a
 // sculpt is undoable in the editor, it moves the world hash, and it saves with
@@ -1015,7 +1015,8 @@ int methodTerrainFillBall(lua_State* L)
                            static_cast<double>(center.y) - terrain->origin.y,
                            static_cast<double>(center.z) - terrain->origin.z};
     const asset::EditReport report = asset::fillBall(terrain->field, wide, radius, material);
-    terrain->fieldRevision += 1;
+    if (report.touched > 0)
+        terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
     return 1;
 }
@@ -1038,7 +1039,8 @@ int methodTerrainRaiseBall(lua_State* L)
                            static_cast<double>(center.y) - terrain->origin.y,
                            static_cast<double>(center.z) - terrain->origin.z};
     const asset::EditReport report = asset::raiseBall(terrain->field, wide, radius, amount);
-    terrain->fieldRevision += 1;
+    if (report.touched > 0)
+        terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
     return 1;
 }
@@ -1061,7 +1063,8 @@ int methodTerrainFillBlock(lua_State* L)
                            static_cast<double>(center.y) - terrain->origin.y,
                            static_cast<double>(center.z) - terrain->origin.z};
     const asset::EditReport report = asset::fillBlock(terrain->field, wide, size, material);
-    terrain->fieldRevision += 1;
+    if (report.touched > 0)
+        terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
     return 1;
 }
@@ -1099,15 +1102,16 @@ int methodTerrainWriteHeights(lua_State* L)
         lua_pop(L, 1);
     }
 
-    // The field's own space, snapped down to its lattice: the first height is
-    // the column at or below the corner, which is what a heightmap's first
-    // pixel means.
+    // The field's own space, snapped down to its grid: the first height is the
+    // voxel column the corner falls in, which is what a heightmap's first pixel
+    // means.
     const double voxel = static_cast<double>(terrain->field.settings().voxelSize);
     const auto firstX = static_cast<core::i32>(std::floor((static_cast<double>(corner.x) - terrain->origin.x) / voxel));
     const auto firstZ = static_cast<core::i32>(std::floor((static_cast<double>(corner.z) - terrain->origin.z) / voxel));
     const asset::EditReport report = asset::writeHeights(
         terrain->field, firstX, firstZ, static_cast<core::u32>(columns), heights, static_cast<core::u8>(material));
-    terrain->fieldRevision += 1;
+    if (report.touched > 0)
+        terrain->fieldRevision += 1;
     lua_pushinteger(L, static_cast<int>(report.touched));
     return 1;
 }
@@ -1176,18 +1180,271 @@ int methodTerrainClear(lua_State* L)
     return 0;
 }
 
+// **Nothing to do, and kept so scripts written against the hybrid still run.**
+// Every write leaves the voxels compact (ADR 0082); there is no second encoding
+// to convert back to.
 int methodTerrainCompact(lua_State* L)
 {
+    (void)liveInstance(L, 1);
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+// A brush's centre, from a script's world `vector` into the field's own space.
+[[nodiscard]] core::DVec3 intoField(const scene::TerrainComponent& terrain, core::Vec3 at) noexcept
+{
+    return core::DVec3{static_cast<double>(at.x) - terrain.origin.x, static_cast<double>(at.y) - terrain.origin.y,
+                       static_cast<double>(at.z) - terrain.origin.z};
+}
+
+// Answers the count a brush changed, bumping the revision only when it did:
+// a brush that changed nothing must not rebuild a collider.
+int finishEdit(lua_State* L, scene::TerrainComponent& terrain, const asset::EditReport& report)
+{
+    if (report.touched > 0)
+        terrain.fieldRevision += 1;
+    lua_pushinteger(L, static_cast<int>(report.touched));
+    return 1;
+}
+
+int methodTerrainFillCylinder(lua_State* L)
+{
     const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const auto height = static_cast<double>(luaL_checknumber(L, 3));
+    const auto radius = static_cast<double>(luaL_checknumber(L, 4));
+    const auto material = static_cast<core::u8>(luaL_checkinteger(L, 5));
     scene::TerrainComponent* terrain = world(L).terrains().find(id);
     if (terrain == nullptr) {
         lua_pushinteger(L, 0);
         return 1;
     }
-    const core::u32 converted = asset::compact(terrain->field);
-    if (converted > 0)
-        terrain->fieldRevision += 1;
-    lua_pushinteger(L, static_cast<int>(converted));
+    return finishEdit(L, *terrain,
+                      asset::fillCylinder(terrain->field, intoField(*terrain, center), height, radius, material));
+}
+
+int methodTerrainSmoothBall(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const auto radius = static_cast<double>(luaL_checknumber(L, 3));
+    const auto strength = static_cast<float>(luaL_optnumber(L, 4, 0.5));
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    return finishEdit(L, *terrain, asset::smoothBall(terrain->field, intoField(*terrain, center), radius, strength));
+}
+
+int methodTerrainFlattenBall(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 center = checkVector3(L, 2);
+    const auto radius = static_cast<double>(luaL_checknumber(L, 3));
+    const auto height = luaL_checknumber(L, 4);
+    const auto strength = static_cast<float>(luaL_optnumber(L, 5, 1.0));
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    // A world height, like every other verb's, into the field's own space.
+    const auto local = static_cast<float>(height - terrain->origin.y);
+    return finishEdit(L, *terrain,
+                      asset::flattenBall(terrain->field, intoField(*terrain, center), radius, local, strength));
+}
+
+int methodTerrainReplaceMaterial(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 low = checkVector3(L, 2);
+    const core::Vec3 high = checkVector3(L, 3);
+    const auto from = static_cast<core::u8>(luaL_checkinteger(L, 4));
+    const auto to = static_cast<core::u8>(luaL_checkinteger(L, 5));
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    return finishEdit(
+        L, *terrain,
+        asset::replaceMaterial(terrain->field, intoField(*terrain, low), intoField(*terrain, high), from, to));
+}
+
+// The largest region `ReadVoxels` and `WriteVoxels` take, in voxels: 256 on a
+// side. Past it a script wants a loop of regions, not one table of sixteen
+// million entries.
+constexpr core::usize MaxVoxelRegion = 256u * 256u * 256u;
+
+// The voxel box a pair of world corners names: every voxel whose cube overlaps
+// `[low, high)`, snapped outward to the grid.
+struct VoxelRegion
+{
+    core::i32 x = 0;
+    core::i32 y = 0;
+    core::i32 z = 0;
+    core::i32 sizeX = 0;
+    core::i32 sizeY = 0;
+    core::i32 sizeZ = 0;
+
+    [[nodiscard]] core::usize count() const noexcept
+    {
+        return static_cast<core::usize>(sizeX) * static_cast<core::usize>(sizeY) * static_cast<core::usize>(sizeZ);
+    }
+};
+
+[[nodiscard]] VoxelRegion regionOf(const scene::TerrainComponent& terrain, core::Vec3 low, core::Vec3 high)
+{
+    const double voxel = static_cast<double>(terrain.field.settings().voxelSize);
+    const core::DVec3 a = intoField(terrain, low);
+    const core::DVec3 b = intoField(terrain, high);
+    const auto first = [voxel](double p, double q) {
+        return static_cast<core::i32>(std::floor(std::min(p, q) / voxel));
+    };
+    const auto past = [voxel](double p, double q) { return static_cast<core::i32>(std::ceil(std::max(p, q) / voxel)); };
+    VoxelRegion region;
+    region.x = first(a.x, b.x);
+    region.y = first(a.y, b.y);
+    region.z = first(a.z, b.z);
+    region.sizeX = std::max(past(a.x, b.x) - region.x, 0);
+    region.sizeY = std::max(past(a.y, b.y) - region.y, 0);
+    region.sizeZ = std::max(past(a.z, b.z) - region.z, 0);
+    return region;
+}
+
+// **Materials and occupancies, flat, x fastest, then y, then z**: index
+// `1 + x + sizeX * (y + sizeY * z)`, with the size returned third. Flat rather
+// than nested three deep because a table of tables of tables is a table per row
+// for a script to allocate and the engine to walk, for no information the size
+// does not already give.
+int methodTerrainReadVoxels(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 low = checkVector3(L, 2);
+    const core::Vec3 high = checkVector3(L, 3);
+    const scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_createtable(L, 0, 0);
+        lua_createtable(L, 0, 0);
+        pushVector3(L, core::Vec3{});
+        return 3;
+    }
+    const VoxelRegion region = regionOf(*terrain, low, high);
+    if (region.count() > MaxVoxelRegion) {
+        const core::I18nArg args[] = {{"count", static_cast<core::i64>(region.count())},
+                                      {"limit", static_cast<core::i64>(MaxVoxelRegion)}};
+        raise(L, LUAUG_TR("scene.err.terrain_region_too_large"), args);
+    }
+    const auto count = static_cast<int>(region.count());
+    lua_createtable(L, count, 0);
+    const int materials = lua_gettop(L);
+    lua_createtable(L, count, 0);
+    const int occupancies = lua_gettop(L);
+    int at = 1;
+    for (core::i32 z = 0; z < region.sizeZ; ++z) {
+        for (core::i32 y = 0; y < region.sizeY; ++y) {
+            for (core::i32 x = 0; x < region.sizeX; ++x) {
+                const asset::Voxel voxel = terrain->field.voxel(region.x + x, region.y + y, region.z + z);
+                lua_pushinteger(L, voxel.material);
+                lua_rawseti(L, materials, at);
+                lua_pushnumber(L, static_cast<double>(asset::occupancyOf(voxel)));
+                lua_rawseti(L, occupancies, at);
+                ++at;
+            }
+        }
+    }
+    pushVector3(L, core::Vec3{static_cast<float>(region.sizeX), static_cast<float>(region.sizeY),
+                              static_cast<float>(region.sizeZ)});
+    return 3;
+}
+
+// The inverse: `corner` names the first voxel (the one it falls in), `size`
+// how many on each axis, and the two tables are laid out as `ReadVoxels`
+// returns them. A material of zero, or an occupancy of zero, is air.
+int methodTerrainWriteVoxels(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 corner = checkVector3(L, 2);
+    const core::Vec3 size = checkVector3(L, 3);
+    luaL_checktype(L, 4, LUA_TTABLE);
+    luaL_checktype(L, 5, LUA_TTABLE);
+    scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    VoxelRegion region;
+    const core::DVec3 local = intoField(*terrain, corner);
+    region.x = terrain->field.voxelIndex(local.x);
+    region.y = terrain->field.voxelIndex(local.y);
+    region.z = terrain->field.voxelIndex(local.z);
+    region.sizeX = static_cast<core::i32>(std::max(std::floor(size.x), 0.0f));
+    region.sizeY = static_cast<core::i32>(std::max(std::floor(size.y), 0.0f));
+    region.sizeZ = static_cast<core::i32>(std::max(std::floor(size.z), 0.0f));
+    const auto materialCount = static_cast<core::usize>(lua_objlen(L, 4));
+    const auto occupancyCount = static_cast<core::usize>(lua_objlen(L, 5));
+    if (region.count() > MaxVoxelRegion || materialCount != region.count() || occupancyCount != region.count()) {
+        const core::I18nArg args[] = {{"count", static_cast<core::i64>(region.count())},
+                                      {"materials", static_cast<core::i64>(materialCount)},
+                                      {"occupancies", static_cast<core::i64>(occupancyCount)}};
+        raise(L, LUAUG_TR("scene.err.terrain_voxels_shape"), args);
+    }
+    asset::FieldWriter writer(terrain->field);
+    int at = 1;
+    for (core::i32 z = 0; z < region.sizeZ; ++z) {
+        for (core::i32 y = 0; y < region.sizeY; ++y) {
+            for (core::i32 x = 0; x < region.sizeX; ++x) {
+                lua_rawgeti(L, 4, at);
+                const lua_Integer material = lua_isnumber(L, -1) != 0 ? lua_tointeger(L, -1) : 0;
+                lua_pop(L, 1);
+                lua_rawgeti(L, 5, at);
+                const double occupancy = lua_isnumber(L, -1) != 0 ? lua_tonumber(L, -1) : 0.0;
+                lua_pop(L, 1);
+                ++at;
+                const auto id8 = static_cast<core::u8>(std::clamp<lua_Integer>(material, 0, 255));
+                (void)writer.set(region.x + x, region.y + y, region.z + z,
+                                 asset::Voxel{asset::quantiseOccupancy(static_cast<float>(occupancy)), id8});
+            }
+        }
+    }
+    writer.finish();
+    asset::EditReport report;
+    report.touched = writer.changed();
+    return finishEdit(L, *terrain, report);
+}
+
+// Which voxel a world position falls in, as its index on each axis.
+int methodTerrainWorldToCell(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 position = checkVector3(L, 2);
+    const scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        pushVector3(L, core::Vec3{});
+        return 1;
+    }
+    const core::DVec3 local = intoField(*terrain, position);
+    pushVector3(L, core::Vec3{static_cast<float>(terrain->field.voxelIndex(local.x)),
+                              static_cast<float>(terrain->field.voxelIndex(local.y)),
+                              static_cast<float>(terrain->field.voxelIndex(local.z))});
+    return 1;
+}
+
+// The world position of a voxel's centre, from its index on each axis.
+int methodTerrainCellCenterToWorld(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec3 cell = checkVector3(L, 2);
+    const scene::TerrainComponent* terrain = world(L).terrains().find(id);
+    if (terrain == nullptr) {
+        pushVector3(L, core::Vec3{});
+        return 1;
+    }
+    const auto index = [](float value) { return static_cast<core::i32>(std::floor(value)); };
+    pushVector3(L, core::Vec3{static_cast<float>(terrain->field.voxelCenter(index(cell.x)) + terrain->origin.x),
+                              static_cast<float>(terrain->field.voxelCenter(index(cell.y)) + terrain->origin.y),
+                              static_cast<float>(terrain->field.voxelCenter(index(cell.z)) + terrain->origin.z)});
     return 1;
 }
 
@@ -1228,6 +1485,14 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"Terrain", "WriteHeights", methodTerrainWriteHeights},
     {"Terrain", "Clear", methodTerrainClear},
     {"Terrain", "Compact", methodTerrainCompact},
+    {"Terrain", "FillCylinder", methodTerrainFillCylinder},
+    {"Terrain", "SmoothBall", methodTerrainSmoothBall},
+    {"Terrain", "FlattenBall", methodTerrainFlattenBall},
+    {"Terrain", "ReplaceMaterial", methodTerrainReplaceMaterial},
+    {"Terrain", "ReadVoxels", methodTerrainReadVoxels},
+    {"Terrain", "WriteVoxels", methodTerrainWriteVoxels},
+    {"Terrain", "WorldToCell", methodTerrainWorldToCell},
+    {"Terrain", "CellCenterToWorld", methodTerrainCellCenterToWorld},
 };
 
 } // namespace

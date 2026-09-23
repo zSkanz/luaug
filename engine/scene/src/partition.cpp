@@ -283,7 +283,7 @@ void extractTerrain(std::string_view scene, const PartitionSettings& settings, P
         const std::vector<asset::TerrainCell> cells = asset::splitTerrain(whole.field);
         if (cells.size() < settings.minimumFieldCells)
             return;
-        const core::u32 across = asset::terrainCellTiles(whole.field.settings().voxelSize);
+        const core::u32 across = asset::terrainCellChunks(whole.field.settings().voxelSize);
         out.report.terrainCells = writeFieldCells(
             cells, asset::FieldLayerTerrain, settings, out.fieldIndex,
             [](const asset::TerrainCell& cell) { return asset::encodeTerrainCell(cell); },

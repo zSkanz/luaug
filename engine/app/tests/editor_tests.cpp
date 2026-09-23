@@ -4702,7 +4702,6 @@ TEST_CASE("painting through the editor changes material and not height")
 
     const std::optional<float> before = asset::heightAt(rig.field().field, 0.0, 0.0);
     REQUIRE(before.has_value());
-    const core::usize bricksBefore = rig.field().field.brickCount();
 
     CHECK(rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true));
     rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
@@ -4710,8 +4709,8 @@ TEST_CASE("painting through the editor changes material and not height")
     const std::optional<float> after = asset::heightAt(rig.field().field, 0.0, 0.0);
     REQUIRE(after.has_value());
     CHECK(static_cast<double>(*after) == doctest::Approx(static_cast<double>(*before)));
-    CHECK(rig.field().field.brickCount() == bricksBefore);
-    CHECK(rig.field().field.sample(0, -40, 0).material == 7);
+    CHECK(asset::sampleField(rig.field().field, core::DVec3{0.2, static_cast<double>(*after) - 0.3, 0.2}).material ==
+          7);
 }
 
 TEST_CASE("the tool cannot be changed mid-stroke")
@@ -4790,8 +4789,7 @@ TEST_CASE("generated ground reaches the floor, so it costs no voxels")
     const scene::TerrainComponent* terrain = rig.world.terrains().find(id);
     REQUIRE(terrain != nullptr);
 
-    CHECK(terrain->field.tileCount() > 0);
-    CHECK(terrain->field.brickCount() == 0);
+    CHECK_FALSE(terrain->field.empty());
 
     const std::optional<float> height = asset::heightAt(terrain->field, 0.0, 0.0);
     REQUIRE(height.has_value());
@@ -4804,11 +4802,11 @@ TEST_CASE("clearing terrain is one undo step, and refuses when there is nothing"
     rig.lookDown(60.0);
     const core::InstanceId id = rig.editor.terrainIn(rig.world, rig.root);
     REQUIRE(id.valid());
-    REQUIRE(rig.world.terrains().find(id)->field.tileCount() > 0);
+    REQUIRE(!rig.world.terrains().find(id)->field.empty());
 
     const core::usize before = rig.editor.history().depth();
     REQUIRE(rig.editor.clearTerrain(rig.world, rig.root, rig.inspector));
-    CHECK(rig.world.terrains().find(id)->field.tileCount() == 0);
+    CHECK(rig.world.terrains().find(id)->field.empty());
     CHECK(rig.editor.history().depth() == before + 1);
 
     // Nothing left to clear: refused rather than recorded, because a step that
@@ -4818,7 +4816,7 @@ TEST_CASE("clearing terrain is one undo step, and refuses when there is nothing"
 
     // And the ground comes back.
     REQUIRE(rig.editor.history().undo(rig.world));
-    CHECK(rig.world.terrains().find(id)->field.tileCount() > 0);
+    CHECK(!rig.world.terrains().find(id)->field.empty());
 }
 
 TEST_CASE("smooth and flatten reach the ground through the brush")
@@ -4972,7 +4970,7 @@ TEST_CASE("a brush over an empty field still stamps, on the plane")
     // Empty the field, which is what `Instance.new("Terrain")` produces.
     rig.field().field = asset::TerrainField(rig.field().field.settings());
     rig.field().fieldRevision += 1;
-    REQUIRE(rig.field().field.tileCount() == 0);
+    REQUIRE(rig.field().field.empty());
 
     rig.editor.setTool(Editor::Tool::Sculpt);
     rig.editor.setBrushOp(Editor::BrushOp::Add);
@@ -4984,7 +4982,7 @@ TEST_CASE("a brush over an empty field still stamps, on the plane")
     rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
 
     // Ground exists where the plane was.
-    CHECK(rig.field().field.tileCount() > 0);
+    CHECK(!rig.field().field.empty());
 }
 
 TEST_CASE("the plane can be turned off, and then an empty field takes no stroke")
@@ -4999,7 +4997,7 @@ TEST_CASE("the plane can be turned off, and then an empty field takes no stroke"
 
     rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
     CHECK_FALSE(rig.editor.brushAim().has_value());
-    CHECK(rig.field().field.tileCount() == 0);
+    CHECK(rig.field().field.empty());
 }
 
 TEST_CASE("the plane follows the stroke rather than the origin")
@@ -5224,17 +5222,18 @@ TEST_CASE("a heightmap lays its ramp over the ground, and one undo takes it back
     }
     REQUIRE(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.0)) == doctest::Approx(0.0));
 
-    // One metre at half-metre voxels is three columns, corner to corner.
+    // Two metres at the default metre voxel is three columns, corner to corner:
+    // the voxel columns from -1 m, whose centres are half a metre in.
     Editor::HeightmapImport spec;
     spec.source = path;
-    spec.size = 1.0f;
+    spec.size = 2.0f;
     spec.low = 0.0f;
     spec.high = 8.0f;
     REQUIRE(rig.editor.importHeightmap(rig.world, rig.root, rig.inspector, spec));
     CHECK_FALSE(rig.editor.status().failed);
-    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, -0.5, 0.0)) == doctest::Approx(0.0).epsilon(0.01));
-    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.0, 0.0)) == doctest::Approx(4.0).epsilon(0.01));
-    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.0)) == doctest::Approx(8.0).epsilon(0.01));
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, -0.5, 0.5)) == doctest::Approx(0.0).epsilon(0.01));
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.5)) == doctest::Approx(4.0).epsilon(0.01));
+    CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 1.5, 0.5)) == doctest::Approx(8.0).epsilon(0.01));
 
     REQUIRE(rig.editor.undo(rig.world, rig.inspector));
     CHECK(static_cast<double>(*asset::heightAt(rig.field().field, 0.5, 0.0)) == doctest::Approx(0.0));

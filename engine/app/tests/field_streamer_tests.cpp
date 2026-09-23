@@ -39,7 +39,7 @@ struct StreamedWorld
     asset::ChunkIndex index;
     app::FieldStreamer streamer;
 
-    // A kilometre square of two-metre ground -- one 64 m tile a cell -- and a
+    // A kilometre square of two-metre ground -- one 64 m chunk column a cell -- and a
     // strip of blocks along the x axis, both written as cells the way a
     // partition writes them.
     StreamedWorld()
@@ -69,7 +69,7 @@ struct StreamedWorld
         std::error_code ignored;
         std::filesystem::remove_all(directory, ignored);
         REQUIRE(platform::createDirectories(directory));
-        const core::u32 tiles = asset::terrainCellTiles(settings.voxelSize);
+        const core::u32 tiles = asset::terrainCellChunks(settings.voxelSize);
         for (const asset::TerrainCell& cell : asset::splitTerrain(source))
             add(asset::ChunkId{cell.x, cell.z, asset::FieldLayerTerrain}, asset::encodeTerrainCell(cell),
                 asset::terrainCellBounds(cell, tiles, core::DVec3{}));
@@ -111,6 +111,8 @@ struct StreamedWorld
     void lookFrom(core::DVec3 position) { world.cameras().find(camera)->cframe.position = position; }
 
     [[nodiscard]] const asset::TerrainField& field() { return world.terrains().find(ground)->field; }
+    // Whether the ground holds any chunk in the column of chunks at (x, z).
+    [[nodiscard]] bool holds(core::i32 x, core::i32 z) { return !field().column(x, z).empty(); }
     [[nodiscard]] const asset::VoxelGrid& grid() { return world.voxels().find(workspace)->grid; }
 
     // Pumps until `done`, the way frames would, with the reader's threads
@@ -139,10 +141,11 @@ TEST_CASE("the ground streams in around the camera, and the simulation waits for
 
     REQUIRE(streamed.pumpUntil([&] { return streamed.streamer.primed(); }));
 
-    // The tile under the camera is here, and one four hundred metres off is not.
-    CHECK(streamed.field().findTile(asset::TileKey{0, 0}) != nullptr);
-    CHECK(streamed.field().findTile(asset::TileKey{-1, -1}) != nullptr);
-    CHECK(streamed.field().findTile(asset::TileKey{6, 6}) == nullptr);
+    // The ground under the camera is here, and ground four hundred metres off
+    // is not.
+    CHECK(streamed.holds(0, 0));
+    CHECK(streamed.holds(-1, -1));
+    CHECK_FALSE(streamed.holds(6, 6));
     // And so are the blocks under it, and not the ones at the strip's far end.
     CHECK(streamed.grid().get(2, 1, 1) == 1);
     CHECK(streamed.grid().get(290, 1, 1) == asset::AirBlock);
@@ -154,23 +157,20 @@ TEST_CASE("ground left behind is dropped, and ground somebody changed is kept")
     StreamedWorld streamed;
     REQUIRE(streamed.pumpUntil([&] { return streamed.streamer.primed(); }));
 
-    // Dig into the cell under the camera -- which clones the tile, since the
+    // Build on the cell under the camera -- which clones the chunk, since the
     // streamer holds the one the cell brought -- and place a block.
     asset::TerrainField& field = streamed.world.terrains().find(streamed.ground)->field;
-    field.setColumn(4, 4, 10.0f, 1);
+    (void)field.setVoxel(4, 5, 4, asset::Voxel{asset::FullOccupancy, 3});
     (void)streamed.world.voxels().find(streamed.workspace)->grid.set(5, 3, 1, 2);
 
     // Walk four hundred metres away.
     streamed.lookFrom(core::DVec3{420.0, 0.0, 420.0});
-    REQUIRE(streamed.pumpUntil([&] {
-        return streamed.field().findTile(asset::TileKey{6, 6}) != nullptr &&
-               streamed.field().findTile(asset::TileKey{-1, -1}) == nullptr;
-    }));
+    REQUIRE(streamed.pumpUntil([&] { return streamed.holds(6, 6) && !streamed.holds(-1, -1); }));
 
     // The untouched cell went; the dug one, and the one with the block, stayed.
-    CHECK(streamed.field().findTile(asset::TileKey{-1, -1}) == nullptr);
-    REQUIRE(streamed.field().findTile(asset::TileKey{0, 0}) != nullptr);
-    CHECK(streamed.field().findTile(asset::TileKey{0, 0})->height[4 * asset::TileEdge + 4] == doctest::Approx(10.0));
+    CHECK_FALSE(streamed.holds(-1, -1));
+    REQUIRE(streamed.holds(0, 0));
+    CHECK(streamed.field().voxel(4, 5, 4).material == 3);
     CHECK(streamed.grid().get(5, 3, 1) == 2);
     CHECK(streamed.grid().get(-40, 1, 1) == asset::AirBlock);
     CHECK(streamed.streamer.kept() >= 2);
@@ -178,6 +178,6 @@ TEST_CASE("ground left behind is dropped, and ground somebody changed is kept")
     // And walking back brings the rest of the ground back without undoing the
     // dig: what the field holds wins over what a cell brings.
     streamed.lookFrom(core::DVec3{0.0, 0.0, 0.0});
-    REQUIRE(streamed.pumpUntil([&] { return streamed.field().findTile(asset::TileKey{-1, -1}) != nullptr; }));
-    CHECK(streamed.field().findTile(asset::TileKey{0, 0})->height[4 * asset::TileEdge + 4] == doctest::Approx(10.0));
+    REQUIRE(streamed.pumpUntil([&] { return streamed.holds(-1, -1); }));
+    CHECK(streamed.field().voxel(4, 5, 4).material == 3);
 }

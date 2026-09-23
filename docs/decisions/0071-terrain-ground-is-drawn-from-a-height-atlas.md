@@ -1,6 +1,6 @@
 # 0071 — Terrain ground is drawn from a height atlas, and only caves are meshes
 
-- Status: accepted
+- Status: superseded by [0082](0082-terrain-is-a-grid-of-voxels.md)
 - Date: 2026-09-22
 - Milestone: F1 (post-v1 phase 2), the terrain rework
 - Decided by: the agent, under the owner's standing instruction of 2026-08-26 to

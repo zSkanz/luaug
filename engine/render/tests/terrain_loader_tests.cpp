@@ -1,166 +1,28 @@
-// GPU terrain (ADR 0071): which nodes are drawn, and what reaches the GPU.
+// Terrain on the GPU (ADR 0082): which nodes are drawn, and what is meshed.
 //
-// **Both halves are testable with no device worth the name.** The selection is
-// a pure function of the terrain's tile grid and where the viewer is, so its
-// guarantees -- the ground covered exactly once, neighbours never more than one
-// level apart, nothing drawn over missing ground -- are asserted directly. The
-// loader runs against the null device and is judged by what it uploaded.
+// **Testable with no device worth the name.** The loader runs against the null
+// device and is judged by what it built and what it chose to draw: every piece
+// of ground drawn once, finest under the viewer, nothing drawn where a node is
+// not ready yet, and an edit rebuilding the node it touched and not the rest.
 #include "luaug/asset/terrain.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/render/terrain_loader.h"
-#include "luaug/render/terrain_lod.h"
 #include "luaug/rhi/backends.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
-#include <cstdlib>
+#include <chrono>
 #include <doctest/doctest.h>
 #include <map>
-#include <utility>
+#include <set>
+#include <string>
 #include <vector>
 
 using namespace luaug;
 using namespace luaug::render;
-
-namespace {
-
-// A square of flat tiles, `tiles` a side, with the viewer at `viewer` in the
-// field's own space.
-struct Square
-{
-    std::vector<float> lo;
-    std::vector<float> hi;
-    TerrainLodSource source;
-
-    Square(core::u32 tiles, core::DVec3 viewer)
-        : lo(static_cast<core::usize>(tiles) * tiles, 0.0f), hi(static_cast<core::usize>(tiles) * tiles, 1.0f)
-    {
-        source.minTileX = 0;
-        source.minTileZ = 0;
-        source.tilesX = tiles;
-        source.tilesZ = tiles;
-        source.tileMin = lo;
-        source.tileMax = hi;
-        source.voxelSize = 0.5f;
-        source.originFromViewer = core::DVec3{-viewer.x, -viewer.y, -viewer.z};
-    }
-};
-
-// Which level covers each leaf tile; and whether any tile was covered twice.
-struct Coverage
-{
-    std::map<std::pair<core::i32, core::i32>, core::i32> level;
-    bool overlap = false;
-};
-
-Coverage coverageOf(const std::vector<TerrainNode>& nodes)
-{
-    Coverage coverage;
-    for (const TerrainNode& node : nodes) {
-        const auto tiles = static_cast<core::i32>(1u << node.level);
-        const core::i32 firstX = node.latticeX / static_cast<core::i32>(TerrainGridQuads);
-        const core::i32 firstZ = node.latticeZ / static_cast<core::i32>(TerrainGridQuads);
-        for (core::i32 z = 0; z < tiles; ++z) {
-            for (core::i32 x = 0; x < tiles; ++x) {
-                const auto key = std::make_pair(firstX + x, firstZ + z);
-                if (coverage.level.contains(key))
-                    coverage.overlap = true;
-                coverage.level[key] = static_cast<core::i32>(node.level);
-            }
-        }
-    }
-    return coverage;
-}
-
-} // namespace
-
-TEST_CASE("the selection covers every tile exactly once")
-{
-    // A 512 m square with the viewer standing in one corner of it, so every
-    // level from the finest to the coarsest is in play.
-    const Square square(32, core::DVec3{20.0, 2.0, 20.0});
-    std::vector<TerrainNode> nodes;
-    selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
-    REQUIRE_FALSE(nodes.empty());
-
-    const Coverage coverage = coverageOf(nodes);
-    CHECK_FALSE(coverage.overlap);
-    CHECK(coverage.level.size() == 32u * 32u);
-}
-
-TEST_CASE("detail is finest under the viewer and coarsens with distance")
-{
-    const Square square(32, core::DVec3{20.0, 2.0, 20.0});
-    std::vector<TerrainNode> nodes;
-    selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
-    const Coverage coverage = coverageOf(nodes);
-
-    // The tile the viewer stands on is a leaf, drawn one vertex per lattice
-    // step; the far corner, 700 m off, is not.
-    CHECK(coverage.level.at({1, 1}) == 0);
-    CHECK(coverage.level.at({31, 31}) > 0);
-}
-
-TEST_CASE("neighbouring tiles are never more than one level apart")
-{
-    // **The condition the morph needs to be crack-free.** A vertex on the edge
-    // between a level-L node and a level-L+1 node is fully morphed onto the
-    // coarse grid, which lines up with the coarse node's edge -- one level. Two
-    // levels apart, the fine edge has vertices the coarse one does not, and
-    // daylight shows through.
-    for (const core::DVec3 viewer :
-         {core::DVec3{20.0, 2.0, 20.0}, core::DVec3{256.0, 40.0, 256.0}, core::DVec3{-100.0, 5.0, 300.0}}) {
-        CAPTURE(viewer.x);
-        const Square square(32, viewer);
-        std::vector<TerrainNode> nodes;
-        selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
-        const Coverage coverage = coverageOf(nodes);
-        for (const auto& [key, level] : coverage.level) {
-            for (const std::pair<core::i32, core::i32> step : {std::pair{1, 0}, std::pair{0, 1}}) {
-                const auto neighbour = coverage.level.find({key.first + step.first, key.second + step.second});
-                if (neighbour == coverage.level.end())
-                    continue;
-                CHECK(std::abs(neighbour->second - level) <= 1);
-            }
-        }
-    }
-}
-
-TEST_CASE("nothing is drawn over tiles the field does not hold")
-{
-    Square square(8, core::DVec3{0.0, 2.0, 0.0});
-    // A 2x2 block of tiles the field does not have.
-    for (const core::usize index : {18u, 19u, 26u, 27u}) {
-        square.lo[index] = 1.0f;
-        square.hi[index] = -1.0f;
-    }
-    std::vector<TerrainNode> nodes;
-    selectTerrainNodes(square.source, TerrainLodSettings{}, nodes);
-    const Coverage coverage = coverageOf(nodes);
-    CHECK_FALSE(coverage.level.contains({2, 2}));
-    CHECK_FALSE(coverage.level.contains({3, 3}));
-    CHECK(coverage.level.contains({0, 0}));
-}
-
-TEST_CASE("the selection is the same on every run")
-{
-    const Square square(16, core::DVec3{37.0, 3.0, 91.0});
-    std::vector<TerrainNode> first;
-    std::vector<TerrainNode> second;
-    selectTerrainNodes(square.source, TerrainLodSettings{}, first);
-    selectTerrainNodes(square.source, TerrainLodSettings{}, second);
-    REQUIRE(first.size() == second.size());
-    for (core::usize at = 0; at < first.size(); ++at) {
-        CHECK(first[at].latticeX == second[at].latticeX);
-        CHECK(first[at].latticeZ == second[at].latticeZ);
-        CHECK(first[at].level == second[at].level);
-    }
-}
-
-// --- The loader -------------------------------------------------------------
 
 namespace {
 
@@ -180,7 +42,8 @@ struct LoaderFixture
     MeshLibrary library;
     TerrainLoader loader;
 
-    LoaderFixture()
+    // Flat ground `size` metres across, at a metre voxel.
+    explicit LoaderFixture(float size = 256.0f)
         : workspaceClass(
               classes.registerClass({.name = atoms.intern("Workspace"), .defaultName = atoms.intern("Workspace")})),
           terrainClass(
@@ -194,10 +57,11 @@ struct LoaderFixture
         terrain = world.create(terrainClass);
         scene::TerrainComponent component;
         component.field =
-            asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-        asset::fillFlat(component.field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
+            asset::TerrainField(asset::FieldSettings{.voxelSize = 1.0f, .minHeight = -32.0f, .maxHeight = 64.0f});
+        (void)asset::fillFlat(component.field, core::DVec3{0.0, 0.0, 0.0}, size, 0.0f, 1);
         world.terrains().add(terrain, std::move(component));
         REQUIRE(world.setParent(terrain, root) == std::nullopt);
+        loader.setBuildsPerSync(1000);
     }
 
     ~LoaderFixture()
@@ -211,120 +75,233 @@ struct LoaderFixture
 
     scene::TerrainComponent& component() { return *world.terrains().find(terrain); }
     core::u32 sync() { return loader.sync(*device, *cmd, world, atoms, cache, library); }
+
+    // Syncs until nothing is left to build, and answers the draws.
+    std::vector<TerrainNodeDraw> settle()
+    {
+        for (int frame = 0; frame < 64; ++frame) {
+            (void)sync();
+            if (!loader.pending() && loader.lastBuilds() == 0)
+                break;
+        }
+        return loader.draws(world);
+    }
 };
+
+// The node a URN names: `terrain://<id>/<level>/<x>,<z>`.
+[[nodiscard]] TerrainNodeKey keyOf(const core::AtomTable& atoms, core::NameAtom urn)
+{
+    const std::string text(atoms.text(urn));
+    TerrainNodeKey key;
+    const auto first = text.find('/', 10);
+    const auto second = text.find('/', first + 1);
+    const auto comma = text.find(',', second + 1);
+    key.level = static_cast<core::u32>(std::stoul(text.substr(first + 1, second - first - 1)));
+    key.x = std::stoi(text.substr(second + 1, comma - second - 1));
+    key.z = std::stoi(text.substr(comma + 1));
+    return key;
+}
+
+// Every chunk column the draws cover, and how many times.
+[[nodiscard]] std::map<std::pair<core::i32, core::i32>, int> coverage(const core::AtomTable& atoms,
+                                                                      const std::vector<TerrainNodeDraw>& draws)
+{
+    std::map<std::pair<core::i32, core::i32>, int> covered;
+    for (const TerrainNodeDraw& draw : draws) {
+        const TerrainNodeKey key = keyOf(atoms, draw.urn);
+        const auto across = static_cast<core::i32>(1u << key.level);
+        for (core::i32 z = 0; z < across; ++z) {
+            for (core::i32 x = 0; x < across; ++x)
+                covered[{key.x * across + x, key.z * across + z}] += 1;
+        }
+    }
+    return covered;
+}
 
 } // namespace
 
-TEST_CASE("every tile is uploaded once, and a quiet frame uploads nothing")
+TEST_CASE("with no viewer nothing is meshed or drawn")
 {
     LoaderFixture fixture;
     (void)fixture.sync();
-    const core::usize tiles = fixture.component().field.tileCount();
-    REQUIRE(tiles > 0);
-    CHECK(fixture.loader.lastTileUploads() == tiles);
-    CHECK(fixture.loader.residentCount() == tiles);
-
-    (void)fixture.sync();
-    CHECK(fixture.loader.lastTileUploads() == 0);
+    CHECK(fixture.loader.residentCount() == 0);
+    CHECK(fixture.loader.draws(fixture.world).empty());
 }
 
-TEST_CASE("a terrain larger than the atlas keeps the tiles nearest the viewer")
+TEST_CASE("the ground is drawn once everywhere, finest under the viewer")
 {
-    // **A 2.2 km square at half a metre is 19,000 tiles**, past the atlas's
-    // 16,384. The editor holds a world like that whole. What is drawn is the
-    // part around the camera, and it follows the camera.
     LoaderFixture fixture;
-    asset::fillFlat(fixture.component().field, core::DVec3{0.0, 0.0, 0.0}, 2200.0f, 0.0f, 1);
-    fixture.component().fieldRevision += 1;
-    const core::usize tiles = fixture.component().field.tileCount();
-    REQUIRE(tiles > 16384u);
+    fixture.loader.setFocus(core::DVec3{8.0, 4.0, 8.0});
+    const std::vector<TerrainNodeDraw> draws = fixture.settle();
+    REQUIRE_FALSE(draws.empty());
 
-    const auto settle = [&]() {
-        for (int frame = 0; frame < 40; ++frame) {
-            (void)fixture.sync();
-            if (fixture.loader.lastTileUploads() == 0)
-                return;
+    // 256 m of 32 m chunk columns is eight a side, each drawn exactly once.
+    const auto covered = coverage(fixture.atoms, draws);
+    for (core::i32 z = -4; z < 4; ++z) {
+        for (core::i32 x = -4; x < 4; ++x) {
+            CAPTURE(x);
+            CAPTURE(z);
+            REQUIRE(covered.contains({x, z}));
+            CHECK(covered.at({x, z}) == 1);
         }
-        FAIL("the atlas never settled");
-    };
-    // Tile keys are 16 m squares at this voxel: the east and west edges.
-    const asset::TileKey east{68, 0};
-    const asset::TileKey west{-69, 0};
-
-    fixture.loader.setFocus(core::DVec3{1090.0, 0.0, 0.0});
-    settle();
-    CHECK(fixture.loader.residentCount() == 16384u);
-    CHECK(fixture.loader.tileResident(fixture.terrain, east));
-    CHECK_FALSE(fixture.loader.tileResident(fixture.terrain, west));
-
-    fixture.loader.setFocus(core::DVec3{-1090.0, 0.0, 0.0});
-    settle();
-    CHECK(fixture.loader.residentCount() == 16384u);
-    CHECK(fixture.loader.tileResident(fixture.terrain, west));
-    CHECK_FALSE(fixture.loader.tileResident(fixture.terrain, east));
+    }
+    // The column under the viewer at full detail; one far away coarser.
+    core::u32 under = 99;
+    core::u32 far = 0;
+    for (const TerrainNodeDraw& draw : draws) {
+        const TerrainNodeKey key = keyOf(fixture.atoms, draw.urn);
+        const auto across = static_cast<core::i32>(1u << key.level);
+        if (key.x * across <= 0 && 0 < (key.x + 1) * across && key.z * across <= 0 && 0 < (key.z + 1) * across)
+            under = key.level;
+        far = std::max(far, key.level);
+    }
+    CHECK(under == 0);
+    CHECK(far > 0);
 }
 
-TEST_CASE("a brush stroke uploads the tiles it touched and nothing else")
+TEST_CASE("a quiet frame builds nothing, and an edit rebuilds the node it touched")
 {
-    // **This is the whole of what an edit costs now**: kilobytes to the GPU.
-    // There is no mesh to rebuild, so a stroke that stays inside one tile is
-    // one tile's upload however large the terrain is.
     LoaderFixture fixture;
+    fixture.loader.setFocus(core::DVec3{8.0, 4.0, 8.0});
+    (void)fixture.settle();
     (void)fixture.sync();
+    CHECK(fixture.loader.lastBuilds() == 0);
 
-    (void)asset::raiseBall(fixture.component().field, core::DVec3{4.0, 0.0, 4.0}, 2.0, 1.0f);
+    // A dig in the middle of one column: that column's node, and no other --
+    // its neighbours read only the layers at its sides (ADR 0082).
+    (void)asset::fillBall(fixture.component().field, core::DVec3{16.0, 0.0, 16.0}, 3.0, 0);
     fixture.component().fieldRevision += 1;
     (void)fixture.sync();
-    CHECK(fixture.loader.lastTileUploads() == 1);
+    CHECK(fixture.loader.lastBuilds() == 1);
+    (void)fixture.sync();
+    CHECK(fixture.loader.lastBuilds() == 0);
 }
 
-TEST_CASE("the render terrain names the atlas and bounds every tile")
+TEST_CASE("a node is drawn until its children are ready, so a change of level shows no hole")
 {
     LoaderFixture fixture;
-    (void)asset::raiseBall(fixture.component().field, core::DVec3{4.0, 0.0, 4.0}, 2.0, 3.0f);
-    (void)fixture.sync();
+    // Far away first: coarse nodes only.
+    fixture.loader.setFocus(core::DVec3{2000.0, 4.0, 2000.0});
+    const std::vector<TerrainNodeDraw> far = fixture.settle();
+    REQUIRE_FALSE(far.empty());
 
+    // Then close, one build a frame: every frame still covers every column.
+    fixture.loader.setBuildsPerSync(1);
+    fixture.loader.setFocus(core::DVec3{8.0, 4.0, 8.0});
+    for (int frame = 0; frame < 40; ++frame) {
+        (void)fixture.sync();
+        const auto covered = coverage(fixture.atoms, fixture.loader.draws(fixture.world));
+        for (core::i32 z = -4; z < 4; ++z) {
+            for (core::i32 x = -4; x < 4; ++x) {
+                CAPTURE(frame);
+                CAPTURE(x);
+                CAPTURE(z);
+                CHECK(covered.contains({x, z}));
+            }
+        }
+    }
+}
+
+TEST_CASE("the ground under the viewer stays at full detail for as long as the viewer stays")
+{
+    // **The owner's flicker in the cave example.** The ancestors of the nodes
+    // drawn close up were let go after a few seconds undrawn; one rebuilt
+    // counted as ready and was drawn over the whole close-up, coarse, for the
+    // frames its children took to come back -- every few seconds, a pop from
+    // the finest ground to the coarsest and back.
+    LoaderFixture fixture;
+    fixture.loader.setFocus(core::DVec3{8.0, 4.0, 8.0});
+    (void)fixture.settle();
+    fixture.loader.setBuildsPerSync(1);
+    for (int frame = 0; frame < 600; ++frame) {
+        // Drifting slowly, as a walking camera does.
+        fixture.loader.setFocus(core::DVec3{8.0 + frame * 0.01, 4.0, 8.0});
+        (void)fixture.sync();
+        core::u32 under = 99;
+        for (const TerrainNodeDraw& draw : fixture.loader.draws(fixture.world)) {
+            const TerrainNodeKey key = keyOf(fixture.atoms, draw.urn);
+            const auto across = static_cast<core::i32>(1u << key.level);
+            if (key.x * across <= 0 && 0 < (key.x + 1) * across && key.z * across <= 0 && 0 < (key.z + 1) * across)
+                under = key.level;
+        }
+        CAPTURE(frame);
+        REQUIRE(under == 0);
+    }
+}
+
+TEST_CASE("the mesh a node is drawn with is its ground, with skirts under its sides")
+{
+    LoaderFixture fixture;
+    const asset::TerrainMesh leaf = meshTerrainNode(fixture.component().field, TerrainNodeKey{0, 0, 0});
+    REQUIRE_FALSE(leaf.mesh.indices.empty());
+    // Skirts are in the drawn mesh, not the collider's surface.
+    CHECK(leaf.mesh.indices.size() > leaf.colliderIndices.size());
+    const asset::TerrainMesh nothing = meshTerrainNode(fixture.component().field, TerrainNodeKey{0, 40, 40});
+    CHECK(nothing.mesh.indices.empty());
+}
+
+TEST_CASE("the render terrain carries the palette, and only for terrain in the world")
+{
+    LoaderFixture fixture;
     RenderWorld snapshot;
     fixture.loader.appendRenderTerrains(fixture.world, fixture.root, snapshot);
     REQUIRE(snapshot.terrains.size() == 1);
-    const RenderTerrain& terrain = snapshot.terrains.front();
-    CHECK(terrain.heights.valid());
-    CHECK(terrain.materials.valid());
-    CHECK(terrain.tileTable.valid());
-    CHECK(terrain.tilesX * terrain.tilesZ == terrain.tileMin.size());
-    // The raised tile's bounds include the bump; a flat one's are flat.
-    float highest = 0.0f;
-    for (const float value : terrain.tileMax)
-        highest = std::max(highest, value);
-    CHECK(highest > 2.5f);
+    CHECK(snapshot.terrains.front().id == fixture.terrain);
+    CHECK(snapshot.terrains.front().palette[1][3] == 1.0f);
 
-    // A terrain outside the root is not in the world.
     RenderWorld elsewhere;
     fixture.loader.appendRenderTerrains(fixture.world, core::InstanceId{}, elsewhere);
     CHECK(elsewhere.terrains.empty());
 }
 
-TEST_CASE("a cave near the viewer is meshed and opens the ground; far away it closes")
+TEST_CASE("a terrain that goes away takes its meshes with it")
 {
     LoaderFixture fixture;
-    (void)asset::fillBall(fixture.component().field, core::DVec3{4.0, -3.0, 4.0}, 1.5, 0);
-    fixture.component().fieldRevision += 1;
-    REQUIRE(fixture.component().field.brickCount() > 0);
-
-    // No viewer, no cave: a headless run has nobody to stand in one.
+    fixture.loader.setFocus(core::DVec3{8.0, 4.0, 8.0});
+    (void)fixture.settle();
+    REQUIRE(fixture.loader.residentCount() > 0);
+    fixture.world.terrains().remove(fixture.terrain);
     (void)fixture.sync();
-    CHECK(fixture.loader.caveCount() == 0);
-
-    fixture.loader.setFocus(core::DVec3{4.0, 2.0, 4.0});
-    (void)fixture.sync();
-    CHECK(fixture.loader.caveCount() == 1);
-    // The tile under it went back up with the cave flag in its materials.
-    CHECK(fixture.loader.lastTileUploads() == 1);
-    CHECK(fixture.library.size() == 1);
-
-    fixture.loader.setFocus(core::DVec3{400.0, 2.0, 400.0});
-    (void)fixture.sync();
-    CHECK(fixture.loader.caveCount() == 0);
-    CHECK(fixture.loader.lastTileUploads() == 1);
+    CHECK(fixture.loader.residentCount() == 0);
     CHECK(fixture.library.size() == 0);
+}
+
+// --- What a dig costs to draw, measured (D164) ---------------------------------
+//
+// The owner's report was a dig that stalled the editor. A dig now rebuilds the
+// mesh of the node it touched, so the number that decides whether it stalls is
+// what meshing one node costs. Skipped by default and run on demand, the shape
+// every cost measurement in this repository takes: a number that varies with
+// the machine must not gate anything.
+//
+//     luaug_render_tests --test-case="what meshing a terrain node costs" --no-skip
+TEST_CASE("what meshing a terrain node costs" * doctest::skip())
+{
+    for (const float voxel : {1.0f, 0.5f}) {
+        asset::TerrainField field(asset::FieldSettings{.voxelSize = voxel, .minHeight = -64.0f, .maxHeight = 64.0f});
+        const float size = 256.0f * voxel;
+        // In doubles for the brushes, which take world positions (R9).
+        const auto v = static_cast<double>(voxel);
+        (void)asset::fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, size, 0.0f, 1);
+        (void)asset::raiseBall(field, core::DVec3{16.0 * v, 0.0, 16.0 * v}, 12.0 * v, 6.0f * voxel);
+        (void)asset::fillBall(field, core::DVec3{16.0 * v, -2.0 * v, 16.0 * v}, 5.0 * v, 0);
+
+        const auto start = std::chrono::steady_clock::now();
+        constexpr int Runs = 20;
+        std::size_t triangles = 0;
+        for (int run = 0; run < Runs; ++run)
+            triangles = meshTerrainNode(field, TerrainNodeKey{0, 0, 0}).mesh.indices.size() / 3;
+        const double leaf =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / Runs;
+
+        const auto brushStart = std::chrono::steady_clock::now();
+        for (int run = 0; run < Runs; ++run)
+            (void)asset::fillBall(field, core::DVec3{8.0 * v, 0.0, 8.0 * v}, 6.0 * v,
+                                  static_cast<core::u8>(run % 2 == 0 ? 0 : 1));
+        const double brush =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - brushStart).count() / Runs;
+
+        MESSAGE("voxel " << voxel << " m: a full-detail node meshes in " << leaf << " ms (" << triangles
+                         << " triangles); a ball of radius 6 voxels writes in " << brush << " ms");
+    }
 }

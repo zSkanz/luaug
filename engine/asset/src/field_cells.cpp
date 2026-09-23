@@ -14,7 +14,6 @@ using core::f32;
 using core::f64;
 using core::i32;
 using core::u32;
-using core::u8;
 using core::usize;
 
 [[nodiscard]] i32 floorDivide(i32 value, i32 divisor) noexcept
@@ -88,48 +87,29 @@ private:
 
 // --- Terrain -----------------------------------------------------------------
 
-u32 terrainCellTiles(f32 voxelSize, f64 cellMetres) noexcept
+u32 terrainCellChunks(f32 voxelSize, f64 cellMetres) noexcept
 {
-    return cellsAcross(static_cast<f64>(TileEdge) * static_cast<f64>(voxelSize), cellMetres);
+    return cellsAcross(static_cast<f64>(ChunkEdge) * static_cast<f64>(voxelSize), cellMetres);
 }
 
-ChunkId terrainCellOf(TileKey key, u32 cellTiles) noexcept
+ChunkId terrainCellOf(ChunkKey key, u32 cellChunks) noexcept
 {
-    const auto across = static_cast<i32>(cellTiles);
+    const auto across = static_cast<i32>(cellChunks);
     return ChunkId{floorDivide(key.x, across), floorDivide(key.z, across), FieldLayerTerrain};
-}
-
-ChunkId terrainCellOf(BrickKey key, u32 cellTiles) noexcept
-{
-    // A brick is half a tile wide, so its column's tile is the brick's lattice
-    // corner divided by the tile's edge.
-    const auto edge = static_cast<i32>(TileEdge);
-    const auto brick = static_cast<i32>(BrickEdge);
-    return terrainCellOf(TileKey{floorDivide(key.x * brick, edge), floorDivide(key.z * brick, edge)}, cellTiles);
 }
 
 std::vector<TerrainCell> splitTerrain(const TerrainField& field, f64 cellMetres)
 {
-    const u32 cellTiles = terrainCellTiles(field.settings().voxelSize, cellMetres);
+    const u32 cellChunks = terrainCellChunks(field.settings().voxelSize, cellMetres);
     std::map<ChunkId, TerrainField> cells;
-    const auto cellFor = [&](ChunkId id) -> TerrainField& {
+    // Chunks are shared into the cells rather than copied: they are immutable
+    // to everyone but a field that holds them alone.
+    for (const TerrainField::Entry& entry : field.chunks()) {
+        const ChunkId id = terrainCellOf(entry.first, cellChunks);
         auto at = cells.find(id);
         if (at == cells.end())
             at = cells.emplace(id, TerrainField(field.settings())).first;
-        return at->second;
-    };
-
-    for (const TileKey key : field.tileKeys()) {
-        const HeightTile* tile = field.findTile(key);
-        TerrainField& cell = cellFor(terrainCellOf(key, cellTiles));
-        cell.setTile(key, std::span<const float>(tile->height, TileArea),
-                     std::span<const u8>(tile->material, TileArea));
-    }
-    for (const BrickKey key : field.brickKeys()) {
-        const Brick* brick = field.findBrick(key);
-        TerrainField& cell = cellFor(terrainCellOf(key, cellTiles));
-        cell.setBrick(key, std::span<const u8>(brick->sd, BrickVolume),
-                      std::span<const u8>(brick->material, BrickVolume));
+        at->second.setChunk(entry.first, entry.second);
     }
 
     std::vector<TerrainCell> out;
@@ -145,10 +125,10 @@ std::vector<TerrainCell> splitTerrain(const TerrainField& field, f64 cellMetres)
     return out;
 }
 
-core::DAABB terrainCellBounds(const TerrainCell& cell, u32 cellTiles, core::DVec3 origin) noexcept
+core::DAABB terrainCellBounds(const TerrainCell& cell, u32 cellChunks, core::DVec3 origin) noexcept
 {
     const f64 side =
-        static_cast<f64>(cellTiles) * static_cast<f64>(TileEdge) * static_cast<f64>(cell.settings.voxelSize);
+        static_cast<f64>(cellChunks) * static_cast<f64>(ChunkEdge) * static_cast<f64>(cell.settings.voxelSize);
     core::DAABB bounds;
     bounds.min =
         core::DVec3{origin.x + static_cast<f64>(cell.x) * side, origin.y + static_cast<f64>(cell.settings.minHeight),
@@ -158,39 +138,30 @@ core::DAABB terrainCellBounds(const TerrainCell& cell, u32 cellTiles, core::DVec
     return bounds;
 }
 
-bool terrainCellUntouched(const TerrainField& field, const TerrainCell& cell, u32 cellTiles) noexcept
+bool terrainCellUntouched(const TerrainField& field, const TerrainCell& cell, u32 cellChunks) noexcept
 {
-    const ChunkId id{cell.x, cell.z, FieldLayerTerrain};
-    for (const TileKey key : field.tileKeys()) {
-        if (!(terrainCellOf(key, cellTiles) == id))
-            continue;
-        if (field.findTile(key) != cell.field.findTile(key))
-            return false;
-    }
-    for (const BrickKey key : field.brickKeys()) {
-        if (!(terrainCellOf(key, cellTiles) == id))
-            continue;
-        if (field.findBrick(key) != cell.field.findBrick(key))
-            return false;
-    }
-    // And nothing the cell brought is gone: a tile dug to nothing and removed is
-    // an edit too.
-    for (const TileKey key : cell.field.tileKeys()) {
-        if (field.findTile(key) == nullptr)
-            return false;
-    }
-    for (const BrickKey key : cell.field.brickKeys()) {
-        if (field.findBrick(key) == nullptr)
-            return false;
+    const auto across = static_cast<i32>(cellChunks);
+    // Every chunk column of the cell's square: the field holds exactly the
+    // chunks the cell brought, each still the very object it shared.
+    for (i32 z = cell.z * across; z < (cell.z + 1) * across; ++z) {
+        for (i32 x = cell.x * across; x < (cell.x + 1) * across; ++x) {
+            const std::span<const TerrainField::Entry> held = field.column(x, z);
+            const std::span<const TerrainField::Entry> brought = cell.field.column(x, z);
+            if (held.size() != brought.size())
+                return false;
+            for (usize at = 0; at < held.size(); ++at) {
+                if (!(held[at].first == brought[at].first) || held[at].second != brought[at].second)
+                    return false;
+            }
+        }
     }
     return true;
 }
 
 void removeTerrainCell(TerrainField& field, const TerrainCell& cell)
 {
-    const std::vector<TileKey> tiles = cell.field.tileKeys();
-    const std::vector<BrickKey> bricks = cell.field.brickKeys();
-    field.removeAll(tiles, bricks);
+    const std::vector<ChunkKey> keys = cell.field.chunkKeys();
+    field.removeAll(keys);
 }
 
 // --- Block worlds ------------------------------------------------------------

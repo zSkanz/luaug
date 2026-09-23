@@ -150,7 +150,7 @@ void drawTerrainSetup(Editor& editor, scene::World& world, core::InstanceId root
     // --- Settings -------------------------------------------------------------
     if (terrain != nullptr && ImGui::CollapsingHeader("Settings")) {
         const asset::FieldSettings& settings = terrain->field.settings();
-        const bool empty = terrain->field.tileCount() == 0 && terrain->field.brickCount() == 0;
+        const bool empty = terrain->field.empty();
         const auto write = [&](std::string_view property, f32 value) {
             g_settingsGesture.edited(inspector);
             inspector.enqueue(terrainId, world.atoms().intern(property), scene::Value{static_cast<double>(value)});

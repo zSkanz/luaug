@@ -289,7 +289,8 @@ void tintBy(RenderMaterial& material, const Color3& color)
 void extract(const scene::World& world, core::InstanceId root, core::InstanceId lightingHost, const MeshLibrary& meshes,
              f32 viewportAspect, f32 shadowRadius, const AnimationSystem* animation, f32 alpha,
              const TransformHistory* history, RenderWorld& out, const ViewOverride* view,
-             std::span<const core::InstanceId> outlined, const TextureLibrary* materials)
+             std::span<const core::InstanceId> outlined, const TextureLibrary* materials,
+             std::span<const TerrainNodeDraw> terrainNodes)
 {
     out.clear();
     if (!root.valid())
@@ -676,56 +677,38 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .firstBone = firstBone,
                 .boneCount = boneCount,
                 .outlined = isOutlined(id),
-                .terrainCave = false,
+                .terrain = false,
                 .voxelBlock = false,
             });
         }
     });
 
-    // --- Terrain caves (F1, ADR 0067 and 0071) ------------------------------
+    // --- Terrain (ADR 0082) ---------------------------------------------------
     //
-    // **The ground itself is not here.** It is drawn by the renderer from the
-    // terrain's height atlas (`RenderWorld::terrains`, filled by
-    // `TerrainLoader::appendRenderTerrains`), and nothing about it is a
-    // `DrawItem`. What IS a mesh is a cave: near the viewer, each column that
-    // carries voxel bricks is meshed on the CPU and filed under
-    // `terrainCaveUrn`, and the atlas opens the ground where it is.
+    // **The ground is meshes**, one per node of each terrain's level-of-detail
+    // quadtree, which `TerrainLoader` built and chose for this camera and hands
+    // in as `terrainNodes`. This turns each into draws.
     //
     // **Terrain is not made of `MeshPart`s**, and the reason is mechanical:
     // `attachPartComponents` adds a `RigidBodyComponent` to every `BasePart`
-    // with no condition, so generated cave parts would be phantom bodies in the
+    // with no condition, so generated parts would be phantom bodies in the
     // broadphase and rows in the Explorer. So the meshes are filed under a URN
     // of their own and this emits their draws directly.
-    world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
-        if (!inWorld(world, id, root))
-            return;
-
-        std::vector<asset::TileKey> columns;
-        for (const asset::BrickKey brick : terrain.field.brickKeys())
-            columns.push_back(asset::TileKey{brick.x, brick.z});
-        std::sort(columns.begin(), columns.end());
-        columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
-
-        for (const asset::TileKey column : columns) {
-            const core::NameAtom urn = world.atoms().lookup(terrainCaveUrn(id, column));
-            if (!urn.valid())
-                continue;
+    for (const TerrainNodeDraw& node : terrainNodes) {
+        const scene::TerrainComponent* component = world.terrains().find(node.terrain);
+        if (component == nullptr || !inWorld(world, node.terrain, root))
+            continue;
+        const scene::TerrainComponent& terrain = *component;
+        const core::NameAtom urn = node.urn;
+        {
             const MeshLibrary::Entry* entry = meshes.find(urn);
-            // Skipped rather than substituted, exactly as a missing mesh is: a
-            // tile whose geometry has not been built yet is ground that is not
-            // there for a frame, and drawing a placeholder for it would be a
-            // hole nobody notices.
+            // Skipped rather than substituted, exactly as a missing mesh is.
             if (entry == nullptr || !entry->mesh.valid())
                 continue;
 
-            // **The mesher works in the field's own space**, so a tile's only
+            // **The mesher works in the field's own space**, so a node's only
             // placement is the terrain's own origin -- plus the floating-origin
-            // rebase every other draw gets. There is no PER-TILE placement to
-            // get wrong: they all share one.
-            //
-            // The origin is applied here rather than baked into the tiles,
-            // because baking would make moving a terrain a rewrite of every one
-            // of them rather than one number.
+            // rebase every other draw gets.
             core::CFrameD placement;
             placement.position = terrain.origin;
             const Mat4 transform = core::toRenderMatrix(placement, origin);
@@ -743,10 +726,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 // reach observable output (R10).
                 u32 materialSlot = 0;
                 bool found = false;
-                for (usize at = 0; at < resolved.size(); ++at) {
-                    if (resolved[at].content == urn && resolved[at].local == localMaterial &&
-                        !resolved[at].material.valid()) {
-                        materialSlot = static_cast<u32>(at);
+                for (usize slot = 0; slot < resolved.size(); ++slot) {
+                    if (resolved[slot].content == urn && resolved[slot].local == localMaterial &&
+                        !resolved[slot].material.valid()) {
+                        materialSlot = static_cast<u32>(slot);
                         found = true;
                         break;
                     }
@@ -776,18 +759,17 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                     .firstBone = 0,
                     .boneCount = 0,
                     // **Never outlined, selected or not.** The outline draws
-                    // through what is in front of it, and a cave mesh's sides
-                    // and skirt are buried under the height layer: outlined,
-                    // they showed through a dug crater as a tinted lid and a
-                    // row of boxes. The ground itself was never outlined, and
-                    // a line around the whole world would say nothing anyway.
+                    // through what is in front of it, and a node's skirts are
+                    // buried in the ground: outlined, they showed through a dug
+                    // crater as a tinted lid and a row of boxes (D161). A line
+                    // round the whole world would say nothing anyway.
                     .outlined = false,
-                    .terrainCave = true,
+                    .terrain = true,
                     .voxelBlock = false,
                 });
             }
         }
-    });
+    }
 
     // --- The block world (V1) --------------------------------------------------
     //
@@ -849,7 +831,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                     .firstBone = 0,
                     .boneCount = 0,
                     .outlined = false,
-                    .terrainCave = false,
+                    .terrain = false,
                     .voxelBlock = true,
                     .cutout = cutout,
                 });
@@ -990,7 +972,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
             .inCameraFrustum = visible,
             .outlined = isOutlined(id),
-            .terrainCave = false,
+            .terrain = false,
             .voxelBlock = false,
         });
     });

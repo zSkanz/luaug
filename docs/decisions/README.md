@@ -107,10 +107,10 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0064](0064-jolt-solves-on-a-fixed-thread-pool.md) | Jolt solves on a fixed thread pool, and the count is part of the hash |
 | [0065](0065-a-loose-gltf-is-not-a-runtime-format.md) | A loose `.gltf` is not a runtime format; everything arrives compiled |
 | [0066](0066-the-physics-seam-learns-two-static-shapes.md) | The physics seam learns two static shapes: height field and triangle mesh |
-| [0067](0067-terrain-is-one-field-with-two-encodings.md) | Terrain is one signed-distance field with two encodings, and the claim is what was measured |
+| [0067](0067-terrain-is-one-field-with-two-encodings.md) | ~~Terrain is one signed-distance field with two encodings~~ -- superseded by 0082 |
 | [0069](0069-replication-reads-state-and-diffs-it.md) | Replication reads state and diffs it, against a declared wire schema; the change queue cannot serve |
 | [0070](0070-a-port-is-opened-by-a-posture-and-never-by-a-script.md) | A listening socket is opened by a command-line posture and by nothing else; ADR 0035 narrowed |
-| [0071](0071-terrain-ground-is-drawn-from-a-height-atlas.md) | Terrain ground is drawn from a height atlas by a CDLOD grid on the GPU; only caves are meshes; the RHI gains `uploadTextureRegion` |
+| [0071](0071-terrain-ground-is-drawn-from-a-height-atlas.md) | ~~Terrain ground is drawn from a height atlas by a CDLOD grid~~ -- superseded by 0082; the RHI keeps `uploadTextureRegion` |
 | [0072](0072-particles-are-a-picture-simulated-on-the-frame.md) | Particles are a picture simulated on the frame, one instanced premultiplied draw; soft by closing the pass, the RHI stays frozen; decals multiply in a pass of their own |
 | [0073](0073-colour-textures-reach-the-gpu-as-srgb.md) | Colour textures reach the GPU as sRGB, compiled or loose; the RHI gains sRGB BC formats |
 | [0074](0074-jolt-runs-cross-platform-deterministic.md) | Jolt runs cross-platform deterministic at no measurable cost; the engine's transcendentals are what stands between it and level C |
@@ -121,3 +121,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0079](0079-a-client-asks-through-a-remote-function.md) | A client asks the authority through a `RemoteFunction` and waits for the answer; the server never waits on a client |
 | [0080](0080-replicated-storage-and-server-storage.md) | `ReplicatedStorage` and `ServerStorage` hold what is not the world; saved with the scene, one reaching every replica and one staying on the authority |
 | [0081](0081-the-editor-holds-the-field-and-the-gpu-holds-what-is-near.md) | The editor holds the whole field; the terrain atlas keeps the tiles nearest the camera; a scene of cells waits for a 1 GiB field |
+| [0082](0082-terrain-is-a-grid-of-voxels.md) | Terrain is one grid of voxels, a material and an occupancy each, in row-packed 32-cubed chunks; drawn as a quadtree of meshes built from mips, collided by chunk near movers; `.lterrain` version 3 reads version 2 |

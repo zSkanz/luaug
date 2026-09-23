@@ -258,33 +258,23 @@ u64 World::worldHash() const
             hasher.flag(action->pressed);
         }
 
-        // **The terrain field, which no property can carry** (ADR 0067). It is
+        // **The terrain field, which no property can carry** (ADR 0082). It is
         // megabytes of samples, so it is not in the walk below and has to be
         // here -- and three rules decide how, each of which is a way to get it
         // silently wrong.
         //
-        // **Per-object digests, not bytes.** Every tile and brick computes an
-        // xxh3 of its arrays once, at construction, so this is O(objects)
-        // instead of O(bytes): a cell of a hundred tiles costs a hundred
-        // eight-byte reads rather than half a megabyte, on every tick that hashes.
+        // **Per-chunk digests, not bytes**, computed lazily and kept until a
+        // write, so this is O(chunks) instead of O(voxels).
         //
         // **The key goes in beside the digest**, because two fields holding the
-        // same ground in different places are different fields, and a digest over
-        // contents alone would miss a move.
+        // same ground in different places are different fields.
         //
         // **Nothing about the SHARING is hashed** -- no pointer, no refcount, no
-        // address. Two runs that share a brick and two runs that cloned it hash
-        // identically, which is the property that lets copy-on-write be an
-        // implementation detail rather than part of the world.
-        //
-        // The representation itself is state and is covered for free: which
-        // columns carry bricks decides which digests appear here, promotion
-        // happens exactly at an edit, demotion only at an explicit `Compact`,
-        // and `.lterrain` preserves it byte for byte -- so a save and a reload
-        // hash the same. An authored world carries that format base64'd in the
-        // scene's own `terrain` key rather than in a file beside it, because
-        // `writeScene` returns a string and a scene is one text file; a streamed
-        // one will carry the same bytes per cell.
+        // address -- which is what lets copy-on-write be an implementation
+        // detail rather than part of the world. Every write leaves its chunks
+        // canonical, so equal voxels are equal bytes and equal digests; an
+        // authored world carries `.lterrain` base64'd in the scene's own
+        // `terrain` key, and a save and a reload hash the same.
         if (const TerrainComponent* terrain = m_terrains.find(id); terrain != nullptr) {
             hasher.number(static_cast<f64>(terrain->field.settings().voxelSize));
             hasher.number(static_cast<f64>(terrain->minHeight));
@@ -295,21 +285,15 @@ u64 World::worldHash() const
             hasher.number(terrain->origin.x);
             hasher.number(terrain->origin.y);
             hasher.number(terrain->origin.z);
-            for (const asset::TileKey key : terrain->field.tileKeys()) {
-                hasher.pod(key.x);
-                hasher.pod(key.z);
-                // `digestOf`, never the field: the digest is computed lazily and
-                // is stale after any write until somebody asks for it -- which
-                // made an edit invisible to the hash.
-                if (const asset::HeightTile* tile = terrain->field.findTile(key); tile != nullptr)
-                    hasher.pod(asset::digestOf(*tile));
-            }
-            for (const asset::BrickKey key : terrain->field.brickKeys()) {
-                hasher.pod(key.x);
-                hasher.pod(key.y);
-                hasher.pod(key.z);
-                if (const asset::Brick* brick = terrain->field.findBrick(key); brick != nullptr)
-                    hasher.pod(asset::digestOf(*brick));
+            // Each chunk's key beside its digest, in key order: O(chunks),
+            // never O(voxels). `digest()`, which computes a stale one, never
+            // a cached field -- a lazy digest read raw made an edit invisible
+            // to the hash once.
+            for (const asset::TerrainField::Entry& entry : terrain->field.chunks()) {
+                hasher.pod(entry.first.x);
+                hasher.pod(entry.first.y);
+                hasher.pod(entry.first.z);
+                hasher.pod(entry.second->digest());
             }
         }
 

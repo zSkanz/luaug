@@ -542,16 +542,18 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `NetworkService:GetPlayers` and `Player:GetIntent`; and 91 at F2, with `ParticleEmitter:Emit` and
     // `VoxelService:SetBlockTextures`; 92 with `VoxelService:SetBlockOpacity`; and 94 when water became a fluid,
     // with `VoxelService:SetBlockFluid` and `:GetFluidDepth`; 95 with `Terrain:WriteHeights`; and 98 at N2, with
-    // `RemoteEvent`'s three; 99 with `VoxelService:SetFluidReaction`; and 100 with
-    // `RemoteFunction:InvokeServerAsync`. This number is what makes a
+    // `RemoteEvent`'s three; 99 with `VoxelService:SetFluidReaction`; 100 with
+    // `RemoteFunction:InvokeServerAsync`; and 108 when terrain became a grid of voxels (ADR 0082), with
+    // `Terrain`'s `FillCylinder`, `SmoothBall`, `FlattenBall`, `ReplaceMaterial`, `ReadVoxels`, `WriteVoxels`,
+    // `WorldToCell` and `CellCenterToWorld`. This number is what makes a
     // DECLARED-but-unbound method impossible to ship: the IDL would count it and the binding table would not, which is
     // `Inert` for a method.
     //
     // **It earned its keep at F1.** Five methods were declared in the IDL in one
     // commit and this failed on the next build, before anything could reach a
     // script and find a name that answered nothing.
-    CHECK(coverage.declared == 100);
-    CHECK(coverage.bound == 100);
+    CHECK(coverage.declared == 108);
+    CHECK(coverage.bound == 108);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

@@ -11,6 +11,18 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **Terrain is a grid of voxels** (ADR 0082). Every voxel holds a material and
+  an occupancy, and the surface is where the occupancy crosses one half:
+  - caves, overhangs and flat ground are the same data, so nothing is special
+    about any of them;
+  - it is drawn as meshes with level of detail, built from each chunk's
+    averages further away;
+  - it collides chunk by chunk around whatever moves.
+
+  New verbs: `FillCylinder`, `SmoothBall`, `FlattenBall`, `ReplaceMaterial`,
+  `ReadVoxels`, `WriteVoxels`, `WorldToCell` and `CellCenterToWorld`. A world
+  saved before this opens as it was and is saved as voxels from then on.
+- `Workspace:Raycast` meets terrain anywhere, not only near things that move.
 - **`TextLabel.RichText`** (F3): a label reads its text as markup -- `<b>`,
   `<i>`, `<u>`, `<s>`, `<font color size transparency>` and `<br/>`, with the
   five XML entities -- so colour, size and weight change part-way through one
@@ -112,8 +124,26 @@ does not is engine work and belongs in the git history rather than in this file.
   `StreamingService.InstanceStreamedOut`, exactly as an evicted chunk's does.
   One the authority destroyed is destroyed. The wire protocol is version 6.
 
+### Changed
+
+- **`Terrain.VoxelSize` defaults to one metre** (was half a metre). A terrain
+  that was already sculpted keeps its own.
+- `Terrain.HeightAt` answers the top of the ground in a column, over a cave
+  too, and between columns it blends the four around the point.
+- `Terrain` brushes return how many voxels they changed, and `WriteHeights`
+  counts voxels rather than columns.
+- `Terrain.MinHeight` and `MaxHeight` are the world's floor and ceiling: no
+  voxel is written outside them.
+- `Terrain.Compact` has nothing left to do and returns 0; every edit leaves the
+  voxels compact.
+- `Terrain.CellCount` counts chunks of 32 voxels a side.
+
 ### Fixed
 
+- **Digging caves no longer lags, and a cave no longer breaks where it meets the
+  ground** (D164): terrain is one grid of voxels, so there is no join between
+  two encodings to fault. A dig rebuilds only the mesh and the collider of the
+  chunk it changed.
 - A partitioned scene kept its block world (D157); a terrain larger than about a
   square kilometre reopened after a save (D159); terrain edges stopped hanging
   curtains to the floor as the level of detail changed.

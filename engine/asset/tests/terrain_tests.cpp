@@ -1,16 +1,18 @@
-// The terrain field: one signed-distance function, two encodings (ADR 0067).
+// The terrain: one grid of voxels, each a material and an occupancy (ADR 0082).
 //
-// **What is worth testing here is the seam and the arithmetic**, because both
-// are silent when wrong. A sampler that reads the wrong brick still returns a
-// number; a mesher built on it produces terrain that is subtly in the wrong
-// place, and no assertion anywhere fires.
+// **What is worth testing here is where the surface lands and what a brush
+// leaves alone**, because both are silent when wrong. A brush that writes a
+// voxel outside its box still returns a count; a surface a quarter of a voxel
+// off still draws. The owner's world was full of both before this grid existed
+// (D162, D163), so each of those has a test here in the new terms.
 #include "luaug/asset/terrain.h"
-#include "luaug/asset/terrain_mesher.h"
 #include "luaug/asset/terrain_palette.h"
 
 #include <algorithm>
 #include <cmath>
 #include <doctest/doctest.h>
+#include <optional>
+#include <string>
 #include <vector>
 
 using namespace luaug;
@@ -18,997 +20,519 @@ using namespace luaug::asset;
 
 namespace {
 
-constexpr float kVoxel = 0.5f;
+constexpr float kVoxel = 1.0f;
 
-[[nodiscard]] TerrainField flatField(float height)
+[[nodiscard]] FieldSettings settingsOf(float voxel = kVoxel)
 {
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    const std::vector<float> heights(TileArea, height);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, materials);
+    return FieldSettings{.voxelSize = voxel, .minHeight = -64.0f, .maxHeight = 64.0f};
+}
+
+// Flat ground over x and z in [-32, 32), `height` metres high.
+[[nodiscard]] TerrainField flatField(float height, float voxel = kVoxel)
+{
+    TerrainField field(settingsOf(voxel));
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, height, 1);
     return field;
 }
 
-} // namespace
-
-TEST_CASE("a lattice point below the ground is inside it, and above it is not")
+[[nodiscard]] double top(const TerrainField& field, double x, double z)
 {
-    const TerrainField field = flatField(4.0f);
-
-    // `sd(p) = p.y - H(x, z)`, so the sign is the answer to "am I in the
-    // ground", and the magnitude is the distance to it in metres.
-    CHECK(static_cast<double>(field.sample(0, 0, 0).distance) == doctest::Approx(-4.0));
-    CHECK(static_cast<double>(field.sample(0, 8, 0).distance) == doctest::Approx(0.0));
-    CHECK(static_cast<double>(field.sample(0, 16, 0).distance) == doctest::Approx(4.0));
-
-    // **Exactly zero on the surface, not near it.** This is the identity the
-    // whole hybrid rests on: a Marching Cubes vertical edge between a sample
-    // below and one above crosses at `y = H`, which is the height grid's own
-    // vertex -- so the boundary between the two encodings is an equality rather
-    // than a stitch. An epsilon here would be the design quietly not holding.
-    CHECK(field.sample(0, 8, 0).distance == 0.0f);
-}
-
-TEST_CASE("a field with nothing in it is air rather than a hole")
-{
-    const TerrainField empty(FieldSettings{.voxelSize = kVoxel});
-
-    // Positive everywhere, so a mesher walking it finds no sign change and emits
-    // nothing -- which is the right picture of a cell nobody has sculpted. The
-    // alternative, returning zero, would put a surface through the whole world.
-    CHECK(empty.sample(0, 0, 0).distance > 0.0f);
-    CHECK(empty.sample(-500, -500, -500).distance > 0.0f);
-    CHECK(empty.tileCount() == 0);
-    CHECK(empty.brickCount() == 0);
-}
-
-TEST_CASE("a brick answers where one covers the point, and the height layer everywhere else")
-{
-    TerrainField field = flatField(4.0f);
-
-    // A brick of solid ground at the origin's brick, which on this lattice is
-    // `{0, 0, 0}` covering lattice points 0..15 on each axis.
-    const std::vector<core::u8> solid(BrickVolume, core::u8{0});
-    const std::vector<core::u8> materials(BrickVolume, core::u8{7});
-    field.setBrick(BrickKey{0, 0, 0}, solid, materials);
-
-    // Inside the brick the brick answers -- and it says solid where the height
-    // layer would have said "four metres of air".
-    const FieldSample inBrick = field.sample(2, 14, 2);
-    CHECK(inBrick.distance < 0.0f);
-    CHECK(inBrick.material == 7);
-
-    // One lattice point above the brick's top, the height layer answers again.
-    const FieldSample aboveBrick = field.sample(2, 16, 2);
-    CHECK(static_cast<double>(aboveBrick.distance) == doctest::Approx(4.0));
-    CHECK(aboveBrick.material == 1);
-
-    CHECK(field.isBricked(2, 2));
-    CHECK_FALSE(field.isBricked(20, 2));
-}
-
-TEST_CASE("a negative coordinate lands in the brick that contains it")
-{
-    // **Floor division, not truncation, and this is the case that catches it.**
-    // `-1 / 16` is `0` in C++, so a truncating sampler puts lattice point -1 in
-    // brick 0 -- and a world with its origin in the middle has negative
-    // coordinates everywhere, which would put the left half of every cave one
-    // brick to the right.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    const std::vector<core::u8> solid(BrickVolume, core::u8{0});
-    const std::vector<core::u8> materials(BrickVolume, core::u8{3});
-
-    // Brick -1 covers lattice points -16..-1.
-    field.setBrick(BrickKey{-1, -1, -1}, solid, materials);
-
-    CHECK(field.sample(-1, -1, -1).material == 3);
-    CHECK(field.sample(-16, -16, -16).material == 3);
-    // And 0 is the NEXT brick along, which has nothing in it.
-    CHECK(field.sample(0, 0, 0).material == 0);
-
-    // The same for the height layer's tiles, which divide by a different edge.
-    const std::vector<float> heights(TileArea, 2.0f);
-    const std::vector<core::u8> tileMaterials(TileArea, core::u8{5});
-    field.setTile(TileKey{-1, -1}, heights, tileMaterials);
-    // Tile -1 covers -32..-1 on each axis, and y is far above the brick.
-    CHECK(field.sample(-1, 100, -1).material == 5);
-    CHECK(field.sample(-32, 100, -32).material == 5);
-    CHECK(field.sample(0, 100, 0).material == 0);
-}
-
-TEST_CASE("a local offset inside a brick is the one the sample was taken at")
-{
-    // A brick whose every voxel carries its own index as a material, so reading
-    // the wrong offset is visible rather than plausible. A transposed index --
-    // x and z swapped, which is the commonest way to write this wrong -- passes
-    // every symmetric test and fails this one.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    std::vector<core::u8> distances(BrickVolume, core::u8{0});
-    std::vector<core::u8> materials(BrickVolume);
-    for (core::u32 y = 0; y < BrickEdge; ++y) {
-        for (core::u32 z = 0; z < BrickEdge; ++z) {
-            for (core::u32 x = 0; x < BrickEdge; ++x) {
-                materials[(y * BrickEdge + z) * BrickEdge + x] = static_cast<core::u8>(x * 3 + z * 5 + y * 7);
-            }
-        }
-    }
-    field.setBrick(BrickKey{0, 0, 0}, distances, materials);
-
-    CHECK(field.sample(1, 0, 0).material == 3);
-    CHECK(field.sample(0, 0, 1).material == 5);
-    CHECK(field.sample(0, 1, 0).material == 7);
-    CHECK(field.sample(2, 3, 4).material == static_cast<core::u8>(2 * 3 + 4 * 5 + 3 * 7));
-}
-
-TEST_CASE("the distance quantisation round-trips near the surface and saturates far from it")
-{
-    // Near the surface is where a mesher reads, so that is where the precision
-    // has to be. The tolerance is one quantisation step of the stated range.
-    const float step = DistanceRange * kVoxel / 128.0f;
-    for (const float metres : {-1.0f, -0.5f, 0.0f, 0.25f, 1.0f}) {
-        const core::u8 quantised = quantiseDistance(metres, kVoxel);
-        CHECK(std::abs(dequantiseDistance(quantised, kVoxel) - metres) <= step);
-    }
-
-    // Exactly on the surface is exactly the surface level, which is what makes a
-    // sample able to sit ON the isosurface rather than approach it.
-    CHECK(quantiseDistance(0.0f, kVoxel) == SurfaceLevel);
-
-    // **Far from the surface saturates rather than wrapping**, and keeps its
-    // sign -- which is the only thing a mesher asks of a distant sample.
-    CHECK(quantiseDistance(-1000.0f, kVoxel) == 0);
-    CHECK(quantiseDistance(1000.0f, kVoxel) == 255);
-    CHECK(dequantiseDistance(0, kVoxel) < 0.0f);
-    CHECK(dequantiseDistance(255, kVoxel) > 0.0f);
-}
-
-TEST_CASE("an edit clones what it touches and leaves the rest shared")
-{
-    // **This is what makes undo affordable.** `UndoStack` snapshots the whole
-    // world by value and keeps 64 of them; a tile is a `shared_ptr<const T>`, so
-    // a snapshot copies pointers. An edit that mutated in place would corrupt
-    // every snapshot at once, and one that deep-copied would make a snapshot
-    // cost megabytes.
-    TerrainField field = flatField(4.0f);
-    const std::vector<float> other(TileArea, 9.0f);
-    const std::vector<core::u8> materials(TileArea, core::u8{2});
-    field.setTile(TileKey{1, 0}, other, materials);
-
-    const HeightTile* untouched = field.findTile(TileKey{1, 0});
-    REQUIRE(untouched != nullptr);
-
-    // Replace a DIFFERENT tile.
-    const std::vector<float> raised(TileArea, 6.0f);
-    field.setTile(TileKey{0, 0}, raised, materials);
-
-    // The one nobody edited is the same object, not an equal copy.
-    CHECK(field.findTile(TileKey{1, 0}) == untouched);
-    // And the edited one took.
-    CHECK(static_cast<double>(field.sample(0, 0, 0).distance) == doctest::Approx(-6.0));
-}
-
-TEST_CASE("a digest is a function of the contents and the keys, and nothing else")
-{
-    const TerrainField a = flatField(4.0f);
-    const TerrainField b = flatField(4.0f);
-
-    // Same contents built twice: the same digest. A digest that depended on an
-    // address or an insertion order would fail here.
-    CHECK(a.digest() == b.digest());
-
-    // Different heights: different digest.
-    CHECK(flatField(5.0f).digest() != a.digest());
-
-    // **Same tile at a different key: different digest.** A digest over contents
-    // alone could not tell two fields apart that hold the same ground in
-    // different places, which is a world hash that misses a move.
-    TerrainField moved(FieldSettings{.voxelSize = kVoxel});
-    const std::vector<float> heights(TileArea, 4.0f);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    moved.setTile(TileKey{3, 7}, heights, materials);
-    CHECK(moved.digest() != a.digest());
-
-    // An empty field has a stable digest of its own rather than a zero that
-    // collides with "nobody computed one".
-    const TerrainField empty(FieldSettings{.voxelSize = kVoxel});
-    CHECK(empty.digest() == TerrainField(FieldSettings{.voxelSize = kVoxel}).digest());
-}
-
-TEST_CASE("keys come back sorted, whatever order they went in")
-{
-    // **R10.** The mesher and the serializer both walk these, and a walk that
-    // depended on insertion order would make a saved cell -- and the world hash
-    // over it -- a fact about how somebody sculpted rather than about what they
-    // sculpted.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel});
-    const std::vector<float> heights(TileArea, 1.0f);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    for (const TileKey key : {TileKey{5, 1}, TileKey{-2, 4}, TileKey{5, -3}, TileKey{0, 0}}) {
-        field.setTile(key, heights, materials);
-    }
-
-    const std::vector<TileKey> keys = field.tileKeys();
-    REQUIRE(keys.size() == 4);
-    CHECK(std::is_sorted(keys.begin(), keys.end()));
-    CHECK(keys.front() == TileKey{-2, 4});
-
-    TerrainField reversed(FieldSettings{.voxelSize = kVoxel});
-    for (const TileKey key : {TileKey{0, 0}, TileKey{5, -3}, TileKey{-2, 4}, TileKey{5, 1}}) {
-        reversed.setTile(key, heights, materials);
-    }
-    CHECK(reversed.tileKeys() == keys);
-    // And therefore the same digest, which is the property that matters.
-    CHECK(reversed.digest() == field.digest());
-}
-
-TEST_CASE("removing a brick gives the column back to the height layer")
-{
-    TerrainField field = flatField(4.0f);
-    const std::vector<core::u8> solid(BrickVolume, core::u8{0});
-    const std::vector<core::u8> materials(BrickVolume, core::u8{7});
-    field.setBrick(BrickKey{0, 0, 0}, solid, materials);
-    REQUIRE(field.isBricked(2, 2));
-    REQUIRE(field.sample(2, 14, 2).distance < 0.0f);
-
-    field.removeBrick(BrickKey{0, 0, 0});
-
-    CHECK_FALSE(field.isBricked(2, 2));
-    CHECK(field.brickCount() == 0);
-    // The height layer answers again, and says what it always said.
-    CHECK(static_cast<double>(field.sample(2, 14, 2).distance) == doctest::Approx(3.0));
-}
-
-// --- The raycast (F1 B4) ----------------------------------------------------
-
-TEST_CASE("a ray fired down at the ground hits it, at the height the ground is")
-{
-    // **No physics involved, and that is the point rather than an
-    // optimisation.** `PhysicsSync::mirror` runs only when the world is paused
-    // AND the collision wireframe is on, so an editor sitting in edit mode with
-    // that view closed holds no bodies at all -- and a brush asking physics
-    // where the ground was would find nothing to hit.
-    const TerrainField field = flatField(4.0f);
-
-    const auto hit = raycastField(field, core::DVec3{0.5, 20.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 100.0);
-    REQUIRE(hit.has_value());
-    CHECK(hit->position.y == doctest::Approx(4.0).epsilon(0.01));
-    CHECK(hit->distance == doctest::Approx(16.0).epsilon(0.01));
-    // Facing up, because the field's gradient does -- the same normal the mesher
-    // gives that surface, so a decal placed here sits flush with the triangle.
-    CHECK(static_cast<double>(hit->normal.y) > 0.9);
-}
-
-TEST_CASE("a ray fired at the sky misses rather than marching for ever")
-{
-    const TerrainField field = flatField(4.0f);
-    CHECK_FALSE(raycastField(field, core::DVec3{0.5, 20.0, 0.5}, core::Vec3{0.0f, 1.0f, 0.0f}, 100.0).has_value());
-
-    // And so does one that runs out of budget before it arrives.
-    CHECK_FALSE(raycastField(field, core::DVec3{0.5, 200.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 10.0).has_value());
-}
-
-TEST_CASE("a ray that starts underground hits at once rather than refusing")
-{
-    // The case that produces this is a brush dragged into a hillside, or a
-    // camera inside terrain. Both want the surface they are already past.
-    const TerrainField field = flatField(4.0f);
-    const auto hit = raycastField(field, core::DVec3{0.5, 1.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 100.0);
-    REQUIRE(hit.has_value());
-    CHECK(hit->distance == doctest::Approx(0.0));
-}
-
-TEST_CASE("a degenerate ray is refused rather than dividing by zero")
-{
-    const TerrainField field = flatField(4.0f);
-    CHECK_FALSE(raycastField(field, core::DVec3{0.0, 20.0, 0.0}, core::Vec3{0.0f, 0.0f, 0.0f}, 100.0).has_value());
-    CHECK_FALSE(raycastField(field, core::DVec3{0.0, 20.0, 0.0}, core::Vec3{0.0f, -1.0f, 0.0f}, 0.0).has_value());
-}
-
-TEST_CASE("a ray finds a cave's roof before its floor")
-{
-    // The property that makes the representation worth its cost: a ray entering
-    // from above meets the top of the cavity first, which a height field could
-    // not express at all.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(TileArea, 20.0f);
-    const std::vector<core::u8> tileMaterials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, tileMaterials);
-
-    // Air in the middle of the brick, solid around it.
-    std::vector<core::u8> distances(BrickVolume);
-    const std::vector<core::u8> brickMaterials(BrickVolume, core::u8{9});
-    for (core::u32 y = 0; y < BrickEdge; ++y) {
-        for (core::u32 z = 0; z < BrickEdge; ++z) {
-            for (core::u32 x = 0; x < BrickEdge; ++x) {
-                const bool hollow = y >= 4 && y < 12;
-                distances[(y * BrickEdge + z) * BrickEdge + x] = quantiseDistance(hollow ? 1.0f : -1.0f, 0.5f);
-            }
-        }
-    }
-    field.setBrick(BrickKey{0, 0, 0}, distances, brickMaterials);
-
-    // Fired upward from inside the hollow: it should meet the roof at y = 12
-    // lattice, which is 6 metres.
-    const auto roof = raycastField(field, core::DVec3{4.0, 4.0, 4.0}, core::Vec3{0.0f, 1.0f, 0.0f}, 20.0);
-    REQUIRE(roof.has_value());
-    CHECK(roof->position.y == doctest::Approx(6.0).epsilon(0.2));
-    CHECK(roof->material == 9);
-}
-
-// --- Editing the field (F1) --------------------------------------------------
-
-TEST_CASE("adding a ball to empty air makes ground you can stand on")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    const EditReport report = fillBall(field, core::DVec3{0.0, 0.0, 0.0}, 3.0, 1);
-
-    CHECK(report.touched > 0);
-    // The ball's middle is solid and a point well outside it is not.
-    CHECK(field.sample(0, 0, 0).distance <= 0.0f);
-    CHECK(field.sample(0, 20, 0).distance > 0.0f);
-}
-
-TEST_CASE("digging into a hillside from the side makes a cave, and the cave is bricked")
-{
-    // **The promotion rule, which is the whole hybrid in one test.** A ball
-    // removed from INSIDE solid ground leaves air with ground above it, so the
-    // column stops being a height function and has to carry voxels.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(TileArea, 20.0f);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, materials);
-
-    REQUIRE_FALSE(field.isBricked(8, 8));
-    const core::usize bricksBefore = field.brickCount();
-
-    // Ten metres down, well below the surface at twenty.
-    const EditReport report = fillBall(field, core::DVec3{4.0, 10.0, 4.0}, 2.0, 0);
-
-    CHECK(report.promoted > 0);
-    CHECK(field.brickCount() > bricksBefore);
-    CHECK(field.isBricked(8, 8));
-
-    // And the cave is air with ground above AND below it, which is what a height
-    // function cannot express.
-    CHECK(field.sample(8, 20, 8).distance > 0.0f);
-    CHECK(field.sample(8, 30, 8).distance <= 0.0f);
-    CHECK(field.sample(8, 10, 8).distance <= 0.0f);
-}
-
-TEST_CASE("lowering the ground from above stays in the cheap encoding")
-{
-    // The common edit, and the one that must NOT promote: a ball taken out of
-    // the top of a hill leaves one surface, lower down. A design that bricked
-    // this would pay voxel prices for ordinary sculpting.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(TileArea, 10.0f);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, materials);
-
-    const EditReport report = fillBall(field, core::DVec3{4.0, 11.0, 4.0}, 2.5, 0);
-
-    CHECK(report.promoted == 0);
-    CHECK(field.brickCount() == 0);
-    CHECK_FALSE(field.isBricked(8, 8));
-
-    // And the ground is lower than it was.
-    const std::optional<float> after = heightAt(field, 4.0, 4.0);
-    REQUIRE(after.has_value());
-    CHECK(*after < 10.0f);
-}
-
-TEST_CASE("a block is a box rather than a rounded lump")
-{
-    // `blockDepth` takes the MINIMUM over the three axes, and taking the maximum
-    // is the mistake that rounds every corner off. A point near a corner is the
-    // one that tells them apart.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    fillBlock(field, core::DVec3{0.0, 0.0, 0.0}, core::Vec3{8.0f, 8.0f, 8.0f}, 1);
-
-    // The middle, a face, and a corner are all inside a box.
-    CHECK(field.sample(0, 0, 0).distance <= 0.0f);
-    CHECK(field.sample(6, 0, 0).distance <= 0.0f);
-    CHECK(field.sample(6, 6, 6).distance <= 0.0f);
-    // And just outside the corner is not.
-    CHECK(field.sample(10, 10, 10).distance > 0.0f);
-}
-
-TEST_CASE("heightAt answers about the height layer and admits when it cannot")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    CHECK_FALSE(heightAt(field, 0.0, 0.0).has_value());
-
-    const std::vector<float> heights(TileArea, 7.5f);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, materials);
-
-    const std::optional<float> found = heightAt(field, 2.0, 2.0);
-    REQUIRE(found.has_value());
-    CHECK(static_cast<double>(*found) == doctest::Approx(7.5).epsilon(0.001));
-
-    // Outside any tile is still nothing rather than zero, because zero is a
-    // legitimate height and "no ground" is not a height at all.
-    CHECK_FALSE(heightAt(field, 1000.0, 1000.0).has_value());
-}
-
-TEST_CASE("an edit is deterministic: the same brush on the same field twice agrees")
-{
-    // **R10.** Every column is examined before any is written and the columns are
-    // visited in a fixed order, precisely so a promotion does not depend on the
-    // order voxels happened to be reached -- and a promotion decides which
-    // encoding a column is in, which is hashed.
-    const auto sculpted = [] {
-        TerrainField field(FieldSettings{.voxelSize = 0.5f});
-        const std::vector<float> heights(TileArea, 12.0f);
-        const std::vector<core::u8> materials(TileArea, core::u8{1});
-        field.setTile(TileKey{0, 0}, heights, materials);
-        fillBall(field, core::DVec3{4.0, 6.0, 4.0}, 2.0, 0);
-        fillBall(field, core::DVec3{6.0, 13.0, 4.0}, 1.5, 2);
-        return field;
-    };
-
-    CHECK(sculpted().digest() == sculpted().digest());
-}
-
-TEST_CASE("compact gives a column back only when its bricks carry nothing")
-{
-    // **Nothing does this automatically**, which is the decision: the
-    // representation is part of the world's state, so a field that recompacted
-    // itself would be a world that changed when nobody touched it.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f});
-    const std::vector<float> heights(TileArea, 20.0f);
-    const std::vector<core::u8> materials(TileArea, core::u8{1});
-    field.setTile(TileKey{0, 0}, heights, materials);
-
-    fillBall(field, core::DVec3{4.0, 10.0, 4.0}, 2.0, 0);
-    const core::usize withCave = field.brickCount();
-    REQUIRE(withCave > 0);
-
-    // **Nothing is redundant, because the edit no longer writes redundant
-    // bricks.** The first version of this test expected that and got three of
-    // four bricks reclaimed -- the examined column runs a brick above and below
-    // the brush, so promoting used to allocate levels that only repeated the
-    // height layer. `writeBricks` skips creating those now, and `compact` is
-    // left as the verb for reclaiming what LATER edits made redundant rather
-    // than as a required step after every dig.
-    CHECK(compact(field) == 0);
-    CHECK(field.brickCount() == withCave);
-
-    // And the cave survives, which is the half a reclaim count cannot say.
-    CHECK(field.sample(8, 20, 8).distance > 0.0f);
-    CHECK(field.sample(8, 30, 8).distance <= 0.0f);
-}
-
-TEST_CASE("ground that reaches the world's floor stays in the cheap encoding")
-{
-    // **The trap this pins cost a working example and 214 bricked cells.**
-    //
-    // The height encoding means "solid for every y below H", so a column is only
-    // height-encodable when everything under its surface is solid. The
-    // examination used to run a fixed margin below whatever was filled, always
-    // find air there, and always conclude the column was a floating slab -- so
-    // the FIRST fill into an empty world promoted to voxels, and so did every
-    // fill after it. Clamping the examination to the world's floor is what fixes
-    // it: below the floor is not air, it is outside the world.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-
-    // Past the floor rather than onto it: a brush that stops exactly at the
-    // floor leaves the sample there outside itself, which reads as air.
-    const EditReport ground = fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-
-    CHECK(ground.promoted == 0);
-    CHECK(field.brickCount() == 0);
-
-    // And it IS ground: the surface is at the block's top, and everything below
-    // is solid.
-    const std::optional<float> height = heightAt(field, 0.0, 0.0);
+    const std::optional<float> height = heightAt(field, x, z);
     REQUIRE(height.has_value());
-    // Within a voxel of the block's top. An absolute tolerance rather than
-    // `Approx`'s epsilon, which is RELATIVE -- and relative to zero is exact
-    // equality, which is not what a sampled surface can promise.
-    CHECK(std::abs(*height) <= kVoxel);
-    CHECK(field.sample(0, -40, 0).distance <= 0.0f);
-
-    // **A slab that does NOT reach the floor is a slab**, and costs voxels. Both
-    // are legal; the difference is stated rather than surprising.
-    TerrainField slab(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    const EditReport floating = fillBlock(slab, core::DVec3{0.0, 8.0, 0.0}, core::Vec3{16.0f, 4.0f, 16.0f}, 1);
-    CHECK(floating.promoted > 0);
-    CHECK(slab.brickCount() > 0);
+    return static_cast<double>(*height);
 }
 
-TEST_CASE("a hill dug into keeps its cheap columns and bricks only the cave")
+[[nodiscard]] bool solidAt(const TerrainField& field, double x, double y, double z)
 {
-    // The whole design, end to end, as one arithmetic claim: a world sculpted
-    // like the terrain example should be mostly height tiles.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -64.0f, .maxHeight = 64.0f});
-    fillBlock(field, core::DVec3{0.0, -40.0, 0.0}, core::Vec3{48.0f, 80.0f, 48.0f}, 1);
-    fillBall(field, core::DVec3{0.0, 2.0, 0.0}, 9.0, 1);
-
-    // **Mostly cheap, and the exception is geometry rather than a defect.** A
-    // ball placed tangent to flat ground floats a sliver above it around its
-    // rim -- the ball's underside curves away from the plane faster than the
-    // plane falls -- so those columns genuinely have two surfaces and genuinely
-    // are not height functions. It is a ring of a dozen columns around a hill
-    // eighteen metres across, which is the hybrid costing what it should.
-    const core::usize afterHill = field.brickCount();
-    CHECK(afterHill < field.tileCount() * 4);
-
-    // **`isBricked` answers per BRICK COLUMN, not per column**, which is worth
-    // knowing before relying on it: one promoted column writes a 16-cubed brick
-    // that then answers for all 256 columns under it. So the rim's ring reaches
-    // the middle's brick, and asking whether the exact centre is bricked is
-    // asking the wrong question. What the surface looks like is the right one.
-    CHECK(field.sample(0, 16, 0).distance <= 0.0f);
-
-    // The cave, which is the one thing a height map cannot express -- and now
-    // the middle of the hill IS bricked, which it was not a moment ago.
-    fillBall(field, core::DVec3{0.0, -1.0, 0.0}, 4.0, 0);
-    CHECK(field.brickCount() > afterHill);
-
-    // Ground above the cave and ground below it, which is the definition of the
-    // thing being demonstrated.
-    CHECK(field.sample(0, 16, 0).distance <= 0.0f);
-    CHECK(field.sample(0, -2, 0).distance > 0.0f);
-    CHECK(field.sample(0, -20, 0).distance <= 0.0f);
+    return sampleField(field, core::DVec3{x, y, z}).distance < 0.0f;
 }
 
-TEST_CASE("painting changes what ground is made of and never where it is")
+// Every voxel in a box, for comparing what a brush left alone.
+[[nodiscard]] std::vector<Voxel> voxelsIn(const TerrainField& field, int minX, int minY, int minZ, int maxX, int maxY,
+                                          int maxZ)
 {
-    // Past the floor, so the ground is height-encoded -- the case a paint brush
-    // must leave height-encoded.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-    REQUIRE(field.brickCount() == 0);
-
-    const std::optional<float> before = heightAt(field, 0.0, 0.0);
-    REQUIRE(before.has_value());
-    const core::usize tilesBefore = field.tileCount();
-
-    const EditReport report = paintBall(field, core::DVec3{0.0, static_cast<double>(*before), 0.0}, 3.0, 3);
-    CHECK(report.touched > 0);
-
-    // The surface did not move, and nothing was promoted.
-    const std::optional<float> after = heightAt(field, 0.0, 0.0);
-    REQUIRE(after.has_value());
-    CHECK(static_cast<double>(*after) == doctest::Approx(static_cast<double>(*before)));
-    CHECK(field.brickCount() == 0);
-    CHECK(field.tileCount() == tilesBefore);
-    CHECK(report.promoted == 0);
-
-    // And the material really changed under the brush while staying `1` outside
-    // it -- a paint that repainted the whole tile would pass every check above.
-    CHECK(field.sample(0, -40, 0).material == 3);
-    CHECK(field.sample(14, -40, 0).material == 1);
-}
-
-TEST_CASE("painting reaches a bricked column without creating a brick")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-    // A cave, which is what puts voxels under the middle.
-    fillBall(field, core::DVec3{0.0, -3.0, 0.0}, 3.0, 0);
-    const core::usize bricksBefore = field.brickCount();
-    REQUIRE(bricksBefore > 0);
-
-    const EditReport report = paintBall(field, core::DVec3{0.0, -3.0, 0.0}, 5.0, 4);
-    CHECK(report.touched > 0);
-    // **No brick was created**, which is the claim: painting is not a sculpt in
-    // disguise and must not change the encoding of anything.
-    CHECK(field.brickCount() == bricksBefore);
-    // Solid ground under the cave, within the brush: painted. (Lattice indices,
-    // so -14 is seven metres down at half-metre voxels -- a metre below the
-    // cave's floor and four metres from the brush's centre.)
-    CHECK(field.sample(0, -14, 0).distance <= 0.0f);
-    CHECK(field.sample(0, -14, 0).material == 4);
-
-    // **The air inside the cave keeps whatever it had**, and that is the design
-    // rather than an oversight: carving stores `max(existing, insideness)` and
-    // leaves the material alone, because the material of a point with no ground
-    // in it is not a question. What matters is that the paint did not reach it.
-    CHECK(field.sample(0, -6, 0).distance > 0.0f);
-    CHECK(field.sample(0, -6, 0).material != 4);
-}
-
-TEST_CASE("painting refuses material zero rather than erasing")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-    const core::u64 digestBefore = field.digest();
-
-    const EditReport report = paintBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, 0);
-    CHECK(report.touched == 0);
-    // Byte-identical: not "mostly unchanged", unchanged.
-    CHECK(field.digest() == digestBefore);
-}
-
-TEST_CASE("painting out of reach of the surface touches nothing")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-    const core::u64 digestBefore = field.digest();
-
-    // Twenty metres above the ground, radius one.
-    const EditReport report = paintBall(field, core::DVec3{0.0, 20.0, 0.0}, 1.0, 5);
-    CHECK(report.touched == 0);
-    CHECK(field.digest() == digestBefore);
-}
-
-TEST_CASE("every column of a block carries its material, not just the first of a tile")
-{
-    // **D153, and it was two defects wearing one symptom.**
-    //
-    // A tile is 32 by 32 columns and is written one column at a time. The first
-    // column filled into a fresh tile came out with material 1 and every column
-    // after it with material 0 -- so a placed block was one square metre of
-    // ground and a thousand square metres of nothing wearing the same height.
-    //
-    // Cause one: a sample exactly ON the brush's flat top has `inside == 0`, and
-    // the add branch tested `> 0`, so it fell through and kept what was already
-    // there. Cause two: what was already there, for an unwritten column of a
-    // tile that now exists, was a height of zero and a material of zero -- read
-    // as a real surface rather than as no ground.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-
-    // Every column across the block, in both tiles it spans.
-    for (core::i32 x = -15; x <= 15; ++x) {
-        CAPTURE(x);
-        CHECK(field.sample(x, -40, 0).material == 1);
-        CHECK(field.sample(x, -40, 0).distance <= 0.0f);
-    }
-
-    // **And the top of the block is where the block's top is.** This is the half
-    // of D153 the material assertions above cannot see: with a strict `>` the
-    // face's own sample is not the brush's, the crossing is found a voxel lower,
-    // and every flat-topped block comes out four tenths of a metre short. A
-    // quarter-voxel tolerance, because that is what an exactly-representable
-    // surface can promise and half a voxel would let the defect back through.
-    const std::optional<float> top = heightAt(field, 0.0, 0.0);
-    REQUIRE(top.has_value());
-    CHECK(std::abs(*top) < kVoxel * 0.25f);
-}
-
-TEST_CASE("creating a tile does not create a plane")
-{
-    // The other half of D153: filling one corner of a tile must not put ground
-    // under the other thousand columns of it. A block 16 metres across lives in
-    // a tile 16 metres across at half-metre voxels, so the columns just outside
-    // it share the tile with it.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{4.0, -20.0, 4.0}, core::Vec3{4.0f, 40.0f, 4.0f}, 1);
-    REQUIRE(field.tileCount() > 0);
-
-    // Inside the block there is ground.
-    CHECK(heightAt(field, 4.0, 4.0).has_value());
-    // Twelve metres away, in the same tile, there is not.
-    CHECK_FALSE(heightAt(field, 14.0, 14.0).has_value());
-    CHECK(field.sample(28, -40, 28).distance > 0.0f);
-}
-
-// --- Smooth and Flatten (F1, the panel's two other tools) --------------------
-
-TEST_CASE("smoothing pulls a spike towards its neighbours")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
-
-    // A tower one column wide, which is the shape a blur has the most to say
-    // about.
-    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{0.5f, 8.0f, 0.5f}, 1);
-    const std::optional<float> spike = heightAt(field, 0.0, 0.0);
-    REQUIRE(spike.has_value());
-    REQUIRE(*spike > 4.0f);
-
-    const EditReport report = smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.5f);
-    CHECK(report.touched > 0);
-
-    const std::optional<float> after = heightAt(field, 0.0, 0.0);
-    REQUIRE(after.has_value());
-    // Lower than it was and still above the ground around it: a blur moves a
-    // column part of the way, and one that flattened the spike in a single pass
-    // would be a tool with no feel.
-    CHECK(*after < *spike);
-    CHECK(*after > 0.0f);
-}
-
-TEST_CASE("smoothing at zero strength changes nothing")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
-    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{0.5f, 8.0f, 0.5f}, 1);
-    const core::u64 before = field.digest();
-
-    CHECK(smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.0f).touched == 0);
-    CHECK(field.digest() == before);
-}
-
-TEST_CASE("smoothing is a blur and not a smear")
-{
-    // **Every column is read before any is written.** Writing as it goes would
-    // feed each column's new height into its neighbour's average, so the result
-    // would depend on the order the columns were visited -- which is a fact
-    // about a loop rather than about the world (R10).
-    //
-    // Asserted by symmetry: a spike smoothed in a field is symmetric about its
-    // own column, and a smear is not.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
-    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{0.5f, 8.0f, 0.5f}, 1);
-    smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.6f);
-
-    for (double at = 0.5; at <= 2.5; at += 0.5) {
-        const std::optional<float> left = heightAt(field, -at, 0.0);
-        const std::optional<float> right = heightAt(field, at, 0.0);
-        CAPTURE(at);
-        REQUIRE(left.has_value());
-        REQUIRE(right.has_value());
-        CHECK(*left == doctest::Approx(static_cast<double>(*right)).epsilon(0.001));
-    }
-}
-
-TEST_CASE("flattening levels towards the height it is given")
-{
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
-    fillBlock(field, core::DVec3{0.0, 4.0, 0.0}, core::Vec3{4.0f, 8.0f, 4.0f}, 1);
-
-    const std::optional<float> raised = heightAt(field, 0.0, 0.0);
-    REQUIRE(raised.has_value());
-    REQUIRE(*raised > 2.0f);
-
-    // **The target is given rather than sampled**, which is what makes it a tool
-    // a person can aim: an editor passes the height the stroke started at, so
-    // dragging across a hillside levels it to where you first clicked instead of
-    // chasing its own result downhill.
-    for (int pass = 0; pass < 12; ++pass) {
-        flattenBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0.0f, 0.5f);
-    }
-
-    const std::optional<float> levelled = heightAt(field, 0.0, 0.0);
-    REQUIRE(levelled.has_value());
-    CHECK(std::abs(*levelled) < 0.2f);
-}
-
-TEST_CASE("smoothing flat ground over a cave changes nothing, and the cave stays")
-{
-    // A bricked column is smoothed by its TOP (D162), so over flat ground --
-    // every top the same -- there is nothing to move, and no brick is made.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
-    fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 3.0, 0);
-    REQUIRE(field.brickCount() > 0);
-
-    const core::usize bricksBefore = field.brickCount();
-    smoothBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 1.0f);
-    // No brick created, none destroyed: smoothing does not change the encoding.
-    CHECK(field.brickCount() == bricksBefore);
-    // And the cave is still a cave.
-    CHECK(field.sample(0, -8, 0).distance > 0.0f);
-}
-
-TEST_CASE("the palette names every material it can draw, and never zero")
-{
-    // Zero means "no ground" everywhere in this system, so a palette entry for
-    // it would be a swatch that deletes the world when clicked.
-    CHECK(terrainMaterial(0) == nullptr);
-    CHECK_FALSE(terrainPalette().empty());
-    for (const TerrainMaterial& entry : terrainPalette()) {
-        CAPTURE(entry.id);
-        CHECK(entry.id != 0);
-        CHECK_FALSE(entry.name.empty());
-        CHECK(terrainMaterial(entry.id) != nullptr);
-    }
-
-    // An id this build does not know still draws as something rather than as
-    // black, so a world authored against a bigger palette is visibly missing an
-    // entry instead of invisibly wrong.
-    const core::Vec3 unknown = terrainColorOf(200);
-    CHECK((unknown.x + unknown.y + unknown.z) > 0.0f);
-}
-
-TEST_CASE("the mesher gives each material its own section")
-{
-    // **What makes painting visible.** The field has carried a material per
-    // voxel since it existed; until the mesher bucketed by it, every terrain
-    // drew as one grey surface and the paint tool changed nothing on screen.
-    TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{-8.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 1);
-    fillBlock(field, core::DVec3{8.0, -20.0, 0.0}, core::Vec3{16.0f, 40.0f, 16.0f}, 2);
-
-    MeshRegion region;
-    region.minX = -40;
-    region.minY = -8;
-    region.minZ = -20;
-    region.cellsX = 80;
-    region.cellsY = 16;
-    region.cellsZ = 40;
-    const TerrainMesh meshed = meshField(field, region);
-
-    REQUIRE_FALSE(meshed.mesh.indices.empty());
-    CHECK(meshed.mesh.submeshes.size() == meshed.sectionMaterials.size());
-    CHECK(meshed.mesh.submeshes.size() >= 2);
-
-    // In id order, which is what keeps a section's place a fact about the field
-    // rather than about an allocator (R10).
-    for (core::usize at = 1; at < meshed.sectionMaterials.size(); ++at) {
-        CHECK(meshed.sectionMaterials[at - 1] < meshed.sectionMaterials[at]);
-    }
-
-    // Every triangle is in exactly one section.
-    core::usize covered = 0;
-    for (const Submesh& section : meshed.mesh.submeshes) {
-        covered += section.indexCount;
-    }
-    CHECK(covered == meshed.mesh.indices.size());
-}
-
-TEST_CASE("a bowl carved from the top of flat ground is still a height function")
-{
-    // **Carving down into ground makes a pit, and a pit is solid below and air
-    // above in every column** -- a height function, which the cheap encoding
-    // holds. Promoting any of its columns to voxels meshes part of the pit on
-    // the CPU and leaves the rest to the height field, and the two walls meet
-    // in a crease down the side of every crater.
-    asset::TerrainField field(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
-    asset::fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 64.0f, 0.0f, 1);
-    REQUIRE(field.brickCount() == 0);
-
-    (void)asset::fillBall(field, core::DVec3{4.0, 0.0, 4.0}, 4.0, 0);
-    CHECK(field.brickCount() == 0);
-    const std::optional<float> bottom = asset::heightAt(field, 4.0, 4.0);
-    REQUIRE(bottom.has_value());
-    CHECK(*bottom < -3.0f);
-}
-
-TEST_CASE("a heightmap is written whole, row after row, clamped, and a cave stays under it")
-{
-    TerrainField field(FieldSettings{.voxelSize = 1.0f});
-    field.setHeightRange(-8.0f, 8.0f);
-    const std::vector<float> heights{1.0f, 2.0f, 3.0f, 4.0f, 50.0f, std::nanf("")};
-    const EditReport report = writeHeights(field, 10, 20, 3, heights, 2);
-    CHECK(report.touched == 5);
-    CHECK(heightAt(field, 10.0, 20.0) == doctest::Approx(1.0));
-    CHECK(heightAt(field, 12.0, 20.0) == doctest::Approx(3.0));
-    CHECK(heightAt(field, 10.0, 21.0) == doctest::Approx(4.0));
-    // Clamped into the reserved range, and a NaN never written.
-    CHECK(heightAt(field, 11.0, 21.0) == doctest::Approx(8.0));
-    CHECK_FALSE(heightAt(field, 12.0, 21.0).has_value());
-    // No width, nothing written; material zero is not ground.
-    CHECK(writeHeights(field, 0, 0, 0, heights, 2).touched == 0);
-    CHECK(writeHeights(field, 0, 0, 3, heights, 0).touched == 0);
-
-    // A column that carries voxels has its TOP moved, and the cave under it
-    // stays (D162). It used to be skipped, which left a slot in the ground.
-    (void)fillBlock(field, core::DVec3{40.0, -4.0, 40.0}, core::Vec3{8.0f, 8.0f, 8.0f}, 1);
-    (void)fillBall(field, core::DVec3{40.0, -4.0, 40.0}, 2.0, 0);
-    REQUIRE(field.isBricked(40, 40));
-    const std::vector<float> one{5.0f};
-    const EditReport moved = writeHeights(field, 40, 40, 1, one, 1);
-    CHECK(moved.touched == 1);
-    CHECK(field.sample(40, 6, 40).distance > 0.0f);
-    CHECK(field.sample(40, 4, 40).distance <= 0.0f);
-    CHECK(field.sample(40, -4, 40).distance > 0.0f);
-}
-
-namespace {
-
-// The highest place a column's ground meets the air, from the field alone, the
-// way anything drawing or colliding with it sees it.
-[[nodiscard]] float topOf(const TerrainField& field, core::i32 x, core::i32 z)
-{
-    for (core::i32 y = 120; y > -64; --y) {
-        const FieldSample here = field.sample(x, y, z);
-        if (here.distance <= 0.0f) {
-            const FieldSample above = field.sample(x, y + 1, z);
-            const float t = here.distance / (here.distance - above.distance);
-            return (static_cast<float>(y) + t) * kVoxel;
+    std::vector<Voxel> out;
+    for (int z = minZ; z <= maxZ; ++z) {
+        for (int y = minY; y <= maxY; ++y) {
+            for (int x = minX; x <= maxX; ++x)
+                out.push_back(field.voxel(x, y, z));
         }
     }
-    return -1000.0f;
+    return out;
 }
 
 } // namespace
 
-TEST_CASE("a hill raised over a tunnel rises there too, and the tunnel stays")
+// --- Storage ---------------------------------------------------------------------
+
+TEST_CASE("a voxel is air until something is written, and air keeps no material")
 {
-    // **D162.** A height brush skipped every column carrying voxels, so a hill
-    // raised over a tunnel had a slot through it as wide as the tunnel's brick
-    // columns, down to the old ground. It moves such a column by its top now.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{64.0f, 40.0f, 64.0f}, 1);
-    fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 2.0, 0);
-    REQUIRE(field.isBricked(0, 0));
-    REQUIRE_FALSE(field.isBricked(0, 20));
+    TerrainField field(settingsOf());
+    CHECK(field.voxel(3, 4, 5) == Voxel{});
+    // Empty with a material is still air: the digest is over bytes, and two
+    // equal worlds must hash equal.
+    CHECK_FALSE(field.setVoxel(3, 4, 5, Voxel{0, 3}));
+    CHECK(field.empty());
+    CHECK(field.setVoxel(3, 4, 5, Voxel{200, 3}));
+    CHECK(field.voxel(3, 4, 5) == Voxel{200, 3});
+    CHECK(field.setVoxel(3, 4, 5, Voxel{0, 3}));
+    CHECK(field.empty());
+}
 
-    for (int stamp = 0; stamp < 5; ++stamp)
-        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 16.0, 2.0f, 1);
+TEST_CASE("negative coordinates land in the chunk to their left")
+{
+    TerrainField field(settingsOf());
+    (void)field.setVoxel(-1, -1, -1, Voxel{FullOccupancy, 1});
+    CHECK(field.findChunk(ChunkKey{-1, -1, -1}) != nullptr);
+    CHECK(field.findChunk(ChunkKey{0, 0, 0}) == nullptr);
+    CHECK(field.voxel(-1, -1, -1).occupancy == FullOccupancy);
+    CHECK(field.voxel(0, 0, 0).occupancy == 0);
+    CHECK(chunkOf(-33, 31, 32) == ChunkKey{-2, 0, 1});
+}
 
-    // Every column ends where the brush's own falloff puts it, bricked or not:
-    // five stamps of two metres, weighted by the smoothstep from the rim.
-    const auto expected = [](double metres) {
-        const double t = metres / 16.0;
-        return 10.0 * (1.0 - t * t * (3.0 - 2.0 * t));
+TEST_CASE("a column of chunks is one run of the sorted list, lowest first")
+{
+    TerrainField field(settingsOf());
+    (void)field.setVoxel(0, 70, 0, Voxel{FullOccupancy, 1});
+    (void)field.setVoxel(0, -5, 0, Voxel{FullOccupancy, 1});
+    (void)field.setVoxel(40, 0, 0, Voxel{FullOccupancy, 1});
+    (void)field.setVoxel(0, 0, 40, Voxel{FullOccupancy, 1});
+    const std::span<const TerrainField::Entry> column = field.column(0, 0);
+    REQUIRE(column.size() == 2);
+    CHECK(column[0].first == ChunkKey{0, -1, 0});
+    CHECK(column[1].first == ChunkKey{0, 2, 0});
+}
+
+TEST_CASE("a chunk holding one value is stored as that value")
+{
+    TerrainField field(settingsOf());
+    {
+        FieldWriter writer(field);
+        for (int z = 0; z < 32; ++z) {
+            for (int y = 0; y < 32; ++y) {
+                for (int x = 0; x < 32; ++x)
+                    (void)writer.set(x, y, z, Voxel{FullOccupancy, 3});
+            }
+        }
+    }
+    const TerrainChunk* chunk = field.findChunk(ChunkKey{0, 0, 0});
+    REQUIRE(chunk != nullptr);
+    CHECK(chunk->uniform());
+    CHECK(chunk->value() == Voxel{FullOccupancy, 3});
+    CHECK(chunk->bytes() < 512);
+}
+
+TEST_CASE("flat ground is mostly rows of one value, and small")
+{
+    const TerrainField field = flatField(2.3f);
+    const TerrainChunk* surface = field.findChunk(ChunkKey{0, 0, 0});
+    REQUIRE(surface != nullptr);
+    CHECK_FALSE(surface->uniform());
+    // The ramp is four voxels across, so a handful of layers of 32 rows are
+    // partial and every other row is one value.
+    CHECK(surface->denseRows() <= 6 * 32);
+    CHECK(surface->bytes() < 16 * 1024);
+    // Everything under it is whole chunks of ground.
+    const TerrainChunk* under = field.findChunk(ChunkKey{0, -1, 0});
+    REQUIRE(under != nullptr);
+    CHECK(under->uniform());
+    CHECK(under->value().occupancy == FullOccupancy);
+}
+
+TEST_CASE("equal voxels hash equal, however they were written")
+{
+    TerrainField once = flatField(0.0f);
+    (void)fillBall(once, core::DVec3{3.0, 0.0, 2.0}, 5.0, 2);
+
+    TerrainField twice = flatField(0.0f);
+    (void)fillBall(twice, core::DVec3{3.0, 0.0, 2.0}, 5.0, 2);
+    (void)fillBall(twice, core::DVec3{3.0, 0.0, 2.0}, 5.0, 2);
+    CHECK(once.digest() == twice.digest());
+
+    // Voxel by voxel into a fresh field: the chunks come out canonical too.
+    TerrainField copied(settingsOf());
+    {
+        FieldWriter writer(copied);
+        for (const TerrainField::Entry& entry : once.chunks()) {
+            for (int z = 0; z < 32; ++z) {
+                for (int y = 0; y < 32; ++y) {
+                    for (int x = 0; x < 32; ++x) {
+                        const auto u = static_cast<core::u32>(x);
+                        const auto v = static_cast<core::u32>(y);
+                        const auto w = static_cast<core::u32>(z);
+                        (void)writer.set(entry.first.x * 32 + x, entry.first.y * 32 + y, entry.first.z * 32 + z,
+                                         entry.second->get(u, v, w));
+                    }
+                }
+            }
+        }
+    }
+    CHECK(copied.digest() == once.digest());
+
+    (void)fillBall(twice, core::DVec3{3.0, 0.0, 2.0}, 1.0, 0);
+    CHECK(once.digest() != twice.digest());
+}
+
+TEST_CASE("a snapshot taken before an edit does not see it")
+{
+    TerrainField field = flatField(0.0f);
+    const TerrainField snapshot = field;
+    const core::u64 before = snapshot.digest();
+    CHECK(fillBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 0).touched > 0);
+    CHECK(snapshot.digest() == before);
+    CHECK(solidAt(snapshot, 0.5, -2.0, 0.5));
+    CHECK_FALSE(solidAt(field, 0.5, -2.0, 0.5));
+}
+
+TEST_CASE("a mip is the mean occupancy of what is under it, and the fullest material")
+{
+    TerrainChunk chunk;
+    // Half of one 2x2x2 block full of material 4, the rest empty.
+    for (core::u32 y = 0; y < 2; ++y) {
+        for (core::u32 x = 0; x < 2; ++x)
+            (void)chunk.set(x, y, 0, Voxel{FullOccupancy, 4});
+    }
+    chunk.normalize();
+    const Voxel half = chunk.mip(1, 0, 0, 0);
+    CHECK(half.material == 4);
+    CHECK(std::abs(static_cast<int>(half.occupancy) - 128) <= 1);
+    CHECK(chunk.mip(1, 1, 0, 0) == Voxel{});
+    // The whole chunk is one value at the top: a sixty-fourth of a sixty-fourth.
+    CHECK(chunk.mip(5, 0, 0, 0).occupancy == 0);
+}
+
+TEST_CASE("fields share what they load, and drop what they are told to")
+{
+    const TerrainField a = flatField(0.0f);
+    TerrainField b(settingsOf());
+    (void)fillBall(b, core::DVec3{100.0, 0.0, 0.0}, 3.0, 2);
+    const core::usize own = b.chunkCount();
+    b.shareFrom(a);
+    CHECK(b.chunkCount() == own + a.chunkCount());
+    // Shared, not copied: the very object.
+    CHECK(b.findChunk(ChunkKey{0, 0, 0}) == a.findChunk(ChunkKey{0, 0, 0}));
+    const std::vector<ChunkKey> keys = a.chunkKeys();
+    b.removeAll(keys);
+    CHECK(b.chunkCount() == own);
+}
+
+// --- Where the surface lands -------------------------------------------------------
+
+TEST_CASE("flat ground's surface is where it was put, between the voxel centres")
+{
+    const TerrainField field = flatField(2.3f);
+    CHECK(top(field, 0.5, 0.5) == doctest::Approx(2.3).epsilon(0.005));
+    CHECK(top(field, -7.25, 12.8) == doctest::Approx(2.3).epsilon(0.005));
+    CHECK(solidAt(field, 0.5, 2.2, 0.5));
+    CHECK_FALSE(solidAt(field, 0.5, 2.4, 0.5));
+}
+
+TEST_CASE("a ball lands where the brush put it, on every axis")
+{
+    TerrainField field(settingsOf());
+    CHECK(fillBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 3).touched > 0);
+    for (const core::DVec3 direction : {core::DVec3{1.0, 0.0, 0.0}, core::DVec3{0.0, 1.0, 0.0},
+                                        core::DVec3{0.0, 0.0, -1.0}, core::DVec3{0.577, 0.577, 0.577}}) {
+        CHECK(solidAt(field, direction.x * 5.8, direction.y * 5.8, direction.z * 5.8));
+        CHECK_FALSE(solidAt(field, direction.x * 6.2, direction.y * 6.2, direction.z * 6.2));
+    }
+    CHECK(sampleField(field, core::DVec3{0.0, 0.0, 0.0}).material == 3);
+}
+
+TEST_CASE("a box and a cylinder land where they were put")
+{
+    TerrainField field(settingsOf());
+    (void)fillBlock(field, core::DVec3{0.0, 0.0, 0.0}, core::Vec3{8.0f, 4.0f, 6.0f}, 2);
+    // Against each face, away from the corners, which the interpolation
+    // between voxel centres rounds by a fraction of a voxel.
+    CHECK(solidAt(field, 3.8, 0.5, 0.5));
+    CHECK(solidAt(field, 0.5, 1.8, 0.5));
+    CHECK(solidAt(field, 0.5, 0.5, 2.8));
+    CHECK_FALSE(solidAt(field, 4.2, 0.0, 0.0));
+    CHECK_FALSE(solidAt(field, 0.0, 2.2, 0.0));
+
+    (void)fillCylinder(field, core::DVec3{20.0, 0.0, 0.0}, 10.0, 3.0, 5);
+    CHECK(solidAt(field, 22.8, 0.0, 0.0));
+    CHECK(solidAt(field, 20.0, 4.8, 0.0));
+    CHECK_FALSE(solidAt(field, 23.2, 0.0, 0.0));
+    CHECK_FALSE(solidAt(field, 20.0, 5.2, 0.0));
+}
+
+TEST_CASE("adding never takes ground away, and removing never adds it")
+{
+    TerrainField field = flatField(0.0f);
+    // A ball of sand half in the grass: the grass under the surface stays grass,
+    // and the half above it is sand.
+    (void)fillBall(field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 2);
+    CHECK(sampleField(field, core::DVec3{0.5, -3.5, 0.5}).material == 1);
+    CHECK(sampleField(field, core::DVec3{0.5, 2.5, 0.5}).material == 2);
+    CHECK(solidAt(field, 0.5, 3.8, 0.5));
+
+    // Removing a ball in the air changes nothing.
+    CHECK(fillBall(field, core::DVec3{0.0, 30.0, 0.0}, 4.0, 0).touched == 0);
+}
+
+// --- What a brush leaves alone (D163) ---------------------------------------------
+
+TEST_CASE("no brush writes a voxel outside its reach")
+{
+    // A hill beside a plain, the shape the owner's world had when a dig beside
+    // a hill cut its peak off and a dig on it deleted the plain below.
+    TerrainField field = flatField(0.0f);
+    (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 12.0, 14.0f);
+    const TerrainField before = field;
+    const double peak = top(before, 0.5, 0.5);
+
+    const auto untouchedOutside = [&](const TerrainField& after, core::DVec3 at, double reach) {
+        // Everything more than `reach` from the brush on x or z is as it was.
+        const std::vector<Voxel> was = voxelsIn(before, -30, -20, -30, 29, 30, 29);
+        const std::vector<Voxel> now = voxelsIn(after, -30, -20, -30, 29, 30, 29);
+        std::size_t at_ = 0;
+        bool same = true;
+        for (int z = -30; z <= 29; ++z) {
+            for (int y = -20; y <= 30; ++y) {
+                for (int x = -30; x <= 29; ++x, ++at_) {
+                    const bool far = std::abs(static_cast<double>(x) + 0.5 - at.x) > reach ||
+                                     std::abs(static_cast<double>(z) + 0.5 - at.z) > reach;
+                    if (far && !(was[at_] == now[at_]))
+                        same = false;
+                }
+            }
+        }
+        return same;
     };
-    REQUIRE(field.isBricked(6, 0));
-    REQUIRE_FALSE(field.isBricked(0, 20));
-    CHECK(static_cast<double>(topOf(field, 6, 0)) == doctest::Approx(expected(3.0)).epsilon(0.002));
-    CHECK(static_cast<double>(topOf(field, 0, 20)) == doctest::Approx(expected(10.0)).epsilon(0.002));
-    // The centre rose by the whole amount.
-    CHECK(static_cast<double>(topOf(field, 0, 0)) == doctest::Approx(10.0).epsilon(0.05));
-    // And the tunnel is still there, under the hill.
-    CHECK(field.sample(0, -8, 0).distance > 0.0f);
 
-    // Lowering takes it back down the same way.
-    for (int stamp = 0; stamp < 5; ++stamp)
-        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 16.0, -2.0f, 1);
-    CHECK(std::abs(topOf(field, 0, 0)) < 0.05f);
-    CHECK(field.sample(0, -8, 0).distance > 0.0f);
+    SUBCASE("a dig at the hill's foot")
+    {
+        const core::DVec3 foot{10.0, 0.0, 0.0};
+        (void)fillBall(field, foot, 3.0, 0);
+        CHECK(untouchedOutside(field, foot, 3.0 + 4.0));
+        CHECK(top(field, 0.5, 0.5) == doctest::Approx(peak));
+    }
+    SUBCASE("a dig high on the hill")
+    {
+        const core::DVec3 high{3.0, 11.0, 0.0};
+        (void)fillBall(field, high, 3.0, 0);
+        CHECK(untouchedOutside(field, high, 3.0 + 4.0));
+        CHECK(top(field, 20.5, 0.5) == doctest::Approx(0.0).epsilon(0.01));
+    }
+    SUBCASE("a raise, a smooth and a flatten")
+    {
+        const core::DVec3 at{-8.0, 4.0, 5.0};
+        (void)raiseBall(field, at, 4.0, 2.0f);
+        (void)smoothBall(field, at, 4.0, 1.0f);
+        (void)flattenBall(field, at, 4.0, 4.0f, 1.0f);
+        CHECK(untouchedOutside(field, at, 4.0 + 4.0));
+    }
 }
 
-TEST_CASE("a long stroke over a tunnel does not walk the ground away")
-{
-    // A stroke is many small stamps. A band laid on a bricked column is joined
-    // exactly, with no fillet, because a fillet re-applied at every stamp moved
-    // the surface a few centimetres each time: a hundred stamps were metres.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -32.0f, .maxHeight = 32.0f});
-    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{64.0f, 40.0f, 64.0f}, 1);
-    fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 2.0, 0);
-    REQUIRE(field.isBricked(0, 0));
+// --- Heights -----------------------------------------------------------------------
 
-    for (int stamp = 0; stamp < 100; ++stamp)
-        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, 0.05f, 1);
-    CHECK(static_cast<double>(topOf(field, 0, 0)) == doctest::Approx(5.0).epsilon(0.01));
-    for (int stamp = 0; stamp < 100; ++stamp)
-        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, -0.05f, 1);
-    CHECK(std::abs(topOf(field, 0, 0)) < 0.05f);
-    CHECK(field.sample(0, -8, 0).distance > 0.0f);
+TEST_CASE("fillFlat moves the top and keeps a tunnel under it (D162)")
+{
+    TerrainField field = flatField(0.0f);
+    (void)fillBall(field, core::DVec3{0.0, -10.0, 0.0}, 2.5, 0);
+    REQUIRE_FALSE(solidAt(field, 0.0, -10.0, 0.0));
+
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 16.0f, 5.0f, 1);
+    CHECK(top(field, 0.5, 0.5) == doctest::Approx(5.0).epsilon(0.01));
+    CHECK_FALSE(solidAt(field, 0.0, -10.0, 0.0));
+
+    (void)fillFlat(field, core::DVec3{0.0, 0.0, 0.0}, 16.0f, -3.0f, 1);
+    CHECK(top(field, 0.5, 0.5) == doctest::Approx(-3.0).epsilon(0.01));
+    CHECK_FALSE(solidAt(field, 0.0, -10.0, 0.0));
 }
 
-TEST_CASE("a dig at the foot of a hill leaves the hill's height alone")
+TEST_CASE("writeHeights lays each column at its own height")
 {
-    // **D163.** A column the brush's range holds entirely as ground has its
-    // surface ABOVE the range, and the brush never touched it. It was given the
-    // range's own top as its height instead, so a dig at the foot of a hill
-    // cut every taller column in its footprint off flat, eight metres above
-    // the dig.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -64.0f, .maxHeight = 64.0f});
-    fillBlock(field, core::DVec3{0.0, -32.0, 0.0}, core::Vec3{64.0f, 64.0f, 64.0f}, 1);
-    for (int stamp = 0; stamp < 12; ++stamp)
-        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 10.0, 2.0f, 1);
-    const std::optional<float> peak = heightAt(field, 0.0, 0.0);
-    const std::optional<float> shoulder = heightAt(field, 3.0, 0.0);
-    REQUIRE(peak.has_value());
-    REQUIRE(shoulder.has_value());
-    REQUIRE(*peak > 20.0f);
-
-    // A box dug at the foot, a metre down, reaching in under the hill.
-    (void)fillBlock(field, core::DVec3{3.0, -1.0, 0.0}, core::Vec3{4.0f, 4.0f, 4.0f}, 0);
-    CHECK(static_cast<double>(*heightAt(field, 0.0, 0.0)) == doctest::Approx(static_cast<double>(*peak)));
-    CHECK(static_cast<double>(*heightAt(field, 3.0, 0.0)) == doctest::Approx(static_cast<double>(*shoulder)));
+    TerrainField field(settingsOf());
+    constexpr core::u32 Columns = 40;
+    std::vector<float> heights(Columns * Columns);
+    for (core::u32 z = 0; z < Columns; ++z) {
+        for (core::u32 x = 0; x < Columns; ++x)
+            heights[z * Columns + x] = 3.0f + 0.25f * static_cast<float>(x) - 0.1f * static_cast<float>(z);
+    }
+    (void)writeHeights(field, -20, -20, Columns, heights, 2);
+    for (core::u32 z = 2; z < Columns - 2; z += 7) {
+        for (core::u32 x = 2; x < Columns - 2; x += 5) {
+            const double expected = static_cast<double>(heights[z * Columns + x]);
+            const std::optional<float> got =
+                field.columnTop(static_cast<core::i32>(x) - 20, static_cast<core::i32>(z) - 20);
+            REQUIRE(got.has_value());
+            CHECK(static_cast<double>(*got) == doctest::Approx(expected).epsilon(0.01));
+        }
+    }
+    CHECK(sampleField(field, core::DVec3{0.5, 0.0, 0.5}).material == 2);
 }
 
-TEST_CASE("a dig high on a hill leaves the lower ground under its reach")
+TEST_CASE("a heightmap on empty ground is whole chunks under a thin skin")
 {
-    // **D163's other half.** A column the range holds entirely as air has its
-    // ground BELOW the range, and was written as no ground at all -- so a dig
-    // high on a hill deleted every lower column in its footprint down to the
-    // world's floor.
-    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -64.0f, .maxHeight = 64.0f});
-    // The plain a metre up: under the dig's reach, and not a height any
-    // default a broken write could fall back to.
-    fillBlock(field, core::DVec3{0.0, -31.5, 0.0}, core::Vec3{64.0f, 65.0f, 64.0f}, 1);
-    for (int stamp = 0; stamp < 12; ++stamp)
-        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 2.0f, 1);
-    REQUIRE(*heightAt(field, 0.0, 0.0) > 20.0f);
-    const std::optional<float> plain = heightAt(field, 8.0, 0.0);
-    REQUIRE(plain.has_value());
-    REQUIRE(static_cast<double>(*plain) == doctest::Approx(1.0));
+    TerrainField field(settingsOf());
+    constexpr core::u32 Columns = 64;
+    const std::vector<float> heights(Columns * Columns, 20.0f);
+    const EditReport report = writeHeights(field, 0, 0, Columns, heights, 1);
+    CHECK(report.touched > 64u * 64u * 80u);
+    // From the floor at -64 to 20 is three whole chunks a column and the one the
+    // surface is in, four columns of them.
+    std::size_t uniform = 0;
+    for (const TerrainField::Entry& entry : field.chunks())
+        uniform += entry.second->uniform() ? 1u : 0u;
+    CHECK(uniform >= 4u * 2u);
+    CHECK(field.bytes() < 256u * 1024u);
+    CHECK(top(field, 10.5, 40.5) == doctest::Approx(20.0).epsilon(0.005));
+}
 
-    // A ball taken out of the peak, twenty metres up, with the plain under its
-    // reach.
-    (void)fillBall(field, core::DVec3{0.0, 20.0, 0.0}, 9.0, 0);
-    const std::optional<float> after = heightAt(field, 8.0, 0.0);
-    REQUIRE(after.has_value());
-    CHECK(static_cast<double>(*after) == doctest::Approx(static_cast<double>(*plain)));
+TEST_CASE("a height that is not a number, and a column with no material, are skipped")
+{
+    TerrainField field(settingsOf());
+    const std::vector<float> heights{1.0f, std::numeric_limits<float>::quiet_NaN(), 3.0f, 4.0f};
+    const std::vector<core::u8> materials{1, 1, 0, 1};
+    (void)writeHeights(field, 0, 0, 4, heights, materials);
+    CHECK(field.columnTop(0, 0).has_value());
+    CHECK_FALSE(field.columnTop(1, 0).has_value());
+    CHECK_FALSE(field.columnTop(2, 0).has_value());
+    CHECK(field.columnTop(3, 0).has_value());
+}
+
+TEST_CASE("heightAt is the top over a cave, and nothing where there is no ground")
+{
+    TerrainField field = flatField(0.0f);
+    (void)fillBall(field, core::DVec3{0.0, -8.0, 0.0}, 3.0, 0);
+    CHECK(top(field, 0.5, 0.5) == doctest::Approx(0.0).epsilon(0.01));
+    CHECK_FALSE(heightAt(field, 200.0, 0.0).has_value());
+}
+
+// --- The height brushes -------------------------------------------------------------
+
+TEST_CASE("raising lifts the middle by the amount and leaves the rim")
+{
+    TerrainField field = flatField(0.0f);
+    (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, 3.0f);
+    CHECK(top(field, 0.0, 0.0) == doctest::Approx(3.0).epsilon(0.05));
+    CHECK(top(field, 9.5, 0.5) == doctest::Approx(0.0).epsilon(0.01));
+
+    (void)raiseBall(field, core::DVec3{20.0, 0.0, 0.0}, 6.0, -2.0f);
+    CHECK(top(field, 20.0, 0.0) == doctest::Approx(-2.0).epsilon(0.05));
+}
+
+TEST_CASE("raising the same spot again and again keeps growing the hill")
+{
+    TerrainField field = flatField(0.0f);
+    for (int stroke = 0; stroke < 10; ++stroke)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 2.0f);
+    // Ten strokes of two metres, not a plateau at the brush's reach.
+    CHECK(top(field, 0.0, 0.0) > 15.0);
+}
+
+TEST_CASE("raising over a tunnel lifts the ground and keeps the tunnel")
+{
+    TerrainField field = flatField(0.0f);
+    (void)fillBall(field, core::DVec3{0.0, -14.0, 0.0}, 2.5, 0);
+    (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 4.0f);
+    CHECK(top(field, 0.0, 0.0) == doctest::Approx(4.0).epsilon(0.05));
+    CHECK_FALSE(solidAt(field, 0.0, -14.0, 0.0));
+}
+
+TEST_CASE("raising empty ground lays ground when there is a material to lay")
+{
+    TerrainField field(settingsOf());
+    CHECK(raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 5.0, 2.0f).touched == 0);
+    (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 5.0, 2.0f, 1);
+    CHECK(top(field, 0.0, 0.0) == doctest::Approx(2.0).epsilon(0.05));
+}
+
+TEST_CASE("smoothing takes the edge off a step")
+{
+    TerrainField field(settingsOf());
+    constexpr core::u32 Columns = 32;
+    std::vector<float> heights(Columns * Columns);
+    for (core::u32 z = 0; z < Columns; ++z) {
+        for (core::u32 x = 0; x < Columns; ++x)
+            heights[z * Columns + x] = x < Columns / 2 ? 0.0f : 4.0f;
+    }
+    (void)writeHeights(field, -16, -16, Columns, heights, 1);
+    const double step = top(field, 1.5, 0.5) - top(field, -1.5, 0.5);
+    for (int pass = 0; pass < 4; ++pass)
+        (void)smoothBall(field, core::DVec3{0.0, 2.0, 0.0}, 5.0, 1.0f);
+    CHECK(top(field, 1.5, 0.5) - top(field, -1.5, 0.5) < step * 0.8);
+}
+
+TEST_CASE("flattening pulls the ground in reach to the plane")
+{
+    TerrainField field = flatField(0.0f);
+    (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, 5.0f);
+    for (int pass = 0; pass < 3; ++pass)
+        (void)flattenBall(field, core::DVec3{0.0, 3.0, 0.0}, 6.0, 1.0f, 1.0f);
+    CHECK(top(field, 0.0, 0.0) == doctest::Approx(1.0).epsilon(0.35));
+}
+
+TEST_CASE("painting changes what ground is made of, and nothing else")
+{
+    TerrainField field = flatField(0.0f);
+    const std::vector<Voxel> before = voxelsIn(field, -4, -4, -4, 4, 4, 4);
+    CHECK(paintBall(field, core::DVec3{0.0, 0.0, 0.0}, 3.0, 0).touched == 0);
+    CHECK(paintBall(field, core::DVec3{0.0, 0.0, 0.0}, 3.0, 5).touched > 0);
+    const std::vector<Voxel> after = voxelsIn(field, -4, -4, -4, 4, 4, 4);
+    for (std::size_t at = 0; at < before.size(); ++at)
+        CHECK(before[at].occupancy == after[at].occupancy);
+    CHECK(sampleField(field, core::DVec3{0.5, -0.5, 0.5}).material == 5);
+
+    CHECK(replaceMaterial(field, core::DVec3{-2.0, -2.0, -2.0}, core::DVec3{2.0, 2.0, 2.0}, 5, 7).touched > 0);
+    CHECK(sampleField(field, core::DVec3{0.5, -0.5, 0.5}).material == 7);
+    CHECK(replaceMaterial(field, core::DVec3{-2.0, -2.0, -2.0}, core::DVec3{2.0, 2.0, 2.0}, 7, 0).touched == 0);
+}
+
+TEST_CASE("nothing is written outside the world's floor and ceiling")
+{
+    TerrainField field(settingsOf());
+    (void)fillBall(field, core::DVec3{0.0, 64.0, 0.0}, 6.0, 1);
+    (void)fillBall(field, core::DVec3{0.0, -64.0, 0.0}, 6.0, 1);
+    for (const TerrainField::Entry& entry : field.chunks()) {
+        CHECK(entry.first.y * 32 >= -64 - 32);
+        CHECK(entry.first.y * 32 < 64);
+    }
+    CHECK_FALSE(solidAt(field, 0.0, 65.0, 0.0));
+    CHECK_FALSE(solidAt(field, 0.0, -65.0, 0.0));
+}
+
+// --- Raycasting -----------------------------------------------------------------------
+
+TEST_CASE("a ray meets flat ground at its height, facing up")
+{
+    const TerrainField field = flatField(3.4f);
+    const std::optional<TerrainHit> hit =
+        raycastField(field, core::DVec3{0.5, 20.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 100.0);
+    REQUIRE(hit.has_value());
+    CHECK(hit->position.y == doctest::Approx(3.4).epsilon(0.005));
+    CHECK(static_cast<double>(hit->normal.y) > 0.99);
+    CHECK(hit->material == 1);
+}
+
+TEST_CASE("a ray at the sky misses, one from inside hits at once")
+{
+    const TerrainField field = flatField(0.0f);
+    CHECK_FALSE(raycastField(field, core::DVec3{0.0, 5.0, 0.0}, core::Vec3{0.0f, 1.0f, 0.0f}, 1000.0).has_value());
+    const std::optional<TerrainHit> inside =
+        raycastField(field, core::DVec3{0.0, -5.0, 0.0}, core::Vec3{1.0f, 0.0f, 0.0f}, 10.0);
+    REQUIRE(inside.has_value());
+    CHECK(inside->distance == doctest::Approx(0.0));
+}
+
+TEST_CASE("a long ray crosses empty chunks and still meets the ground beyond them")
+{
+    TerrainField field(settingsOf());
+    (void)fillBlock(field, core::DVec3{500.0, 0.0, 0.0}, core::Vec3{8.0f, 8.0f, 8.0f}, 3);
+    const std::optional<TerrainHit> hit =
+        raycastField(field, core::DVec3{0.0, 0.5, 0.5}, core::Vec3{1.0f, 0.0f, 0.0f}, 1000.0);
+    REQUIRE(hit.has_value());
+    CHECK(hit->position.x == doctest::Approx(496.0).epsilon(0.001));
+    CHECK(static_cast<double>(hit->normal.x) < -0.99);
+}
+
+TEST_CASE("the palette names what the field only numbers")
+{
+    CHECK(terrainMaterial(0) == nullptr);
+    REQUIRE(terrainMaterial(1) != nullptr);
+    CHECK(std::string(terrainMaterial(1)->name) == "Grass");
+    CHECK(terrainPalette().size() == 8);
 }

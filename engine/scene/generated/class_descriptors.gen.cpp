@@ -1015,7 +1015,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "How coarse the field is, in metres. Half a metre resolves a doorway; two metres resolves a hillside and costs a sixteenth as much.\012\012**Only settable while the terrain is empty.** Changing it under a sculpted world would mean resampling every tile and brick onto a different lattice, which is a lossy operation nobody asked for -- so it is refused, by name, rather than done quietly. Clear it first if that is really what you want.",
+            .doc = "How big one voxel is, in metres. One metre resolves a doorway and a path; two metres resolves a hillside and costs an eighth as much.\012\012**Only settable while the terrain is empty.** Changing it under a sculpted world would mean resampling every voxel onto a different grid, which is a lossy operation nobody asked for -- so it is refused, by name, rather than done quietly. Clear it first if that is really what you want.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.terrain_not_empty"),
             .get = native::getTerrainVoxelSize,
             .set = native::setTerrainVoxelSize,
@@ -1026,7 +1026,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = true,
-            .doc = "How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own spacing, and a terrain that disagreed with it would have cells that load and unload on different boundaries from everything else in the world.\012\012**What a saved terrain streams by.** A terrain written with a scene and large enough to span sixteen cells or more is cut into cells of this size, rounded to whole tiles at its `VoxelSize`, and each one is loaded and dropped around `StreamingService`'s foci on its terrain radii. A cell somebody changed is never dropped. The number is the grid's rather than this terrain's, which is why it is read-only and why nothing reads it back from here.",
+            .doc = "How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own spacing, and a terrain that disagreed with it would have cells that load and unload on different boundaries from everything else in the world.\012\012**What a saved terrain streams by.** A terrain written with a scene and large enough to span sixteen cells or more is cut into cells of this size, rounded to whole columns of 32-voxel chunks, and each one is loaded and dropped around `StreamingService`'s foci on its terrain radii. A cell somebody changed is never dropped.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTerrainCellSize,
             .set = nullptr,
@@ -1037,7 +1037,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "Where this terrain's own origin sits in the world, in metres.\012\012**A terrain is an instance and it can be moved.** Every sample, every collider and every brush stroke is offset by this rather than baked into the field, so moving a sculpted world is one number rather than a rewrite of every tile.\012\012**It translates and does not turn, and that is the encoding rather than an omission.** The cheap half of the field is a height layer, and `H(x, z)` has no meaning under a rotation; the collider is a height field, which is axis-aligned too. There is no `CFrame` here because a rotation this could not keep would be worse than not offering one.",
+            .doc = "Where this terrain's own origin sits in the world, in metres.\012\012**A terrain is an instance and it can be moved.** Every voxel, every collider and every brush stroke is offset by this rather than baked into the grid, so moving a sculpted world is one number rather than a rewrite of every voxel. It translates and does not turn.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
             .get = native::getTerrainPosition,
             .set = native::setTerrainPosition,
@@ -1048,7 +1048,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The lowest this terrain may ever be dug to, in metres.\012\012**Decided once and reserved, rather than measured as you go.** A collider's height precision is spread across this range when the cell is built and cannot be widened afterwards, so digging past it does not deepen the world -- it stops. Set it to the deepest cave you will ever want before you start.",
+            .doc = "The world's floor, in metres: no voxel below it is ever written.\012\012**It is also where ground starts.** `WriteHeights`, Generate Flat Ground and a first raise on empty terrain lay ground from here up to the surface, so a hill is solid all the way down and a tunnel dug into it has ground under its floor.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTerrainMinHeight,
             .set = native::setTerrainMinHeight,
@@ -1059,7 +1059,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The highest this terrain may ever be raised to, in metres. The upper half of the same reservation `MinHeight` describes.",
+            .doc = "The world's ceiling, in metres: no voxel above it is ever written.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTerrainMaxHeight,
             .set = native::setTerrainMaxHeight,
@@ -1070,61 +1070,109 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = true,
             .inert = false,
-            .doc = "How many cells of terrain currently hold anything. Zero for a terrain nobody has sculpted, which is what `Clear` returns it to.",
+            .doc = "How many chunks of 32 by 32 by 32 voxels currently hold anything. Air is never stored, so zero is a terrain nobody has sculpted, which is what `Clear` returns it to.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getTerrainCellCount,
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 8> terrainMethods;
+    static std::array<MethodDesc, 16> terrainMethods;
     terrainMethods = {{
         MethodDesc{
             .name = atoms.intern("FillBall"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Adds a ball of ground, or removes one when `material` is zero. Returns how many cells it changed.\012\012This is the verb a sculpting brush is made of, and it is the same one a script uses -- an explosion crater is `FillBall(hit.Position, 4, 0)`.",
-        },
-        MethodDesc{
-            .name = atoms.intern("RaiseBall"),
-            .yields = false,
-            .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Raises the ground under a disc by `amount` metres at the centre, falling smoothly to nothing at the rim -- or lowers it, when `amount` is negative. Returns how many columns it changed.\012\012This is the heightmap sculpting brush, and it is what to reach for to shape hills and valleys: it only ever moves the surface, so it never creates an overhang. `FillBall` adds a real ball, which near its rim hangs over the ground below it -- the right verb for a boulder or a tunnel, and the wrong one for a hill.",
+            .doc = "Adds a ball of ground, or removes one when `material` is zero. Returns how many voxels it changed.\012\012Adding never takes ground away and removing never adds it: a voxel ends up as full as the fuller of it and the ball (adding), or as empty as the ball leaves it (removing). An explosion crater is `FillBall(hit.Position, 4, 0)`.",
         },
         MethodDesc{
             .name = atoms.intern("FillBlock"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "The same, as an axis-aligned box. Returns how many cells it changed.",
+            .doc = "The same, as an axis-aligned box `size` across. Returns how many voxels it changed.",
+        },
+        MethodDesc{
+            .name = atoms.intern("FillCylinder"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The same, as an upright cylinder `height` tall. Returns how many voxels it changed. A well is `FillCylinder(top - vector.create(0, 10, 0), 20, 1.5, 0)`.",
+        },
+        MethodDesc{
+            .name = atoms.intern("RaiseBall"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Raises the ground around `center` by `amount` metres at the middle, falling smoothly to nothing at `radius` -- or lowers it, when `amount` is negative. Returns how many voxels it changed.\012\012**It moves the surface rather than adding a ball**: the ground within `radius` above and below `center` is pushed up, so a hill rises without an overhang at its rim, and a tunnel further down stays where it is. This is the verb for shaping hills and valleys; `FillBall` is the one for a boulder or a tunnel.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SmoothBall"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Softens the ground in a ball: every voxel moves towards the average of its neighbours by `strength` (0 to 1, default 0.5), less towards the rim. Returns how many voxels it changed.",
+        },
+        MethodDesc{
+            .name = atoms.intern("FlattenBall"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Pulls the ground in a ball towards a level plane at `height` -- taking away what is above it and filling what is below it -- by `strength` (0 to 1, default 1), less towards the rim. Returns how many voxels it changed.",
         },
         MethodDesc{
             .name = atoms.intern("PaintBall"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Changes what the ground is MADE OF, without changing where it is. Returns how many cells it changed.\012\012**It edits no distance at all**, which is the whole difference between this and `FillBall`. It writes material where there is already ground and nowhere else, creates no voxel brick and promotes no column -- so painting a hillside leaves the hillside exactly as cheap as it was.\012\012A `material` of zero is refused rather than treated as erase. Zero means erase to `FillBall`, and picking the first entry of a material list must not delete the ground you were about to paint.",
+            .doc = "Changes what the ground is MADE OF in a ball, without moving it. Returns how many voxels it changed.\012\012A `material` of zero is refused rather than treated as erase. Zero means erase to `FillBall`, and picking the first entry of a material list must not delete the ground you were about to paint.",
+        },
+        MethodDesc{
+            .name = atoms.intern("ReplaceMaterial"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Every voxel of material `from` in the box between the two corners becomes `to`. Returns how many it changed. Zero for either is refused: this changes what ground is made of, never whether it is there.",
+        },
+        MethodDesc{
+            .name = atoms.intern("ReadVoxels"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Reads every voxel the box between the two corners touches, snapped outward to the grid. Returns their materials, their occupancies (0 to 1) and how many there are on each axis.\012\012**The tables are flat**: the voxel at `x, y, z` (counting from 0 at the low corner) is at index `1 + x + size.X * (y + size.Y * z)`. At most 256 cubed voxels at once; read a larger region in pieces.",
+        },
+        MethodDesc{
+            .name = atoms.intern("WriteVoxels"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Writes a box of voxels in one call, laid out as `ReadVoxels` returns them: `corner` is a point in the first voxel, `size` how many voxels on each axis, and both tables hold one entry per voxel. Returns how many it changed.\012\012A material of zero, or an occupancy of zero, is air. What `ReadVoxels` reads, `WriteVoxels` puts back exactly -- the verb for copying a piece of terrain, generating one voxel by voxel, or undoing a script's own change.",
+        },
+        MethodDesc{
+            .name = atoms.intern("WorldToCell"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Which voxel a world position falls in, as its whole-number index on each axis.",
+        },
+        MethodDesc{
+            .name = atoms.intern("CellCenterToWorld"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The world position of a voxel's centre, from its index on each axis.",
         },
         MethodDesc{
             .name = atoms.intern("HeightAt"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "The height of the ground at this column, in metres.\012\012**It answers about the height layer and says nothing about caves**, which is the honest shape of the question: a column with a cave in it has no single height. Cast a ray at it with `Workspace:Raycast` when what you want is the first surface along a direction rather than the top of the ground.",
+            .doc = "The height of the top of the ground here, in metres, or nil where there is none.\012\012**The top, over caves as well**: the highest surface in the column, which is where a tree is planted or a player lands from above. Cast a ray with `Workspace:Raycast` when what you want is the first surface along a direction.",
         },
         MethodDesc{
             .name = atoms.intern("WriteHeights"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Writes a heightmap in one call: one height per column, `columns` to a row, row after row along +Z, starting at the column at `corner` (its X and Z; Y is not read). Columns are `VoxelSize` apart, so a 257 by 257 table at a one-metre voxel covers 256 metres with both edges included. Returns how many columns it wrote.\012\012**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where `FillBlock` per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is painted on every column written. A column with a cave in it has its top moved to the height and keeps the cave under it, and a height that is not a number is skipped rather than written.",
+            .doc = "Writes a heightmap in one call: one height per column of voxels, `columns` to a row, row after row along +Z, starting at the column `corner` falls in (its X and Z; Y is not read). Returns how many voxels it changed.\012\012**This is the verb for ground that comes from somewhere** -- a generator's noise, an image, another tool -- where a brush per column would be a quarter of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; `material` (default 1) is what new ground is made of. Each column's top moves to its height -- ground added from the old top up, or taken from it down -- and a cave under the top stays. A column with no ground at all is filled from `MinHeight`. A height that is not a number is skipped.",
         },
         MethodDesc{
             .name = atoms.intern("Clear"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Removes every cell. The terrain is empty afterwards and `VoxelSize` becomes settable again.",
+            .doc = "Removes every voxel. The terrain is empty afterwards and `VoxelSize` becomes settable again.",
         },
         MethodDesc{
             .name = atoms.intern("Compact"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Converts back to the cheap encoding every column that no longer needs voxels, and returns how many it converted.\012\012**Nothing does this automatically, deliberately.** Which columns carry voxels is part of the world's state -- it is saved, and it is in the world hash -- so a terrain that quietly recompacted itself would be a world that changed when nobody touched it. Filling a cave back in leaves the bricks behind until you ask.",
+            .doc = "Does nothing and returns 0.\012\012It converted the old terrain's voxel columns back to heights. Every edit now leaves the voxels as compact as they can be, so there is nothing left for it to do. It stays so scripts that call it keep running.",
         },
     }};
     ClassDescriptor terrainDesc;
@@ -1132,7 +1180,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     terrainDesc.super = instanceClass;
     terrainDesc.flags = ClassFlags::None;
     terrainDesc.defaultName = atoms.intern("Terrain");
-    terrainDesc.doc = "A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.\012\012**It is a volume and not a height map**, which is what makes caves and overhangs possible. Underneath, one signed-distance field is stored two ways -- a height layer for the ground that is a single-valued height function, which is most of it, and voxel bricks where it stops being one. Nothing you write here has to know which: `FillBall` through a hillside converts what it needs to and leaves the rest cheap.\012\012There is one per `Workspace`, reached as `workspace.Terrain`, because a world has one ground. Creating a second is legal and it simply is not the one the workspace names.\012\012**Every verb here is a write to the field**, and the field is part of the world -- so a sculpt is undoable in the editor, it moves the world hash, and it saves with the project.";
+    terrainDesc.doc = "A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.\012\012**It is a grid of voxels.** Space is cut into cubes `VoxelSize` on a side, and each one holds a material and an occupancy -- how full of that material it is, from 0 to 1. The surface is wherever the occupancy crosses one half, found by interpolating between neighbouring voxels, so a ball carved out of a hillside lands where you put it rather than on a grid line. Caves, arches, overhangs and flat ground are all the same data.\012\012Materials are numbered: 0 is air, and 1 to 8 are Grass, Sand, Rock, Snow, Mud, Sandstone, Basalt and Ice.\012\012There is one per `Workspace`, reached as `workspace.Terrain`, because a world has one ground. Creating a second is legal and it simply is not the one the workspace names.\012\012**Every verb here is a write to the voxels**, and the voxels are part of the world -- so a sculpt is undoable in the editor, it moves the world hash, and it saves with the project.";
     terrainDesc.properties = terrainProperties;
     terrainDesc.methods = terrainMethods;
     terrainDesc.attachComponents = native::attachTerrainComponents;

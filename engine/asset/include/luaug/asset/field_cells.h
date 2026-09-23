@@ -37,40 +37,39 @@ inline constexpr core::i32 FieldLayerVoxels = 1;
 
 // --- Terrain ---------------------------------------------------------------
 
-// How many tiles on a side a cell holds at this voxel size: the whole count
-// nearest `cellMetres`, never fewer than one. A 64 m cell is four tiles at half
-// a metre and two at a metre; at four metres a tile is already 128 m, and the
-// cell is the tile.
-[[nodiscard]] core::u32 terrainCellTiles(core::f32 voxelSize, core::f64 cellMetres = FieldCellMetres) noexcept;
+// How many chunk columns on a side a cell holds at this voxel size: the whole
+// count nearest `cellMetres`, never fewer than one. A 64 m cell is four columns
+// of chunks at half a metre and two at a metre; at two metres a chunk is
+// already 64 m, and the cell is the chunk column.
+[[nodiscard]] core::u32 terrainCellChunks(core::f32 voxelSize, core::f64 cellMetres = FieldCellMetres) noexcept;
 
-// Which cell a tile, and a brick's column, belongs to. A brick is filed with
-// the tile under it, so a cave is never split from the ground it is dug into.
-[[nodiscard]] ChunkId terrainCellOf(TileKey key, core::u32 cellTiles) noexcept;
-[[nodiscard]] ChunkId terrainCellOf(BrickKey key, core::u32 cellTiles) noexcept;
+// Which cell a chunk belongs to: every chunk of its column, whatever its `y`,
+// so a cave is never split from the ground it is dug into.
+[[nodiscard]] ChunkId terrainCellOf(ChunkKey key, core::u32 cellChunks) noexcept;
 
 // The whole field cut into cells, in `ChunkId` order. The field inside each
-// cell holds absolute keys and its own copies: this runs once, at a partition,
-// and what it produces is written to disk and dropped.
+// cell holds absolute keys and SHARES the chunks: this runs once, at a
+// partition, and what it produces is written to disk and dropped.
 [[nodiscard]] std::vector<TerrainCell> splitTerrain(const TerrainField& field, core::f64 cellMetres = FieldCellMetres);
 
 // The world-space box a cell covers: its square, and the field's whole height
 // range, both offset by where the terrain sits.
-[[nodiscard]] core::DAABB terrainCellBounds(const TerrainCell& cell, core::u32 cellTiles, core::DVec3 origin) noexcept;
+[[nodiscard]] core::DAABB terrainCellBounds(const TerrainCell& cell, core::u32 cellChunks, core::DVec3 origin) noexcept;
 
 // **Whether `field` still holds exactly what `cell` put into it**, within the
-// cell's footprint: every object the same one `cell` shares, and nothing
+// cell's footprint: every chunk the same one `cell` shares, and nothing
 // there that `cell` did not bring. False is a cell somebody edited, which an
 // evicting streamer must keep -- dropping it would drop the edit.
 [[nodiscard]] bool terrainCellUntouched(const TerrainField& field, const TerrainCell& cell,
-                                        core::u32 cellTiles) noexcept;
+                                        core::u32 cellChunks) noexcept;
 
-// Takes a cell's objects back out of `field`.
+// Takes a cell's chunks back out of `field`.
 void removeTerrainCell(TerrainField& field, const TerrainCell& cell);
 
 // --- Block worlds ------------------------------------------------------------
 
 // How many 16-block chunks on a side a cell holds at this block size, on
-// `terrainCellTiles`' terms.
+// `terrainCellChunks`' terms.
 [[nodiscard]] core::u32 voxelCellChunks(core::f32 blockSize, core::f64 cellMetres = FieldCellMetres) noexcept;
 
 // Which cell a chunk belongs to: every chunk of the column, whatever its `y`.

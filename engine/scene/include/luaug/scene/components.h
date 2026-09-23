@@ -533,18 +533,15 @@ struct TerrainComponent
     // owner asked for and is the right answer: two terrains in one world, an
     // island placed beside another, ground shifted after the fact.
     //
-    // **A position and not a `CFrame`, and that is a limit of the encoding
-    // rather than an omission.** The cheap half of the field is a height layer,
-    // and a height function is axis-aligned by definition -- `H(x, z)` has no
-    // meaning under a rotation. The collider is a `HeightFieldShape`, which Jolt
-    // also builds axis-aligned. So a terrain translates and does not turn, and
-    // saying so is better than offering a `CFrame` whose rotation is silently
-    // dropped.
+    // **A position and not a `CFrame`.** A grid of voxels could be turned, but
+    // every consumer -- the mesher's draw transform, the colliders, the
+    // brush's raycast -- would then carry a rotation for something nobody has
+    // asked for, so a terrain translates and does not turn.
     //
     // f64 because it is a world coordinate (R9), and every consumer -- the
-    // mesher's draw transform, the tile colliders, the brush's raycast, the
+    // mesher's draw transform, the chunk colliders, the brush's raycast, the
     // script's `HeightAt` -- offsets by it rather than baking it into the field.
-    // Baking would make moving a terrain a rewrite of every tile.
+    // Baking would make moving a terrain a rewrite of every voxel.
     core::DVec3 origin;
 
     // **Bumped on every write to `field`**, and read by `PhysicsSync` to decide
@@ -558,10 +555,9 @@ struct TerrainComponent
     // would load and unload on different boundaries from everything else.
     f32 cellSize = 64.0f;
 
-    // **The range this terrain may ever be dug or raised to.** Reserved rather
-    // than measured, because a height field's precision is spread across it when
-    // a cell's collider is built and cannot be widened afterwards (ADR 0066) --
-    // so digging past it does not deepen the world, it stops.
+    // **The world's floor and ceiling**: no voxel is written outside them, and
+    // the verbs that lay ground rather than add to it fill from the floor up.
+    // Mirrored into the field's settings, where the brushes read them.
     f32 minHeight = -256.0f;
     f32 maxHeight = 256.0f;
 };

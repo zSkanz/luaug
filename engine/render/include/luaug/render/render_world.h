@@ -246,10 +246,9 @@ struct DrawItem
     // False on every frame a game renders, so a packaged build's draw list is
     // the one it always was.
     bool outlined = false;
-    // A terrain cave (ADR 0071): drawn with the terrain's own forward shader,
-    // which takes its material per vertex and its look from the ground's, so
-    // the cave and the ground around its opening are one surface.
-    bool terrainCave = false;
+    // A terrain mesh (ADR 0082): drawn with the terrain's own forward shader,
+    // which takes its material and the sky it sees per vertex.
+    bool terrain = false;
     // A chunk of the block world (V1): drawn with the block shader, which takes
     // its colour per vertex from the registry and its shading from the
     // per-corner occlusion the mesher baked.
@@ -260,32 +259,25 @@ struct DrawItem
     bool cutout = false;
 };
 
-// One terrain the GPU draws from its height atlas (ADR 0071). Filled by
-// `TerrainLoader::appendRenderTerrains`, which owns the textures named here;
-// the renderer selects nodes from it with `selectTerrainNodes` and draws them.
+// One terrain, as the renderer needs it beyond its meshes: the palette its
+// shader reads (ADR 0082). Filled by `TerrainLoader::appendRenderTerrains`.
 struct RenderTerrain
 {
     core::InstanceId id;
-    rhi::TextureHandle tileTable;
-    rhi::TextureHandle heights;
-    rhi::TextureHandle materials;
-    // `GpuTerrainParams::atlas` and `atlasSize`, already filled.
-    f32 atlas[4]{};
-    f32 atlasSize[4]{};
-    f32 voxelSize = 0.5f;
-    // The terrain's origin in world space; the renderer makes it relative to
-    // the camera.
+    // The terrain's origin in world space.
     DVec3 origin;
-    // The tile grid `tileMin` and `tileMax` describe, for the selection.
-    core::i32 minTileX = 0;
-    core::i32 minTileZ = 0;
-    u32 tilesX = 0;
-    u32 tilesZ = 0;
-    std::vector<f32> tileMin;
-    std::vector<f32> tileMax;
     // Linear colour per material id.
     f32 palette[kTerrainPaletteSize][4]{};
-    bool outlined = false;
+};
+
+// One node of a terrain's level-of-detail quadtree to draw this frame: the
+// terrain it belongs to and the URN its mesh is filed under in `MeshLibrary`.
+// Chosen by `TerrainLoader`, which knows where the camera is and which meshes
+// are ready; turned into draws by `extract`.
+struct TerrainNodeDraw
+{
+    core::InstanceId terrain;
+    core::NameAtom urn;
 };
 
 // One decal as drawn (F2): its box, in camera-relative space, and what it paints.
@@ -683,6 +675,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
              // need per-field "is set" bits on a struct whose virtue is being
              // flat, and "which half of this material is mine" is not a question
              // anybody wants to answer while looking at a wrong-coloured wall.
-             const TextureLibrary* textures = nullptr);
+             const TextureLibrary* textures = nullptr,
+             // The terrain nodes to draw, as `TerrainLoader::draws` chose them
+             // for this world. Empty draws no terrain, which is what a harness
+             // with no loader gets.
+             std::span<const TerrainNodeDraw> terrainNodes = {});
 
 } // namespace luaug::render

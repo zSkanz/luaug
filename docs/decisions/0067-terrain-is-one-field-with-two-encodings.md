@@ -1,6 +1,6 @@
 # 0067 — Terrain is one field with two encodings
 
-- Status: accepted
+- Status: superseded by [0082](0082-terrain-is-a-grid-of-voxels.md)
 - Date: 2026-08-27
 - Milestone: F1 (post-v1 phase 2), step A1
 - Decided by: the agent, under the owner's standing instruction of 2026-08-26 to

@@ -402,10 +402,10 @@ bool setTerrainVoxelSize(World& world, core::InstanceId id, const Value& value)
 
     // **Only while it is empty**, and refused by name rather than done quietly.
     // Changing the lattice under a sculpted world would mean resampling every
-    // tile and brick onto a different one, which is lossy in a way nobody asked
+    // voxel onto a different one, which is lossy in a way nobody asked
     // for -- and the alternative to refusing is a terrain that silently loses
     // detail when somebody adjusts a number in a properties grid.
-    if (terrain->field.tileCount() > 0 || terrain->field.brickCount() > 0)
+    if (!terrain->field.empty())
         return false;
 
     asset::FieldSettings settings = terrain->field.settings();
@@ -504,9 +504,8 @@ Value getTerrainCellCount(const World& world, core::InstanceId id)
     const TerrainComponent* terrain = world.terrains().find(id);
     if (terrain == nullptr)
         return Value{};
-    // Tiles and bricks both count as occupancy: a cell holding only a cave is a
-    // cell that holds something.
-    return Value{static_cast<f64>(terrain->field.tileCount() + terrain->field.brickCount())};
+    // Chunks that hold anything: air is never stored.
+    return Value{static_cast<f64>(terrain->field.chunkCount())};
 }
 
 void attachAttachmentComponents(World& world, core::InstanceId id)
