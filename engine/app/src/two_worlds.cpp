@@ -12,6 +12,12 @@
 #include "luaug/render/render_world.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
+#include "luaug/replication/extract.h"
+#include "luaug/replication/replication.h"
+
+#if LUAUG_ENABLE_REPLICATION
+#include "luaug/net/memory_transport.h"
+#endif
 
 #include <array>
 #include <memory>
@@ -67,10 +73,10 @@ struct Session
     std::vector<std::byte> pixels;
 };
 
-[[nodiscard]] std::optional<core::EngineError> openSession(Session& session, rhi::IDevice& device,
-                                                           const render::ShaderLibrary& shaders,
-                                                           const std::filesystem::path& project,
-                                                           const TwoWorldsOptions& options, u64 seed)
+[[nodiscard]] std::optional<core::EngineError>
+openSession(Session& session, rhi::IDevice& device, const render::ShaderLibrary& shaders,
+            const std::filesystem::path& project, const TwoWorldsOptions& options, u64 seed,
+            scene::NetworkTopology topology = scene::NetworkTopology::Solo)
 {
     session.target = device.createTexture({
         .format = kColorFormat,
@@ -111,6 +117,7 @@ struct Session
         // and nothing else (ADR 0049).
         .bootStamps = {},
         .bootScene = {},
+        .networkTopology = topology,
     };
     return session.host.boot(worldOptions);
 }
@@ -131,20 +138,13 @@ void closeSession(Session& session, rhi::IDevice& device)
 // Ticks the world and draws it into its own target, leaving the pixels in
 // `session.pixels`. Everything a frame of `engine.cpp` does that can influence
 // an image, in the same order, minus the parts a headless run does not have.
-[[nodiscard]] std::optional<core::EngineError> renderSession(Session& session, rhi::IDevice& device,
-                                                             const TwoWorldsOptions& options)
+// Draws the world as it stands into the session's target: one frame of
+// `engine.cpp` minus the parts a headless run does not have.
+[[nodiscard]] std::optional<core::EngineError> drawFrame(Session& session, rhi::IDevice& device,
+                                                         const TwoWorldsOptions& options, render::RenderWorld& snapshot)
 {
-    // Every session runs the same number of frames, and that is a requirement
-    // rather than a convenience: exposure adapts towards the frame before it and
-    // the environment chain bakes one level per frame, so a world rendered once
-    // and the same world rendered four times are two different pictures. The
-    // comparison is only about isolation if the frame COUNT is held equal.
     const f32 aspect = options.height == 0 ? 1.0f : static_cast<f32>(options.width) / static_cast<f32>(options.height);
-    render::RenderWorld snapshot;
-
-    for (u64 frame = 0; frame < options.ticks; ++frame) {
-        session.host.tick();
-
+    {
         rhi::ICmdList* cmd = device.beginFrame();
         if (cmd == nullptr)
             return core::makeError(LUAUG_TR("rhi.err.target_create_failed"));
@@ -171,15 +171,36 @@ void closeSession(Session& session, rhi::IDevice& device)
 
         device.submitAndPresent();
     }
+    return std::nullopt;
+}
 
+// What the session's target holds, into `session.pixels`.
+[[nodiscard]] std::optional<core::EngineError> readBack(Session& session, rhi::IDevice& device,
+                                                        const TwoWorldsOptions& options)
+{
     device.waitIdle();
-
     session.pixels.assign(static_cast<std::size_t>(options.width) * static_cast<std::size_t>(options.height) * 4,
                           std::byte{});
     if (!device.readTexture(session.target, session.pixels))
         return core::makeError(LUAUG_TR("engine.twoworlds.err.readback_failed"));
-
     return std::nullopt;
+}
+
+[[nodiscard]] std::optional<core::EngineError> renderSession(Session& session, rhi::IDevice& device,
+                                                             const TwoWorldsOptions& options)
+{
+    // Every session runs the same number of frames, and that is a requirement
+    // rather than a convenience: exposure adapts towards the frame before it and
+    // the environment chain bakes one level per frame, so a world rendered once
+    // and the same world rendered four times are two different pictures. The
+    // comparison is only about isolation if the frame COUNT is held equal.
+    render::RenderWorld snapshot;
+    for (u64 frame = 0; frame < options.ticks; ++frame) {
+        session.host.tick();
+        if (auto error = drawFrame(session, device, options, snapshot); error.has_value())
+            return error;
+    }
+    return readBack(session, device, options);
 }
 
 [[nodiscard]] std::optional<core::EngineError> writeEvidence(const TwoWorldsOptions& options, std::string_view name,
@@ -317,6 +338,181 @@ std::optional<core::EngineError> runTwoWorldsGate(const TwoWorldsOptions& option
     const std::array<I18nArg, 1> okArgs{I18nArg{"different", static_cast<core::i64>(between)}};
     core::log(LogLevel::Info, LUAUG_TR("engine.twoworlds.info.ok"), okArgs);
     return std::nullopt;
+}
+
+#if LUAUG_ENABLE_REPLICATION
+namespace {
+
+// Pixels that differ in any channel by more than `threshold` levels. A pixel
+// count rather than a byte count, and a threshold rather than zero, for the
+// reason `ReplicaGateOptions` gives.
+[[nodiscard]] std::size_t pixelsApart(const std::vector<std::byte>& left, const std::vector<std::byte>& right,
+                                      int threshold)
+{
+    if (left.size() != right.size())
+        return left.size() / 4 + right.size() / 4;
+    std::size_t count = 0;
+    for (std::size_t pixel = 0; pixel + 3 < left.size(); pixel += 4) {
+        bool apart = false;
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            const int a = std::to_integer<int>(left[pixel + channel]);
+            const int b = std::to_integer<int>(right[pixel + channel]);
+            apart = apart || (a > b ? a - b : b - a) > threshold;
+        }
+        count += apart ? 1u : 0u;
+    }
+    return count;
+}
+
+} // namespace
+#endif
+
+std::optional<core::EngineError> runReplicaGate(const ReplicaGateOptions& options)
+{
+#if LUAUG_ENABLE_REPLICATION
+    std::error_code ec;
+    if (!std::filesystem::is_directory(options.project, ec)) {
+        const std::array<I18nArg, 1> args{I18nArg{"path", options.project.string()}};
+        return core::makeError(LUAUG_TR("engine.twoworlds.err.no_projects"), args);
+    }
+
+    jobs::init();
+    if (const auto error = platform::init({.headless = true}); error.has_value())
+        return error;
+    struct PlatformScope
+    {
+        ~PlatformScope()
+        {
+            platform::shutdown();
+            jobs::shutdown();
+        }
+    } platformScope;
+
+    core::EngineError deviceError;
+    const rhi::DeviceResult device = createDevice({.backend = options.backend, .debug = true}, &deviceError);
+    if (device == nullptr)
+        return deviceError;
+    render::ShaderLibrary shaders;
+    if (auto error = shaders.load(platform::paths().contentDir, device->caps().shaderFormat); error.has_value())
+        return error;
+
+    const TwoWorldsOptions frameOptions{
+        .root = {},
+        .outputDir = options.outputDir,
+        .backend = options.backend,
+        .ticks = options.ticks,
+        .width = options.width,
+        .height = options.height,
+    };
+
+    // One seed for both: the replica's own script draws the same numbers the
+    // authority's does, so nothing but replication can make the pictures agree
+    // or disagree.
+    Session authority;
+    Session replica;
+    if (auto error =
+            openSession(authority, *device, shaders, options.project, frameOptions, 1, scene::NetworkTopology::Host);
+        error.has_value())
+        return error;
+    if (auto error =
+            openSession(replica, *device, shaders, options.project, frameOptions, 1, scene::NetworkTopology::Replica);
+        error.has_value())
+        return error;
+    // What the replica's own copy of the scene would have duplicated -- the
+    // same call the engine makes after a replica boots.
+    (void)replication::clearReplicated(replica.host.world(), replica.host.workspace());
+
+    // The memory transport: what arrives is a function of the calls made, so
+    // this gate is as repeatable as the determinism traces.
+    constexpr core::u16 Port = 7777;
+    auto network = net::createMemoryNetwork();
+    std::optional<core::EngineError> netError;
+    replication::Config hostConfig;
+    hostConfig.topology = replication::Topology::Host;
+    hostConfig.port = Port;
+    hostConfig.ticksPerSnapshot = 1;
+    auto hostNet = replication::createReplicationOver(net::createMemoryTransport(network), hostConfig, netError);
+    if (hostNet == nullptr)
+        return netError;
+    replication::Config joinConfig;
+    joinConfig.topology = replication::Topology::Replica;
+    joinConfig.port = Port;
+    joinConfig.address = "memory";
+    auto joinNet = replication::createReplicationOver(net::createMemoryTransport(network), joinConfig, netError);
+    if (joinNet == nullptr)
+        return netError;
+
+    render::RenderWorld authoritySnapshot;
+    render::RenderWorld replicaSnapshot;
+    std::vector<std::byte> replicaFirst;
+    for (u64 frame = 0; frame < options.ticks; ++frame) {
+        // Lockstep, in the frame's own order on each side: receive, tick, send.
+        // The authority sends tick T after it; the replica applies it before its
+        // own tick T, so both draw the state of tick T.
+        hostNet->receive(authority.host.world(), authority.host.workspace());
+        authority.host.tick();
+        hostNet->send(authority.host.world(), authority.host.workspace(), authority.host.world().engineState().tick);
+        joinNet->receive(replica.host.world(), replica.host.workspace());
+        replica.host.tick();
+        joinNet->send(replica.host.world(), replica.host.workspace(), replica.host.world().engineState().tick);
+
+        if (auto error = drawFrame(authority, *device, frameOptions, authoritySnapshot); error.has_value())
+            return error;
+        if (auto error = drawFrame(replica, *device, frameOptions, replicaSnapshot); error.has_value())
+            return error;
+        if (frame == 0) {
+            if (auto error = readBack(replica, *device, frameOptions); error.has_value())
+                return error;
+            replicaFirst = replica.pixels;
+        }
+        // **Drained every frame.** Two sessions submitting hundreds of frames
+        // back to back never let the backend retire a command buffer, so its
+        // descriptor pools only grew -- and lavapipe, the software device the
+        // Linux tier renders on, died inside one of those allocations. A real
+        // frame loop presents and waits; this one has to say so.
+        device->waitIdle();
+    }
+    if (auto error = readBack(authority, *device, frameOptions); error.has_value())
+        return error;
+    if (auto error = readBack(replica, *device, frameOptions); error.has_value())
+        return error;
+
+    if (auto error = writeEvidence(frameOptions, "authority", authority.pixels); error.has_value())
+        return error;
+    if (auto error = writeEvidence(frameOptions, "replica", replica.pixels); error.has_value())
+        return error;
+    if (auto error = writeEvidence(frameOptions, "replica-first", replicaFirst); error.has_value())
+        return error;
+
+    const std::size_t total = static_cast<std::size_t>(options.width) * static_cast<std::size_t>(options.height);
+    const std::size_t apart = pixelsApart(authority.pixels, replica.pixels, 6);
+    const std::size_t arrived = pixelsApart(replicaFirst, replica.pixels, 6);
+    const replication::Status joined = joinNet->status();
+
+    hostNet->shutdown();
+    joinNet->shutdown();
+    closeSession(authority, *device);
+    closeSession(replica, *device);
+
+    // Half a percent of the frame: a crate is ten times that at this size.
+    if (apart * 200 > total) {
+        const std::array<I18nArg, 2> args{I18nArg{"apart", static_cast<core::i64>(apart)},
+                                          I18nArg{"total", static_cast<core::i64>(total)}};
+        return core::makeError(LUAUG_TR("engine.replicagate.err.diverged"), args);
+    }
+    // The vacuous pass: a world that never arrived. Five percent of the frame
+    // has to have changed since the replica's first, empty, frame.
+    if (arrived * 20 < total || joined.serverTick == 0)
+        return core::makeError(LUAUG_TR("engine.replicagate.err.vacuous"));
+
+    const std::array<I18nArg, 2> okArgs{I18nArg{"apart", static_cast<core::i64>(apart)},
+                                        I18nArg{"tick", static_cast<core::i64>(joined.serverTick)}};
+    core::log(LogLevel::Info, LUAUG_TR("engine.replicagate.info.ok"), okArgs);
+    return std::nullopt;
+#else
+    (void)options;
+    return core::makeError(LUAUG_TR("engine.cli.err.no_replication"));
+#endif
 }
 
 } // namespace luaug::app

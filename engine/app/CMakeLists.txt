@@ -787,6 +787,22 @@ if(LUAUG_BUILD_TESTS)
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 180)
 
+    # N1's acceptance gate (ADR 0069): the same harness inverted -- one project
+    # booted as an authority and as its replica in one process over the memory
+    # transport, and the replica must draw the authority's world. Only where the
+    # module is built, because without it there is no replica to be.
+    if(LUAUG_ENABLE_REPLICATION)
+        add_test(NAME replica_seam
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DPROJECT=${CMAKE_SOURCE_DIR}/examples/15-multiplayer
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/replica-seam
+                -P ${CMAKE_SOURCE_DIR}/tests/twoworlds/run_replica_gate.cmake)
+        set_tests_properties(replica_seam PROPERTIES
+            SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+            TIMEOUT 180)
+    endif()
+
     # The M1 gate's reference screenshot: render a frame on a real GPU, read it
     # back, and compare against a checked-in golden with tools/imgcmp.
     #

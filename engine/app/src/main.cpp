@@ -336,6 +336,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.twoWorldsRoot = std::filesystem::path(arg.substr(arg.find('=') + 1));
             continue;
         }
+        if (arg.starts_with("--replica-gate=")) {
+            options.replicaGateProject = std::filesystem::path(arg.substr(arg.find('=') + 1));
+            continue;
+        }
         if (arg.starts_with("--two-worlds-out=")) {
             options.twoWorldsOutDir = std::filesystem::path(arg.substr(arg.find('=') + 1));
             continue;
@@ -451,7 +455,7 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // `--launcher` is the third: it has its own loop, no world and no frame
     // budget, and it ends when somebody chooses a project or closes the window.
     if (!options.replayRoot.empty() || !options.benchRoot.empty() || !options.twoWorldsRoot.empty() ||
-        options.partitionOnly || options.launcher)
+        !options.replicaGateProject.empty() || options.partitionOnly || options.launcher)
         return kExitOk;
 
     // A conformance run needs a ceiling for the same reason, and a generous one:
@@ -656,6 +660,23 @@ int main(int argc, char** argv)
 
             // Same mapping the session path uses, and for the same reason: a
             // runner with no driver has not found anything about the seam.
+            if (error->key.hash == LUAUG_TR("rhi.err.device_create_failed").hash)
+                return kExitNoGraphicsDevice;
+            return kExitScriptError;
+        }
+        return kExitOk;
+    }
+
+    if (!options.replicaGateProject.empty()) {
+        if (const std::optional<luaug::core::EngineError> error = luaug::app::runReplicaGate({
+                .project = options.replicaGateProject,
+                .outputDir = options.twoWorldsOutDir,
+                .backend = options.backend,
+                .ticks = options.frames == 0 ? 240 : options.frames,
+                .width = options.width,
+                .height = options.height,
+            })) {
+            luaug::core::logText(LogLevel::Error, error->message);
             if (error->key.hash == LUAUG_TR("rhi.err.device_create_failed").hash)
                 return kExitNoGraphicsDevice;
             return kExitScriptError;

@@ -57,7 +57,11 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M6** — input actions, UI, tweens, audio, minimal animation; `examples/04-obby` | signed off, `milestone/m6` |
 | ✅ | **M7** — asset pipeline, async IO, streaming, floating origin | signed off, `milestone/m7` |
 | ✅ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | signed off, `milestone/m7.5` |
-| 🔨 | **M8** — the flagship open-world demo, hardening, docs, v1.0 | awaiting review |
+| ✅ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | released `v1.0.0` |
+| ✅ | **E1–E9** — the visual editor: explorer, properties, manipulators, content, stamps, launcher, script editor and debugger | built; `v1.1.0` prepared |
+| 🔨 | **F1** — sculpted terrain: a GPU height atlas, caves as surface nets, a brush in the editor | built through its brush; streaming open |
+| 🔨 | **V1** — `VoxelService`: a block world with a registry, a greedy mesher, colliders and an editor tool | built; streaming open |
+| 🔨 | **N1** — multiplayer: host, dedicated server and replica from one binary, players and intent | playable on a LAN; prediction open |
 
 **What runs today.** `luaug new` scaffolds a project; `luaug dev` runs it with a
 watcher, so a saved file rebuilds the world without the window closing;
@@ -70,7 +74,7 @@ bloom and FXAA; Jolt with contacts surfaced as deferred `Touched` signals,
 collision groups, queries, welds and a character that climbs, rides platforms and
 is stopped by walls; rebindable input actions across keyboard, mouse and gamepad;
 a UI tree over `UDim2` layout with real text; tweens, positional audio on the
-simulation timeline, and skeletal animation. **1,109** conformance specs written
+simulation timeline, and skeletal animation. **Nearly 1,200** conformance cases written
 against [`docs/api-design.md`](docs/api-design.md) — not against the
 implementation — pass on Windows and Linux, beside a determinism harness that
 replays recorded input and compares world hashes, a capture-stream gate that
@@ -78,10 +82,10 @@ compares draw commands rather than pixels, an editor-seam proof that runs two
 worlds and two VMs in one process, and a soak that walks the flagship for ten
 minutes and asserts the memory curve flattens.
 
-**What it does not have, stated plainly.** No visual editor, no particles, no
-decals, no terrain, no `SurfaceGui`, no rich text, no navmesh, no 2D workflow, no
-multiplayer, no mobile. Each has an owner in the roadmap's post-v1 phases rather
-than a shrug, and
+**What it does not have, stated plainly.** No particles, no decals, no
+`SurfaceGui`, no rich text, no navmesh, no 2D workflow, no mobile. Multiplayer
+runs on a LAN over an unencrypted transport, with no client prediction yet.
+Each has an owner in the roadmap's post-v1 phases rather than a shrug, and
 [`docs/migrating.md`](docs/migrating.md) §5 lists them with
 where they went. A `Sound` plays a generated tone rather than a file. A property
 the engine stores and does not act on is marked `Inert` in the inspector and the

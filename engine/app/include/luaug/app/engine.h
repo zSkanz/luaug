@@ -82,6 +82,11 @@ struct EngineOptions
     // human and never an input to the result.
     std::filesystem::path twoWorldsOutDir;
 
+    // N1's acceptance gate: this project booted as an authority and as its
+    // replica in one process, rendered side by side (`runReplicaGate`). Its
+    // evidence goes to `twoWorldsOutDir`.
+    std::filesystem::path replicaGateProject;
+
     // Runs the simulation benchmarks over this directory. Like a replay it
     // opens no device: what it measures is the tick, and a tick that depended
     // on a swapchain would be the finding rather than the measurement.

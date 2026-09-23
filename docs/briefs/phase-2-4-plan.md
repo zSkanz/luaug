@@ -773,6 +773,54 @@ compared to it — interest management gives the replica a strict subset. The
 per-baseline checksum catches apply bugs, which is what it can honestly catch,
 and it cannot detect simulation divergence.
 
+
+## N1 built (2026-09-22 and 23)
+
+Parts B through F, in compile order, each commit gated on all tiers.
+
+**The core is a snapshot-and-baseline protocol**, the one every shipped action
+game converges on, over any `ITransport`
+(`engine/replication/include/luaug/replication/session.h`). The authority
+captures its replicated subtree each send and keeps the last 64 states; each
+welcomed peer gets the spawns and despawns it lacks on the reliable control
+channel and a snapshot diffed against the newest state it acknowledged on the
+unreliable-sequenced state channel. The replica reconstructs from that baseline,
+checks the snapshot's checksum, applies only what changed, and acknowledges only
+states it holds -- so a lost snapshot costs bandwidth and never correctness.
+Names travel as strings in a per-message table and parents as network ids,
+because an atom number or an instance index means nothing in another process.
+
+**The harness ADR 0069 said N1 owed exists**: `net::createMemoryTransport`, which
+delivers at the next poll, and `net::createLossyTransport`, which drops and
+reorders unreliable traffic from a `Pcg32` seed. Under a third of snapshots lost
+and a fifth reordered a replica converges with zero checksum failures, and the
+same seed misbehaves identically every run.
+
+**Postures, players and intent.** `--host`, `--serve` and `--join` choose the
+posture before any script exists, and `createReplication` is the one line that
+turns it into a socket (ADR 0070); the editor profile compiles it in, player
+and shipping do not. `NetworkService` reports `Authority`, `Topology`,
+`ServerTick`, `PeerCount` and `LocalPlayer`; a `Player` exists from boot solo
+and one per replica on an authority; what a player did reaches the authority as
+the values of their simulation-rate input actions, and `player:GetIntent`
+reads the local player and a remote one the same way. A replica's loose bodies
+are kinematic (decision 5), and its own copy of the scene loses what the
+authority will send.
+
+**The acceptance test is the editor seam inverted**, as planned: `replica_seam`
+boots `examples/15-multiplayer` as a host and as its replica in one process over
+the memory transport and requires the replica to draw the authority's world
+within half a percent of the frame -- and to have changed from its own first,
+empty frame, which refuses the vacuous pass. Break-verified: with component
+fields not applied it fails by 892,781 of 921,600 pixels.
+
+**Not built, and named so it is not mistaken for done:** a replica does not
+see the list of other players; there is no client prediction, so a replica's own
+character moves a round trip after the key; despawn destroys rather than using
+the streaming husk contract (decision 6); interest management is the whole
+workspace; and no service's properties replicate (`Lighting.ClockTime` is the
+real example).
+
 ---
 
 # F2 — Particles and Decals

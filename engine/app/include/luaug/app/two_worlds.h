@@ -68,4 +68,38 @@ struct TwoWorldsOptions
 // the exit code CTest reads as a skip.
 [[nodiscard]] std::optional<core::EngineError> runTwoWorldsGate(const TwoWorldsOptions& options);
 
+// **The same harness, inverted** (ADR 0069's acceptance test, N1 part F).
+//
+// Where the editor seam proves two worlds in one process are INDEPENDENT, this
+// proves one is a faithful REPLICA of the other: one project booted twice, once
+// as the authority (a host, with its own player) and once as a replica joined
+// to it over the in-process memory transport, ticked in lockstep and rendered
+// side by side. The replica's picture must be the authority's.
+//
+// **Within a tolerance, and the tolerance is stated.** Exposure adapts toward
+// the frame before it, and a replica's first frames show a world that has not
+// arrived yet, so the two histories differ for a moment even when every
+// transform agrees. Enough frames later they converge, and what is asserted is
+// that almost no pixel differs by more than a few levels -- a part missing, a
+// transform a tick behind or a colour decoded wrong all fail by orders of
+// magnitude more.
+//
+// **And not vacuously**: the replica's final picture has to differ from its own
+// first frame, taken before anything had arrived. A replica that received
+// nothing and an authority that drew nothing would otherwise agree perfectly.
+struct ReplicaGateOptions
+{
+    // One project, the authority's and the replica's alike -- the posture is
+    // the only difference, which is the whole claim of ADR 0070.
+    std::filesystem::path project;
+    std::filesystem::path outputDir;
+    rhi::BackendId backend = rhi::BackendId::SdlGpu;
+    // Enough for the handshake, the first snapshot and exposure to settle.
+    core::u64 ticks = 240;
+    core::i32 width = 640;
+    core::i32 height = 360;
+};
+
+[[nodiscard]] std::optional<core::EngineError> runReplicaGate(const ReplicaGateOptions& options);
+
 } // namespace luaug::app

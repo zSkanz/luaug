@@ -102,9 +102,24 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   says why. What it does not have yet: an editor tool that places a block,
   transparent blocks, and chunks streamed from disk.
 
-  **The next action, as a sentence:** give the editor a block tool for
-  `VoxelService`, then open N1 (multiplayer), which is designed and has its
-  wire schema but no transport wiring.
+  The editor has a block tool for it since 2026-09-22: place, break and replace,
+  a palette of registered types with their three face colours, and one undo
+  step per stroke.
+
+  **N1, multiplayer, is playable over a LAN** (2026-09-22 and 23). One project
+  runs solo, as a host (`--host`), as a dedicated server (`--serve`) or as a
+  replica (`--join=address`); the authority sends each replica a snapshot
+  diffed against the state it last acknowledged, checked by checksum, and each
+  replica sends back what its player did as intent. `examples/15-multiplayer`
+  gives every player a racer, and `replica_seam` requires a replica booted in
+  the same process to draw its authority's world.
+  [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md) lists what is
+  not built: other players' list on a replica, client prediction, the husk
+  despawn, interest management and service properties.
+
+  **The next action, as a sentence:** close N1's named gaps -- prediction and
+  the player list first, because they are what a person playing notices -- then
+  F2 (particles and decals).
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is
