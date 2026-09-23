@@ -828,6 +828,14 @@ real example).
 
 # F2 — Particles and Decals
 
+**Particles built 2026-09-23** ([ADR 0072](../decisions/0072-particles-are-a-picture-simulated-on-the-frame.md)):
+`ParticleEmitter` streams and bursts along its parent's up, simulated on the
+frame in `render::ParticleSystem`, drawn as one premultiplied instanced draw
+that blends and adds in one pipeline, replicated as its settings and a burst
+total. Not soft; the RHI stays frozen for it. Decals are still to build, and
+the ADR records that they will be clustered, applied in the forward shader.
+The plan below is what was written before; the ADR supersedes its choice.
+
 **Blocked on one human decision and nothing else: ADR 0071, unfreezing exactly
 one thing in the RHI.** `DepthStencilAttachment` gains a read-only flag, or
 `ICmdList` gains a copy — one field or one call, and ADR 0037 makes it a human
@@ -937,10 +945,18 @@ two a tick. `examples/14-voxels` plays it.
 single-block edit re-meshes in 0.33 ms, so an edit is inside a frame without a
 dirty-region mesher, and the design did not need one.
 
-**Not built yet, and named so it is not mistaken for done:** an editor tool that
-places and breaks blocks; transparent blocks (glass, water), which need their own
-pass and a sort; per-face textures rather than colours; and chunks streamed from
-disk, which waits on the same streaming work F1's Part E does.
+**Built after, on 2026-09-22 and 23:** the editor's block tool (place, break,
+replace, a palette of registered types, one undo step per stroke); per-face
+images, drawn into a GPU block atlas so compiled images work -- which found
+ADR 0073's sRGB defect on the way; and see-through blocks, cutout and
+translucent, with the face rules a block game needs and a third mesh per chunk
+so the depth prepass never writes a leaf's holes.
+
+**Not built yet, and named so it is not mistaken for done:** chunks streamed
+from disk, which waits on the same streaming work F1's Part E does; a block
+type's images and opacity set from the editor's panel rather than a script;
+cutout shadows (a leaf casts a full square); and water that behaves as a fluid
+rather than a see-through block.
 
 ## The unresolved list, carried forward rather than closed
 

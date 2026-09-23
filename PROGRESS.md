@@ -104,7 +104,13 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 
   The editor has a block tool for it since 2026-09-22: place, break and replace,
   a palette of registered types with their three face colours, and one undo
-  step per stroke.
+  step per stroke. Block faces have images and blocks can be see-through --
+  leaves, glass, water -- since 2026-09-23, and making the images work found
+  that every compiled colour texture in the engine had been drawing pale
+  (ADR 0073, fixed).
+
+  **F2's particles are built** (ADR 0072): `ParticleEmitter`, with
+  `examples/16-particles`. Decals are next in F2.
 
   **N1, multiplayer, is playable over a LAN** (2026-09-22 and 23). One project
   runs solo, as a host (`--host`), as a dedicated server (`--serve`) or as a
