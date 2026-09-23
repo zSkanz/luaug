@@ -41,8 +41,23 @@ definitions. Then `workspace.Player.Walker` is a `CharacterBody`, and
 ## What is not typed
 
 A child a script makes while the game runs has no name the scene knows. A dot
-still reaches it at run time, but the analyzer cannot know it is there. Reach it
-the explicit way:
+still reaches it at run time, and the game runs, but the analyzer cannot know it
+is there: `workspace.Coin` is reported as `Key 'Coin' not found`. No static
+checker can tell that name from a typo of one, so a strict one reports both.
+
+When you know the shape, **say it once, as a type**, and the dot is typed from
+then on, typos included:
+
+```luau
+--!strict
+type Arena = Workspace & { Coin: Part & { Gem: Part } }
+
+local arena = workspace :: Arena
+arena.Coin.Gem.Transparency = 0.5   -- typed
+print(arena.Coni)                   -- still an error: no key 'Coni'
+```
+
+Or reach it the explicit way:
 
 | Want | Use |
 |---|---|
