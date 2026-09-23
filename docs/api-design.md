@@ -464,7 +464,7 @@ Instance (abstract)
 │  ├─ Frame
 │  ├─ TextLabel                -- Text, TextColor, TextSize, Font: Content,
 │  │  │                        -- HorizontalAlignment, VerticalAlignment, TextWrapped, TextScaled
-│  │  │                        -- (no RichText)
+│  │  │                        -- RichText: markup inside one label (F3)
 │  │  ├─ TextButton            -- a TextLabel that is clickable; no members of its own
 │  │  └─ TextInput             -- PlaceholderText, Focused/FocusLost signals
 │  ├─ ImageLabel               -- Image: Content, ImageColor, ScaleType, SliceCenter: Rect
@@ -479,8 +479,7 @@ Layout is computed directly -- two passes over each dirty `ScreenGui` -- and no
 solver is exposed or vendored. It was to have been Clay; ADR 0040 records why a
 `UDim2` placement turned out to be arithmetic rather than a constraint problem.
 **Not here (documented honestly):**
-ParticleEmitter, SurfaceGui/billboards, RichText and video. **Two things have
-come off this list.** The solver joints did: it read "every constraint except the
+SurfaceGui/billboards and video. **Four things have come off this list.** The solver joints did: it read "every constraint except the
 rigid weld — no `HingeConstraint`, `SpringConstraint` or `Motor6D`, and no
 solver joint of any kind", and `HingeConstraint`, `BallSocketConstraint` and
 `FixedConstraint` now ship over `Attachment` pairs, with a `Ragdoll` assembled
@@ -488,11 +487,12 @@ from them rather than owning bodies of its own. `SpringConstraint` and `Motor6D`
 are still absent. And **Terrain** did: one signed-distance field under two
 encodings (ADR 0067), sculpted from a script through `FillBall`/`FillBlock`/
 `PaintBall` or from the editor's brush, meshed, collided, saved with the scene
-and reached as `workspace.Terrain`.
+and reached as `workspace.Terrain`. `ParticleEmitter` did (F2, ADR 0072), and
+so did rich text: `TextLabel.RichText` reads its text as markup, so one label
+changes colour, size and weight part-way through (F3).
 
 **The rest of that list now has an owner** (roadmap post-v1 phase 2, opened
-2026-08-27): `ParticleEmitter`, `SurfaceGui`/billboards and rich text are all
-being built. Video is not, and has no phase. This paragraph stays until each one
+2026-08-27): `SurfaceGui`/billboards are being built. Video is not, and has no phase. This paragraph stays until each one
 ships rather than being edited in advance: **a surface is documented as absent
 while it is absent**, which is the same rule that forbids a declared class
 nothing implements — so Terrain left it in the commit that made it false and

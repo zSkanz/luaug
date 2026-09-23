@@ -2117,9 +2117,10 @@ local Classes: { Schema.Class } = {
         Extends = "UIObject",
         Module = "ui",
         Storage = "TextLabel",
-        Doc = "Text in a box (§2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid "
-            .. "out left to right with kerning. That is a known gap for Arabic, Devanagari and Thai, and the "
-            .. "seam a text shaper would sit behind is deliberately left open.",
+        Doc = "Text in a box (§2.2). Markup inside one label is `RichText`'s. There is no complex-script "
+            .. "shaping and no kerning -- codepoints are laid out left to right by their advances. That is a "
+            .. "known gap for Arabic, Devanagari and Thai, and the seam a text shaper would sit behind is "
+            .. "deliberately left open.",
         Properties = {
             {
                 Name = "Text",
@@ -2178,6 +2179,22 @@ local Classes: { Schema.Class } = {
                 Doc = "Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word "
                     .. "wider than the box -- a word cut in half at a random letter is worse than one that "
                     .. "overhangs.",
+            },
+            {
+                Name = "RichText",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether `Text` is read as markup, so one label can change colour, size and weight "
+                    .. "part-way through (F3).\n\n"
+                    .. "The tags: `<b>` bold, `<i>` italic, `<u>` underlined, `<s>` struck through, "
+                    .. '`<font color="#rrggbb" size="20" transparency="0.5">` (any of the three, '
+                    .. "`color` also as `rgb(r, g, b)`), and `<br/>` for a line break. Tags nest and each closes "
+                    .. "its own. Write `&lt;`, `&gt;`, `&amp;`, `&quot;` and `&apos;` for the characters "
+                    .. "themselves.\n\n"
+                    .. "**A tag that is not understood is drawn as text**, so a typo shows as itself rather "
+                    .. "than vanishing. Bold is drawn from the label's one face rather than a bold file, and "
+                    .. "italic by leaning it. A `TextInput` shows its text plain whatever this says: its "
+                    .. "caret counts characters as typed, tags and all.",
             },
             {
                 Name = "TextScaled",

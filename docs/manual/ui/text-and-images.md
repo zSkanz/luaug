@@ -149,11 +149,30 @@ including a plain `Frame`.
 
 The classes exist because they are the ones a reader recognises.
 
+## Rich text
+
+Turn on `RichText` and a label reads its `Text` as markup, so colour, size and
+weight change part-way through one line:
+
+```luau
+label.RichText = true
+label.Text = "Health <b><font color=\"#ff5050\">12</font></b> / 100<br/>"
+    .. "<i>Poisoned</i> <font size=\"12\" transparency=\"0.4\">(3s)</font>"
+```
+
+`<b>`, `<i>`, `<u>` and `<s>` are bold, italic, underlined and struck through;
+`<font>` takes `color` (`#rrggbb` or `rgb(r, g, b)`), `size` and
+`transparency`; `<br/>` breaks the line. Write `&lt;`, `&gt;`, `&amp;`,
+`&quot;` and `&apos;` for the characters themselves. A tag the label does not
+understand is drawn as text, so a typo shows as itself. Bold and italic come
+from the label's one face -- thickened and leaned -- rather than from separate
+font files, and a `TextInput` always shows its text plain.
+
 ## What is not here
 
-No rich text — colour, weight and size do not vary inside one label, and complex
-scripts are not shaped. No world-space UI: this tree draws on the screen and
-nowhere else.
+Complex scripts are not shaped: codepoints are laid out left to right, so
+Arabic, Devanagari and Thai do not join. No world-space UI yet: this tree draws
+on the screen and nowhere else.
 
 ## Where to look next
 

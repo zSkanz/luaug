@@ -46,10 +46,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 // The one translation unit that defines them. Both are
@@ -67,6 +70,7 @@
 namespace luaug::ui {
 namespace {
 
+using core::Color3;
 using core::Vec2;
 
 // The default face's name, as `TextLabel.Font` spells it. An empty `Font` and
@@ -740,6 +744,350 @@ void breakLines(std::string_view text, Face& face, f32 pixelSize, f32 scale, f32
     flush(text.size(), text.size());
 }
 
+// --- Rich text (F3) ------------------------------------------------------------
+//
+// **Markup in, styled codepoints out, then the same three steps as plain
+// text**: break into lines at spaces, align, emit a quad per glyph. What a
+// style changes is the size each codepoint is measured and drawn at, its
+// colour, and four decorations. What it does not change is the cache key --
+// face, size, codepoint -- which is why nothing below touches the store's
+// shape.
+//
+// The tags are the ones every engine's rich text agrees on: `<b>`, `<i>`,
+// `<u>`, `<s>`, `<font color="#rrggbb" size="n" transparency="t">` and `<br/>`,
+// with the five XML entities. A tag this parser does not recognise, or one it
+// cannot read, is TEXT: a label that shows `<blink>` tells its author exactly
+// what went wrong, and one that silently dropped it would not.
+
+struct RichStyle
+{
+    Color3 color;
+    f32 alpha = 1.0f;
+    f32 size = 14.0f;
+    bool bold = false;
+    bool italic = false;
+    bool underline = false;
+    bool strike = false;
+};
+
+struct RichGlyph
+{
+    u32 codepoint = 0;
+    u32 style = 0;
+};
+
+struct RichText
+{
+    std::vector<RichStyle> styles;
+    std::vector<RichGlyph> glyphs;
+};
+
+[[nodiscard]] bool startsWith(std::string_view text, usize at, std::string_view prefix) noexcept
+{
+    return text.substr(at, prefix.size()) == prefix;
+}
+
+// An attribute's value, quoted with either quote, or nothing.
+[[nodiscard]] std::optional<std::string_view> attribute(std::string_view tag, std::string_view name)
+{
+    usize at = 0;
+    while ((at = tag.find(name, at)) != std::string_view::npos) {
+        const bool boundary = at == 0 || tag[at - 1] == ' ';
+        usize cursor = at + name.size();
+        while (cursor < tag.size() && tag[cursor] == ' ')
+            ++cursor;
+        if (!boundary || cursor >= tag.size() || tag[cursor] != '=') {
+            at += name.size();
+            continue;
+        }
+        ++cursor;
+        while (cursor < tag.size() && tag[cursor] == ' ')
+            ++cursor;
+        if (cursor >= tag.size() || (tag[cursor] != '"' && tag[cursor] != '\''))
+            return std::nullopt;
+        const char quote = tag[cursor];
+        const usize end = tag.find(quote, cursor + 1);
+        if (end == std::string_view::npos)
+            return std::nullopt;
+        return tag.substr(cursor + 1, end - cursor - 1);
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<f32> numberOf(std::string_view text)
+{
+    if (text.empty() || text.size() > 32)
+        return std::nullopt;
+    char buffer[33] = {};
+    std::memcpy(buffer, text.data(), text.size());
+    char* end = nullptr;
+    const f32 value = std::strtof(buffer, &end);
+    if (end != buffer + text.size() || !std::isfinite(value))
+        return std::nullopt;
+    return value;
+}
+
+// `#rrggbb`, or `rgb(r, g, b)` in 0-255.
+[[nodiscard]] std::optional<Color3> colourOf(std::string_view text)
+{
+    const auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+    if (text.size() == 7 && text[0] == '#') {
+        f32 channels[3] = {};
+        for (usize index = 0; index < 3; ++index) {
+            const int high = hex(text[1 + index * 2]);
+            const int low = hex(text[2 + index * 2]);
+            if (high < 0 || low < 0)
+                return std::nullopt;
+            channels[index] = static_cast<f32>(high * 16 + low) / 255.0f;
+        }
+        return Color3{channels[0], channels[1], channels[2]};
+    }
+    if (text.size() > 5 && text.substr(0, 4) == "rgb(" && text.back() == ')') {
+        const std::string_view inner = text.substr(4, text.size() - 5);
+        f32 channels[3] = {};
+        usize begin = 0;
+        for (int index = 0; index < 3; ++index) {
+            const usize comma = index < 2 ? inner.find(',', begin) : inner.size();
+            if (comma == std::string_view::npos)
+                return std::nullopt;
+            std::string_view part = inner.substr(begin, comma - begin);
+            while (!part.empty() && part.front() == ' ')
+                part.remove_prefix(1);
+            while (!part.empty() && part.back() == ' ')
+                part.remove_suffix(1);
+            const std::optional<f32> value = numberOf(part);
+            if (!value.has_value())
+                return std::nullopt;
+            channels[index] = std::clamp(*value, 0.0f, 255.0f) / 255.0f;
+            begin = comma + 1;
+        }
+        return Color3{channels[0], channels[1], channels[2]};
+    }
+    return std::nullopt;
+}
+
+// Parses `markup` into styled codepoints. `base` is the label's own style.
+[[nodiscard]] RichText parseRichText(std::string_view markup, const RichStyle& base)
+{
+    RichText out;
+    out.styles.push_back(base);
+    std::vector<u32> stack{0};
+    // Which tag opened each stack level, so `</b>` closes a `<b>` and nothing
+    // else. A close that matches nothing open is text.
+    std::vector<std::string_view> opened{""};
+
+    const auto push = [&](RichStyle style, std::string_view name) {
+        out.styles.push_back(style);
+        stack.push_back(static_cast<u32>(out.styles.size() - 1));
+        opened.push_back(name);
+    };
+    const auto literal = [&](usize at, usize length) {
+        usize index = at;
+        while (index < at + length) {
+            const Decoded decoded = decodeUtf8(markup, index);
+            out.glyphs.push_back(RichGlyph{decoded.codepoint, stack.back()});
+            index += decoded.length;
+        }
+    };
+
+    usize index = 0;
+    while (index < markup.size()) {
+        const char c = markup[index];
+        if (c == '&') {
+            static constexpr std::pair<std::string_view, u32> Entities[] = {
+                {"&lt;", '<'}, {"&gt;", '>'}, {"&amp;", '&'}, {"&quot;", '"'}, {"&apos;", '\''}};
+            bool matched = false;
+            for (const auto& entity : Entities) {
+                if (startsWith(markup, index, entity.first)) {
+                    out.glyphs.push_back(RichGlyph{entity.second, stack.back()});
+                    index += entity.first.size();
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                literal(index, 1);
+                ++index;
+            }
+            continue;
+        }
+        if (c != '<') {
+            const Decoded decoded = decodeUtf8(markup, index);
+            out.glyphs.push_back(RichGlyph{decoded.codepoint, stack.back()});
+            index += decoded.length;
+            continue;
+        }
+
+        const usize close = markup.find('>', index);
+        if (close == std::string_view::npos) {
+            literal(index, markup.size() - index);
+            break;
+        }
+        std::string_view tag = markup.substr(index + 1, close - index - 1);
+        const usize whole = close - index + 1;
+        while (!tag.empty() && tag.back() == ' ')
+            tag.remove_suffix(1);
+
+        bool understood = true;
+        if (tag == "br/" || tag == "br" || tag == "br /") {
+            out.glyphs.push_back(RichGlyph{'\n', stack.back()});
+        }
+        else if (!tag.empty() && tag.front() == '/') {
+            const std::string_view name = tag.substr(1);
+            if (opened.size() > 1 && opened.back() == name) {
+                stack.pop_back();
+                opened.pop_back();
+            }
+            else {
+                understood = false;
+            }
+        }
+        else {
+            RichStyle style = out.styles[stack.back()];
+            const usize space = tag.find(' ');
+            const std::string_view name = tag.substr(0, space);
+            if (name == "b")
+                style.bold = true;
+            else if (name == "i")
+                style.italic = true;
+            else if (name == "u")
+                style.underline = true;
+            else if (name == "s")
+                style.strike = true;
+            else if (name == "font" && space != std::string_view::npos) {
+                const std::string_view rest = tag.substr(space + 1);
+                const std::optional<std::string_view> colour = attribute(rest, "color");
+                const std::optional<std::string_view> size = attribute(rest, "size");
+                const std::optional<std::string_view> transparency = attribute(rest, "transparency");
+                if (!colour && !size && !transparency)
+                    understood = false;
+                if (colour) {
+                    const std::optional<Color3> parsed = colourOf(*colour);
+                    understood = understood && parsed.has_value();
+                    if (parsed)
+                        style.color = *parsed;
+                }
+                if (size) {
+                    const std::optional<f32> parsed = numberOf(*size);
+                    understood = understood && parsed.has_value() && *parsed > 0.0f;
+                    if (parsed && *parsed > 0.0f)
+                        style.size = std::min(*parsed, 512.0f);
+                }
+                if (transparency) {
+                    const std::optional<f32> parsed = numberOf(*transparency);
+                    understood = understood && parsed.has_value();
+                    if (parsed)
+                        style.alpha = base.alpha * (1.0f - std::clamp(*parsed, 0.0f, 1.0f));
+                }
+            }
+            else
+                understood = false;
+            if (understood)
+                push(style, name);
+        }
+
+        if (!understood)
+            literal(index, whole);
+        index += whole;
+    }
+    return out;
+}
+
+// Faux bold: the glyph drawn twice, this far apart, and advanced by as much.
+// A face with a real bold file is `Font`'s business; this is what one face can
+// honestly do.
+[[nodiscard]] f32 boldOffsetOf(f32 size) noexcept
+{
+    return std::max(1.0f, std::round(size / 18.0f));
+}
+
+// The slant an italic run is drawn with: the top of a glyph moves this many
+// pixels right per pixel of height.
+constexpr f32 ItalicSlant = 0.2f;
+
+struct RichLine
+{
+    usize begin = 0;
+    usize end = 0;
+    f32 width = 0.0f;
+    f32 ascent = 0.0f;
+    f32 height = 0.0f;
+};
+
+[[nodiscard]] f32 advanceOf(Face& face, const RichStyle& style, u32 codepoint)
+{
+    const f32 advance = store().entries[glyphIndex(face, style.size, codepoint)].advance * scaleFor(face, style.size);
+    return advance + (style.bold ? boldOffsetOf(style.size) : 0.0f);
+}
+
+// On `breakLines`' rules, over styled glyphs rather than bytes.
+void breakRichLines(const RichText& text, Face& face, f32 maxWidth, std::vector<RichLine>& out)
+{
+    out.clear();
+    usize lineBegin = 0;
+    usize lastSpace = static_cast<usize>(-1);
+    f32 width = 0.0f;
+    f32 widthAtSpace = 0.0f;
+
+    const auto finish = [&](usize end, f32 lineWidth, usize nextBegin) {
+        RichLine line;
+        line.begin = lineBegin;
+        line.end = end;
+        line.width = lineWidth;
+        // The tallest thing on the line sets its height and its baseline; an
+        // empty line is as tall as whatever style it sits in.
+        const usize probeEnd = end > lineBegin ? end : std::min(lineBegin + 1, text.glyphs.size());
+        for (usize at = lineBegin; at < probeEnd; ++at) {
+            const RichStyle& style = text.styles[text.glyphs[at].style];
+            line.ascent = std::max(line.ascent, ascentOf(face, style.size));
+            line.height = std::max(line.height, lineHeightOf(face, style.size));
+        }
+        if (line.height <= 0.0f) {
+            line.ascent = ascentOf(face, text.styles.front().size);
+            line.height = lineHeightOf(face, text.styles.front().size);
+        }
+        out.push_back(line);
+        lineBegin = nextBegin;
+        lastSpace = static_cast<usize>(-1);
+        width = 0.0f;
+    };
+
+    usize index = 0;
+    while (index < text.glyphs.size()) {
+        const RichGlyph glyph = text.glyphs[index];
+        if (glyph.codepoint == '\n') {
+            finish(index, width, index + 1);
+            ++index;
+            continue;
+        }
+        const f32 advance = advanceOf(face, text.styles[glyph.style], glyph.codepoint);
+        if (maxWidth > 0.0f && width + advance > maxWidth && index > lineBegin) {
+            if (lastSpace != static_cast<usize>(-1) && lastSpace > lineBegin) {
+                finish(lastSpace, widthAtSpace, lastSpace + 1);
+                index = lineBegin;
+                continue;
+            }
+            finish(index, width, index);
+            continue;
+        }
+        if (glyph.codepoint == ' ') {
+            lastSpace = index;
+            widthAtSpace = width;
+        }
+        width += advance;
+        ++index;
+    }
+    finish(text.glyphs.size(), width, text.glyphs.size());
+}
+
 } // namespace
 
 const GlyphCacheStats& glyphCacheStats() noexcept
@@ -837,6 +1185,146 @@ void buildTextGeometry(std::string_view text, std::string_view font, f32 pixelSi
         }
         y += lineHeight;
     }
+}
+
+TextRunMetrics measureRichText(std::string_view markup, std::string_view font, f32 pixelSize, f32 maxWidth)
+{
+    Face& face = faceFor(font);
+    RichStyle base;
+    base.size = pixelSize;
+    const RichText text = parseRichText(markup, base);
+    std::vector<RichLine> lines;
+    breakRichLines(text, face, maxWidth, lines);
+
+    TextRunMetrics metrics;
+    metrics.lineCount = static_cast<u32>(lines.size());
+    metrics.ascent = lines.empty() ? ascentOf(face, pixelSize) : lines.front().ascent;
+    for (const RichLine& line : lines) {
+        metrics.size.x = std::fmax(metrics.size.x, line.width);
+        metrics.size.y += line.height;
+    }
+    return metrics;
+}
+
+void buildRichTextGeometry(std::string_view markup, std::string_view font, f32 pixelSize, f32 maxWidth, core::Rect box,
+                           i32 horizontalAlignment, i32 verticalAlignment, core::Color3 color, f32 alpha, u32 scissor,
+                           std::vector<DrawQuad>& out)
+{
+    Face& face = faceFor(font);
+    RichStyle base;
+    base.size = pixelSize;
+    base.color = color;
+    base.alpha = alpha;
+    const RichText text = parseRichText(markup, base);
+    std::vector<RichLine> lines;
+    breakRichLines(text, face, maxWidth, lines);
+
+    f32 totalHeight = 0.0f;
+    for (const RichLine& line : lines)
+        totalHeight += line.height;
+    const f32 boxWidth = box.max.x - box.min.x;
+    const f32 boxHeight = box.max.y - box.min.y;
+
+    f32 y = box.min.y;
+    if (verticalAlignment == 1)
+        y += (boxHeight - totalHeight) * 0.5f;
+    else if (verticalAlignment == 2)
+        y += boxHeight - totalHeight;
+
+    const auto rule = [&](f32 left, f32 right, f32 top, f32 thickness, const RichStyle& style) {
+        DrawQuad bar;
+        bar.min = Vec2{left, top};
+        bar.max = Vec2{right, top + thickness};
+        bar.color = style.color;
+        bar.alpha = style.alpha;
+        bar.scissor = scissor;
+        out.push_back(bar);
+    };
+
+    for (const RichLine& line : lines) {
+        f32 x = box.min.x;
+        if (horizontalAlignment == 1)
+            x += (boxWidth - line.width) * 0.5f;
+        else if (horizontalAlignment == 2)
+            x += boxWidth - line.width;
+        const f32 baseline = y + line.ascent;
+
+        f32 pen = x;
+        for (usize index = line.begin; index < line.end; ++index) {
+            const RichGlyph glyph = text.glyphs[index];
+            const RichStyle& style = text.styles[glyph.style];
+            const f32 scale = scaleFor(face, style.size);
+            // A glyph's quads are measured from the top of ITS size's line, so
+            // a smaller run is dropped until its baseline meets the line's.
+            const f32 top = baseline - ascentOf(face, style.size);
+            const usize slot = glyphIndex(face, style.size, glyph.codepoint);
+            const GlyphEntry entry = store().entries[slot];
+            const f32 advance = entry.advance * scale + (style.bold ? boldOffsetOf(style.size) : 0.0f);
+
+            const int strokes = style.bold ? 2 : 1;
+            for (int stroke = 0; stroke < strokes; ++stroke) {
+                const f32 offset = stroke == 0 ? 0.0f : boldOffsetOf(style.size);
+                for (u32 quad = 0; quad < entry.quadCount; ++quad) {
+                    const GlyphQuad& shape = store().quads[entry.firstQuad + quad];
+                    DrawQuad drawn;
+                    drawn.min = Vec2{pen + offset + shape.minX * scale, top + shape.minY * scale};
+                    drawn.max = Vec2{pen + offset + shape.maxX * scale, top + shape.maxY * scale};
+                    drawn.color = style.color;
+                    drawn.alpha = style.alpha;
+                    drawn.texture = entry.textured ? 1u : 0u;
+                    drawn.uvMin = Vec2{shape.u0, shape.v0};
+                    drawn.uvMax = Vec2{shape.u1, shape.v1};
+                    drawn.scissor = scissor;
+                    // Sheared about the baseline rather than the quad's own
+                    // bottom, so every glyph of a word leans the same way.
+                    if (style.italic) {
+                        drawn.slant = ItalicSlant;
+                        const f32 lift = baseline - drawn.max.y;
+                        drawn.min.x += lift * ItalicSlant;
+                        drawn.max.x += lift * ItalicSlant;
+                    }
+                    out.push_back(drawn);
+                }
+            }
+
+            const f32 thickness = std::max(1.0f, std::round(style.size / 14.0f));
+            if (style.underline)
+                rule(pen, pen + advance, baseline + thickness, thickness, style);
+            if (style.strike)
+                rule(pen, pen + advance, baseline - ascentOf(face, style.size) * 0.32f, thickness, style);
+            pen += advance;
+        }
+        y += line.height;
+    }
+}
+
+std::string plainTextOf(std::string_view markup)
+{
+    const RichText text = parseRichText(markup, RichStyle{});
+    std::string out;
+    out.reserve(markup.size());
+    for (const RichGlyph glyph : text.glyphs) {
+        const u32 cp = glyph.codepoint;
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        }
+        else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+        else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+        else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    }
+    return out;
 }
 
 GlyphAtlas glyphAtlas() noexcept

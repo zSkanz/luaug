@@ -113,8 +113,12 @@ void collectChildren(const scene::World& world, core::InstanceId parent, const s
     const scene::TextLabelComponent* label = world.textLabels().find(id);
     if (label == nullptr || label->text.empty())
         return Vec2{};
-    const TextRunMetrics metrics =
-        measureText(label->text, label->font, label->textSize, label->textWrapped ? wrapWidth : 0.0f);
+    // Measured the way it is drawn: markup when it is rich, and never in a
+    // field being typed into (`draw.cpp` says why).
+    const f32 wrap = label->textWrapped ? wrapWidth : 0.0f;
+    const bool rich = label->richText && world.textInputs().find(id) == nullptr;
+    const TextRunMetrics metrics = rich ? measureRichText(label->text, label->font, label->textSize, wrap)
+                                        : measureText(label->text, label->font, label->textSize, wrap);
     return metrics.size;
 }
 

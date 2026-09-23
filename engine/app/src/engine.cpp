@@ -207,9 +207,15 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
         // rather than turning it into an ellipse -- the fragment stage measures
         // a distance in the quad's space, and the quad's space is not what
         // moved.
-        const auto corner = [&](f32 x, f32 y, f32 u, f32 v) {
-            const f32 turnedX = quad.turn.x * x - quad.turn.y * y + quad.turnOffset.x;
-            const f32 turnedY = quad.turn.y * x + quad.turn.x * y + quad.turnOffset.y;
+        //
+        // `lean` is rich text's italic: the top edge moves right by the quad's
+        // `slant` times its height, before the turn, so a turned label's italics
+        // lean with it.
+        const f32 lean = quad.slant * (quad.max.y - quad.min.y);
+        const auto corner = [&](f32 x, f32 y, f32 u, f32 v, f32 shift) {
+            const f32 placedX = x + shift;
+            const f32 turnedX = quad.turn.x * placedX - quad.turn.y * y + quad.turnOffset.x;
+            const f32 turnedY = quad.turn.y * placedX + quad.turn.x * y + quad.turnOffset.y;
             return render::UiVertex{turnedX,
                                     turnedY,
                                     toByte(quad.color.r),
@@ -225,10 +231,10 @@ void buildUiGeometry(const ui::DrawList& list, core::Vec2 viewport, std::vector<
                                     v};
         };
 
-        const render::UiVertex a = corner(quad.min.x, quad.min.y, quad.uvMin.x, quad.uvMin.y);
-        const render::UiVertex b = corner(quad.max.x, quad.min.y, quad.uvMax.x, quad.uvMin.y);
-        const render::UiVertex c = corner(quad.max.x, quad.max.y, quad.uvMax.x, quad.uvMax.y);
-        const render::UiVertex d = corner(quad.min.x, quad.max.y, quad.uvMin.x, quad.uvMax.y);
+        const render::UiVertex a = corner(quad.min.x, quad.min.y, quad.uvMin.x, quad.uvMin.y, lean);
+        const render::UiVertex b = corner(quad.max.x, quad.min.y, quad.uvMax.x, quad.uvMin.y, lean);
+        const render::UiVertex c = corner(quad.max.x, quad.max.y, quad.uvMax.x, quad.uvMax.y, 0.0f);
+        const render::UiVertex d = corner(quad.min.x, quad.max.y, quad.uvMin.x, quad.uvMax.y, 0.0f);
         vertices.insert(vertices.end(), {a, b, c, a, c, d});
         runs.back().vertexCount += 6;
     }

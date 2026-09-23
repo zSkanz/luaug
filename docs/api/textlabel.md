@@ -5,7 +5,7 @@
 - Inherits [`UIObject`](uiobject.md)
 - Created with `Instance.new("TextLabel")`
 
-Text in a box (§2.2). No RichText in v1, and no complex-script shaping -- codepoints are laid out left to right with kerning. That is a known gap for Arabic, Devanagari and Thai, and the seam a text shaper would sit behind is deliberately left open.
+Text in a box (§2.2). Markup inside one label is `RichText`'s. There is no complex-script shaping and no kerning -- codepoints are laid out left to right by their advances. That is a known gap for Arabic, Devanagari and Thai, and the seam a text shaper would sit behind is deliberately left open.
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on
@@ -17,6 +17,7 @@ offers is on the base's page, which is what keeps one added member on
 |---|---|---|---|---|
 | `Font` | `Content` | `""` | read/write | The typeface, as an `asset://` URI to a TrueType file. Empty is the engine's own default face -- **Inter**, OFL 1.1, vendored and staged beside the binary -- and so is the literal name `Inter`.<br><br>A name that cannot be resolved falls back to the default and says so ONCE rather than once a frame: a label that vanished because its font name had a typo is a bug report about the label. A build whose content directory has no font at all falls back further, to a built-in vector face that is ASCII only, one weight and no kerning -- text still draws, which is the point of having a fallback.<br><br>Glyphs are rasterised on demand and cached by face, size and codepoint, so a `TextSize` a tween is animating costs one entry per quarter-pixel rather than one per frame. |
 | `HorizontalAlignment` | `Enum.HorizontalAlignment` | `Enum.HorizontalAlignment.Center` | read/write | Where the text sits across the box. One alignment vocabulary shared with the layouts (§2.5, divergence #23). |
+| `RichText` | `boolean` | `false` | read/write | Whether `Text` is read as markup, so one label can change colour, size and weight part-way through (F3).<br><br>The tags: `<b>` bold, `<i>` italic, `<u>` underlined, `<s>` struck through, `<font color="#rrggbb" size="20" transparency="0.5">` (any of the three, `color` also as `rgb(r, g, b)`), and `<br/>` for a line break. Tags nest and each closes its own. Write `&lt;`, `&gt;`, `&amp;`, `&quot;` and `&apos;` for the characters themselves.<br><br>**A tag that is not understood is drawn as text**, so a typo shows as itself rather than vanishing. Bold is drawn from the label's one face rather than a bold file, and italic by leaning it. A `TextInput` shows its text plain whatever this says: its caret counts characters as typed, tags and all. |
 | `Text` | `string` | `""` | read/write | What it says. UTF-8, and a codepoint the font has no glyph for draws the font's `.notdef` box rather than nothing: a label that silently drops characters is the failure mode that ships. |
 | `TextColor` | `Color3` | `Color3.new(0, 0, 0)` | read/write | No `3` suffix (§2.5, divergence #11). |
 | `TextScaled` | `boolean` | `false` | read/write | Whether `TextSize` is ignored and the text is rasterized at whatever size fills the box. Re-rasterized rather than scaled: there is no distance field in v1, and a stretched bitmap is what "scaled text" usually means and looks like. |

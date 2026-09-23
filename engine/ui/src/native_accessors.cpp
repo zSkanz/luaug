@@ -505,6 +505,25 @@ bool setTextLabelTextWrapped(scene::World& world, core::InstanceId id, const Val
     return true;
 }
 
+Value getTextLabelRichText(const scene::World& world, core::InstanceId id)
+{
+    const scene::TextLabelComponent* component = world.textLabels().find(id);
+    return component == nullptr ? Value{} : Value{component->richText};
+}
+
+bool setTextLabelRichText(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::TextLabelComponent* component = world.textLabels().find(id);
+    if (component == nullptr)
+        return false;
+    const auto* flag = std::get_if<bool>(&value);
+    if (flag == nullptr)
+        return false;
+    component->richText = *flag;
+    markLayoutDirty(world, id);
+    return true;
+}
+
 Value getTextLabelTextScaled(const scene::World& world, core::InstanceId id)
 {
     const scene::TextLabelComponent* component = world.textLabels().find(id);

@@ -802,6 +802,8 @@ struct TextLabelComponent
     i32 verticalAlignment = 1;
     bool textWrapped = false;
     bool textScaled = false;
+    // `TextLabel.RichText` (F3): read `text` as markup.
+    bool richText = false;
 };
 
 struct TextInputComponent

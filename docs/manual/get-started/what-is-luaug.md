@@ -60,8 +60,7 @@ Worth knowing before you start rather than after:
 
 | Missing | State |
 |---|---|
-| Particles, decals, terrain, world-space UI | Planned, in a later phase |
-| Rich text | Not scheduled |
+| World-space UI (`SurfaceGui`, billboards) | Being built |
 | Constraints beyond a rigid weld | Not scheduled |
 | `BasePart.Material` | Not shipped; a surface look rather than body state |
 | A filesystem for scripts | Not present; persistence is a backend |

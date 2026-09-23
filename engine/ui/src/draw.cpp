@@ -408,6 +408,10 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
     if (const scene::TextLabelComponent* label = world.textLabels().find(entry.id); label != nullptr) {
         std::string_view text = label->text;
         core::Color3 color = label->textColor;
+        // **Markup, when the label asks for it** -- and never in a field being
+        // typed into, whose caret counts the characters of what is written, tags
+        // and all. A placeholder is plain for the same reason.
+        const bool rich = label->richText && world.textInputs().find(entry.id) == nullptr;
         if (text.empty()) {
             // A focused-away, empty `TextInput` shows its placeholder. Dimmed
             // rather than coloured differently, because a placeholder that
@@ -424,14 +428,21 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
         // glyph is what "scaled text" usually looks like.
         f32 size = label->textSize;
         if (label->textScaled && !text.empty()) {
-            const TextRunMetrics unit = measureText(text, label->font, 100.0f, 0.0f);
+            const TextRunMetrics unit =
+                rich ? measureRichText(text, label->font, 100.0f, 0.0f) : measureText(text, label->font, 100.0f, 0.0f);
             if (unit.size.x > 0.0f && unit.size.y > 0.0f) {
                 size = 100.0f * std::fmin(self->absoluteSize.x / unit.size.x, self->absoluteSize.y / unit.size.y);
             }
         }
 
-        buildTextGeometry(text, label->font, size, label->textWrapped ? self->absoluteSize.x : 0.0f, box,
-                          label->horizontalAlignment, label->verticalAlignment, color, 1.0f, entry.scissor, out.quads);
+        if (rich)
+            buildRichTextGeometry(text, label->font, size, label->textWrapped ? self->absoluteSize.x : 0.0f, box,
+                                  label->horizontalAlignment, label->verticalAlignment, color, 1.0f, entry.scissor,
+                                  out.quads);
+        else
+            buildTextGeometry(text, label->font, size, label->textWrapped ? self->absoluteSize.x : 0.0f, box,
+                              label->horizontalAlignment, label->verticalAlignment, color, 1.0f, entry.scissor,
+                              out.quads);
 
         // --- The caret (S6.7) -------------------------------------------------
         //

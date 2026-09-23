@@ -133,6 +133,8 @@ scene::Value getTextLabelVerticalAlignment(const scene::World& world, core::Inst
 bool setTextLabelVerticalAlignment(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelTextWrapped(const scene::World& world, core::InstanceId id);
 bool setTextLabelTextWrapped(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getTextLabelRichText(const scene::World& world, core::InstanceId id);
+bool setTextLabelRichText(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelTextScaled(const scene::World& world, core::InstanceId id);
 bool setTextLabelTextScaled(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachTextLabelComponents(scene::World& world, core::InstanceId id);

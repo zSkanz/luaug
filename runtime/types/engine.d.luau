@@ -1309,6 +1309,15 @@ declare extern type TextLabel extends UIObject with
     --- Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word wider
     --- than the box -- a word cut in half at a random letter is worse than one that overhangs.
     TextWrapped: boolean
+    --- Whether `Text` is read as markup, so one label can change colour, size and weight part-way
+    --- through (F3). The tags: `<b>` bold, `<i>` italic, `<u>` underlined, `<s>` struck through, `<font
+    --- color="#rrggbb" size="20" transparency="0.5">` (any of the three, `color` also as `rgb(r, g,
+    --- b)`), and `<br/>` for a line break. Tags nest and each closes its own. Write `&lt;`, `&gt;`,
+    --- `&amp;`, `&quot;` and `&apos;` for the characters themselves. **A tag that is not understood is
+    --- drawn as text**, so a typo shows as itself rather than vanishing. Bold is drawn from the label's
+    --- one face rather than a bold file, and italic by leaning it. A `TextInput` shows its text plain
+    --- whatever this says: its caret counts characters as typed, tags and all.
+    RichText: boolean
     --- Whether `TextSize` is ignored and the text is rasterized at whatever size fills the box.
     --- Re-rasterized rather than scaled: there is no distance field in v1, and a stretched bitmap is
     --- what "scaled text" usually means and looks like.

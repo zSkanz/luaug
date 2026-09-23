@@ -9,7 +9,26 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`TextLabel.RichText`** (F3): a label reads its text as markup -- `<b>`,
+  `<i>`, `<u>`, `<s>`, `<font color size transparency>` and `<br/>`, with the
+  five XML entities -- so colour, size and weight change part-way through one
+  label. A tag it does not understand is drawn as text.
+- **Terrain and block worlds stream from disk** (ADR 0075): a saved field of
+  sixteen 64 m cells or more is cut into cells at play and streamed around the
+  foci on the terrain radii. A cell somebody changed is never evicted, and the
+  world waits for its ground on first load. `Terrain.CellSize` now names the
+  grid it streams on.
+- **Digging into a wall carves it**: the editor's dig aimed at steep ground, or
+  with the box, takes volume out and bores forward at a steady speed while held.
+- `examples/17-cave`: a tunnel into a mountain, dark inside and lit by its lamps.
+
+### Fixed
+
+- A partitioned scene kept its block world (D157); a terrain larger than about a
+  square kilometre reopened after a save (D159); terrain edges stopped hanging
+  curtains to the floor as the level of detail changed.
 
 ## [1.1.0] — 2026-09-23
 

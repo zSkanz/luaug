@@ -337,11 +337,11 @@ Each of these has an owner in the roadmap's post-v1 phases rather than a shrug.
 | Missing | Where it went |
 |---|---|
 | Visual editor | Post-v1 phase 1, built on the engine (ADR 0017) |
-| Particles (`ParticleEmitter`) | Post-v1 phase 2 — the most visible gap of the group, and the one with no workaround |
-| Decals | Post-v1 phase 2, and **projected into the world** rather than parented to a face |
-| Terrain | Post-v1 phase 2 — Jolt has a height field; what is open is the authoring question |
+| Particles (`ParticleEmitter`) | Shipped in post-v1 phase 2 (ADR 0072) |
+| Decals | Shipped in post-v1 phase 2, **projected into the world** rather than parented to a face |
+| Terrain | Shipped in post-v1 phase 2 — sculpted, collided, saved, and streamed from disk (ADRs 0067, 0075) |
 | `SurfaceGui`, billboards | Post-v1 phase 2 — the UI tree exists; putting it in world space does not |
-| Rich text | Post-v1 phase 2 — the glyph cache is already keyed for it |
+| Rich text | Shipped in post-v1 phase 2: `TextLabel.RichText` |
 | Navmesh pathfinding | Post-v1 phase 3, over the Recast seam already vendored (ADR 0022) |
 | 2D workflow | Post-v1 phase 3 |
 | Multiplayer, RemoteEvent, replication | Post-v1 phase 4 — designed, approved, and every seam it needs is open |

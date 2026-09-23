@@ -28,6 +28,7 @@
 #include "luaug/core/types.h"
 
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -122,6 +123,12 @@ struct DrawQuad
     // it for exactly the same reason.
     core::Vec2 turn{1.0f, 0.0f};
     core::Vec2 turnOffset{0.0f, 0.0f};
+
+    // **A lean, for rich text's italic**: the quad's top edge is drawn this
+    // many pixels right of its bottom per pixel of height. Zero -- upright --
+    // is every quad but an italic glyph's, and a vertex is moved by it before
+    // the turn above, so a turned label's italics lean with the label.
+    f32 slant = 0.0f;
 };
 
 struct DrawList
@@ -236,6 +243,21 @@ void resetGlyphCache() noexcept;
 void buildTextGeometry(std::string_view text, std::string_view font, f32 pixelSize, f32 maxWidth, core::Rect box,
                        i32 horizontalAlignment, i32 verticalAlignment, core::Color3 color, f32 alpha, u32 scissor,
                        std::vector<DrawQuad>& out);
+
+// **Rich text** (F3): the same two answers for a label whose `RichText` is on,
+// reading its text as markup -- `<b>`, `<i>`, `<u>`, `<s>`, `<font color size
+// transparency>`, `<br/>` and the five XML entities. `pixelSize`, `color` and
+// `alpha` are the label's own, which every run starts from; a tag this reader
+// does not understand is drawn as text, so a mistake shows as itself.
+[[nodiscard]] TextRunMetrics measureRichText(std::string_view markup, std::string_view font, f32 pixelSize,
+                                             f32 maxWidth);
+void buildRichTextGeometry(std::string_view markup, std::string_view font, f32 pixelSize, f32 maxWidth, core::Rect box,
+                           i32 horizontalAlignment, i32 verticalAlignment, core::Color3 color, f32 alpha, u32 scissor,
+                           std::vector<DrawQuad>& out);
+
+// The text a markup string reads as, with its tags taken out and its entities
+// put back. What a screen reader, a copy, or a length limit should see.
+[[nodiscard]] std::string plainTextOf(std::string_view markup);
 
 // How many times the solver has run, and over how many elements. A COUNTER
 // rather than a duration, and the milestone's benchmark asserts the first is
