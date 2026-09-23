@@ -1957,6 +1957,14 @@
       ]
     },
     {
+      "Name": "ReplicatedStorage",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "RunService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -2103,6 +2111,14 @@
           "Default": "12"
         }
       ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "ServerStorage",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [],
       "Methods": [],
       "Events": []
     },

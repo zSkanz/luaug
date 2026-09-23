@@ -420,7 +420,7 @@ std::optional<core::EngineError> runReplicaGate(const ReplicaGateOptions& option
         return error;
     // What the replica's own copy of the scene would have duplicated -- the
     // same call the engine makes after a replica boots.
-    (void)replication::clearReplicated(replica.host.world(), replica.host.workspace());
+    (void)replication::clearForReplica(replica.host.world(), replica.host.workspace());
 
     // The memory transport: what arrives is a function of the calls made, so
     // this gate is as repeatable as the determinism traces.

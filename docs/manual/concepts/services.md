@@ -38,13 +38,17 @@ what the file depends on.
 constantly. `workspace` and `game:GetService("Workspace")` are the same
 instance.
 
-## The thirteen
+## The services
 
 | Service | Owns |
 |---|---|
 | `Workspace` | The 3D scene, and the spatial queries against it. |
 | `RunService` | The frame loop: the phase signals, and the clock they run on. |
 | `Lighting` | The sun, the sky, the fog and the exposure. |
+| `ReplicatedStorage` | What every machine keeps and nobody sees: templates to clone, `RemoteEvent`s. |
+| `ServerStorage` | What only the authority keeps. |
+| `NetworkService` | Who is playing, and whether this machine decides the world. |
+| `VoxelService` | The block world. |
 | `PhysicsService` | The simulation tick grid, and the controls that are not per-part. |
 | `StreamingService` | The streamed world: its foci, chunks and budgets. |
 | `TagService` | Finding instances by tag, and being told when a tagged one appears. |
@@ -63,10 +67,14 @@ both.
 
 ## What is deliberately not a service
 
-There is no `Players`, no `DataStoreService` and no `ReplicatedStorage`. The
-first two belong to a hosted platform this engine is not; the third is a
-multiplayer concept, and v1 has no replication. Persistence is your own backend,
-reached with `@std/net` — see [Talking to a backend](manual:guides/backend).
+There is no `Players` and no `DataStoreService`. Both belong to a hosted
+platform this engine is not: players are `NetworkService`'s children, and
+persistence is your own backend, reached with `@std/net`. See
+[Talking to a backend](manual:guides/backend).
+
+There is no `ServerScriptService`, `StarterPlayer` or `StarterGui` either.
+Scripts are files under `src/`, mounted by `ScriptService`, and one script runs
+on every machine and asks `NetworkService.Authority` which side it is on.
 
 Streaming is a service rather than a flag on the scene root, and that is a
 deliberate divergence: streaming is a system with foci, budgets and events, and

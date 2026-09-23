@@ -1453,6 +1453,24 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     workspaceDesc.detachComponents = native::detachWorkspaceComponents;
     classes.registerClass(workspaceDesc);
 
+    // --- ReplicatedStorage ---
+    ClassDescriptor replicatedStorageDesc;
+    replicatedStorageDesc.name = atoms.intern("ReplicatedStorage");
+    replicatedStorageDesc.super = instanceClass;
+    replicatedStorageDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    replicatedStorageDesc.defaultName = atoms.intern("ReplicatedStorage");
+    replicatedStorageDesc.doc = "What every machine has and nobody sees (ADR 0080): templates to clone, `RemoteEvent`s, anything a game keeps rather than shows. It is not the world -- nothing under it is drawn, collides or moves -- and it is saved with the scene, so what the editor puts here is here when the game starts.\012\012**Its contents reach every replica, whatever their distance.** A replica's copy is the authority's: what the scene put here on the replica is replaced by what the authority sends, as `Workspace` is. Reach it with `game:GetService(\"ReplicatedStorage\")`, and clone what you want in the world into `Workspace`.";
+    classes.registerClass(replicatedStorageDesc);
+
+    // --- ServerStorage ---
+    ClassDescriptor serverStorageDesc;
+    serverStorageDesc.name = atoms.intern("ServerStorage");
+    serverStorageDesc.super = instanceClass;
+    serverStorageDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    serverStorageDesc.defaultName = atoms.intern("ServerStorage");
+    serverStorageDesc.doc = "What only the authority has (ADR 0080): templates and data a client has no business holding. Like `ReplicatedStorage` it is not the world and it is saved with the scene; unlike it, **nothing here replicates**, and a replica empties it when it joins. Solo, this machine is the authority and has it all.";
+    classes.registerClass(serverStorageDesc);
+
     // --- NetworkService ---
     static std::array<PropertyDesc, 5> networkServiceProperties;
     networkServiceProperties = {{

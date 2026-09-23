@@ -91,6 +91,10 @@ export type Class = {
     --- both ends, so it is never spawned or despawned and is always in
     --- interest. Its properties are what travel.
     Service: boolean?,
+    --- A service whose CHILDREN replicate too (ADR 0080): to every replica,
+    --- whatever their position, because what is kept there is kept for
+    --- everybody. Only a service can be one.
+    Contents: boolean?,
     Fields: { Field },
     Retired: { RetiredField }?,
     Doc: string?,

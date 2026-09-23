@@ -62,3 +62,35 @@ TEST_CASE("an empty workspace is declared plainly")
     world.workspaces().add(workspace, scene::WorkspaceComponent{});
     CHECK(app::sceneDefinitions(world).find("declare workspace: Workspace\n") != std::string::npos);
 }
+
+TEST_CASE("what the storages keep is declared on game, and only when they keep something")
+{
+    app::testing::Fixture fixture;
+    scene::World world{fixture.classes, fixture.enums, fixture.atoms, 7u};
+    const core::InstanceId dataModel = world.create(fixture.folderClass);
+    const core::InstanceId workspace = world.create(fixture.workspaceClass);
+    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    REQUIRE_FALSE(world.setParent(workspace, dataModel).has_value());
+    // The fixture registers its classes by hand; the two storages are plain
+    // containers, which is all a class needs to be here.
+    const auto container = [&](const char* name) {
+        return fixture.classes.registerClass({
+            .name = fixture.atoms.intern(name),
+            .defaultName = fixture.atoms.intern(name),
+        });
+    };
+    const scene::ClassId replicatedClass = container("ReplicatedStorage");
+    const scene::ClassId serverClass = container("ServerStorage");
+    const core::InstanceId storage = child(fixture, world, replicatedClass, dataModel, "ReplicatedStorage");
+    (void)child(fixture, world, serverClass, dataModel, "ServerStorage");
+    CHECK(app::sceneDefinitions(world).find("declare game") == std::string::npos);
+
+    const core::InstanceId weapons = child(fixture, world, fixture.folderClass, storage, "Weapons");
+    (void)child(fixture, world, fixture.partClass, weapons, "Sword");
+    const std::string text = app::sceneDefinitions(world);
+    CHECK(text.find("declare game: DataModel & {\n    ReplicatedStorage: ReplicatedStorage & {\n"
+                    "        Weapons: Folder & {\n            Sword: Part,\n        },\n    },\n}") !=
+          std::string::npos);
+    // An empty storage is not declared at all.
+    CHECK(text.find("ServerStorage") == std::string::npos);
+}

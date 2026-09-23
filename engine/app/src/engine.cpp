@@ -1023,7 +1023,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         if (options.network.topology == replication::Topology::Replica) {
             // What the authority is about to send, removed from this copy of
             // the scene so it is not everything twice. See `clearReplicated`.
-            (void)replication::clearReplicated(host->world(), host->workspace());
+            (void)replication::clearForReplica(host->world(), host->workspace());
             const core::I18nArg args[] = {{"address", options.network.address},
                                           {"port", static_cast<core::i64>(options.network.port)}};
             core::log(core::LogLevel::Info, LUAUG_TR("net.info.joining"), args);

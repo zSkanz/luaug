@@ -68,7 +68,7 @@ once, at migration.
 |---|---|---|
 | `RemoteEvent.OnServerEvent` / `OnClientEvent` | **`RemoteEvent.ServerReceived` / `ClientReceived`** | An event is named as a fact that happened, everywhere in this API. `FireServer`, `FireClient` and `FireAllClients` keep their names. |
 | `RemoteFunction:InvokeServer` / `InvokeClient` | **`InvokeServerAsync`**, and no `InvokeClient` | A call that parks its caller says so in its name, everywhere in this API. The server never waits on a client, because a client that never answered would hold the server's script forever. |
-| `ReplicatedStorage` | **`Workspace`, in a `Folder`** | `Workspace` is what replicates; a second replicated container is a separate decision. |
+| `ReplicatedStorage` / `ServerStorage` | **The same two**, saved with the scene | What they hold reaches every replica, or stays on the authority. Scripts are files rather than instances, so neither holds modules. |
 
 ## Naming
 

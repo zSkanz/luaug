@@ -145,6 +145,9 @@ emit("    int base = -1;")
 emit("    // A service: one per world, on both ends from boot, so it is never")
 emit("    // spawned, never leaves interest, and travels under a fixed id.")
 emit("    bool service = false;")
+emit("    // A service whose children replicate to every replica, whatever their")
+emit("    // position (ADR 0080).")
+emit("    bool contents = false;")
 emit("};")
 emit("")
 
@@ -202,7 +205,8 @@ for _, class in Classes do
     local fields = if hasArray[`{class.Name}Fields`] then `{class.Name}Fields` else "{}"
     local base = if class.Extends ~= nil then classIndex[class.Extends] else -1
     local service = if class.Service then "true" else "false"
-    emit("    {" .. `{quote(class.Name)}, {fields}, {base}, {service}` .. "},")
+    local contents = if class.Contents then "true" else "false"
+    emit("    {" .. `{quote(class.Name)}, {fields}, {base}, {service}, {contents}` .. "},")
 end
 emit("};")
 emit("")

@@ -276,6 +276,30 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Property },
     },
     {
+        Name = "ReplicatedStorage",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "What every machine has and nobody sees (ADR 0080): templates to clone, `RemoteEvent`s, "
+            .. "anything a game keeps rather than shows. It is not the world -- nothing under it is drawn, "
+            .. "collides or moves -- and it is saved with the scene, so what the editor puts here is here "
+            .. "when the game starts.\n\n"
+            .. "**Its contents reach every replica, whatever their distance.** A replica's copy is the "
+            .. "authority's: what the scene put here on the replica is replaced by what the authority "
+            .. 'sends, as `Workspace` is. Reach it with `game:GetService("ReplicatedStorage")`, and clone '
+            .. "what you want in the world into `Workspace`.",
+    },
+    {
+        Name = "ServerStorage",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "What only the authority has (ADR 0080): templates and data a client has no business "
+            .. "holding. Like `ReplicatedStorage` it is not the world and it is saved with the scene; "
+            .. "unlike it, **nothing here replicates**, and a replica empties it when it joins. Solo, this "
+            .. "machine is the authority and has it all.",
+    },
+    {
         Name = "NetworkService",
         Extends = "Instance",
         Module = "scene",

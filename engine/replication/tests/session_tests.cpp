@@ -6,6 +6,7 @@
 // most needs and a socket least provides.
 #include "luaug/core/i18n.h"
 #include "luaug/net/memory_transport.h"
+#include "luaug/replication/extract.h"
 #include "luaug/replication/replication.h"
 #include "luaug/replication/session.h"
 #include "luaug/scene/class_registry.h"
@@ -977,4 +978,76 @@ TEST_CASE("a question reaches the authority with its number, and its answer reac
     CHECK(match.server.world.engineState().remoteInbox.empty());
     CHECK(match.authority->stats().messagesDropped == droppedBefore + 3);
     CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("what ReplicatedStorage keeps reaches every replica, whatever its distance, into the replica's own")
+{
+    PlayedMatch match;
+    const auto storageOf = [](RealSide& side) {
+        const core::InstanceId id = side.world.create(side.classes.findId(side.atoms.intern("ReplicatedStorage")));
+        REQUIRE(id.valid());
+        side.world.setName(id, side.atoms.intern("ReplicatedStorage"));
+        REQUIRE_FALSE(side.world.setParent(id, side.dataModel).has_value());
+        return id;
+    };
+    const core::InstanceId serverStorage = storageOf(match.server);
+    const core::InstanceId clientStorage = storageOf(match.client);
+
+    match.server.world.engineState().streamingLoadRadius = 100.0;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId far = match.part("Far", core::DVec3{5000.0, 1.0, 0.0});
+    // A template far away, and inside a folder, kept for everybody.
+    const core::InstanceId folder =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("Folder")));
+    REQUIRE_FALSE(match.server.world.setParent(folder, serverStorage).has_value());
+    const core::InstanceId sword = match.part("Sword", core::DVec3{5000.0, 1.0, 0.0});
+    REQUIRE_FALSE(match.server.world.setParent(sword, folder).has_value());
+    match.server.world.players().find(match.remote())->character = racer;
+    match.run(4);
+
+    CHECK(match.copyOf(racer).valid());
+    CHECK_FALSE(match.copyOf(far).valid());
+    const core::InstanceId swordHere = match.copyOf(sword);
+    REQUIRE(swordHere.valid());
+    CHECK(match.client.world.parentOf(match.copyOf(folder)) == clientStorage);
+    CHECK(match.client.world.parentOf(swordHere) == match.copyOf(folder));
+
+    // It stays while the character moves, and goes when the authority drops it.
+    match.server.world.parts().find(racer)->cframe.position = core::DVec3{-3000.0, 1.0, 0.0};
+    match.run(4);
+    CHECK(match.client.world.alive(swordHere));
+    REQUIRE(match.server.world.destroy(sword));
+    match.server.world.retireDestroyed();
+    match.run(4);
+    match.client.world.retireDestroyed();
+    CHECK_FALSE(match.client.world.alive(swordHere));
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a replica joining clears the world's copy, ReplicatedStorage's copy and all of ServerStorage")
+{
+    RealSide side;
+    const auto service = [&](std::string_view name) {
+        const core::InstanceId id = side.world.create(side.classes.findId(side.atoms.intern(name)));
+        REQUIRE(id.valid());
+        REQUIRE_FALSE(side.world.setParent(id, side.dataModel).has_value());
+        return id;
+    };
+    const core::InstanceId replicated = service("ReplicatedStorage");
+    const core::InstanceId server = service("ServerStorage");
+    const auto partIn = [&](core::InstanceId parent) {
+        const core::InstanceId id = side.world.create(side.classes.findId(side.atoms.intern("Part")));
+        REQUIRE_FALSE(side.world.setParent(id, parent).has_value());
+        return id;
+    };
+    const core::InstanceId inWorld = partIn(side.workspace);
+    const core::InstanceId kept = partIn(replicated);
+    const core::InstanceId secret = partIn(server);
+
+    CHECK(replication::clearForReplica(side.world, side.workspace) == 3);
+    CHECK_FALSE(side.world.alive(inWorld));
+    CHECK_FALSE(side.world.alive(kept));
+    CHECK_FALSE(side.world.alive(secret));
+    CHECK(side.world.alive(replicated));
+    CHECK(side.world.alive(server));
 }

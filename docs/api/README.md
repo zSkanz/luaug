@@ -28,8 +28,10 @@ guided tour.
 | [`Lighting`](lighting.md) | [`Instance`](instance.md) | Day/night and the environment every surface is lit against. |
 | [`NetworkService`](networkservice.md) | [`Instance`](instance.md) | What this process is in a networked game, and nothing it can change (ADR 0069, ADR 0070). |
 | [`PhysicsService`](physicsservice.md) | [`Instance`](instance.md) | The simulation tick grid and the physics controls that do not belong on an individual part. |
+| [`ReplicatedStorage`](replicatedstorage.md) | [`Instance`](instance.md) | What every machine has and nobody sees (ADR 0080): templates to clone, `RemoteEvent`s, anything a game keeps rather than shows. |
 | [`RunService`](runservice.md) | [`Instance`](instance.md) | The frame loop: the phase signals per-frame work hangs off, and the clock that work reads. |
 | [`ScriptService`](scriptservice.md) | [`Instance`](instance.md) | The mount point for entry scripts. |
+| [`ServerStorage`](serverstorage.md) | [`Instance`](instance.md) | What only the authority has (ADR 0080): templates and data a client has no business holding. |
 | [`StreamingService`](streamingservice.md) | [`Instance`](instance.md) | The streamed world's controls (api-design.md §2.1). |
 | [`TagService`](tagservice.md) | [`Instance`](instance.md) | Finds instances by tag. |
 | [`TweenService`](tweenservice.md) | [`Instance`](instance.md) | Property animation (§2.1). |

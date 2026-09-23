@@ -1571,6 +1571,8 @@ declare extern type DataModel extends Instance with
     read Loaded: Signal<()>
     function GetService(self, name: "Workspace"): Workspace
     function GetService(self, name: "Lighting"): Lighting
+    function GetService(self, name: "ReplicatedStorage"): ReplicatedStorage
+    function GetService(self, name: "ServerStorage"): ServerStorage
     function GetService(self, name: "NetworkService"): NetworkService
     function GetService(self, name: "RunService"): RunService
     function GetService(self, name: "ScriptService"): ScriptService
@@ -1662,6 +1664,12 @@ declare extern type Lighting extends Instance with
     --- GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same
     --- ClockTime always gives the same direction.
     read SunDirection: vector
+end
+
+declare extern type ReplicatedStorage extends Instance with
+end
+
+declare extern type ServerStorage extends Instance with
 end
 
 declare extern type NetworkService extends Instance with

@@ -118,6 +118,34 @@ std::string sceneDefinitions(const scene::World& world)
     else
         out += "Workspace";
     out += '\n';
+
+    // **And what the scene keeps in storage** (ADR 0080), reached as
+    // `game.ReplicatedStorage.Sword`: declared only when something is there,
+    // so a project with none keeps the plain `game`.
+    const core::InstanceId dataModel = workspace.valid() ? world.parentOf(workspace) : core::InstanceId{};
+    std::string storages;
+    for (const std::string_view storage : {std::string_view{"ReplicatedStorage"}, std::string_view{"ServerStorage"}}) {
+        for (core::InstanceId service = dataModel.valid() ? world.firstChild(dataModel) : core::InstanceId{};
+             service.valid(); service = world.nextSibling(service)) {
+            if (classNameOf(world, service) != storage)
+                continue;
+            std::string children;
+            emitChildren(world, service, 1, children);
+            if (children.empty())
+                break;
+            storages += "    ";
+            storages += keyOf(world.atoms().text(world.name(service)));
+            storages += ": ";
+            emitType(world, service, 1, storages);
+            storages += ",\n";
+            break;
+        }
+    }
+    if (!storages.empty()) {
+        out += "\ndeclare game: DataModel & {\n";
+        out += storages;
+        out += "}\n";
+    }
     return out;
 }
 

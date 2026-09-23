@@ -13,7 +13,10 @@
 #include <luaug/scene/world.h>
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace luaug::scene {
@@ -51,6 +54,36 @@ constexpr core::i64 kVersion = 1;
             found = id;
     });
     return found;
+}
+
+// **The services whose contents a scene carries beside the world's** (ADR
+// 0080), in the order a file writes them. They are not the world -- nothing
+// under them is drawn or simulated -- but what an editor put in them is part
+// of what a game starts with.
+constexpr std::array<std::string_view, 2> StorageServices{"ReplicatedStorage", "ServerStorage"};
+
+// The service of that class under the world's data model, or nothing.
+[[nodiscard]] core::InstanceId storageNamed(const World& world, std::string_view className) noexcept
+{
+    const core::InstanceId workspace = workspaceOf(world);
+    const core::InstanceId dataModel = workspace.valid() ? world.parentOf(workspace) : core::InstanceId{};
+    for (core::InstanceId child = dataModel.valid() ? world.firstChild(dataModel) : core::InstanceId{}; child.valid();
+         child = world.nextSibling(child)) {
+        const ClassDescriptor* descriptor = world.classes().find(world.classOf(child));
+        if (descriptor != nullptr && world.atoms().text(descriptor->name) == className)
+            return child;
+    }
+    return {};
+}
+
+// Whether a storage holds anything a scene would write.
+[[nodiscard]] bool holdsAuthored(const World& world, core::InstanceId service) noexcept
+{
+    for (core::InstanceId child = world.firstChild(service); child.valid(); child = world.nextSibling(child)) {
+        if (!world.generated(child))
+            return true;
+    }
+    return false;
 }
 
 // --- writing ---------------------------------------------------------------
@@ -1165,14 +1198,22 @@ void clearScene(World& world)
         return;
 
     // Collected first. `destroy` unlinks as it goes, so walking and destroying
-    // in one pass drops the rest of the list.
+    // in one pass drops the rest of the list. The storages are the scene's
+    // too (ADR 0080).
+    std::vector<core::InstanceId> containers{workspace};
+    for (const std::string_view name : StorageServices) {
+        if (const core::InstanceId service = storageNamed(world, name); service.valid())
+            containers.push_back(service);
+    }
     std::vector<core::InstanceId> authored;
-    for (core::InstanceId child = world.firstChild(workspace); child.valid(); child = world.nextSibling(child)) {
-        // Not authored, so not a scene's to remove. A new scene is not a reason
-        // to evict the ground a streaming system put there.
-        if (world.generated(child))
-            continue;
-        authored.push_back(child);
+    for (const core::InstanceId container : containers) {
+        for (core::InstanceId child = world.firstChild(container); child.valid(); child = world.nextSibling(child)) {
+            // Not authored, so not a scene's to remove. A new scene is not a
+            // reason to evict the ground a streaming system put there.
+            if (world.generated(child))
+                continue;
+            authored.push_back(child);
+        }
     }
     for (const core::InstanceId child : authored)
         (void)world.destroy(child);
@@ -1230,10 +1271,31 @@ std::string writeScene(const World& world, SceneIoReport* report, StampLibrary* 
 
     const core::InstanceId workspace = workspaceOf(world);
     if (workspace.valid()) {
+        // Every root's paths before anything is written, so a part in the
+        // world can name a template in storage and the other way round.
         std::unordered_map<core::u32, std::string> paths;
         collectPaths(world, workspace, {}, paths);
+        std::vector<std::pair<std::string_view, core::InstanceId>> storages;
+        for (const std::string_view name : StorageServices) {
+            const core::InstanceId service = storageNamed(world, name);
+            if (service.valid() && holdsAuthored(world, service)) {
+                collectPaths(world, service, {}, paths);
+                storages.emplace_back(name, service);
+            }
+        }
         writer.key("root");
         writeInstance(writer, world, workspace, paths, out, core::InstanceId{}, stamps);
+        // **Only when something is kept there**, so a scene with empty storages
+        // is the byte-for-byte file it was before they existed.
+        if (!storages.empty()) {
+            writer.key("storage");
+            writer.beginObject();
+            for (const auto& [name, service] : storages) {
+                writer.key(name);
+                writeInstance(writer, world, service, paths, out, core::InstanceId{}, stamps);
+            }
+            writer.endObject();
+        }
     }
     writeVoxels(writer, world);
 
@@ -1277,8 +1339,34 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
         }
     }
 
+    // The storages (ADR 0080), each into this world's own service of that
+    // class. One this build does not have is skipped, as an unknown class is.
+    std::vector<std::pair<std::string, core::InstanceId>> roots{
+        {std::string(world.atoms().text(world.name(workspace))), workspace}};
+    if (const JsonValue storage = root["storage"]; storage.type() == core::JsonType::Object) {
+        for (const std::string_view name : StorageServices) {
+            const JsonValue node = storage[name];
+            const core::InstanceId service = storageNamed(world, name);
+            if (node.type() != core::JsonType::Object || !service.valid())
+                continue;
+            applyNode(world, service, node, pending, out);
+            if (const JsonValue children = node["children"]; children.type() == core::JsonType::Array) {
+                for (core::usize index = 0; index < children.size(); ++index)
+                    (void)readInstance(world, service, children.at(index), pending, out, &stamps, 0);
+            }
+            roots.emplace_back(std::string(world.atoms().text(world.name(service))), service);
+        }
+    }
+
     for (const PendingReference& reference : pending) {
-        const core::InstanceId target = resolvePath(world, workspace, reference.path);
+        // A path's first segment names its root: the world, or a storage.
+        const std::string_view first = std::string_view(reference.path).substr(0, reference.path.find('.'));
+        core::InstanceId pathRoot = workspace;
+        for (const auto& [name, id] : roots) {
+            if (name == first)
+                pathRoot = id;
+        }
+        const core::InstanceId target = resolvePath(world, pathRoot, reference.path);
         if (!target.valid()) {
             ++out.droppedReferences;
             continue;

@@ -469,6 +469,15 @@ local Classes: { Schema.Class } = {
         Fields = NoFields,
     },
     {
+        Name = "ReplicatedStorage",
+        Service = true,
+        Contents = true,
+        Doc = "A service with no fields whose contents travel (ADR 0080): every instance under it "
+            .. "reaches every replica, whatever its position, parented to the replica's own "
+            .. "`ReplicatedStorage`.",
+        Fields = NoFields,
+    },
+    {
         Name = "RemoteFunction",
         Doc = "Replicated for the reason `RemoteEvent` is (ADR 0079): a question and its answer both "
             .. "name it. Its handler is a function on the authority and never travels.",

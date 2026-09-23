@@ -507,48 +507,56 @@ void AuthoritySession::capture(const scene::World& world, InstanceId root, u64 t
     // its parent is in this list, in pre-order.
     m_order.clear();
     std::map<u64, i32> orderOf;
-    // Pre-order, children in sibling order: a parent is always captured before
-    // its children, so a new child's parent already has an id.
-    std::vector<InstanceId> stack;
-    for (InstanceId child = world.firstChild(root); child.valid(); child = world.nextSibling(child))
-        stack.push_back(child);
-    std::reverse(stack.begin(), stack.end());
 
-    while (!stack.empty()) {
-        const InstanceId id = stack.back();
-        stack.pop_back();
-        const generated::ClassDesc* desc = schemaFor(world, id);
-        FieldSet fields;
-        // **An instance the schema does not describe takes its subtree with
-        // it.** A replica could not parent the children to anything.
-        if (desc == nullptr || !extractFields(world, id, *desc, fields))
-            continue;
+    // One container's subtree -- `Workspace`'s, or a service's whose contents
+    // travel (ADR 0080) -- with the container itself standing for the parent
+    // of its children. Pre-order, children in sibling order: a parent is
+    // always captured before its children, so a new child's parent already
+    // has an id. `pinned` is every replica's, whatever its position.
+    const auto walk = [&](InstanceId container, u32 containerNetId, i32 containerOrder, bool pinned) {
+        std::vector<InstanceId> stack;
+        for (InstanceId child = world.firstChild(container); child.valid(); child = world.nextSibling(child))
+            stack.push_back(child);
+        std::reverse(stack.begin(), stack.end());
 
-        const u64 key = packed(id);
-        u32 netId = 0;
-        if (const auto found = m_netIds.find(key); found != m_netIds.end()) {
-            netId = found->second;
+        while (!stack.empty()) {
+            const InstanceId id = stack.back();
+            stack.pop_back();
+            const generated::ClassDesc* desc = schemaFor(world, id);
+            FieldSet fields;
+            // **An instance the schema does not describe takes its subtree with
+            // it.** A replica could not parent the children to anything.
+            if (desc == nullptr || !extractFields(world, id, *desc, fields))
+                continue;
+
+            const u64 key = packed(id);
+            u32 netId = 0;
+            if (const auto found = m_netIds.find(key); found != m_netIds.end()) {
+                netId = found->second;
+            }
+            else {
+                netId = m_nextNetId++;
+                m_classNames[netId] = world.classes().find(world.classOf(id))->name;
+            }
+            seen[key] = netId;
+
+            const InstanceId parent = world.parentOf(id);
+            const auto parentId = parent == container ? containerNetId : seen.at(packed(parent));
+            setNetId(fields[parentField], NetId{parentId});
+
+            state->entities.push_back(EntityState{NetId{netId}, schemaIndexOf(desc), std::move(fields)});
+            const auto parentOrder = orderOf.find(packed(parent));
+            orderOf[key] = static_cast<i32>(m_order.size());
+            m_order.push_back(
+                Captured{netId, id, parentOrder != orderOf.end() ? parentOrder->second : containerOrder, pinned});
+
+            std::vector<InstanceId> children;
+            for (InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child))
+                children.push_back(child);
+            stack.insert(stack.end(), children.rbegin(), children.rend());
         }
-        else {
-            netId = m_nextNetId++;
-            m_classNames[netId] = world.classes().find(world.classOf(id))->name;
-        }
-        seen[key] = netId;
-
-        const InstanceId parent = world.parentOf(id);
-        const auto parentId = parent == root ? RootNetId.value : seen.at(packed(parent));
-        setNetId(fields[parentField], NetId{parentId});
-
-        state->entities.push_back(EntityState{NetId{netId}, schemaIndexOf(desc), std::move(fields)});
-        const auto parentOrder = orderOf.find(packed(parent));
-        orderOf[key] = static_cast<i32>(m_order.size());
-        m_order.push_back(Captured{netId, id, parentOrder != orderOf.end() ? parentOrder->second : -1});
-
-        std::vector<InstanceId> children;
-        for (InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child))
-            children.push_back(child);
-        stack.insert(stack.end(), children.rbegin(), children.rend());
-    }
+    };
+    walk(root, RootNetId.value, -1, false);
 
     // **The services whose properties travel** (`Service = true` in the wire
     // schema), each under an id of its own that never changes: every world has
@@ -567,7 +575,9 @@ void AuthoritySession::capture(const scene::World& world, InstanceId root, u64 t
             setNetId(fields[parentField], RootNetId);
             const u32 netId = ServiceNetIdBase + static_cast<u32>(index);
             state->entities.push_back(EntityState{NetId{netId}, static_cast<u8>(index), std::move(fields)});
-            m_order.push_back(Captured{netId, child, -1});
+            m_order.push_back(Captured{netId, child, -1, desc.contents});
+            if (desc.contents)
+                walk(child, netId, static_cast<i32>(m_order.size() - 1), true);
             break;
         }
     }
@@ -704,8 +714,9 @@ std::vector<u32> AuthoritySession::interestOf(const scene::World& world, const P
         }
     }
 
+    // What a service keeps for everybody is everybody's, near or far.
     for (usize at = 0; at < count; ++at) {
-        if (marked[at])
+        if (marked[at] || m_order[at].pinned)
             relevant.push_back(m_order[at].netId);
     }
     std::sort(relevant.begin(), relevant.end());
@@ -1420,20 +1431,24 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
 {
     const usize nameField = commonIndex("Name");
     const usize parentField = commonIndex("Parent");
+    // **This world's own copy of each service, by its class name, first.**
+    // Services sort after every instance, and an instance kept in one
+    // (ADR 0080) names it as its parent in this same state.
     for (const EntityState& entity : state.entities) {
-        const bool service = entity.id.value >= ServiceNetIdBase;
-        if (service && !m_locals.contains(entity.id.value)) {
-            // This world's own copy of the service, by its class name.
-            const InstanceId dataModel = world.parentOf(root);
-            const std::string_view wanted = generated::Classes[entity.schema].name;
-            for (InstanceId child = dataModel.valid() ? world.firstChild(dataModel) : InstanceId{}; child.valid();
-                 child = world.nextSibling(child)) {
-                if (world.atoms().text(world.classes().find(world.classOf(child))->name) == wanted) {
-                    m_locals[entity.id.value] = child;
-                    break;
-                }
+        if (entity.id.value < ServiceNetIdBase || m_locals.contains(entity.id.value))
+            continue;
+        const InstanceId dataModel = world.parentOf(root);
+        const std::string_view wanted = generated::Classes[entity.schema].name;
+        for (InstanceId child = dataModel.valid() ? world.firstChild(dataModel) : InstanceId{}; child.valid();
+             child = world.nextSibling(child)) {
+            if (world.atoms().text(world.classes().find(world.classOf(child))->name) == wanted) {
+                m_locals[entity.id.value] = child;
+                break;
             }
         }
+    }
+    for (const EntityState& entity : state.entities) {
+        const bool service = entity.id.value >= ServiceNetIdBase;
         const auto local = m_locals.find(entity.id.value);
         if (local == m_locals.end() || !world.alive(local->second))
             continue; // its spawn has not arrived yet; the next apply writes it whole

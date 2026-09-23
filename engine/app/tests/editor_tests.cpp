@@ -5278,3 +5278,81 @@ TEST_CASE("a block type's images and opacity are set from the panel, and undo")
     CHECK_FALSE(restored.texture.valid());
     CHECK(restored.opacity == 0);
 }
+
+TEST_CASE("the world and the two storages take what is dragged into them, and stay where they are")
+{
+    // **A container the engine owns is still a place to put things.** The
+    // Explorer's root is the data model, so a drag onto `Workspace` or onto a
+    // storage names a SERVICE as the new parent -- which may not be moved or
+    // deleted, and must still be dropped into (ADR 0080).
+    BrushRig rig;
+    const core::InstanceId storage = rig.world.create(rig.classes.findId(rig.atoms.intern("ReplicatedStorage")));
+    REQUIRE_FALSE(rig.world.setParent(storage, rig.root).has_value());
+    const core::InstanceId folder = rig.world.create(rig.classes.findId(rig.atoms.intern("Folder")));
+    REQUIRE_FALSE(rig.world.setParent(folder, rig.workspace).has_value());
+    const core::InstanceId sword = rig.part(core::DVec3{0.0, 1.0, 0.0});
+    REQUIRE_FALSE(rig.world.setParent(sword, folder).has_value());
+
+    const std::array<core::InstanceId, 1> one{sword};
+    REQUIRE(rig.editor.reparent(rig.world, one, storage, rig.root, rig.inspector));
+    CHECK(rig.world.parentOf(sword) == storage);
+    REQUIRE(rig.editor.reparent(rig.world, one, rig.workspace, rig.root, rig.inspector));
+    CHECK(rig.world.parentOf(sword) == rig.workspace);
+
+    // The services themselves stay put.
+    const std::array<core::InstanceId, 1> service{storage};
+    CHECK_FALSE(rig.editor.reparent(rig.world, service, folder, rig.root, rig.inspector));
+    CHECK(rig.world.parentOf(storage) == rig.root);
+}
+
+TEST_CASE("a scene keeps what is in the two storages, and a scene with none is unchanged")
+{
+    // **Saved with the scene, and only when something is there** (ADR 0080):
+    // a project that keeps nothing in storage writes the file it always wrote.
+    BrushRig rig;
+    const std::string plain = scene::writeScene(rig.world);
+    const core::InstanceId replicated = rig.world.create(rig.classes.findId(rig.atoms.intern("ReplicatedStorage")));
+    const core::InstanceId server = rig.world.create(rig.classes.findId(rig.atoms.intern("ServerStorage")));
+    rig.world.setName(replicated, rig.atoms.intern("ReplicatedStorage"));
+    rig.world.setName(server, rig.atoms.intern("ServerStorage"));
+    REQUIRE_FALSE(rig.world.setParent(replicated, rig.root).has_value());
+    REQUIRE_FALSE(rig.world.setParent(server, rig.root).has_value());
+    CHECK(scene::writeScene(rig.world) == plain);
+
+    const core::InstanceId sword = rig.part(core::DVec3{0.0, 1.0, 0.0});
+    rig.world.setName(sword, rig.atoms.intern("Sword"));
+    REQUIRE_FALSE(rig.world.setParent(sword, replicated).has_value());
+    const core::InstanceId boss = rig.part(core::DVec3{0.0, 1.0, 0.0});
+    rig.world.setName(boss, rig.atoms.intern("Boss"));
+    REQUIRE_FALSE(rig.world.setParent(boss, server).has_value());
+    // A reference from the world into storage, which resolves by its root.
+    const core::InstanceId weld = rig.world.create(rig.classes.findId(rig.atoms.intern("Weld")));
+    REQUIRE_FALSE(rig.world.setParent(weld, rig.workspace).has_value());
+    REQUIRE(rig.world.setProperty(weld, rig.atoms.intern("Part0"), scene::Value{sword}) !=
+            scene::World::SetResult::InvalidValue);
+
+    const std::string text = scene::writeScene(rig.world);
+    CHECK(text.find("\"storage\"") != std::string::npos);
+
+    // Read back into the same world: a scene replaces what the storages held.
+    REQUIRE_FALSE(scene::readScene(rig.world, text).has_value());
+    const core::InstanceId swordAgain = rig.world.findFirstChild(replicated, rig.atoms.intern("Sword"));
+    REQUIRE(swordAgain.valid());
+    CHECK(swordAgain != sword);
+    CHECK(rig.world.findFirstChild(server, rig.atoms.intern("Boss")).valid());
+    CHECK(rig.world.childCount(replicated) == 1);
+    const core::InstanceId weldAgain = rig.world.findFirstChild(rig.workspace, rig.atoms.intern("Weld"));
+    REQUIRE(weldAgain.valid());
+    const std::optional<scene::Value> part0 = rig.world.getProperty(weldAgain, rig.atoms.intern("Part0"));
+    REQUIRE(part0.has_value());
+    CHECK(std::get<core::InstanceId>(*part0) == swordAgain);
+    // The storages write back the same bytes. (The rig's terrain is re-encoded
+    // by a round trip, which is the terrain's business and not this test's.)
+    const std::string again = scene::writeScene(rig.world);
+    CHECK(again.substr(again.find("\"storage\"")) == text.substr(text.find("\"storage\"")));
+
+    // A new scene empties them too.
+    scene::clearScene(rig.world);
+    CHECK(rig.world.childCount(replicated) == 0);
+    CHECK(rig.world.childCount(server) == 0);
+}

@@ -842,6 +842,24 @@ bool Editor::redo(scene::World& world, Inspector& inspector)
     return true;
 }
 
+namespace {
+
+// **A service that holds authored content**: the world, and the two storages
+// (ADR 0080). The engine owns them -- nobody moves or deletes one -- and they
+// are still places to put things. The Explorer's root is the data model, so a
+// drag onto one of them names a service as the new parent, and asking only
+// `isEngineOwned` refused every such drop, the world's included.
+[[nodiscard]] bool holdsAuthoredContent(const scene::World& world, core::InstanceId id) noexcept
+{
+    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    if (descriptor == nullptr)
+        return false;
+    const std::string_view name = world.atoms().text(descriptor->name);
+    return name == "Workspace" || name == "ReplicatedStorage" || name == "ServerStorage";
+}
+
+} // namespace
+
 bool Editor::isEngineOwned(const scene::World& world, core::InstanceId id, core::InstanceId root) noexcept
 {
     if (!world.alive(id))
@@ -1019,7 +1037,9 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
                                           core::InstanceId newParent, core::InstanceId root)
 {
     ReparentPlan plan;
-    if (!world.alive(newParent) || (newParent != root && !authorable(world, newParent, root))) {
+    if (!world.alive(newParent) ||
+        (newParent != root && !authorable(world, newParent, root) &&
+         !(holdsAuthoredContent(world, newParent) && canParentInto(world, newParent, root)))) {
         plan.targetRefuses = true;
         return plan;
     }

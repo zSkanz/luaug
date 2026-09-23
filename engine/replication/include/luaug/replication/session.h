@@ -176,6 +176,9 @@ private:
         u32 netId = 0;
         core::InstanceId id;
         core::i32 parent = -1;
+        // Kept in a service whose contents travel (ADR 0080): in every peer's
+        // interest, whatever its position.
+        bool pinned = false;
     };
 
     // The subtree as it stands, and the class name each new id is spawned as.

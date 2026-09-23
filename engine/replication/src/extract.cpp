@@ -645,6 +645,32 @@ usize clearReplicated(scene::World& world, InstanceId root)
     return doomed.size();
 }
 
+usize clearForReplica(scene::World& world, InstanceId workspace)
+{
+    usize cleared = clearReplicated(world, workspace);
+    const InstanceId dataModel = world.parentOf(workspace);
+    for (InstanceId service = dataModel.valid() ? world.firstChild(dataModel) : InstanceId{}; service.valid();
+         service = world.nextSibling(service)) {
+        const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(service));
+        if (descriptor == nullptr)
+            continue;
+        const std::string_view name = world.atoms().text(descriptor->name);
+        if (name == "ReplicatedStorage") {
+            cleared += clearReplicated(world, service);
+        }
+        else if (name == "ServerStorage") {
+            std::vector<InstanceId> doomed;
+            for (InstanceId child = world.firstChild(service); child.valid(); child = world.nextSibling(child))
+                doomed.push_back(child);
+            for (const InstanceId id : doomed)
+                (void)world.destroy(id);
+            world.retireDestroyed();
+            cleared += doomed.size();
+        }
+    }
+    return cleared;
+}
+
 bool applyField(scene::World& world, InstanceId id, const ClassDesc& desc, const FieldDelta& delta)
 {
     const usize count = fieldCount(desc);

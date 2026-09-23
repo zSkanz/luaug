@@ -133,10 +133,32 @@ local count = standing:InvokeServerAsync()
 that never answered would hold the server's script forever. Tell a client
 something with a `RemoteEvent`.
 
+## Keeping things: `ReplicatedStorage` and `ServerStorage`
+
+Two services hold things that are not in the world. Nothing under them is drawn,
+collides or moves, and both are saved with the scene, so what the editor put
+there is there when the game starts.
+
+| Service | Who has it |
+|---|---|
+| `ReplicatedStorage` | Every machine. Its contents reach every replica, whatever their distance from the player. |
+| `ServerStorage` | The authority only. A replica empties it when it joins. |
+
+A template comes into the world by being cloned into `Workspace`:
+
+```luau
+local ServerStorage = game:GetService("ServerStorage")
+
+local enemy = ServerStorage.Enemy:Clone()
+enemy.Parent = workspace
+```
+
+`RemoteEvent`s and `RemoteFunction`s can live in `ReplicatedStorage` as well as
+in `Workspace`. A replica finds them with `WaitForChild` either way.
+
 ## What is not here
 
 - unreliable messages;
-- a replicated container other than `Workspace`;
 - rollback;
 - lag compensation for hits.
 

@@ -134,8 +134,8 @@ TEST_CASE("the generated schema is what the module was built against")
     CHECK(generated::ProtocolVersion >= 1);
     CHECK(std::size(generated::CommonFields) == 2);
     // BasePart, CharacterBody, Model, Lighting, Decal, ParticleEmitter, Folder,
-    // RemoteEvent and RemoteFunction.
-    CHECK(std::size(generated::Classes) == 9);
+    // RemoteEvent, ReplicatedStorage and RemoteFunction.
+    CHECK(std::size(generated::Classes) == 10);
     CHECK(std::size(generated::Channels) == 4);
 
     // Channel 3 is claimed and unused on purpose, so the numbering cannot shift

@@ -40,6 +40,12 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **`ReplicatedStorage` and `ServerStorage`** (ADR 0080): two services that
+  hold what is not the world, saved with the scene under a new optional
+  `storage` key. What `ReplicatedStorage` keeps reaches every replica whatever
+  its distance; `ServerStorage` stays on the authority. `scene.d.luau` types
+  their contents on `game`. The Explorer takes a drop onto `Workspace` or a
+  storage, which it refused before. Wire protocol 9.
 - **`RemoteFunction`** (ADR 0079): a client asks with `InvokeServerAsync`,
   which yields until the authority's `OnServerInvoke` answers, and raises when
   the handler fails or there is none. The IDL gains callbacks, a function a

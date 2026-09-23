@@ -181,8 +181,11 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   yields until the authority's `OnServerInvoke` answers, the IDL has callbacks
   for it, and the protocol is version 8.
 
-  **The next action, as a sentence:** a replicated storage container, which
-  ADR 0077 left for later, then editing a world larger than memory
+  **`ReplicatedStorage` and `ServerStorage` are built (2026-09-23, ADR
+  0080)**: saved with the scene, one replicated to everybody and one kept on the
+  authority, typed on `game`, and droppable into from the Explorer.
+
+  **The next action, as a sentence:** editing a world larger than memory
   (ADR 0075). Android waits, on the owner's word.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven

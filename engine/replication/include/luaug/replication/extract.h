@@ -97,6 +97,13 @@ void diffFields(const generated::ClassDesc& desc, std::span<const FieldValue> ba
 // scripts -- which is exactly what a replica needs from its own files.
 core::usize clearReplicated(scene::World& world, core::InstanceId root);
 
+// **What a replica clears when it joins** (ADR 0080): what replicates under
+// `workspace`, what replicates under `ReplicatedStorage` -- the authority's
+// copy of both is on its way -- and everything under `ServerStorage`, which is
+// the authority's alone. `workspace`'s parent is the data model the services
+// are found under. Returns how many subtrees went.
+core::usize clearForReplica(scene::World& world, core::InstanceId workspace);
+
 // Applies one field to an instance. Returns false when the id is not one this
 // class has -- which is what a peer speaking a newer protocol looks like, and is
 // a refusal rather than a guess.

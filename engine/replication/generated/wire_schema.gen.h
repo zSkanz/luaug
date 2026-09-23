@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 8;
+inline constexpr u32 ProtocolVersion = 9;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -76,6 +76,9 @@ struct ClassDesc
     // A service: one per world, on both ends from boot, so it is never
     // spawned, never leaves interest, and travels under a fixed id.
     bool service = false;
+    // A service whose children replicate to every replica, whatever their
+    // position (ADR 0080).
+    bool contents = false;
 };
 
 // The fields every replicated instance carries whatever its class.
@@ -148,15 +151,16 @@ inline constexpr FieldDesc ParticleEmitterFields[] = {
 
 // Every replicated class, in schema order.
 inline constexpr ClassDesc Classes[] = {
-    {"BasePart", BasePartFields, -1, false},
-    {"CharacterBody", CharacterBodyFields, 0, false},
-    {"Model", ModelFields, -1, false},
-    {"Lighting", LightingFields, -1, true},
-    {"Decal", DecalFields, -1, false},
-    {"ParticleEmitter", ParticleEmitterFields, -1, false},
-    {"Folder", {}, -1, false},
-    {"RemoteEvent", {}, -1, false},
-    {"RemoteFunction", {}, -1, false},
+    {"BasePart", BasePartFields, -1, false, false},
+    {"CharacterBody", CharacterBodyFields, 0, false, false},
+    {"Model", ModelFields, -1, false, false},
+    {"Lighting", LightingFields, -1, true, false},
+    {"Decal", DecalFields, -1, false, false},
+    {"ParticleEmitter", ParticleEmitterFields, -1, false, false},
+    {"Folder", {}, -1, false, false},
+    {"RemoteEvent", {}, -1, false, false},
+    {"ReplicatedStorage", {}, -1, true, true},
+    {"RemoteFunction", {}, -1, false, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.
