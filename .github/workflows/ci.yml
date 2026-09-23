@@ -763,14 +763,14 @@ jobs:
       # the cheapest coverage available anywhere in this file: the marginal cost
       # is the test runtime, not another build.
       #
-      # **Non-blocking until it has been green once**, which is the shape S7.5
-      # used for the sanitizers and for the same reason: this is the first time
-      # any test in this repository has executed on macOS, nothing on the
-      # developer's machine can predict what a different libc++ and a Metal
-      # SDL_GPU backend will do, and turning `main` red on a platform nobody can
-      # reproduce locally teaches people to ignore red. The step below says so
-      # in the summary rather than hiding it, and the `continue-on-error` comes
-      # off in the commit that reports the first clean run.
+      # **Blocking since its first clean run** (run 35929395297, 55 of 55, on
+      # 2026-09-23). It was non-blocking until then, the shape S7.5 used for the
+      # sanitizers: the first time any test here executed on macOS, nothing
+      # local could predict a different libc++ and a Metal SDL_GPU backend, and
+      # it found D166 and D167 -- failures nobody had read, which is the cost
+      # of a step allowed to fail. `--output-on-failure`, because the one run
+      # that failed after those were fixed (`streaming_soak`, once) left only a
+      # status line to learn from.
       #
       # `-LE gpu-golden` for the reason every other tier excludes them: a pixel
       # golden is tied to the GPU that recorded it, and this is not it.
@@ -781,23 +781,33 @@ jobs:
           name: shaders-for-macos
           path: ${{ env.LUAUG_BUILD_ROOT }}/macos-clang-dev/engine/app/content/shaders
 
-      - name: Test (non-blocking until green once)
-        continue-on-error: true
+      - name: Test
         shell: bash
         run: |
           set +e
-          ctest --preset macos-clang-dev -LE gpu-golden --no-tests=error 2>&1 | tee ctest.log
+          ctest --preset macos-clang-dev -LE gpu-golden --no-tests=error --output-on-failure 2>&1 | tee ctest.log
           status=${PIPESTATUS[0]}
           set -e
           exit "$status"
 
+      # What a soak saw, frame by frame, kept when the macOS run fails: a
+      # timing gate on a shared runner is the test most likely to fail there
+      # for a reason no local machine reproduces.
+      - name: The soak reports, on failure (macOS)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-soak-reports
+          path: ${{ env.LUAUG_BUILD_ROOT }}/macos-clang-dev/engine/app/*soak*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Skips are named here too. A macOS runner has no Vulkan and may have no
       # window server session, so the device and display tests are expected to
       # skip -- and anything ELSE skipping is the regression this check exists
-      # for. It reports rather than fails while the step above is non-blocking.
+      # for.
       - name: No test skipped that was not expected to (macOS)
         if: always()
-        continue-on-error: true
         shell: bash
         run: |
           if [ ! -f ctest.log ]; then
@@ -813,13 +823,9 @@ jobs:
           {
             echo "## macOS (Tier 3)"
             echo
-            echo "The C++ suite now RUNS here; until this change the job built every test"
-            echo "binary and ran none of them."
-            echo
-            echo "**The test step is non-blocking until it has been green once.** This is the"
-            echo "first execution of any test in this repository on macOS, and a red \`main\` on"
-            echo "a platform nobody can reproduce locally teaches people to ignore red. The"
-            echo "\`continue-on-error\` comes off in the commit that reports the first clean run."
+            echo "The C++ suite runs here and **blocks**, since its first clean run"
+            echo "(35929395297, 55 of 55). A failure prints its output, and a failed soak"
+            echo "leaves its report as the \`macos-soak-reports\` artifact."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
