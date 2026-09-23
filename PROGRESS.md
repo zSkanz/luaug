@@ -94,7 +94,13 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   the height layer is a GPU atlas under a CDLOD quadtree, so a brush stroke
   uploads the tiles it touched instead of re-meshing them, and only bricked
   columns -- caves and overhangs -- are CPU meshes, now surface nets. Cave
-  surfaces collide, built lazily within reach of something that moves. What is
+  surfaces collide, built lazily within reach of something that moves.
+
+  **Caves became usable on 2026-09-23**, from a person reporting that digging
+  sideways went nowhere: a dig aimed at a wall now carves into it and bores on
+  the clock, caves are dark inside (a sky-visibility term baked per cave
+  vertex), open per pixel so they are drawn to 256 m, and stop streaking on
+  steep walls (triplanar detail). `examples/17-cave` flies through one. What is
   left of F1 is still named in the roadmap: terrain does not stream from disk
   (Part E), and Part H's seam gate and flagship swap are unstarted.
 
@@ -126,9 +132,10 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   not built: client prediction, the husk despawn, interest management and
   service properties.
 
-  **The next action, as a sentence:** close N1's named gaps -- prediction first,
-  because it is what a person playing notices -- then F2 (particles and
-  decals).
+  **The next action, as a sentence:** in the order the owner agreed on
+  2026-09-23 -- terrain and block worlds streamed from disk (F1 Part E), then
+  F3 (world-space UI and rich text), then N1's prediction and interest
+  management, then the editor's smaller items. Android waits.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is
@@ -157,7 +164,10 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   milestones are signed and tagged, and `v1.1.0` is cut.
 - **`v1.1.0` is released, 2026-09-23**, tagged on `main` with the editor phase
   and the first of phases 2 and 4 in it; the archive is built from a clean
-  checkout of the tag.
+  checkout of the tag, and the GitHub release carries it.
+- **Jolt runs cross-platform deterministic since 2026-09-23** (ADR 0074),
+  measured at under 1% and closing audit row 4; the guarantee stays level B
+  because the engine's own transcendentals still part Windows from Linux.
 - **The work is published, and that is new.** 164 commits reached `origin` on
   2026-08-26. `origin/main` had not moved since E1's sign-off on 2026-08-22, so
   seven milestones of post-v1 work existed on one machine with no backup and
@@ -276,48 +286,31 @@ carrying out of session 19 is under E3 above. Session 26's -- the campaign
 opening, and what a `git push` found -- and session 27's -- S7 closed, and what
 a gate reports when it did not run -- both went there on 2026-08-27, each to
 make room for the next. Session 29's -- the ground, and two ways a brush can lie
--- followed them on 2026-09-22.
+-- followed them on 2026-09-22, and session 30's -- the ground drawn by the GPU,
+and a block world -- went to
+[`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
+2026-09-23.
 
-- **Session 30 — the ground is drawn by the GPU, shadows stop floating, and a
-  block world, 2026-09-22.** Four things a person reported by playing the
-  package, and one feature the owner asked for by name.
+- **Session 31 — releases, a cave you can dig and see, and a benchmark decided
+  by measurement, 2026-09-23.** The owner delegated the sign-offs, the tags and
+  the benchmark questions, and reported two terrain defects by playing the
+  package.
 
-  **"The terrain lags and looks wrong from below."** Both were measured before
-  either was fixed: a brush stroke cost 49.5 ms, because every touched tile was
-  re-meshed on the CPU and every tile carried skirts that read as curtains from
-  underneath. The answer is the one open terrains converge on, and ADR 0071
-  records it: heights in an `R32Float` atlas, a CDLOD quadtree whose leaves are
-  tiles, one shared grid, geomorphing in the vertex shader and neighbours never
-  more than one level apart, so there are no skirts at all. A stroke costs
-  8.4 ms now, and most of that is the collider. Only caves stay CPU meshes, and
-  they became **surface nets** rather than marching tetrahedra: one vertex per
-  cell stops the zig-zag walls, and snapping the rim ring to the heightfield's
-  own vertices turns the cave seam from an overlap into a crease.
+  **"Sculpting past the edge of the terrain is deformed."** Reproduced
+  headlessly with a flat square and no brush at all: a vertex past the edge of
+  the ground stopped being a hole once it had morphed more than halfway onto a
+  neighbour that was ground, and kept the height of an empty column. Each end of
+  the morph now borrows the other's height when it has none.
 
-  **Jolt 5.6.0 corrupts a height field whose block count is not a power of two**
-  on `SetHeights`, and a cube fell through the ground to prove it. The backend
-  pads the grid with no-collision samples and widens every edit rectangle to
-  whole blocks, so the library is not edited (R13) and the defect cannot reach a
-  game.
+  **"Digging sideways does not go."** It could not: a dig was a height brush,
+  and a stroke aims at the field as it was when it began. A dig aimed at a wall
+  now carves volume and bores at a speed, and the flow the owner tried -- flat
+  ground, down, then out -- is a test. Making the result worth looking at took
+  four renderer changes, and one of them was a defect this session made and
+  caught: the colour pass and the depth prepass compiled the same vertex maths
+  differently once the shaders changed, and the ground showed the sky in
+  specks. `precise` fixes it and the comment says why.
 
-  **"Shadows are bad everywhere, not only on the terrain."** Researched against
-  the open engines rather than guessed at: a penumbra in world units rather than
-  texels, a rotated sixteen-tap Vogel disc of bilinear PCF, a normal offset that
-  moves the sample sideways only, and no receiver slope bias -- which had been
-  lifting every shadow off the base that casts it. A screen-space contact pass
-  closes the last gap, where a shadow map cannot resolve a foot on a floor. The
-  terrain casts as sixteen-metre tiles so its enormous nodes stop inflating the
-  cascade fit, and the tile is 2048 by default.
-
-  **V1, `VoxelService`, from its bench first.** A greedy chunk costs 0.37 ms to
-  mesh and a single-block edit 0.33 ms to re-mesh, measured before the service
-  existed so the design could be refused cheaply. Copy-on-write 16-cubed chunks
-  keyed with a `y`, a registry whose ids are a pure function of the script,
-  per-face colours, corner occlusion merged only where it agrees, colliders only
-  near things that move, and a run-coded save under the scene's own key.
-
-  **Two things a gate caught that nothing else would have**: D3D12 refuses a
-  pipeline whose vertex stage reads a cbuffer from the fragment space, and a
-  texture read only through `Load` is reflected as a storage texture. Both
-  failed at pipeline creation rather than at compile, so both are written into
-  the shaders' comments.
+  **Jolt's cross-platform switch was decided by running it**, after finding
+  that the audit's experiment could not answer: its scenario simulated nothing.
+  ADR 0074 has the table.
