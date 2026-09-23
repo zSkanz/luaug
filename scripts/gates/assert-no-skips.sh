@@ -28,7 +28,14 @@ fi
 
 # CTest prints `  3/51 Test  #3: name .......***Skipped   0.01 sec`. The name is
 # the field between the colon and the run of dots.
-mapfile -t skipped < <(
+#
+# Read with a loop rather than `mapfile`: macOS ships bash 3.2, which has no
+# `mapfile`. This failed there with "command not found" the first time the
+# macOS job stopped being allowed to fail.
+skipped=()
+while IFS= read -r name; do
+    skipped+=("$name")
+done < <(
     grep -oE '^[[:space:]]*[0-9]+/[0-9]+[[:space:]]+Test[[:space:]]+#[0-9]+:[[:space:]]+[^[:space:]]+[[:space:]]+\.+\*+Skipped' "$log" \
         | sed -E 's/.*#[0-9]+:[[:space:]]+([^[:space:]]+)[[:space:]]+\.+\*+Skipped/\1/' \
         | sort -u
