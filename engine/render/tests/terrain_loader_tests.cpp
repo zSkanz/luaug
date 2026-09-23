@@ -159,7 +159,7 @@ TEST_CASE("the ground is drawn once everywhere, finest under the viewer")
     CHECK(far > 0);
 }
 
-TEST_CASE("a quiet frame builds nothing, and an edit rebuilds the node it touched")
+TEST_CASE("a quiet frame builds nothing, and an edit rebuilds every node it touched in one frame")
 {
     LoaderFixture fixture;
     fixture.loader.setFocus(core::DVec3{8.0, 4.0, 8.0});
@@ -167,12 +167,15 @@ TEST_CASE("a quiet frame builds nothing, and an edit rebuilds the node it touche
     (void)fixture.sync();
     CHECK(fixture.loader.lastBuilds() == 0);
 
-    // A dig in the middle of one column: that column's node, and no other --
-    // its neighbours read only the layers at its sides (ADR 0082).
+    // A dig in the middle of one column: that column's node and the eight
+    // round it, whose openness reads 12 m into it -- **all in the frame the dig
+    // lands**, whatever the loading budget. Spread over frames, neighbours
+    // showed two versions of one edit: the owner's flicker while editing.
+    fixture.loader.setBuildsPerSync(1);
     (void)asset::fillBall(fixture.component().field, core::DVec3{16.0, 0.0, 16.0}, 3.0, 0);
     fixture.component().fieldRevision += 1;
     (void)fixture.sync();
-    CHECK(fixture.loader.lastBuilds() == 1);
+    CHECK(fixture.loader.lastBuilds() == 9);
     (void)fixture.sync();
     CHECK(fixture.loader.lastBuilds() == 0);
 }

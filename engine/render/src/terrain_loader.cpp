@@ -3,6 +3,7 @@
 #include "luaug/asset/terrain_mesher.h"
 #include "luaug/asset/terrain_palette.h"
 #include "luaug/core/log.h"
+#include "luaug/jobs/jobs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,12 @@ using core::usize;
 // How many frames a node may go undrawn and unwanted before its mesh is let
 // go. Long enough that looking away and back does not rebuild anything.
 constexpr u64 EvictAfterFrames = 180;
+
+// At most this many EDITED nodes rebuilt in one frame. An edit rebuilds every
+// node it changed in the frame it lands (`sync`), and this is only the ceiling
+// that keeps a brush the size of the world from stalling one frame for all of
+// it; the rest follow in the next.
+constexpr u32 MaxEditBuildsPerSync = 64;
 
 // Order-sensitive, which is what a key built from an ordered walk wants.
 [[nodiscard]] u64 combine(u64 seed, u64 value) noexcept
@@ -66,10 +73,17 @@ void forChunksIn(const asset::TerrainField& field, i32 x0, i32 x1, i32 z0, i32 z
 }
 
 // What a node's mesh reads: every chunk in its footprint, and the ring of one
-// column round it. **At full detail the ring is read two voxels deep**, so a
-// ring chunk counts by the faces that look at the node rather than whole: a dig
-// in the middle of one column rebuilt the eight nodes round it as well as its
-// own. A coarser node reads its ring deeper, and takes it whole.
+// column round it, **whole**.
+//
+// The ring used to count at full detail only by the two layers of voxels that
+// face the node, which is all the triangles read. The openness baked into every
+// vertex reads further: the tops and bottoms of the columns up to 12 m round it
+// (`terrain_mesher.cpp`). So an edit a few metres into the next column changed
+// what a node's vertices should look like and left the node as it was -- dark
+// where the ground had since gone, bright where it had since come -- until
+// something else rebuilt it: the owner's "the shadows go wrong while I edit".
+// Whole costs the eight nodes round an edit a rebuild, which `sync` does in
+// parallel and in the same frame.
 [[nodiscard]] u64 contentOf(const asset::TerrainField& field, TerrainNodeKey key) noexcept
 {
     const i32 n = across(key.level);
@@ -81,17 +95,7 @@ void forChunksIn(const asset::TerrainField& field, i32 x0, i32 x1, i32 z0, i32 z
         content = combine(content, static_cast<u64>(static_cast<u32>(entry.first.x)));
         content = combine(content, static_cast<u64>(static_cast<u32>(entry.first.y)));
         content = combine(content, static_cast<u64>(static_cast<u32>(entry.first.z)));
-        const bool inside =
-            entry.first.x >= x0 && entry.first.x < x0 + n && entry.first.z >= z0 && entry.first.z < z0 + n;
-        if (inside || key.level > 0) {
-            content = combine(content, entry.second->digest());
-            return;
-        }
-        // The ring chunk's layers facing the node: an offset of -1 on an axis
-        // means the node is on its low side, and so on (`borderDigest`).
-        const core::i32 dx = entry.first.x < x0 ? 1 : (entry.first.x >= x0 + n ? -1 : 0);
-        const core::i32 dz = entry.first.z < z0 ? 1 : (entry.first.z >= z0 + n ? -1 : 0);
-        content = combine(content, entry.second->borderDigest(dx, 0, dz));
+        content = combine(content, entry.second->digest());
     });
     return content;
 }
@@ -425,24 +429,66 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
         std::unique(requests.begin(), requests.end(),
                     [](const Request& a, const Request& b) { return a.terrain == b.terrain && a.key == b.key; }),
         requests.end());
+    // **Which to build this frame.** A node that was built and is stale is
+    // ground somebody changed, and **every one of those is rebuilt in the frame
+    // the change lands**, up to `MaxEditBuildsPerSync`. Rebuilt a few a frame,
+    // neighbouring nodes showed two versions of one edit for several frames --
+    // a ridge half raised, an old shade beside a new one -- and a held brush
+    // changes the ground every frame, so that never settled: the flicker the
+    // owner saw while editing. A node that was never built is loading, and
+    // loading keeps the per-frame budget, nearest first.
+    struct Build
+    {
+        const asset::TerrainField* field = nullptr;
+        u64 revision = 0;
+        Node* node = nullptr;
+        TerrainNodeKey key;
+        asset::TerrainMesh mesh;
+    };
+    std::vector<Build> builds;
+    u32 edits = 0;
+    u32 loads = 0;
     for (const Request& next : requests) {
-        if (m_lastBuilds >= m_buildsPerSync) {
-            m_pending = true;
-            break;
-        }
         const scene::TerrainComponent* terrain = world.terrains().find(next.terrain);
         Node* node = find(&world, next.terrain, next.key);
         if (terrain == nullptr || node == nullptr)
             continue;
-        const asset::TerrainMesh meshed = meshTerrainNode(terrain->field, next.key);
-        if (node->mesh.valid())
-            cache.release(device, node->mesh);
-        node->mesh = upload(device, cmd, cache, library, node->urn, meshed);
-        if (!node->mesh.valid())
-            library.remove(node->urn);
-        node->content = contentOf(terrain->field, next.key);
-        node->revision = terrain->fieldRevision;
-        node->built = true;
+        if (node->built ? edits >= MaxEditBuildsPerSync : loads >= m_buildsPerSync) {
+            m_pending = true;
+            continue;
+        }
+        (node->built ? edits : loads) += 1;
+        builds.push_back(Build{&terrain->field, terrain->fieldRevision, node, next.key, {}});
+    }
+
+    // **Meshed in parallel**, which is what makes rebuilding a whole edit in
+    // one frame affordable. The mesher is a pure function of the field and the
+    // key; the one thing in it that writes is a chunk's lazy mip, and that is
+    // done here first, on this thread (`TerrainChunk::prepareMip`).
+    for (const Build& build : builds) {
+        if (build.key.level == 0)
+            continue;
+        const i32 n = across(build.key.level);
+        forChunksIn(*build.field, build.key.x * n - 1, build.key.x * n + n, build.key.z * n - 1, build.key.z * n + n,
+                    [&](const asset::TerrainField::Entry& entry) { entry.second->prepareMip(build.key.level); });
+    }
+    jobs::parallelFor("terrain.mesh", jobs::Domain::Render, 0, builds.size(), 1,
+                      [&builds](usize begin, usize end, u32) noexcept {
+                          for (usize at = begin; at < end; ++at)
+                              builds[at].mesh = meshTerrainNode(*builds[at].field, builds[at].key);
+                      });
+
+    // Uploaded in request order, on this thread: nearest first, as ever.
+    for (Build& build : builds) {
+        Node& node = *build.node;
+        if (node.mesh.valid())
+            cache.release(device, node.mesh);
+        node.mesh = upload(device, cmd, cache, library, node.urn, build.mesh);
+        if (!node.mesh.valid())
+            library.remove(node.urn);
+        node.content = contentOf(*build.field, build.key);
+        node.revision = build.revision;
+        node.built = true;
         m_lastBuilds += 1;
     }
 

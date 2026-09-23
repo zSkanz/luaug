@@ -166,6 +166,7 @@
   "app.warn.image_undecodable": "The picture {content} could not be decoded; the label it names draws as a flat colour.",
   "app.warn.chunk_duplicate": "Two chunk indexes name the cell {content}; the second one is ignored.",
   "app.warn.partition_uncached": "The world was partitioned but {path} could not be written, so it will be partitioned again next time.",
+  "app.warn.field_no_focus": "This world streams its ground and has no camera and no streaming focus, so none of the ground loads and the simulation does not wait for it. Give the workspace a CurrentCamera, or add a focus with StreamingService:AddFocus.",
   "app.info.field_primed": "The ground around the camera has streamed in: {cells} cell(s) in {ms} ms.",
   "app.info.partitioned": "Partitioned the scene into {cells} cell(s) holding {count} instance(s); {kept} stayed in the scene.",
   "app.warn.chunk_missing": "The chunk index names {content}, but nothing mounted resolves it.",

@@ -220,6 +220,17 @@ void FieldStreamer::pump(f64 budgetMilliseconds)
         m_manager.onChunkFailed(id);
     m_failedStarts.clear();
 
+    // **No focus, no wait** (D169). The first load holds the simulation so a
+    // character standing on streamed ground does not fall through it -- and a
+    // world with no camera and no focus has nobody standing anywhere, and never
+    // will have a ring to be resident. Held, it waited for ever: a project whose
+    // scene carried terrain and no camera ran with its scripts' Heartbeat never
+    // firing. Scripts have run by the first pump (`WorldHost::boot`), so a game
+    // that makes its own camera has one by now and still waits for its ground.
+    if (!m_primed && foci.empty()) {
+        m_primed = true;
+        core::log(core::LogLevel::Warn, LUAUG_TR("app.warn.field_no_focus"), {});
+    }
     if (!m_primed && !foci.empty() && m_manager.minimumRingResident()) {
         m_primed = true;
         // Said once, because how long the first load took is the number a

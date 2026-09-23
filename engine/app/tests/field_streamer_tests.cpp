@@ -181,3 +181,22 @@ TEST_CASE("ground left behind is dropped, and ground somebody changed is kept")
     REQUIRE(streamed.pumpUntil([&] { return streamed.holds(-1, -1); }));
     CHECK(streamed.field().voxel(4, 5, 4).material == 3);
 }
+
+TEST_CASE("a world with no camera and no focus does not hold the simulation for ground (D169)")
+{
+    // **The owner's project**: a scene carrying terrain and no camera, run
+    // outside the editor. The first load waited for a ring around a focus that
+    // did not exist, so it waited for ever, and the scripts' Heartbeat never
+    // fired. Nobody stands anywhere in such a world, so there is nothing to
+    // wait for.
+    IoScope io;
+    StreamedWorld streamed;
+    streamed.world.workspaces().find(streamed.workspace)->currentCamera = {};
+    REQUIRE(streamed.streamer.active());
+    CHECK_FALSE(streamed.streamer.primed());
+
+    streamed.streamer.pump(50.0);
+    CHECK(streamed.streamer.primed());
+    // And nothing was loaded for a focus that is not there.
+    CHECK_FALSE(streamed.holds(0, 0));
+}

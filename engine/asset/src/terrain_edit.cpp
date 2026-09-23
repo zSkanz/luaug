@@ -150,6 +150,50 @@ EditReport applyShape(TerrainField& field, const Box& box, u8 material, Distance
     return std::sqrt(x * x + y * y + z * z);
 }
 
+// **The voxels of a box, read a chunk at a time**, x fastest, then y, then z.
+// Read voxel by voxel it is a search of the chunk table per voxel, and a big
+// brush's box is a hundred thousand of them: the owner's "smooth stalls".
+void readBox(const TerrainField& field, i32 x0, i32 y0, i32 z0, i32 sizeX, i32 sizeY, i32 sizeZ,
+             std::vector<Voxel>& out)
+{
+    out.assign(static_cast<usize>(sizeX) * static_cast<usize>(sizeY) * static_cast<usize>(sizeZ), Voxel{});
+    constexpr auto edge = static_cast<i32>(ChunkEdge);
+    const auto slot = [&](i32 x, i32 y, i32 z) {
+        return (static_cast<usize>(z - z0) * static_cast<usize>(sizeY) + static_cast<usize>(y - y0)) *
+                   static_cast<usize>(sizeX) +
+               static_cast<usize>(x - x0);
+    };
+    std::array<core::u16, ChunkEdge> row{};
+    for (i32 cz = floorDiv(z0, edge); cz <= floorDiv(z0 + sizeZ - 1, edge); ++cz) {
+        for (i32 cx = floorDiv(x0, edge); cx <= floorDiv(x0 + sizeX - 1, edge); ++cx) {
+            for (const TerrainField::Entry& entry : field.column(cx, cz)) {
+                const i32 cy = entry.first.y;
+                const i32 lowY = std::max(y0, cy * edge);
+                const i32 highY = std::min(y0 + sizeY, (cy + 1) * edge);
+                if (lowY >= highY)
+                    continue;
+                const i32 lowX = std::max(x0, cx * edge);
+                const i32 highX = std::min(x0 + sizeX, (cx + 1) * edge);
+                const i32 lowZ = std::max(z0, cz * edge);
+                const i32 highZ = std::min(z0 + sizeZ, (cz + 1) * edge);
+                const TerrainChunk& chunk = *entry.second;
+                for (i32 z = lowZ; z < highZ; ++z) {
+                    for (i32 y = lowY; y < highY; ++y) {
+                        Voxel* first = &out[slot(lowX, y, z)];
+                        if (chunk.uniform()) {
+                            std::fill(first, first + (highX - lowX), chunk.value());
+                            continue;
+                        }
+                        chunk.readRow(static_cast<u32>(y - cy * edge), static_cast<u32>(z - cz * edge), row);
+                        for (i32 x = lowX; x < highX; ++x)
+                            first[x - lowX] = unpackVoxel(row[static_cast<usize>(x - cx * edge)]);
+                    }
+                }
+            }
+        }
+    }
+}
+
 // The occupancies of one voxel column over `[low, high]`, read once so a brush
 // that shifts or blurs reads the field as it was before the stroke.
 struct ColumnBuffer
@@ -512,41 +556,38 @@ EditReport smoothBall(TerrainField& field, DVec3 center, double radius, float st
                    static_cast<usize>(sizeX) +
                static_cast<usize>(x - x0);
     };
-    std::vector<Voxel> copy(static_cast<usize>(sizeX) * static_cast<usize>(sizeY) * static_cast<usize>(sizeZ));
+    std::vector<Voxel> copy;
+    readBox(field, x0, y0, z0, sizeX, sizeY, sizeZ, copy);
     std::vector<float> blurred(copy.size());
-    for (i32 z = z0; z < z0 + sizeZ; ++z) {
-        for (i32 y = y0; y < y0 + sizeY; ++y) {
-            for (i32 x = x0; x < x0 + sizeX; ++x) {
-                const Voxel got = field.voxel(x, y, z);
-                copy[index(x, y, z)] = got;
-                blurred[index(x, y, z)] = occupancyOf(got);
-            }
-        }
-    }
+    for (usize at = 0; at < copy.size(); ++at)
+        blurred[at] = occupancyOf(copy[at]);
     // One axis at a time, each pass reading the last; the copy's own edge is
     // held rather than padded with air, so the blur does not eat into ground
-    // at the edge of what was read.
-    std::vector<float> pass(blurred.size());
-    const auto blurAlong = [&](i32 dx, i32 dy, i32 dz) {
-        for (i32 z = z0; z < z0 + sizeZ; ++z) {
-            for (i32 y = y0; y < y0 + sizeY; ++y) {
-                for (i32 x = x0; x < x0 + sizeX; ++x) {
-                    float sum = 0.0f;
-                    for (i32 k = -reach; k <= reach; ++k) {
-                        const i32 sx = std::clamp(x + dx * k, x0, x0 + sizeX - 1);
-                        const i32 sy = std::clamp(y + dy * k, y0, y0 + sizeY - 1);
-                        const i32 sz = std::clamp(z + dz * k, z0, z0 + sizeZ - 1);
-                        sum += blurred[index(sx, sy, sz)];
-                    }
-                    pass[index(x, y, z)] = sum / static_cast<float>(2 * reach + 1);
-                }
+    // at the edge of what was read. **Each line is a running sum**, so a pass
+    // costs the same whatever the kernel's width.
+    const auto blurAlong = [&](i32 length, usize stride, i32 lines, auto&& lineStart) {
+        std::vector<double> sums(static_cast<usize>(length + 2 * reach) + 1);
+        const float width = static_cast<float>(2 * reach + 1);
+        for (i32 line = 0; line < lines; ++line) {
+            float* values = &blurred[lineStart(line)];
+            sums[0] = 0.0;
+            for (i32 k = 0; k < length + 2 * reach; ++k) {
+                const i32 from = std::clamp(k - reach, 0, length - 1);
+                sums[static_cast<usize>(k) + 1] =
+                    sums[static_cast<usize>(k)] + static_cast<double>(values[static_cast<usize>(from) * stride]);
+            }
+            for (i32 at = 0; at < length; ++at) {
+                const double sum = sums[static_cast<usize>(at + 2 * reach) + 1] - sums[static_cast<usize>(at)];
+                values[static_cast<usize>(at) * stride] = static_cast<float>(sum) / width;
             }
         }
-        blurred.swap(pass);
     };
-    blurAlong(1, 0, 0);
-    blurAlong(0, 1, 0);
-    blurAlong(0, 0, 1);
+    const auto strideY = static_cast<usize>(sizeX);
+    const auto strideZ = static_cast<usize>(sizeX) * static_cast<usize>(sizeY);
+    blurAlong(sizeX, 1, sizeY * sizeZ, [&](i32 line) { return static_cast<usize>(line) * strideY; });
+    blurAlong(sizeY, strideY, sizeX * sizeZ,
+              [&](i32 line) { return static_cast<usize>(line / sizeX) * strideZ + static_cast<usize>(line % sizeX); });
+    blurAlong(sizeZ, strideZ, sizeX * sizeY, [&](i32 line) { return static_cast<usize>(line); });
 
     FieldWriter writer(field);
     walk(box, [&](i32 x, i32 y, i32 z) {
