@@ -124,8 +124,12 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   that every compiled colour texture in the engine had been drawing pale
   (ADR 0073, fixed).
 
-  **F2's particles are built** (ADR 0072): `ParticleEmitter`, with
-  `examples/16-particles`. Decals are next in F2.
+  **F2's particles and decals are built** (ADR 0072): `ParticleEmitter` and
+  `Decal`, with `examples/16-particles`.
+
+  **F3 is built (2026-09-23)**: `TextLabel.RichText`, and `SurfaceGui` and
+  `BillboardGui` drawing the screen's own UI classes in the world, with
+  `examples/18-world-ui`. Not clickable yet.
 
   **N1, multiplayer, is playable over a LAN** (2026-09-22 and 23). One project
   runs solo, as a host (`--host`), as a dedicated server (`--serve`) or as a
@@ -139,9 +143,8 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   service properties.
 
   **The next action, as a sentence:** in the order the owner agreed on
-  2026-09-23 -- terrain and block worlds streamed from disk (F1 Part E), then
-  F3 (world-space UI and rich text), then N1's prediction and interest
-  management, then the editor's smaller items. Android waits.
+  2026-09-23 -- terrain streaming and F3 are done, so N1's prediction and
+  interest management, then the editor's smaller items. Android waits.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is

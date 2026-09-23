@@ -1286,12 +1286,16 @@ and the ecosystem work.
      builds it:** this is world-space UI and therefore part of the world image —
      it is *not* the screen-space UI pass that the frame-generation constraint
      says must be composited last. Two different things with the same word in
-     them.
+     them. **Built 2026-09-23** as `SurfaceGui` and `BillboardGui`: each tree is
+     laid out against its own canvas, mapped into the world by one affine
+     placement, and drawn in the HDR pass after the particles, depth-tested
+     unless `AlwaysOnTop`. Not clickable yet.
    - **Rich text** — colour, weight and size varying inside one label. The glyph
      cache is already keyed by **face, size and codepoint** (M6, from the human's
      own font decision), so a label carrying three sizes and two weights already
      fits the cache that exists. That decision was made for user-supplied fonts
-     and pays here a second time.
+     and pays here a second time. **Built 2026-09-23** as `TextLabel.RichText`,
+     and the cache's key did not change.
 3. **2D layer** — sprites, tilemaps, Box2D 3.1, dedicated 2D workflow (user
    decision #7 made this the first item; the human moved it to second on
    2026-08-21), together with **navmesh integration**
