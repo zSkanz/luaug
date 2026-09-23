@@ -99,6 +99,9 @@ end
 declare extern type EnumNetworkTopology extends EnumItem with
 end
 
+declare extern type EnumParticleShape extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -1024,6 +1027,48 @@ declare extern type PointLight extends Instance with
     --- not dimmed and does not flicker: the order is by apparent size with ties broken by creation
     --- order, so it is the same answer on every frame and on every machine.
     Shadows: boolean
+end
+
+declare extern type ParticleEmitter extends Instance with
+    --- Whether it emits continuously. `Emit` works either way: a burst is a separate thing from a
+    --- stream.
+    Enabled: boolean
+    --- Particles a second while enabled.
+    Rate: number
+    --- Seconds each particle lives before it is gone.
+    Lifetime: number
+    --- Metres a second at birth, along the emitter's up direction.
+    Speed: number
+    --- How far, in degrees, a particle's direction may stray from straight up: 0 is a jet, 180 a
+    --- sphere.
+    SpreadAngle: number
+    --- Metres a second squared in world space, for the whole of each particle's life. `vector.create(0,
+    --- -9.81, 0)` is gravity; a small upward one is heat.
+    Acceleration: vector
+    --- The fraction of its velocity a particle loses each second: smoke slows, sparks do not.
+    Drag: number
+    --- The colour at birth.
+    Color: Color3
+    --- The colour at death; life interpolates between the two.
+    ColorEnd: Color3
+    --- The width in metres at birth.
+    Size: number
+    --- The width in metres at death.
+    SizeEnd: number
+    --- 0 opaque to 1 invisible, at birth.
+    Transparency: number
+    --- At death. The default fades each particle out as it dies.
+    TransparencyEnd: number
+    --- 0 blends a particle over what is behind it, 1 ADDS its light to it -- fire, sparks, magic -- and
+    --- between is both. Additive particles never darken anything, which is the point.
+    LightEmission: number
+    --- A multiplier on the colour, unclamped: above one is what makes a spark bloom.
+    Brightness: number
+    --- What one particle looks like.
+    Shape: EnumParticleShape
+    --- Emits `count` particles at once, whether or not the emitter is enabled: an explosion is a burst,
+    --- not a stream. At most 1,000 a call.
+    function Emit(self, count: number): ()
 end
 
 declare extern type SpotLight extends Instance with
@@ -2198,6 +2243,12 @@ declare Enum: {
         Replica: EnumNetworkTopology,
         GetEnumItems: (self: any) -> { EnumNetworkTopology },
     },
+    ParticleShape: {
+        Soft: EnumParticleShape,
+        Disc: EnumParticleShape,
+        Square: EnumParticleShape,
+        GetEnumItems: (self: any) -> { EnumParticleShape },
+    },
 }
 
 declare Vector3: {
@@ -2303,6 +2354,7 @@ declare Instance: {
         & (("CharacterBody") -> CharacterBody)
         & (("Camera") -> Camera)
         & (("PointLight") -> PointLight)
+        & (("ParticleEmitter") -> ParticleEmitter)
         & (("SpotLight") -> SpotLight)
         & (("InputContext") -> InputContext)
         & (("InputAction") -> InputAction)

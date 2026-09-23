@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 2;
+inline constexpr u32 ProtocolVersion = 3;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -70,6 +70,9 @@ struct ClassDesc
 {
     std::string_view name;
     std::span<const FieldDesc> fields;
+    // The index in `Classes` of the class whose fields this one also carries,
+    // or -1. One level: a `CharacterBody` is a `BasePart`.
+    int base = -1;
 };
 
 // The fields every replicated instance carries whatever its class.
@@ -101,12 +104,33 @@ inline constexpr FieldDesc ModelFields[] = {
     {"Scale", 1, Encoding::F32, Source::Component, "models"},
 };
 
+inline constexpr FieldDesc ParticleEmitterFields[] = {
+    {"Enabled", 1, Encoding::Bool, Source::Component, "particleEmitters"},
+    {"Rate", 2, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Lifetime", 3, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Speed", 4, Encoding::F32, Source::Component, "particleEmitters"},
+    {"SpreadAngle", 5, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Acceleration", 6, Encoding::Vector3, Source::Component, "particleEmitters"},
+    {"Drag", 7, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Color", 8, Encoding::Color3, Source::Component, "particleEmitters"},
+    {"ColorEnd", 9, Encoding::Color3, Source::Component, "particleEmitters"},
+    {"Size", 10, Encoding::F32, Source::Component, "particleEmitters"},
+    {"SizeEnd", 11, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Transparency", 12, Encoding::F32, Source::Component, "particleEmitters"},
+    {"TransparencyEnd", 13, Encoding::F32, Source::Component, "particleEmitters"},
+    {"LightEmission", 14, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Brightness", 15, Encoding::F32, Source::Component, "particleEmitters"},
+    {"Shape", 16, Encoding::I32, Source::Component, "particleEmitters"},
+    {"Emitted", 17, Encoding::U32, Source::Component, "particleEmitters"},
+};
+
 // Every replicated class, in schema order.
 inline constexpr ClassDesc Classes[] = {
-    {"BasePart", BasePartFields},
-    {"CharacterBody", CharacterBodyFields},
-    {"Model", ModelFields},
-    {"Folder", {}},
+    {"BasePart", BasePartFields, -1},
+    {"CharacterBody", CharacterBodyFields, 0},
+    {"Model", ModelFields, -1},
+    {"ParticleEmitter", ParticleEmitterFields, -1},
+    {"Folder", {}, -1},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.

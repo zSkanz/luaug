@@ -272,6 +272,16 @@ The solid a `Part` renders and collides as; `MeshPart` carries geometry instead 
 | `Capsule` | 3 | A cylinder closed by a hemisphere at each end. |
 | `Wedge` | 4 | A box with one face sloped away to an edge: a right-triangular prism. |
 
+## Enum.ParticleShape
+
+What one particle looks like before its colour is applied. Drawn in the shader rather than sampled from a texture, so a puff of smoke needs no file.
+
+| Item | Value | Description |
+|---|---|---|
+| `Soft` | 0 | A round puff that fades to nothing at its edge: smoke, dust, steam, a glow. |
+| `Disc` | 1 | A round dot with a crisp edge: sparks, bubbles, confetti. |
+| `Square` | 2 | A square facing the camera: pixels, debris, blocky confetti. |
+
 ## Enum.PlaybackState
 
 Where a `Tween` is in its life (§2.1). A state rather than a pair of booleans, because "finished" and "stopped early" are different facts and code that acts on one usually must not act on the other.

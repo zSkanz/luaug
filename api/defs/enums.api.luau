@@ -745,6 +745,28 @@ local Definition: Schema.Definition = {
                 },
             } :: { Schema.EnumItem },
         },
+        {
+            Name = "ParticleShape",
+            Doc = "What one particle looks like before its colour is applied. Drawn in the shader rather "
+                .. "than sampled from a texture, so a puff of smoke needs no file.",
+            Items = {
+                {
+                    Name = "Soft",
+                    Value = 0,
+                    Doc = "A round puff that fades to nothing at its edge: smoke, dust, steam, a glow.",
+                },
+                {
+                    Name = "Disc",
+                    Value = 1,
+                    Doc = "A round dot with a crisp edge: sparks, bubbles, confetti.",
+                },
+                {
+                    Name = "Square",
+                    Value = 2,
+                    Doc = "A square facing the camera: pixels, debris, blocky confetti.",
+                },
+            } :: { Schema.EnumItem },
+        },
     },
 }
 

@@ -284,6 +284,21 @@ struct RenderTerrain
     bool outlined = false;
 };
 
+// One particle as drawn: a camera-facing square of `size` metres at `position`.
+struct RenderParticle
+{
+    Vec3 position;
+    f32 size = 0.0f;
+    // Linear colour times brightness, and opacity in the fourth.
+    f32 color[4]{1.0f, 1.0f, 1.0f, 1.0f};
+    // 0 blends over what is behind, 1 adds to it.
+    f32 emission = 0.0f;
+    // `Enum.ParticleShape`.
+    core::i32 shape = 0;
+    // From the camera, for the back-to-front sort.
+    f32 distance = 0.0f;
+};
+
 struct RenderWorld
 {
     RenderCamera camera;
@@ -307,6 +322,10 @@ struct RenderWorld
         Color3 bottom;
     };
     std::vector<VoxelColors> voxelColors;
+    // This frame's particles (F2), camera-relative and back to front --
+    // appended by `ParticleSystem::append` after the extract, because they are
+    // simulated on the frame and are not in the world the extract reads.
+    std::vector<RenderParticle> particles;
     // The block world's block size, which the block shader needs to name the
     // block a fragment belongs to.
     f32 voxelBlockSize = 1.0f;
@@ -331,6 +350,7 @@ struct RenderWorld
         bones.clear();
         terrains.clear();
         voxelColors.clear();
+        particles.clear();
         voxelBlockSize = 1.0f;
         candidateDraws = 0;
         culledDraws = 0;

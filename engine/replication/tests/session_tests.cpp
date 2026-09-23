@@ -388,3 +388,41 @@ TEST_CASE("a joined replica is a player on the authority, and what it does arriv
     CHECK_FALSE(scene::playerByUserId(server.world, 2).valid());
     CHECK(scene::localPlayerOf(server.world) == host);
 }
+
+TEST_CASE("a character's transform replicates, because a CharacterBody carries BasePart's fields too")
+{
+    // **The defect this pins**: the schema said `CharacterBody` inherited the
+    // part's six fields in its doc and not in its data, so a character on a
+    // replica held its spawn position for ever.
+    seedCatalog();
+    auto network = net::createMemoryNetwork();
+    auto serverTransport = net::createMemoryTransport(network);
+    auto clientTransport = net::createMemoryTransport(network);
+    REQUIRE_FALSE(serverTransport->open(net::TransportConfig{.port = Port, .maxPeers = 4, .channels = 4}).has_value());
+    REQUIRE_FALSE(clientTransport->open(net::TransportConfig{.port = 0, .maxPeers = 1, .channels = 4}).has_value());
+    net::PeerId toServer;
+    REQUIRE_FALSE(clientTransport->connect("memory", Port, toServer).has_value());
+
+    RealSide server;
+    RealSide client;
+    const core::InstanceId body = server.world.create(server.classes.findId(server.atoms.intern("CharacterBody")));
+    REQUIRE(body.valid());
+    server.world.setName(body, server.atoms.intern("Hero"));
+    REQUIRE_FALSE(server.world.setParent(body, server.workspace).has_value());
+
+    AuthoritySession authority(*serverTransport);
+    ReplicaSession replica(*clientTransport, toServer);
+    for (core::u64 tick = 1; tick <= 6; ++tick) {
+        server.world.parts().find(body)->cframe.position = core::DVec3{static_cast<double>(tick), 2.0, -3.0};
+        authority.receive(server.world, server.workspace);
+        authority.send(server.world, server.workspace, tick);
+        replica.receive(client.world, client.workspace);
+    }
+
+    const core::InstanceId hero = client.world.findFirstChild(client.workspace, client.atoms.intern("Hero"));
+    REQUIRE(hero.valid());
+    CHECK(client.world.characterBodies().find(hero) != nullptr);
+    CHECK(client.world.parts().find(hero)->cframe.position.x == doctest::Approx(6.0));
+    CHECK(client.world.parts().find(hero)->cframe.position.z == doctest::Approx(-3.0));
+    CHECK(replica.checksumFailures() == 0);
+}

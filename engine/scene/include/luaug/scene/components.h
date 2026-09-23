@@ -405,6 +405,49 @@ struct PointLightComponent
     bool shadows = false;
 };
 
+// `ParticleEmitter` (F2). Everything a script can set, and one counter.
+//
+// **The particles themselves are not here.** They are a picture, not the
+// world: what a spark does after it leaves the emitter decides nothing a
+// script can observe, so they live in `render::ParticleSystem` and are
+// simulated on the render clock. What IS world state is how the emitter is
+// configured and how many bursts a script asked for -- the second as a running
+// total, so the renderer spawns the difference since it last looked and never
+// has to write back into the world to say it did.
+struct ParticleEmitterComponent
+{
+    bool enabled = true;
+    // Particles a second, continuously, while enabled.
+    f32 rate = 20.0f;
+    // Seconds each particle lives.
+    f32 lifetime = 2.0f;
+    // Metres a second at birth, along the emitter's up direction within
+    // `spreadAngle` degrees of it.
+    f32 speed = 4.0f;
+    f32 spreadAngle = 15.0f;
+    // Metres a second squared, in world space: `(0, -9.81, 0)` is gravity.
+    core::Vec3 acceleration{0.0f, 0.0f, 0.0f};
+    // The fraction of velocity lost per second, so smoke slows and sparks do not.
+    f32 drag = 0.0f;
+    // Start and end of life, interpolated linearly over it.
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+    core::Color3 colorEnd{1.0f, 1.0f, 1.0f};
+    f32 size = 0.5f;
+    f32 sizeEnd = 0.5f;
+    f32 transparency = 0.0f;
+    f32 transparencyEnd = 1.0f;
+    // 0 is an ordinary blended particle, 1 adds its light to what is behind it
+    // -- fire and sparks -- and anything between is both.
+    f32 lightEmission = 0.0f;
+    // A multiplier on the colour, unclamped: above one is what makes a spark
+    // bloom.
+    f32 brightness = 1.0f;
+    // `Enum.ParticleShape`: 0 Soft, 1 Disc, 2 Square.
+    i32 shape = 0;
+    // Every particle `Emit` has asked for since the emitter existed.
+    u64 emitted = 0;
+};
+
 struct SpotLightComponent
 {
     core::Color3 color{1.0f, 1.0f, 1.0f};

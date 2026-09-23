@@ -259,6 +259,7 @@ struct NameIndex
     X(MeshPartComponent, meshParts)                                                                                    \
     X(CameraComponent, cameras)                                                                                        \
     X(PointLightComponent, pointLights)                                                                                \
+    X(ParticleEmitterComponent, particleEmitters)                                                                      \
     X(SpotLightComponent, spotLights)                                                                                  \
     X(LightingComponent, lighting)                                                                                     \
     X(NameIndex, nameIndices)                                                                                          \
@@ -691,6 +692,11 @@ public:
     [[nodiscard]] const ComponentPool<MeshPartComponent>& meshParts() const noexcept { return m_meshParts; }
     [[nodiscard]] ComponentPool<CameraComponent>& cameras() noexcept { return m_cameras; }
     [[nodiscard]] const ComponentPool<CameraComponent>& cameras() const noexcept { return m_cameras; }
+    [[nodiscard]] ComponentPool<ParticleEmitterComponent>& particleEmitters() noexcept { return m_particleEmitters; }
+    [[nodiscard]] const ComponentPool<ParticleEmitterComponent>& particleEmitters() const noexcept
+    {
+        return m_particleEmitters;
+    }
     [[nodiscard]] ComponentPool<PointLightComponent>& pointLights() noexcept { return m_pointLights; }
     [[nodiscard]] const ComponentPool<PointLightComponent>& pointLights() const noexcept { return m_pointLights; }
     [[nodiscard]] ComponentPool<SpotLightComponent>& spotLights() noexcept { return m_spotLights; }

@@ -48,6 +48,7 @@
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/debug_renderer.h"
 #include "luaug/render/mesh_loader.h"
+#include "luaug/render/particles.h"
 #include "luaug/render/render_world.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
@@ -757,6 +758,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     render::TerrainLoader terrainLoader;
     // The block world's chunks (V1), meshed and uploaded the same way.
     render::VoxelLoader voxelLoader;
+    // Particles (F2): simulated on the frame, because they are a picture.
+    render::ParticleSystem particles;
     // **The editor reads its textures off the frame; everything else does not**
     // (D118). A decode is 14 to 36 ms for an ordinary 1024-square PNG, and the
     // synchronous path loads every missing map it finds in one frame -- so
@@ -3033,6 +3036,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // snapshot, for the same world and the same root.
             terrainLoader.appendRenderTerrains(
                 authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(), snapshot);
+            // **Particles, on the render clock** (F2): advanced by this frame's
+            // own length -- which a headless run fixes at one tick, so a golden
+            // with sparks in it is still one picture -- and appended for the
+            // same root the extract drew.
+            particles.update(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
+                             frame.renderDt);
+            particles.append(snapshot);
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the

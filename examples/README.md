@@ -18,6 +18,7 @@ automated headless gate script (screenshot/capture + asserted behavior):
 | `13-terrain` | post-v1 phase 2 | the sculpted ground: a height atlas drawn on the GPU, caves as surface nets, and a brush from a script |
 | `14-voxels` | post-v1 phase 2 | `VoxelService`: a block world registered, filled, mined with `Raycast` and collided — not the terrain |
 | `15-multiplayer` | post-v1 phase 4 | one project in every posture: `--host`, `--join`, `--serve` or solo. The authority builds and moves the world, the replica is sent it, and `NetworkService.Authority` is the one question the script asks |
+| `16-particles` | post-v1 phase 2 | `ParticleEmitter`: fire, smoke, sparks, a fountain and a scripted burst -- additive and blended in one draw, from parts and from attachments |
 
 Assets used by examples must be permissively licensed and recorded in
 `THIRD_PARTY_NOTICES.md`. Keep binary assets tiny until the git-LFS ADR (M4);

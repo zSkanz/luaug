@@ -833,6 +833,26 @@ int inputActionGetState(lua_State* L)
     return 1;
 }
 
+// --- ParticleEmitter (F2) ------------------------------------------------------
+
+// Adds to the emitter's running total rather than spawning anything: the
+// particles are the renderer's, and it spawns the difference the next frame it
+// looks. That keeps a burst a fact about the world -- hashed, saved, replicated
+// -- and the particles a picture of it.
+int particleEmitterEmit(lua_State* L)
+{
+    const core::InstanceId self = checkInstance(L, 1);
+    const double requested = luaL_checknumber(L, 2);
+    scene::ParticleEmitterComponent* emitter = world(L).particleEmitters().find(self);
+    if (emitter == nullptr || !std::isfinite(requested))
+        return 0;
+    // A thousand a call is more than any one effect needs and few enough that a
+    // loop calling it every tick cannot bury the frame.
+    const auto count = static_cast<core::u64>(std::clamp(std::floor(requested), 0.0, 1000.0));
+    emitter->emitted += count;
+    return 0;
+}
+
 // --- NetworkService and Player (N1) -------------------------------------------
 
 int networkServiceGetPlayers(lua_State* L)
@@ -1246,6 +1266,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"InputAction", "GetState", inputActionGetState},
     {"NetworkService", "GetPlayers", networkServiceGetPlayers},
     {"Player", "GetIntent", playerGetIntent},
+    {"ParticleEmitter", "Emit", particleEmitterEmit},
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},
     {"InputService", "GetPointerPosition", inputServiceGetPointerPosition},
     {"InputService", "IsKeyDown", inputServiceIsKeyDown},

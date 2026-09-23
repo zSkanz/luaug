@@ -64,6 +64,7 @@ inline constexpr scene::EnumId SortOrderEnumId = 21;
 inline constexpr scene::EnumId AutomaticSizeEnumId = 22;
 inline constexpr scene::EnumId ScaleTypeEnumId = 23;
 inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
+inline constexpr scene::EnumId ParticleShapeEnumId = 25;
 
 } // namespace generated
 
@@ -150,6 +151,42 @@ scene::Value getPointLightShadows(const scene::World& world, core::InstanceId id
 bool setPointLightShadows(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachPointLightComponents(scene::World& world, core::InstanceId id);
 void detachPointLightComponents(scene::World& world, core::InstanceId id);
+
+// ParticleEmitter
+scene::Value getParticleEmitterEnabled(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterRate(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterRate(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterLifetime(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterLifetime(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterSpeed(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterSpeed(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterSpreadAngle(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterSpreadAngle(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterAcceleration(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterAcceleration(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterDrag(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterDrag(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterColor(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterColorEnd(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterColorEnd(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterSize(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterSizeEnd(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterSizeEnd(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterTransparency(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterTransparency(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterTransparencyEnd(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterTransparencyEnd(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterLightEmission(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterLightEmission(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterBrightness(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterBrightness(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getParticleEmitterShape(const scene::World& world, core::InstanceId id);
+bool setParticleEmitterShape(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachParticleEmitterComponents(scene::World& world, core::InstanceId id);
+void detachParticleEmitterComponents(scene::World& world, core::InstanceId id);
 
 // SpotLight
 scene::Value getSpotLightColor(const scene::World& world, core::InstanceId id);

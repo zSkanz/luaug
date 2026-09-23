@@ -1,0 +1,15 @@
+# Sparks, smoke, fire and water (F2): ParticleEmitter.
+#
+# No scene file: the script builds four effects and a burst, because how an
+# emitter is set up is the subject.
+
+[project]
+name = "LuauG Particles"
+id = "dev.luaug.particles"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Particles"
+width = 1280
+height = 720

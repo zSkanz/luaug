@@ -62,6 +62,7 @@ inline constexpr EnumId SortOrderEnumId = 21;
 inline constexpr EnumId AutomaticSizeEnumId = 22;
 inline constexpr EnumId ScaleTypeEnumId = 23;
 inline constexpr EnumId NetworkTopologyEnumId = 24;
+inline constexpr EnumId ParticleShapeEnumId = 25;
 
 } // namespace generated
 

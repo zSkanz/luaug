@@ -102,6 +102,82 @@ using generated::Source;
         return false;
     }
 
+    if (field.pool == "particleEmitters") {
+        const scene::ParticleEmitterComponent* emitter = world.particleEmitters().find(id);
+        if (emitter == nullptr) {
+            return false;
+        }
+        if (field.name == "Enabled") {
+            setBool(out, emitter->enabled);
+            return true;
+        }
+        if (field.name == "Rate") {
+            setF32(out, emitter->rate);
+            return true;
+        }
+        if (field.name == "Lifetime") {
+            setF32(out, emitter->lifetime);
+            return true;
+        }
+        if (field.name == "Speed") {
+            setF32(out, emitter->speed);
+            return true;
+        }
+        if (field.name == "SpreadAngle") {
+            setF32(out, emitter->spreadAngle);
+            return true;
+        }
+        if (field.name == "Acceleration") {
+            setVec3(out, emitter->acceleration);
+            return true;
+        }
+        if (field.name == "Drag") {
+            setF32(out, emitter->drag);
+            return true;
+        }
+        if (field.name == "Color") {
+            setVec3(out, core::Vec3{emitter->color.r, emitter->color.g, emitter->color.b});
+            return true;
+        }
+        if (field.name == "ColorEnd") {
+            setVec3(out, core::Vec3{emitter->colorEnd.r, emitter->colorEnd.g, emitter->colorEnd.b});
+            return true;
+        }
+        if (field.name == "Size") {
+            setF32(out, emitter->size);
+            return true;
+        }
+        if (field.name == "SizeEnd") {
+            setF32(out, emitter->sizeEnd);
+            return true;
+        }
+        if (field.name == "Transparency") {
+            setF32(out, emitter->transparency);
+            return true;
+        }
+        if (field.name == "TransparencyEnd") {
+            setF32(out, emitter->transparencyEnd);
+            return true;
+        }
+        if (field.name == "LightEmission") {
+            setF32(out, emitter->lightEmission);
+            return true;
+        }
+        if (field.name == "Brightness") {
+            setF32(out, emitter->brightness);
+            return true;
+        }
+        if (field.name == "Shape") {
+            setI32(out, emitter->shape);
+            return true;
+        }
+        if (field.name == "Emitted") {
+            setU32(out, static_cast<core::u32>(emitter->emitted));
+            return true;
+        }
+        return false;
+    }
+
     if (field.pool == "models") {
         const scene::ModelComponent* model = world.models().find(id);
         if (model == nullptr) {
@@ -180,6 +256,87 @@ using generated::Source;
         return false;
     }
 
+    if (field.pool == "particleEmitters") {
+        scene::ParticleEmitterComponent* emitter = world.particleEmitters().find(id);
+        if (emitter == nullptr) {
+            return false;
+        }
+        if (field.name == "Enabled") {
+            emitter->enabled = asBool(value);
+            return true;
+        }
+        if (field.name == "Rate") {
+            emitter->rate = asF32(value);
+            return true;
+        }
+        if (field.name == "Lifetime") {
+            emitter->lifetime = asF32(value);
+            return true;
+        }
+        if (field.name == "Speed") {
+            emitter->speed = asF32(value);
+            return true;
+        }
+        if (field.name == "SpreadAngle") {
+            emitter->spreadAngle = asF32(value);
+            return true;
+        }
+        if (field.name == "Acceleration") {
+            emitter->acceleration = asVec3(value);
+            return true;
+        }
+        if (field.name == "Drag") {
+            emitter->drag = asF32(value);
+            return true;
+        }
+        if (field.name == "Color") {
+            const core::Vec3 colour = asVec3(value);
+            emitter->color = core::Color3{colour.x, colour.y, colour.z};
+            return true;
+        }
+        if (field.name == "ColorEnd") {
+            const core::Vec3 colour = asVec3(value);
+            emitter->colorEnd = core::Color3{colour.x, colour.y, colour.z};
+            return true;
+        }
+        if (field.name == "Size") {
+            emitter->size = asF32(value);
+            return true;
+        }
+        if (field.name == "SizeEnd") {
+            emitter->sizeEnd = asF32(value);
+            return true;
+        }
+        if (field.name == "Transparency") {
+            emitter->transparency = asF32(value);
+            return true;
+        }
+        if (field.name == "TransparencyEnd") {
+            emitter->transparencyEnd = asF32(value);
+            return true;
+        }
+        if (field.name == "LightEmission") {
+            emitter->lightEmission = asF32(value);
+            return true;
+        }
+        if (field.name == "Brightness") {
+            emitter->brightness = asF32(value);
+            return true;
+        }
+        if (field.name == "Shape") {
+            emitter->shape = static_cast<core::i32>(asU32(value));
+            return true;
+        }
+        if (field.name == "Emitted") {
+            // The replica keeps its own running total and moves it by the
+            // difference, so a wrap of the 32 bits on the wire costs nothing.
+            const core::u32 sent = asU32(value);
+            emitter->emitted += static_cast<core::u32>(sent - static_cast<core::u32>(emitter->emitted));
+            return true;
+        }
+        return false;
+    }
+
     if (field.pool == "models") {
         scene::ModelComponent* model = world.models().find(id);
         if (model == nullptr) {
@@ -215,9 +372,22 @@ const ClassDesc* schemaFor(const scene::World& world, InstanceId id)
     return nullptr;
 }
 
+namespace {
+
+// The class whose fields this one also carries, or null.
+[[nodiscard]] const ClassDesc* baseOf(const ClassDesc& desc) noexcept
+{
+    if (desc.base < 0 || static_cast<usize>(desc.base) >= std::size(generated::Classes))
+        return nullptr;
+    return &generated::Classes[desc.base];
+}
+
+} // namespace
+
 usize fieldCount(const ClassDesc& desc)
 {
-    return std::size(generated::CommonFields) + desc.fields.size();
+    const ClassDesc* base = baseOf(desc);
+    return std::size(generated::CommonFields) + (base != nullptr ? base->fields.size() : 0) + desc.fields.size();
 }
 
 core::u16 wireIdAt(const ClassDesc& desc, usize index)
@@ -232,13 +402,24 @@ core::u16 wireIdAt(const ClassDesc& desc, usize index)
     // The top bit says which half. Ids are capped at 32767 by that, which is
     // four orders of magnitude more than any class will have, and the wire form
     // is what both ends compare -- so it is the permanent id, not the index.
+    //
+    // A class that extends another carries a third half, its base's fields,
+    // under the next bit down -- so `CharacterBody`'s `VerticalVelocity` (own
+    // id 1) and its inherited `CFrame` (base id 1) cannot collide either.
     constexpr core::u16 ClassBit = 0x8000;
+    constexpr core::u16 BaseBit = 0x4000;
     const usize common = std::size(generated::CommonFields);
+    const ClassDesc* base = baseOf(desc);
+    const usize inherited = base != nullptr ? base->fields.size() : 0;
     const FieldDesc* field = fieldAt(desc, index);
     if (field == nullptr) {
         return 0;
     }
-    return index < common ? field->id : static_cast<core::u16>(field->id | ClassBit);
+    if (index < common)
+        return field->id;
+    if (index < common + inherited)
+        return static_cast<core::u16>(field->id | BaseBit);
+    return static_cast<core::u16>(field->id | ClassBit);
 }
 
 const FieldDesc* fieldAt(const ClassDesc& desc, usize index)
@@ -247,7 +428,12 @@ const FieldDesc* fieldAt(const ClassDesc& desc, usize index)
     if (index < common) {
         return &generated::CommonFields[index];
     }
-    const usize own = index - common;
+    usize own = index - common;
+    if (const ClassDesc* base = baseOf(desc); base != nullptr) {
+        if (own < base->fields.size())
+            return &base->fields[own];
+        own -= base->fields.size();
+    }
     if (own < desc.fields.size()) {
         return &desc.fields[own];
     }

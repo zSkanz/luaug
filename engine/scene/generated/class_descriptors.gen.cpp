@@ -3361,6 +3361,31 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     networkTopologyDesc.docKey = {};
     networkTopologyDesc.items = networkTopologyItems;
     enums.registerEnum(networkTopologyDesc);
+
+    // --- ParticleShape ---
+    static std::array<EnumItemDesc, 3> particleShapeItems;
+    particleShapeItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Soft"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Disc"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Square"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor particleShapeDesc;
+    particleShapeDesc.name = atoms.intern("ParticleShape");
+    particleShapeDesc.docKey = {};
+    particleShapeDesc.items = particleShapeItems;
+    enums.registerEnum(particleShapeDesc);
 }
 
 } // namespace luaug::scene::generated

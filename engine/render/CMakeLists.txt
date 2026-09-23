@@ -29,6 +29,7 @@ luaug_add_module(render
         src/mesh_loader.cpp
         src/terrain_loader.cpp
         src/terrain_lod.cpp
+        src/particles.cpp
         src/voxel_loader.cpp
         src/scene_types.cpp
         src/shadow.cpp
@@ -76,6 +77,7 @@ luaug_add_module_tests(render
         tests/animation_tests.cpp
         tests/mesh_loader_tests.cpp
         tests/terrain_loader_tests.cpp
+        tests/particles_tests.cpp
         tests/voxel_loader_tests.cpp
 )
 

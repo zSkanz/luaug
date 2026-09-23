@@ -1532,6 +1532,107 @@
       "Events": []
     },
     {
+      "Name": "ParticleEmitter",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Acceleration",
+          "Type": "vector",
+          "Default": "vector.create(0, 0, 0)"
+        },
+        {
+          "Name": "Brightness",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "ColorEnd",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "Drag",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Lifetime",
+          "Type": "number",
+          "Default": "2"
+        },
+        {
+          "Name": "LightEmission",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Rate",
+          "Type": "number",
+          "Default": "20"
+        },
+        {
+          "Name": "Shape",
+          "Type": "Enum.ParticleShape",
+          "Default": "Enum.ParticleShape.Soft"
+        },
+        {
+          "Name": "Size",
+          "Type": "number",
+          "Default": "0.5"
+        },
+        {
+          "Name": "SizeEnd",
+          "Type": "number",
+          "Default": "0.5"
+        },
+        {
+          "Name": "Speed",
+          "Type": "number",
+          "Default": "4"
+        },
+        {
+          "Name": "SpreadAngle",
+          "Type": "number",
+          "Default": "15"
+        },
+        {
+          "Name": "Transparency",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "TransparencyEnd",
+          "Type": "number",
+          "Default": "1"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Emit",
+          "Parameters": [
+            {
+              "Name": "count",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "PhysicsService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -5280,6 +5381,23 @@
         {
           "Name": "Wedge",
           "Value": 4
+        }
+      ]
+    },
+    {
+      "Name": "ParticleShape",
+      "Items": [
+        {
+          "Name": "Disc",
+          "Value": 1
+        },
+        {
+          "Name": "Soft",
+          "Value": 0
+        },
+        {
+          "Name": "Square",
+          "Value": 2
         }
       ]
     },

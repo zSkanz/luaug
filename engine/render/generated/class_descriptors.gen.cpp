@@ -435,6 +435,208 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     pointLightDesc.detachComponents = native::detachPointLightComponents;
     classes.registerClass(pointLightDesc);
 
+    // --- ParticleEmitter ---
+    static std::array<scene::PropertyDesc, 16> particleEmitterProperties;
+    particleEmitterProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it emits continuously. `Emit` works either way: a burst is a separate thing from a stream.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getParticleEmitterEnabled,
+            .set = native::setParticleEmitterEnabled,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Rate"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Particles a second while enabled.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterRate,
+            .set = native::setParticleEmitterRate,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Lifetime"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Seconds each particle lives before it is gone.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterLifetime,
+            .set = native::setParticleEmitterLifetime,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Speed"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Metres a second at birth, along the emitter's up direction.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterSpeed,
+            .set = native::setParticleEmitterSpeed,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SpreadAngle"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far, in degrees, a particle's direction may stray from straight up: 0 is a jet, 180 a sphere.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_spread_degrees"),
+            .get = native::getParticleEmitterSpreadAngle,
+            .set = native::setParticleEmitterSpreadAngle,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Acceleration"),
+            .type = scene::ValueType::Vector3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Metres a second squared in world space, for the whole of each particle's life. `vector.create(0, -9.81, 0)` is gravity; a small upward one is heat.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getParticleEmitterAcceleration,
+            .set = native::setParticleEmitterAcceleration,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Drag"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The fraction of its velocity a particle loses each second: smoke slows, sparks do not.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterDrag,
+            .set = native::setParticleEmitterDrag,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The colour at birth.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getParticleEmitterColor,
+            .set = native::setParticleEmitterColor,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("ColorEnd"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The colour at death; life interpolates between the two.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getParticleEmitterColorEnd,
+            .set = native::setParticleEmitterColorEnd,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Size"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The width in metres at birth.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterSize,
+            .set = native::setParticleEmitterSize,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SizeEnd"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The width in metres at death.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterSizeEnd,
+            .set = native::setParticleEmitterSizeEnd,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Transparency"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "0 opaque to 1 invisible, at birth.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getParticleEmitterTransparency,
+            .set = native::setParticleEmitterTransparency,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("TransparencyEnd"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "At death. The default fades each particle out as it dies.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getParticleEmitterTransparencyEnd,
+            .set = native::setParticleEmitterTransparencyEnd,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("LightEmission"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "0 blends a particle over what is behind it, 1 ADDS its light to it -- fire, sparks, magic -- and between is both. Additive particles never darken anything, which is the point.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getParticleEmitterLightEmission,
+            .set = native::setParticleEmitterLightEmission,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Brightness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "A multiplier on the colour, unclamped: above one is what makes a spark bloom.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getParticleEmitterBrightness,
+            .set = native::setParticleEmitterBrightness,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Shape"),
+            .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("ParticleShape"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "What one particle looks like.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getParticleEmitterShape,
+            .set = native::setParticleEmitterShape,
+        },
+    }};
+    static std::array<scene::MethodDesc, 1> particleEmitterMethods;
+    particleEmitterMethods = {{
+        scene::MethodDesc{
+            .name = atoms.intern("Emit"),
+            .yields = false,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .doc = "Emits `count` particles at once, whether or not the emitter is enabled: an explosion is a burst, not a stream. At most 1,000 a call.",
+        },
+    }};
+    scene::ClassDescriptor particleEmitterDesc;
+    particleEmitterDesc.name = atoms.intern("ParticleEmitter");
+    particleEmitterDesc.super = instanceClass;
+    particleEmitterDesc.flags = scene::ClassFlags::None;
+    particleEmitterDesc.defaultName = atoms.intern("ParticleEmitter");
+    particleEmitterDesc.doc = "Sparks, smoke, dust and magic (F2). Parent it to a `BasePart` or an `Attachment`: particles are born at its position and fly along its up direction. **They are a picture, not the world** -- they collide with nothing, a script cannot find one, and they are simulated on the frame rather than the tick -- which is what lets a scene hold thousands for the price of one draw.";
+    particleEmitterDesc.properties = particleEmitterProperties;
+    particleEmitterDesc.methods = particleEmitterMethods;
+    particleEmitterDesc.attachComponents = native::attachParticleEmitterComponents;
+    particleEmitterDesc.detachComponents = native::detachParticleEmitterComponents;
+    classes.registerClass(particleEmitterDesc);
+
     // --- SpotLight ---
     static std::array<scene::PropertyDesc, 6> spotLightProperties;
     spotLightProperties = {{

@@ -3,6 +3,7 @@
 #include "luaug/core/text_key.h"
 #include "luaug/render/clusters.h"
 #include "luaug/render/environment.h"
+#include "luaug/render/particles.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/settings.h"
 #include "luaug/render/shader_types.h"
@@ -375,6 +376,8 @@ private:
     [[nodiscard]] bool ensureTerrain(rhi::IDevice& device);
     // The block shader's pipeline, on the same lazy terms as the terrain's.
     [[nodiscard]] bool ensureVoxel(rhi::IDevice& device);
+    // The particle pipeline and its instance buffer, on the same lazy terms.
+    [[nodiscard]] bool ensureParticles(rhi::IDevice& device);
     // Picks this frame's nodes for every terrain in `world`, from its camera.
     void selectTerrain(const RenderWorld& world);
     // Draws the selected nodes. `cull` is a cascade's or a light's sphere;
@@ -438,7 +441,7 @@ private:
     // without a second list. Sized with room: `create` silently stops recording
     // once it is full and the overflow leaks at shutdown, which is a bug that
     // announces itself nowhere.
-    rhi::ShaderHandle shaders_[48]{};
+    rhi::ShaderHandle shaders_[64]{};
     core::usize shaderCount_ = 0;
 
     rhi::TextureHandle hdr_{};
@@ -564,6 +567,13 @@ private:
     rhi::PipelineHandle voxelPipeline_{};
     bool voxelTried_ = false;
     GpuVoxelPalette voxelPalette_{};
+    // Particles (F2): the pipeline, made the first frame one is drawn, and
+    // the instance stream this frame uploads into.
+    rhi::PipelineHandle particlePipeline_{};
+    rhi::BufferHandle particleBuffer_{};
+    bool particleTried_ = false;
+    std::vector<GpuParticle> particleStaging_;
+    u32 particleCount_ = 0;
     // The palette the terrain shaders read, filled once a frame.
     GpuTerrainSurfaceUniforms terrainSurface_{};
     // One grid for every node of every terrain: 33 by 33 lattice points.
@@ -1401,7 +1411,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     instanceBuffer_ = {};
 
     for (rhi::PipelineHandle* pipeline : {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_,
-                                          &terrainCavePipeline_, &voxelPipeline_}) {
+                                          &terrainCavePipeline_, &voxelPipeline_, &particlePipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1414,6 +1424,10 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     terrainTried_ = false;
     terrainValid_ = false;
     voxelTried_ = false;
+    if (particleBuffer_.valid())
+        device.destroy(particleBuffer_);
+    particleBuffer_ = {};
+    particleTried_ = false;
     terrainGridUploaded_ = false;
 
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
@@ -1897,6 +1911,69 @@ void uploadTerrainGrid(rhi::ICmdList& cmd, rhi::BufferHandle vertices, rhi::Buff
 
 } // namespace
 
+bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
+{
+    if (particleTried_)
+        return particlePipeline_.valid() && particleBuffer_.valid();
+    particleTried_ = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+
+    core::EngineError error;
+    const auto load = [&](std::string_view name, rhi::ShaderStage stage) -> rhi::ShaderHandle {
+        const rhi::ShaderHandle handle = shaderLibrary_->create(device, name, stage, &error);
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+        return handle;
+    };
+    const rhi::ShaderHandle vertex = load("particle", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle fragment = load("particle", rhi::ShaderStage::Fragment);
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+
+    // **Instances only**: the six corners come from the vertex index, so the
+    // one stream is per instance and there is no per-vertex buffer at all.
+    const std::array<rhi::VertexAttribute, 3> attributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 32},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> buffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = sizeof(GpuParticle), .perInstance = true},
+    };
+    // Premultiplied, which is what lets one pipeline blend and add: see the
+    // shader's header.
+    const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true,
+                  .srcColor = rhi::BlendFactor::One,
+                  .dstColor = rhi::BlendFactor::OneMinusSrcAlpha,
+                  .srcAlpha = rhi::BlendFactor::One,
+                  .dstAlpha = rhi::BlendFactor::OneMinusSrcAlpha},
+    }};
+    particlePipeline_ = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        // Tested, never written: hidden by what is in front, and never hiding
+        // the particles behind.
+        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "particle",
+    });
+    particleBuffer_ = device.createBuffer({
+        .usage = rhi::BufferUsage::Vertex,
+        .sizeBytes = static_cast<u32>(ParticleSystem::MaxDrawn * sizeof(GpuParticle)),
+        .debugName = "particles",
+    });
+    return particlePipeline_.valid() && particleBuffer_.valid();
+}
+
 bool DefaultRenderer::ensureVoxel(rhi::IDevice& device)
 {
     if (voxelTried_)
@@ -2240,6 +2317,31 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     buildInstanceBatches(world, meshes);
     if (!instanceStaging_.empty()) {
         cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);
+    }
+
+    // This frame's particles, up before any pass for the reason the instances
+    // are. The pipeline is made the first frame there is one, so a world
+    // without particles builds nothing and moves no golden.
+    particleCount_ = 0;
+    if (!world.particles.empty() && ensureParticles(device)) {
+        particleStaging_.clear();
+        const usize count = std::min(world.particles.size(), ParticleSystem::MaxDrawn);
+        particleStaging_.reserve(count);
+        for (usize at = 0; at < count; ++at) {
+            const RenderParticle& particle = world.particles[at];
+            GpuParticle gpu;
+            gpu.positionSize[0] = particle.position.x;
+            gpu.positionSize[1] = particle.position.y;
+            gpu.positionSize[2] = particle.position.z;
+            gpu.positionSize[3] = particle.size;
+            for (usize channel = 0; channel < 4; ++channel)
+                gpu.color[channel] = particle.color[channel];
+            gpu.params[0] = particle.emission;
+            gpu.params[1] = static_cast<f32>(particle.shape);
+            particleStaging_.push_back(gpu);
+        }
+        cmd.upload(particleBuffer_, asBytes(particleStaging_.data(), particleStaging_.size() * sizeof(GpuParticle)), 0);
+        particleCount_ = static_cast<u32>(count);
     }
 
     // The terrain's nodes for this frame, chosen from the camera once and used
@@ -2770,6 +2872,48 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         cmd.setPipeline(pbrBlendPipeline_);
         drawGeometry(cmd, world, meshes, world.camera.viewProjection, pbrBlendPipeline_, pbrSkinnedBlendPipeline_,
                      Selection::Transparent);
+
+        // Particles last (F2): over every surface, transparent ones included,
+        // which is the one ordering error this accepts -- a particle behind a
+        // pane of glass draws over it. Sorting the two together would put a
+        // per-particle draw into a per-draw sort, and the whole point of a
+        // particle is that it is not a draw of its own.
+        if (particleCount_ > 0) {
+            GpuParticleUniforms particleUniforms;
+            particleUniforms.viewProjection = world.camera.viewProjection;
+            const Mat4 cameraToWorld = core::inverse(world.camera.view);
+            const Vec3 right = core::transformDirection(cameraToWorld, Vec3{1.0f, 0.0f, 0.0f});
+            const Vec3 up = core::transformDirection(cameraToWorld, Vec3{0.0f, 1.0f, 0.0f});
+            particleUniforms.cameraRight[0] = right.x;
+            particleUniforms.cameraRight[1] = right.y;
+            particleUniforms.cameraRight[2] = right.z;
+            particleUniforms.cameraUp[0] = up.x;
+            particleUniforms.cameraUp[1] = up.y;
+            particleUniforms.cameraUp[2] = up.z;
+
+            GpuParticleLighting lighting;
+            lighting.ambient[0] = world.environment.ambient.r;
+            lighting.ambient[1] = world.environment.ambient.g;
+            lighting.ambient[2] = world.environment.ambient.b;
+            const f32 sun = world.environment.sunBrightness * sky.dayFactor;
+            lighting.sunLight[0] = sky.sunColor.r * sun;
+            lighting.sunLight[1] = sky.sunColor.g * sun;
+            lighting.sunLight[2] = sky.sunColor.b * sun;
+            lighting.fogColor[0] = world.environment.fogColor.r;
+            lighting.fogColor[1] = world.environment.fogColor.g;
+            lighting.fogColor[2] = world.environment.fogColor.b;
+            lighting.fogRange[0] = frame.fogRange[0];
+            lighting.fogRange[1] = frame.fogRange[1];
+            lighting.fogRange[2] = frame.fogRange[2];
+
+            cmd.setPipeline(particlePipeline_);
+            cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&particleUniforms, sizeof(particleUniforms)));
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&lighting, sizeof(lighting)));
+            const std::array<rhi::BufferHandle, 1> particleBuffers{particleBuffer_};
+            cmd.bindVertexBuffers(0, particleBuffers);
+            cmd.draw(6, particleCount_, 0, 0);
+            stats_.drawCalls += 1;
+        }
     }
 
     cmd.endRenderPass();

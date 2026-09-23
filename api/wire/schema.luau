@@ -82,6 +82,11 @@ export type RetiredField = {
 --- One replicated class.
 export type Class = {
     Name: string,
+    --- The replicated class this one's instances ALSO carry the fields of: a
+    --- `CharacterBody` is a `BasePart`, and a replica that received its three
+    --- fields and not the part's six would hold a character that never moves.
+    --- One level, and it must be declared earlier in the list.
+    Extends: string?,
     Fields: { Field },
     Retired: { RetiredField }?,
     Doc: string?,
@@ -173,11 +178,21 @@ function Schema.validate(definition: Definition): { string }
     end
 
     local classes: { Class } = definition.Classes or {}
+    local declared: { [string]: Class } = {}
     for _, class in classes do
         if class.Name == "" then
             fail("a class with no name")
             continue
         end
+        if class.Extends ~= nil then
+            local base = declared[class.Extends]
+            if base == nil then
+                fail(`{class.Name}: extends {class.Extends}, which is not a replicated class declared above it`)
+            elseif base.Extends ~= nil then
+                fail(`{class.Name}: extends {class.Extends}, which extends another -- one level only`)
+            end
+        end
+        declared[class.Name] = class
 
         --- Ids claimed by this class, live and retired alike. **Both, in one
         --- table**, which is the whole point: a retired id is still claimed.

@@ -161,6 +161,145 @@ local ModelFields: { Schema.Field } = {
 
 local NoFields: { Schema.Field } = {}
 
+local ParticleEmitterFields: { Schema.Field } = {
+    {
+        Name = "Enabled",
+        Id = 1,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "A stream a replica keeps drawing after the authority stopped it is smoke from a fire somebody put out.",
+    },
+    {
+        Name = "Rate",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How dense the stream is, which a game changes to say how much is burning.",
+    },
+    {
+        Name = "Lifetime",
+        Id = 3,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How far a stream reaches, with Speed.",
+    },
+    {
+        Name = "Speed",
+        Id = 4,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How far a stream reaches, with Lifetime.",
+    },
+    {
+        Name = "SpreadAngle",
+        Id = 5,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "A jet and a fountain are one number apart.",
+    },
+    {
+        Name = "Acceleration",
+        Id = 6,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "Whether smoke rises or sparks fall.",
+    },
+    {
+        Name = "Drag",
+        Id = 7,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How soon a puff stops.",
+    },
+    {
+        Name = "Color",
+        Id = 8,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "What it looks like, which is the whole of what it is.",
+    },
+    {
+        Name = "ColorEnd",
+        Id = 9,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "What it fades to.",
+    },
+    {
+        Name = "Size",
+        Id = 10,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How big a particle is born.",
+    },
+    {
+        Name = "SizeEnd",
+        Id = 11,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How big it dies.",
+    },
+    {
+        Name = "Transparency",
+        Id = 12,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How solid it is born.",
+    },
+    {
+        Name = "TransparencyEnd",
+        Id = 13,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How solid it dies.",
+    },
+    {
+        Name = "LightEmission",
+        Id = 14,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "Whether it glows or blends.",
+    },
+    {
+        Name = "Brightness",
+        Id = 15,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "How hard it glows.",
+    },
+    {
+        Name = "Shape",
+        Id = 16,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "What one particle looks like.",
+    },
+    {
+        Name = "Emitted",
+        Id = 17,
+        Encoding = "U32",
+        Source = "Component",
+        Component = "particleEmitters",
+        Doc = "**How bursts reach a replica**: a running total of what `Emit` asked for, so a replica spawns the difference it has not seen -- the low 32 bits, because a difference is all it ever takes, and it wraps safely.",
+    },
+}
+
 local Classes: { Schema.Class } = {
     {
         Name = "BasePart",
@@ -170,8 +309,11 @@ local Classes: { Schema.Class } = {
     },
     {
         Name = "CharacterBody",
+        Extends = "BasePart",
         Doc = "A player's body, and the one class where the authority's answer and the client's guess "
-            .. "are most visibly different. Inherits `BasePart`'s six.",
+            .. "are most visibly different. **Carries `BasePart`'s six too**, by `Extends` -- the first "
+            .. "version of this entry said so in its doc and not in its data, and a replica would have "
+            .. "held a character that never moved.",
         Fields = CharacterBodyFields,
     },
     {
@@ -179,6 +321,13 @@ local Classes: { Schema.Class } = {
         Doc = "Replicated for its scale alone: everything else about a model is its children, and "
             .. "they replicate as themselves.",
         Fields = ModelFields,
+    },
+    {
+        Name = "ParticleEmitter",
+        Doc = "Sparks, smoke and magic (F2). Its particles are a picture and never travel -- each "
+            .. "machine simulates its own -- but how an emitter is set up is what a game changes to say "
+            .. "something, and a burst a script asked for on the authority has to happen on a replica too.",
+        Fields = ParticleEmitterFields,
     },
     {
         Name = "Folder",

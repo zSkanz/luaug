@@ -418,6 +418,40 @@ struct GpuTerrainSurfaceUniforms
 
 static_assert(sizeof(GpuTerrainSurfaceUniforms) == 32 * 16 + 80, "GpuTerrainSurfaceUniforms is a cbuffer layout");
 
+// One particle, as `particle.hlsl` reads its instance stream (F2).
+struct GpuParticle
+{
+    // xyz camera-relative position, w width in metres.
+    f32 positionSize[4]{};
+    // Linear colour times brightness, and opacity.
+    f32 color[4]{};
+    // x emission, y shape.
+    f32 params[4]{};
+};
+
+static_assert(sizeof(GpuParticle) == 48, "GpuParticle is a vertex stride; see particle.hlsl");
+
+// Vertex stage, `b0 space1`, for `particle`.
+struct GpuParticleUniforms
+{
+    core::Mat4 viewProjection;
+    f32 cameraRight[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    f32 cameraUp[4]{0.0f, 1.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuParticleUniforms) == 96, "GpuParticleUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for `particle`.
+struct GpuParticleLighting
+{
+    f32 ambient[4]{};
+    f32 sunLight[4]{};
+    f32 fogColor[4]{};
+    f32 fogRange[4]{};
+};
+
+static_assert(sizeof(GpuParticleLighting) == 64, "GpuParticleLighting is a cbuffer layout");
+
 // How many block types the block shader has colours for; ids past it wrap.
 inline constexpr u32 kVoxelPaletteSize = 256;
 
