@@ -427,17 +427,17 @@ if(LUAUG_PHYSICS_JOLT)
     #     question the engine has already answered, and would double the size of
     #     every position Jolt stores.
     #
-    #   CROSS_PLATFORM_DETERMINISTIC -- OFF, and this is ADR 0025's level B.
-    #     Upstream's own documentation (Docs/Architecture.md:792) says this
-    #     switch makes the simulation deterministic across compiler, OS,
-    #     architecture and word size at roughly 8% of the library's speed. That
-    #     is precisely the level C guarantee ADR 0025 declines for v1, where the
-    #     win<->linux comparison is a tracked non-blocking job rather than a
-    #     promise. It is therefore the one line that would change that answer,
-    #     and turning it on is a human decision with a perf bill attached, not a
-    #     default to drift into.
+    #   CROSS_PLATFORM_DETERMINISTIC -- ON (ADR 0074). Upstream's own
+    #     documentation (Docs/Architecture.md:792) says this switch makes the
+    #     simulation deterministic across compiler, OS, architecture and word
+    #     size at roughly 8% of the library's speed. Measured here it costs under
+    #     1%, and it is what made the `character` scenario's Windows and Linux
+    #     traces byte-identical -- they differ with it off. It does not make the
+    #     engine level C on its own: the engine's own transcendentals and Luau's
+    #     `math` still go through each platform's C runtime, and ADR 0074 says
+    #     what closing that would take.
     set(DOUBLE_PRECISION             OFF CACHE BOOL "" FORCE)
-    set(CROSS_PLATFORM_DETERMINISTIC OFF CACHE BOOL "" FORCE)
+    set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
 
     #   USE_ASSERTS -- on outside shipping. Jolt's asserts are its contract with
     #     its caller ("this body is not dynamic", "this shape is degenerate"),

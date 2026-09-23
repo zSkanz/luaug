@@ -820,3 +820,32 @@ constant, which the A5 slope survey concluded independently. And a bricked cell'
 collider needs a budgeted, off-frame rebuild path that a height-encoded one does
 not — so "the failure mode is the baseline" is true of correctness and not of
 cost.
+
+## Jolt's cross-platform switch (ADR 0074)
+
+Measured 2026-09-23, same machine, same build, `win-msvc-dev`,
+`--bench-repeats=3`, two runs each way, the mean of the two. The A/B, for the
+reason the thread-pool table gives one.
+
+| Bench | Measure | `CROSS_PLATFORM_DETERMINISTIC` off | on |
+|---|---|---|---|
+| `physics1k` | physics step | 0.645 ms | **0.649 ms** |
+| `churn10k` | physics step | 1.808 ms | **1.809 ms** |
+| `churn10k` | mean sim tick | 5.216 ms | **5.229 ms** |
+| `ragdoll10` | physics step | 0.136 ms | **0.134 ms** |
+| `platforms200` | physics step | 0.108 ms | **0.108 ms** |
+
+**Under 1% where it shows at all**, against upstream's documented 8%. What the
+switch bought is in the ADR: the `character` scenario's Windows and Linux traces
+became byte-identical.
+
+**And `churn10k` is not a problem this table has to solve.** Its 5.2 ms is
+ten thousand parts, two thirds of them moved from Luau every tick through
+property writes that raise signals to a thousand listeners -- about 3 ms of
+physics (apply 0.46, step 1.81, write-back 0.79) and about 2 ms of scripted
+churn, which is some 300 ns a write. The apply already calls the backend only
+for what changed; what it spends is building and comparing a description per
+body, about 46 ns each, and a dirty flag would save a fraction of half a
+millisecond at the price of a second source of truth. Engines that move ten thousand scripted objects a
+frame land in the same few milliseconds; the ones that do much better do it by
+not running a script per object, which is a game's decision and not a kernel's.

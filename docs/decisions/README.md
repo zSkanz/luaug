@@ -113,3 +113,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0071](0071-terrain-ground-is-drawn-from-a-height-atlas.md) | Terrain ground is drawn from a height atlas by a CDLOD grid on the GPU; only caves are meshes; the RHI gains `uploadTextureRegion` |
 | [0072](0072-particles-are-a-picture-simulated-on-the-frame.md) | Particles are a picture simulated on the frame, one instanced premultiplied draw; not soft, the RHI stays frozen; decals will be clustered |
 | [0073](0073-colour-textures-reach-the-gpu-as-srgb.md) | Colour textures reach the GPU as sRGB, compiled or loose; the RHI gains sRGB BC formats |
+| [0074](0074-jolt-runs-cross-platform-deterministic.md) | Jolt runs cross-platform deterministic at no measurable cost; the engine's transcendentals are what stands between it and level C |
