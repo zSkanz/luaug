@@ -277,8 +277,16 @@ void VoxelGrid::setChunk(VoxelChunkKey key, std::span<const BlockId> blocks)
 }
 
 std::optional<VoxelHit> raycastVoxels(const VoxelGrid& grid, core::f32 blockSize, const core::DVec3& origin,
-                                      const core::Vec3& direction, core::f64 reach) noexcept
+                                      const core::Vec3& direction, core::f64 reach,
+                                      std::span<const bool> passable) noexcept
 {
+    const auto stops = [&](i32 x, i32 y, i32 z) noexcept {
+        const BlockId id = grid.get(x, y, z);
+        if (id == AirBlock)
+            return false;
+        const BlockId type = blockTypeOf(id);
+        return !(type < passable.size() && passable[type]);
+    };
     const auto size = static_cast<core::f64>(blockSize);
     const core::f64 length = std::sqrt(static_cast<core::f64>(direction.x) * static_cast<core::f64>(direction.x) +
                                        static_cast<core::f64>(direction.y) * static_cast<core::f64>(direction.y) +
@@ -315,7 +323,7 @@ std::optional<VoxelHit> raycastVoxels(const VoxelGrid& grid, core::f32 blockSize
         }
     }
 
-    if (grid.get(block[0], block[1], block[2]) != AirBlock)
+    if (stops(block[0], block[1], block[2]))
         return VoxelHit{block, {0, 0, 0}, 0.0};
 
     // A ray crosses at most one cell per axis per block of length, so this
@@ -333,7 +341,7 @@ std::optional<VoxelHit> raycastVoxels(const VoxelGrid& grid, core::f32 blockSize
         const core::f64 along = nextBoundary[axis];
         block[axis] += stepSign[axis];
         nextBoundary[axis] += delta[axis];
-        if (grid.get(block[0], block[1], block[2]) != AirBlock) {
+        if (stops(block[0], block[1], block[2])) {
             std::array<i32, 3> face{0, 0, 0};
             face[axis] = -stepSign[axis];
             return VoxelHit{block, face, along * size};

@@ -1,8 +1,10 @@
 #include "luaug/script/services.h"
 
+#include "luaug/asset/voxel_mesher.h"
 #include "luaug/input/input.h"
 #include "luaug/platform/event.h"
 #include "luaug/scene/players.h"
+#include "luaug/scene/voxel_fluid.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/instance_binding.h"
@@ -17,6 +19,8 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -1162,9 +1166,10 @@ int voxelRegisterBlock(lua_State* L)
             return 1;
         }
     }
-    // Sixty-five thousand types is the id's range; refusing past it is kinder
-    // than wrapping an id onto somebody else's block.
-    if (voxels.types.size() >= 0xFFFFu) {
+    // Four thousand and ninety-five types is the id's range -- the rest of a
+    // stored id is the block's state (`asset::BlockTypeMask`) -- and refusing
+    // past it is kinder than wrapping an id onto somebody else's block.
+    if (voxels.types.size() >= asset::MaxBlockType) {
         const core::I18nArg args[] = {{"id", static_cast<core::i64>(voxels.types.size() + 1)},
                                       {"count", static_cast<core::i64>(voxels.types.size())}};
         raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
@@ -1191,14 +1196,45 @@ int voxelGetBlockId(lua_State* L)
     return 1;
 }
 
+int voxelSetBlockFluid(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    const asset::BlockId id = checkBlockId(L, 2, voxels);
+    if (id == asset::AirBlock) {
+        const core::I18nArg args[] = {{"id", static_cast<core::i64>(id)},
+                                      {"count", static_cast<core::i64>(voxels.types.size())}};
+        raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
+    }
+    const lua_Integer reach = luaL_checkinteger(L, 3);
+    const lua_Integer ticks = luaL_optinteger(L, 4, 5);
+    if (reach < 0 || reach > static_cast<lua_Integer>(asset::MaxFluidReach)) {
+        const core::I18nArg args[] = {{"reach", static_cast<core::i64>(reach)},
+                                      {"max", static_cast<core::i64>(asset::MaxFluidReach)}};
+        raise(L, LUAUG_TR("scene.err.voxel_fluid_reach"), args);
+    }
+    if (ticks < 1 || ticks > 65535) {
+        const core::I18nArg args[] = {{"ticks", static_cast<core::i64>(ticks)}};
+        raise(L, LUAUG_TR("scene.err.voxel_fluid_ticks"), args);
+    }
+    scene::VoxelBlockType& type = voxels.types[id - 1u];
+    type.fluidReach = static_cast<core::u8>(reach);
+    type.fluidTicks = static_cast<core::u32>(ticks);
+    voxels.revision += 1;
+    // A type that just became a fluid has blocks that should start moving.
+    scene::wakeAllFluids(voxels);
+    return 0;
+}
+
 int voxelSetBlock(lua_State* L)
 {
     scene::VoxelComponent& voxels = voxelsOf(L);
     const BlockCoord at = checkBlockCoord(L, 2);
     const asset::BlockId id = checkBlockId(L, 3, voxels);
     const bool changed = voxels.grid.set(at.x, at.y, at.z, id);
-    if (changed)
+    if (changed) {
         voxels.revision += 1;
+        scene::wakeFluids(voxels, at.x, at.y, at.z);
+    }
     lua_pushboolean(L, changed ? 1 : 0);
     return 1;
 }
@@ -1207,7 +1243,23 @@ int voxelGetBlock(lua_State* L)
 {
     const scene::VoxelComponent& voxels = voxelsOf(L);
     const BlockCoord at = checkBlockCoord(L, 2);
-    lua_pushinteger(L, static_cast<int>(voxels.grid.get(at.x, at.y, at.z)));
+    // The TYPE: a fluid's level is a state of its block, not a different block.
+    lua_pushinteger(L, static_cast<int>(asset::blockTypeOf(voxels.grid.get(at.x, at.y, at.z))));
+    return 1;
+}
+
+int voxelGetFluidDepth(lua_State* L)
+{
+    const scene::VoxelComponent& voxels = voxelsOf(L);
+    const BlockCoord at = checkBlockCoord(L, 2);
+    const asset::BlockId id = voxels.grid.get(at.x, at.y, at.z);
+    const asset::BlockId type = asset::blockTypeOf(id);
+    if (id == asset::AirBlock || !scene::isFluidType(voxels, type)) {
+        lua_pushnumber(L, 0.0);
+        return 1;
+    }
+    const asset::BlockId above = voxels.grid.get(at.x, at.y + 1, at.z);
+    lua_pushnumber(L, static_cast<double>(asset::fluidSurface(id, above, voxels.types[type - 1u].fluidReach)));
     return 1;
 }
 
@@ -1218,8 +1270,10 @@ int voxelFillBlocks(lua_State* L)
     const BlockCoord to = checkBlockCoord(L, 3);
     const asset::BlockId id = checkBlockId(L, 4, voxels);
     const core::u32 changed = voxels.grid.fill(from.x, from.y, from.z, to.x, to.y, to.z, id);
-    if (changed > 0)
+    if (changed > 0) {
         voxels.revision += 1;
+        scene::wakeFluidsInBox(voxels, from.x, from.y, from.z, to.x, to.y, to.z);
+    }
     lua_pushinteger(L, static_cast<int>(changed));
     return 1;
 }
@@ -1231,6 +1285,7 @@ int voxelClear(lua_State* L)
         voxels.grid.clear();
         voxels.revision += 1;
     }
+    voxels.fluidWakes.clear();
     return 0;
 }
 
@@ -1262,11 +1317,18 @@ int voxelRaycast(lua_State* L)
     const scene::VoxelComponent& voxels = voxelsOf(L);
     const core::Vec3 origin = checkVector3(L, 2);
     const core::Vec3 direction = checkVector3(L, 3);
+    // A fluid is passed through: a pickaxe swung at a lake bed hits the bed.
+    // (An array rather than a `std::vector<bool>`, which packs its bits and
+    // cannot be viewed as a span.)
+    const core::usize count = voxels.types.size() + 1;
+    const std::unique_ptr<bool[]> passable = std::make_unique<bool[]>(count);
+    for (core::usize type = 0; type < voxels.types.size(); ++type)
+        passable[type + 1] = voxels.types[type].fluidReach > 0;
     // The direction's length is the reach, as `Workspace:Raycast` has it.
     const std::optional<asset::VoxelHit> hit = asset::raycastVoxels(
         voxels.grid, voxels.blockSize,
         core::DVec3{static_cast<f64>(origin.x), static_cast<f64>(origin.y), static_cast<f64>(origin.z)}, direction,
-        static_cast<f64>(core::length(direction)));
+        static_cast<f64>(core::length(direction)), std::span<const bool>{passable.get(), count});
     if (!hit.has_value()) {
         lua_pushnil(L);
         lua_pushnil(L);
@@ -1344,6 +1406,8 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"VoxelService", "GetBlockId", voxelGetBlockId},
     {"VoxelService", "SetBlockTextures", voxelSetBlockTextures},
     {"VoxelService", "SetBlockOpacity", voxelSetBlockOpacity},
+    {"VoxelService", "SetBlockFluid", voxelSetBlockFluid},
+    {"VoxelService", "GetFluidDepth", voxelGetFluidDepth},
     {"VoxelService", "SetBlock", voxelSetBlock},
     {"VoxelService", "GetBlock", voxelGetBlock},
     {"VoxelService", "FillBlocks", voxelFillBlocks},

@@ -30,6 +30,7 @@ luaug_add_module(scene
         src/players.cpp
         src/ragdoll_build.cpp
         src/streaming_glue.cpp
+        src/voxel_fluid.cpp
         generated/class_descriptors.gen.cpp
     DEPS
         core
@@ -72,6 +73,7 @@ luaug_add_module_tests(scene
         tests/physics_sync_tests.cpp
         tests/ragdoll_build_tests.cpp
         tests/streaming_glue_tests.cpp
+        tests/voxel_fluid_tests.cpp
 )
 
 if(LUAUG_BUILD_TESTS)

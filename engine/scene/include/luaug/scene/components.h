@@ -39,6 +39,8 @@
 #include "luaug/core/types.h"
 #include "luaug/scene/types.h"
 
+#include <array>
+#include <map>
 #include <string>
 
 namespace luaug::scene {
@@ -584,6 +586,13 @@ struct VoxelBlockType
     // How much a translucent block lets through, 0 to 1, where it has no image
     // alpha of its own to say.
     f32 transparency = 0.5f;
+    // **A fluid, when above zero**: how many blocks it spreads sideways from a
+    // source, 1 to `asset::MaxFluidReach` (`luaug/scene/voxel_fluid.h`).
+    core::u8 fluidReach = 0;
+    // And how often it moves, in simulation ticks per step -- five is a
+    // quarter-second of water at sixty hertz, and a slower fluid is a larger
+    // number.
+    u32 fluidTicks = 5;
 };
 
 // One thing a player did this tick: an input action's name and its value (N1).
@@ -628,6 +637,11 @@ struct VoxelComponent
     // **Bumped on every write to `grid`**, the same trick the terrain uses: the
     // renderer and the physics mirror compare it before doing any work.
     core::u64 revision = 0;
+    // The blocks the fluid step is due to look at, by position, with the tick
+    // each is due. Ordered, so the step visits them the same way on every
+    // machine (R10), and copied with the component, so a world restored from
+    // a snapshot resumes its water where it was.
+    std::map<std::array<i32, 3>, core::u64> fluidWakes;
 };
 
 // `PVInstance`'s own state, and therefore attached to every `BasePart`, `Model`

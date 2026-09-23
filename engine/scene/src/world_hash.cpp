@@ -349,6 +349,23 @@ u64 World::worldHash() const
                     hasher.text(m_atoms.text(image));
                 hasher.pod(static_cast<core::u64>(static_cast<core::u32>(type.opacity)));
                 hasher.number(static_cast<f64>(type.transparency));
+                // Only for a fluid, so every world hashed before fluids existed
+                // hashes as it did.
+                if (type.fluidReach > 0) {
+                    hasher.pod(static_cast<core::u64>(type.fluidReach));
+                    hasher.pod(static_cast<core::u64>(type.fluidTicks));
+                }
+            }
+            // The steps water is still due to take are part of what the world
+            // will become, so they are part of what it is.
+            if (!voxels->fluidWakes.empty()) {
+                hasher.pod(static_cast<core::u64>(voxels->fluidWakes.size()));
+                for (const auto& [at, due] : voxels->fluidWakes) {
+                    hasher.pod(at[0]);
+                    hasher.pod(at[1]);
+                    hasher.pod(at[2]);
+                    hasher.pod(due);
+                }
             }
             for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
                 hasher.pod(key.x);

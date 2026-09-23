@@ -39,12 +39,25 @@ enum class BlockOpacity : core::u8
     Translucent = 2,
 };
 
-// What the mesher needs to know about a block type. Indexed by `BlockId`; an id
-// past the end is treated as a plain opaque block.
+// What the mesher needs to know about a block type. Indexed by the block's TYPE
+// (`blockTypeOf`); a type past the end is treated as a plain opaque block.
 struct BlockLook
 {
     BlockOpacity opacity = BlockOpacity::Opaque;
+    // **A fluid is drawn as deep as it is full and never collides.** Its faces
+    // are translucent whatever `opacity` says, its top sits at a height its
+    // level decides (`fluidSurface`), and none of it reaches the collider: a
+    // lake is something to wade into, not a floor to stand on.
+    bool fluid = false;
+    // How far the fluid spreads, which is what a level is a fraction of.
+    core::u8 reach = 0;
 };
+
+// How high a fluid block's surface stands inside its block, 0 to 1. Full when
+// the same fluid is above it or it is falling; otherwise a source stands a ninth
+// short of the top -- a surface reads as water rather than as a cube -- and each
+// block it spreads loses an equal share of that, so the last one is a film.
+[[nodiscard]] float fluidSurface(BlockId id, BlockId above, core::u8 reach) noexcept;
 
 struct VoxelMesh
 {
@@ -67,8 +80,8 @@ struct VoxelMesh
     // second draw, after every opaque surface and without writing depth.
     Mesh translucent;
 
-    // Every face for the collider, translucent ones included: glass is a wall.
-    // Positions only; one index list.
+    // Every face for the collider, translucent ones included -- glass is a wall
+    // -- and a fluid's excluded. Positions only; one index list.
     std::vector<core::Vec3> colliderPoints;
     std::vector<core::u32> colliderIndices;
 };

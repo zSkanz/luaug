@@ -46,6 +46,10 @@ voxels:SetBlockTextures(Glass, "asset://textures/glass.png")
 voxels:SetBlockOpacity(Glass, Enum.BlockOpacity.Translucent, 0)
 local Water = voxels:RegisterBlock("Water", Color3.new(0.1, 0.3, 0.6))
 voxels:SetBlockOpacity(Water, Enum.BlockOpacity.Translucent, 0.45)
+-- **And water is a fluid**: a block of it is a source that pours down first and
+-- then spreads five blocks sideways, shallower as it goes. It does not collide,
+-- and `Raycast` looks through it.
+voxels:SetBlockFluid(Water, 5)
 
 --- The ground's height at a column: two gentle waves, so there are hills.
 local function heightAt(x: number, z: number): number
@@ -78,6 +82,10 @@ for x = 4, 13 do
         voxels:FillBlocks(vector.create(x, math.min(h, level - 1), z), vector.create(x, level - 1, z), Water)
     end
 end
+
+-- A spring on the highest hill: it runs down the terraces towards the pond,
+-- a step of the simulation every five ticks.
+voxels:SetBlock(vector.create(10, heightAt(10, 0) + 1, 0), Water)
 
 -- A glass window in a stone wall.
 voxels:FillBlocks(vector.create(-14, 9, 8), vector.create(-8, 14, 8), Stone)

@@ -2877,6 +2877,17 @@
           "ThreadSafety": "Safe"
         },
         {
+          "Name": "GetFluidDepth",
+          "Parameters": [
+            {
+              "Name": "block",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Safe"
+        },
+        {
           "Name": "Raycast",
           "Parameters": [
             {
@@ -2927,6 +2938,25 @@
             }
           ],
           "Returns": ["boolean"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SetBlockFluid",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "number"
+            },
+            {
+              "Name": "reach",
+              "Type": "number"
+            },
+            {
+              "Name": "ticksPerStep",
+              "Type": "number?"
+            }
+          ],
+          "Returns": [],
           "ThreadSafety": "Unsafe"
         },
         {

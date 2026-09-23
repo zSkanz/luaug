@@ -1070,6 +1070,18 @@ void PhysicsSync::applyVoxels()
 
         const f64 chunkMetres = static_cast<f64>(asset::VoxelChunkEdge) * static_cast<f64>(voxels->blockSize);
         u32 rebuilt = 0;
+        // **Only which types are fluids**: every other block collides as the
+        // opaque solid it always did, glass and leaves included, and a fluid
+        // leaves the collider -- a lake is waded into, not stood on.
+        std::vector<asset::BlockLook> looks(voxels->types.size() + 1);
+        u64 fluidDigest = 0x666C7569ull;
+        for (usize at = 0; at < voxels->types.size(); ++at) {
+            if (voxels->types[at].fluidReach == 0)
+                continue;
+            looks[at + 1].fluid = true;
+            looks[at + 1].reach = voxels->types[at].fluidReach;
+            fluidDigest = combine(fluidDigest, static_cast<u64>(at + 1));
+        }
         for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
             bool near = false;
             for (const core::DVec3& mover : movers) {
@@ -1088,7 +1100,7 @@ void PhysicsSync::applyVoxels()
             if (!near)
                 continue;
 
-            u64 content = static_cast<u64>(std::bit_cast<u32>(voxels->blockSize));
+            u64 content = combine(static_cast<u64>(std::bit_cast<u32>(voxels->blockSize)), fluidDigest);
             for (const asset::VoxelChunkKey neighbour :
                  {key, asset::VoxelChunkKey{key.x - 1, key.y, key.z}, asset::VoxelChunkKey{key.x + 1, key.y, key.z},
                   asset::VoxelChunkKey{key.x, key.y - 1, key.z}, asset::VoxelChunkKey{key.x, key.y + 1, key.z},
@@ -1109,7 +1121,7 @@ void PhysicsSync::applyVoxels()
             if (rebuilt >= VoxelRebuildsPerTick)
                 continue; // the old collider, if any, stands until its turn
 
-            const asset::VoxelMesh meshed = asset::meshVoxelChunk(voxels->grid, key, {}, voxels->blockSize);
+            const asset::VoxelMesh meshed = asset::meshVoxelChunk(voxels->grid, key, looks, voxels->blockSize);
             physics::BodyHandle handle{};
             if (meshed.colliderIndices.size() >= 3) {
                 physics::BodyDesc desc;

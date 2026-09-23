@@ -85,7 +85,10 @@ u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Wor
         looks.assign(voxels->types.size() + 1, asset::BlockLook{});
         for (usize at = 0; at < voxels->types.size(); ++at) {
             looks[at + 1].opacity = static_cast<asset::BlockOpacity>(std::clamp(voxels->types[at].opacity, 0, 2));
+            looks[at + 1].fluid = voxels->types[at].fluidReach > 0;
+            looks[at + 1].reach = voxels->types[at].fluidReach;
             looksDigest = combine(looksDigest, static_cast<u64>(voxels->types[at].opacity) + 1u);
+            looksDigest = combine(looksDigest, static_cast<u64>(voxels->types[at].fluidReach));
         }
     }
 

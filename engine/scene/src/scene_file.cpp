@@ -9,6 +9,7 @@
 #include <luaug/scene/components.h>
 #include <luaug/scene/enum_registry.h>
 #include <luaug/scene/scene_file.h>
+#include <luaug/scene/voxel_fluid.h>
 #include <luaug/scene/world.h>
 
 #include <algorithm>
@@ -1029,6 +1030,10 @@ void writeVoxels(JsonWriter& writer, const World& world)
             writer.field("opacity", static_cast<f64>(type.opacity));
             writer.field("transparency", static_cast<f64>(type.transparency));
         }
+        if (type.fluidReach > 0) {
+            writer.field("fluidReach", static_cast<f64>(type.fluidReach));
+            writer.field("fluidTicks", static_cast<f64>(type.fluidTicks));
+        }
         writer.endObject();
     }
     writer.endArray();
@@ -1060,6 +1065,7 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
         return;
     voxels->grid.clear();
     voxels->types.clear();
+    voxels->fluidWakes.clear();
     voxels->blockSize = 1.0f;
     voxels->revision += 1;
 
@@ -1088,10 +1094,19 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
             };
             const auto opacity = static_cast<core::i32>(std::clamp(type["opacity"].asNumber(0.0), 0.0, 2.0));
             const auto transparency = static_cast<f32>(std::clamp(type["transparency"].asNumber(0.5), 0.0, 1.0));
-            voxels->types.push_back(VoxelBlockType{world.atoms().intern(type["name"].asString()), top, side,
-                                                   colour(type["bottom"], side), image(type["texture"]),
-                                                   image(type["sideTexture"]), image(type["bottomTexture"]), opacity,
-                                                   transparency});
+            VoxelBlockType read{world.atoms().intern(type["name"].asString()),
+                                top,
+                                side,
+                                colour(type["bottom"], side),
+                                image(type["texture"]),
+                                image(type["sideTexture"]),
+                                image(type["bottomTexture"]),
+                                opacity,
+                                transparency};
+            read.fluidReach = static_cast<core::u8>(
+                std::clamp(type["fluidReach"].asNumber(0.0), 0.0, static_cast<f64>(asset::MaxFluidReach)));
+            read.fluidTicks = static_cast<core::u32>(std::clamp(type["fluidTicks"].asNumber(5.0), 1.0, 65535.0));
+            voxels->types.push_back(read);
         }
     }
     if (const JsonValue chunks = node["chunks"]; chunks.type() == core::JsonType::Array) {
@@ -1109,6 +1124,11 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
                                   blocks);
         }
     }
+    // **A scene keeps its water, not the steps it was due.** Every fluid block
+    // is looked at once when the world is read, so a spring placed in the
+    // editor and saved runs when the game does; a lake that is already level
+    // settles in that one look and costs nothing after it.
+    wakeAllFluids(*voxels);
 }
 
 } // namespace

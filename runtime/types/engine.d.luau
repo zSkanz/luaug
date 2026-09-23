@@ -2038,7 +2038,7 @@ declare extern type VoxelService extends Instance with
     --- machine gets the same ids. Registering a name twice returns the id it already has and updates
     --- its colours. `color` is the block's top, and every face when it is the only colour given.
     --- `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a
-    --- grass block is green on top and earth everywhere else.
+    --- grass block is green on top and earth everywhere else. A world holds up to 4,095 block types.
     function RegisterBlock(self, name: string, color: Color3, sideColor: Color3?, bottomColor: Color3?): number
     --- Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top,
     --- its four sides and its underside; the sides default to the top and the underside to the sides,
@@ -2052,12 +2052,27 @@ declare extern type VoxelService extends Instance with
     --- is how much they let through where their image does not say. See-through blocks still collide --
     --- glass is a wall -- and do not shade the corners around them.
     function SetBlockOpacity(self, id: number, opacity: EnumBlockOpacity, transparency: number?): ()
+    --- Makes a block type a fluid -- water, lava, oil -- or, with a `reach` of 0, an ordinary block
+    --- again. A fluid block placed with `SetBlock` or `FillBlocks` is a SOURCE, and stays. From it the
+    --- fluid flows DOWN first, filling every block below it that is empty; where it cannot fall it
+    --- spreads SIDEWAYS, one level shallower per block, for `reach` blocks (1 to 7). Take the source
+    --- away and what it fed drains. It moves once every `ticksPerStep` simulation ticks (default 5, a
+    --- quarter of a second): a slower fluid is a larger number. A fluid is drawn see-through whatever
+    --- its opacity, as deep as it is full, and it does not collide and does not stop `Raycast`: a
+    --- character wades into a lake, and a pickaxe swung at the lake bed hits the bed. `GetBlock`
+    --- answers its type at every level; `GetFluidDepth` says how full it is.
+    function SetBlockFluid(self, id: number, reach: number, ticksPerStep: number?): ()
+    --- How full a block is with fluid, from 0 to 1: 1 where the fluid is falling or has more of itself
+    --- above, a little under 1 at a source, and shallower with every block it has spread. 0 for a block
+    --- that is not a fluid.
+    function GetFluidDepth(self, block: vector): number
     --- The id a block type was registered with, or nil for a name nobody registered.
     function GetBlockId(self, name: string): number?
     --- Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are
     --- rounded down. Returns whether anything changed.
     function SetBlock(self, block: vector, id: number): boolean
-    --- The id of the block at a block coordinate, 0 for air.
+    --- The id of the block at a block coordinate, 0 for air. For a fluid it is the fluid's type at
+    --- every level: how full the block is, is `GetFluidDepth`'s answer.
     function GetBlock(self, block: vector): number
     --- Fills every block in the box between two block coordinates, both included, with one id -- 0
     --- empties it. Returns how many blocks changed. The way to build a floor, a wall or a world's first
@@ -2071,7 +2086,8 @@ declare extern type VoxelService extends Instance with
     function BlockToWorld(self, block: vector): vector
     --- Walks a ray block by block and returns the first solid block it enters and the face it entered
     --- through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length.
-    --- The block is what a pickaxe breaks; the block plus the normal is where a placed block goes.
+    --- The block is what a pickaxe breaks; the block plus the normal is where a placed block goes. A
+    --- fluid is passed through, as if it were air.
     function Raycast(self, origin: vector, direction: vector): (vector?, vector?)
 end
 

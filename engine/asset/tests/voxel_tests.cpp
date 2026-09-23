@@ -3,6 +3,7 @@
 #include "luaug/asset/voxel_mesher.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <doctest/doctest.h>
@@ -201,6 +202,75 @@ TEST_CASE("a ray stops at its reach, and one that starts inside a block hits it 
         raycastVoxels(grid, 0.5f, core::DVec3{0.25, 0.25, 0.25}, core::Vec3{1.0f, 0.0f, 0.0f}, 100.0);
     REQUIRE(half.has_value());
     CHECK(half->distance == doctest::Approx(2.25));
+}
+
+TEST_CASE("a fluid is drawn as deep as it is full, see-through, and never collides")
+{
+    constexpr BlockId Water = 2;
+    // Stone, then water: water is the fluid, reaching three blocks.
+    std::vector<BlockLook> looks(3);
+    looks[Water].fluid = true;
+    looks[Water].reach = 3;
+
+    VoxelGrid grid;
+    (void)grid.fill(0, 0, 0, 3, 0, 3, Stone);
+    (void)grid.set(1, 1, 1, Water);                    // a source on the floor
+    (void)grid.set(2, 1, 1, blockWithState(Water, 2)); // two blocks out
+    const VoxelMesh mesh = meshVoxelChunk(grid, VoxelChunkKey{0, 0, 0}, looks, 1.0f);
+
+    // **Nothing of the water is solid**: its faces are all in the translucent
+    // mesh, and every collider point is on the stone -- none stands above the
+    // floor's top at y = 1.
+    CHECK(mesh.cutout.vertices.empty());
+    REQUIRE_FALSE(mesh.translucent.vertices.empty());
+    for (const core::Vec3& point : mesh.colliderPoints)
+        CHECK(static_cast<double>(point.y) <= 1.0 + 1e-6);
+
+    // The source's surface stands a ninth short of its block; the one two
+    // blocks out is shallower by two shares of four.
+    float sourceTop = 0.0f;
+    float spreadTop = 0.0f;
+    for (const Vertex& vertex : mesh.translucent.vertices) {
+        if (vertex.normal.y < 0.5f)
+            continue;
+        if (vertex.position.x <= 2.0f)
+            sourceTop = std::max(sourceTop, vertex.position.y);
+        else
+            spreadTop = std::max(spreadTop, vertex.position.y);
+    }
+    CHECK(static_cast<double>(sourceTop) == doctest::Approx(1.0 + 8.0 / 9.0));
+    CHECK(static_cast<double>(spreadTop) == doctest::Approx(1.0 + (8.0 / 9.0) * 2.0 / 4.0));
+    CHECK(static_cast<double>(fluidSurface(blockWithState(Water, 1), Water, 3)) == doctest::Approx(1.0));
+
+    // Every face is wound outwards, and the step between the two levels is a
+    // face of its own on the deeper block's side.
+    for (core::usize at = 0; at + 2 < mesh.translucent.indices.size(); at += 3) {
+        const Vertex& a = mesh.translucent.vertices[mesh.translucent.indices[at]];
+        const Vertex& b = mesh.translucent.vertices[mesh.translucent.indices[at + 1]];
+        const Vertex& c = mesh.translucent.vertices[mesh.translucent.indices[at + 2]];
+        CHECK(core::dot(core::cross(b.position - a.position, c.position - a.position), a.normal) > 0.0f);
+    }
+    // A type's id rides in the tangent, never its state.
+    for (const Vertex& vertex : mesh.translucent.vertices)
+        CHECK(static_cast<double>(vertex.tangent[0]) == doctest::Approx(static_cast<double>(Water)));
+}
+
+TEST_CASE("a ray passes through a fluid to what is under it")
+{
+    constexpr BlockId Water = 2;
+    VoxelGrid grid;
+    (void)grid.set(0, 0, 0, Stone);
+    (void)grid.set(0, 1, 0, blockWithState(Water, 3));
+    const std::array<bool, 3> passable{false, false, true};
+    const std::optional<VoxelHit> hit =
+        raycastVoxels(grid, 1.0f, core::DVec3{0.5, 5.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 10.0, passable);
+    REQUIRE(hit.has_value());
+    CHECK(hit->block == std::array<core::i32, 3>{0, 0, 0});
+    // And without the list, the water is what it meets.
+    const std::optional<VoxelHit> blocked =
+        raycastVoxels(grid, 1.0f, core::DVec3{0.5, 5.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 10.0);
+    REQUIRE(blocked.has_value());
+    CHECK(blocked->block == std::array<core::i32, 3>{0, 1, 0});
 }
 
 TEST_CASE("what meshing a block world costs" * doctest::skip())

@@ -12,6 +12,7 @@
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
 #include "luaug/scene/players.h"
+#include "luaug/scene/voxel_fluid.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/net_module.h"
 #include "luaug/ui/scene_types.h"
@@ -828,6 +829,11 @@ void WorldHost::tick()
 
     if (m_physics.has_value())
         m_physics->step(state.fixedTimestep);
+    // Fluids are simulation too, and move in the same half of the tick: a
+    // script that breaks a dam in `PreSimulation` sees the first block of
+    // water move in `PostSimulation`.
+    m_world->voxels().forEach(
+        [&state](core::InstanceId, scene::VoxelComponent& voxels) { (void)scene::stepFluids(voxels, state.tick); });
 
     m_runtime->firePhase(core::Phase::PostSimulation, state.fixedTimestep);
     m_runtime->drain(core::Phase::PostSimulation);

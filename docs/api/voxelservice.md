@@ -40,15 +40,19 @@ Fills every block in the box between two block coordinates, both included, with 
 
 ### `GetBlock(block: vector): number`
 
-The id of the block at a block coordinate, 0 for air.
+The id of the block at a block coordinate, 0 for air. For a fluid it is the fluid's type at every level: how full the block is, is `GetFluidDepth`'s answer.
 
 ### `GetBlockId(name: string): number?`
 
 The id a block type was registered with, or nil for a name nobody registered.
 
+### `GetFluidDepth(block: vector): number`
+
+How full a block is with fluid, from 0 to 1: 1 where the fluid is falling or has more of itself above, a little under 1 at a source, and shallower with every block it has spread. 0 for a block that is not a fluid.
+
 ### `Raycast(origin: vector, direction: vector): (vector?, vector?)`
 
-Walks a ray block by block and returns the first solid block it enters and the face it entered through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length. The block is what a pickaxe breaks; the block plus the normal is where a placed block goes.
+Walks a ray block by block and returns the first solid block it enters and the face it entered through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length. The block is what a pickaxe breaks; the block plus the normal is where a placed block goes. A fluid is passed through, as if it were air.
 
 ### `RegisterBlock(name: string, color: Color3, sideColor: Color3?, bottomColor: Color3?): number`
 
@@ -56,9 +60,19 @@ Registers a block type and returns its id. Ids are handed out in registration or
 
 `color` is the block's top, and every face when it is the only colour given. `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a grass block is green on top and earth everywhere else.
 
+A world holds up to 4,095 block types.
+
 ### `SetBlock(block: vector, id: number): boolean`
 
 Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are rounded down. Returns whether anything changed.
+
+### `SetBlockFluid(id: number, reach: number, ticksPerStep: number?)`
+
+Makes a block type a fluid -- water, lava, oil -- or, with a `reach` of 0, an ordinary block again.
+
+A fluid block placed with `SetBlock` or `FillBlocks` is a SOURCE, and stays. From it the fluid flows DOWN first, filling every block below it that is empty; where it cannot fall it spreads SIDEWAYS, one level shallower per block, for `reach` blocks (1 to 7). Take the source away and what it fed drains. It moves once every `ticksPerStep` simulation ticks (default 5, a quarter of a second): a slower fluid is a larger number.
+
+A fluid is drawn see-through whatever its opacity, as deep as it is full, and it does not collide and does not stop `Raycast`: a character wades into a lake, and a pickaxe swung at the lake bed hits the bed. `GetBlock` answers its type at every level; `GetFluidDepth` says how full it is.
 
 ### `SetBlockOpacity(id: number, opacity: Enum.BlockOpacity, transparency: number?)`
 

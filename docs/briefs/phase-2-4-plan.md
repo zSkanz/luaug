@@ -987,10 +987,21 @@ so the depth prepass never writes a leaf's holes.
 block world of sixteen cells or more leaves the scene as `.lvoxel` cells and
 streams around the foci, and a cell somebody built in is never evicted.
 
-**Not built yet, and named so it is not mistaken for done:** a block
-type's images and opacity set from the editor's panel rather than a script;
-cutout shadows (a leaf casts a full square); and water that behaves as a fluid
-rather than a see-through block.
+**Built on 2026-09-23:** cutout shadows, where a leaf casts its holes
+through the forward pass's own test. Also water that behaves as a fluid:
+`SetBlockFluid` makes a type pour down first, spread its reach sideways one
+level shallower per block, and drain when nothing feeds it. It uses the rules
+block games settled on, stepped on the simulation clock and only where
+something changed. The fluid's level lives in the stored id's top four bits,
+the block-state layout those games shipped, so a type is one of 4,095 and
+nothing about the chunk format changed. A fluid never collides and `Raycast`
+passes through it (`luaug/scene/voxel_fluid.h`).
+
+**Not built yet, and named so it is not mistaken for done:** a block type's
+images and opacity set from the editor's panel rather than a script. Two
+things are left of fluids: a streamed-in cell's water stays still until
+something next to it changes, and two fluids meeting do not react -- water
+on lava makes nothing.
 
 ## The unresolved list, carried forward rather than closed
 

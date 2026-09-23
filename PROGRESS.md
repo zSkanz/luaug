@@ -124,6 +124,11 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   says why. What it does not have yet: an editor tool that places a block,
   transparent blocks, and chunks streamed from disk.
 
+  **Water is a fluid since 2026-09-23**: `SetBlockFluid` makes a type pour,
+  spread and drain on the simulation clock, deterministically, and never
+  collide. `examples/14-voxels` has a spring running down its hill into the
+  pond. Leaves cast their holes in shadow.
+
   The editor has a block tool for it since 2026-09-22: place, break and replace,
   a palette of registered types with their three face colours, and one undo
   step per stroke. Block faces have images and blocks can be see-through --

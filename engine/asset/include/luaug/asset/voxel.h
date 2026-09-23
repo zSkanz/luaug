@@ -34,6 +34,45 @@ namespace luaug::asset {
 using BlockId = core::u16;
 inline constexpr BlockId AirBlock = 0;
 
+// --- Block states ------------------------------------------------------------
+//
+// **A stored id is a type and a state**, the layout the classic block games
+// shipped with: the low twelve bits name the registered type and the high four
+// carry its state. A block with no state is its type, so every grid written
+// before states existed reads exactly as it did -- and the chunk format, its
+// digest and the streamed cells did not change.
+//
+// Four bits is what a fluid needs (below), and nothing else uses them yet.
+inline constexpr BlockId BlockTypeMask = 0x0FFF;
+inline constexpr core::u32 BlockStateShift = 12;
+// The highest type a registry may hand out: the rest of the id is state.
+inline constexpr BlockId MaxBlockType = BlockTypeMask;
+
+[[nodiscard]] constexpr BlockId blockTypeOf(BlockId id) noexcept
+{
+    return static_cast<BlockId>(id & BlockTypeMask);
+}
+
+[[nodiscard]] constexpr core::u32 blockStateOf(BlockId id) noexcept
+{
+    return static_cast<core::u32>(id) >> BlockStateShift;
+}
+
+[[nodiscard]] constexpr BlockId blockWithState(BlockId type, core::u32 state) noexcept
+{
+    return static_cast<BlockId>((type & BlockTypeMask) | ((state & 0xFu) << BlockStateShift));
+}
+
+// A fluid's state. The low three bits are its level: 0 at a source, and one more
+// for every block it has spread sideways from one. The fourth is set while it
+// falls, fed from the block above -- a falling block is full, and lands as if
+// it were a source. A type placed as itself (state 0) is therefore a source.
+inline constexpr core::u32 FluidLevelMask = 0x7;
+inline constexpr core::u32 FluidFalling = 0x8;
+// How far a fluid can spread sideways from a source, in blocks: the level's
+// three bits.
+inline constexpr core::u32 MaxFluidReach = 7;
+
 inline constexpr core::u32 VoxelChunkEdge = 16;
 inline constexpr core::u32 VoxelChunkVolume = VoxelChunkEdge * VoxelChunkEdge * VoxelChunkEdge;
 
@@ -151,8 +190,12 @@ struct VoxelHit
 // unit length; `reach` is in metres. One implementation for the script's
 // `Raycast` and the editor's block tool, so a tool and a game can never
 // disagree about which block is under the pointer.
+//
+// `passable`, indexed by block TYPE, names the types a ray goes through as if
+// they were air: a fluid, which a pickaxe swung at the lake bed must not stop
+// at. Empty means every block stops it.
 [[nodiscard]] std::optional<VoxelHit> raycastVoxels(const VoxelGrid& grid, core::f32 blockSize,
                                                     const core::DVec3& origin, const core::Vec3& direction,
-                                                    core::f64 reach) noexcept;
+                                                    core::f64 reach, std::span<const bool> passable = {}) noexcept;
 
 } // namespace luaug::asset

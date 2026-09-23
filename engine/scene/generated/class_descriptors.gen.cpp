@@ -2083,13 +2083,13 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 11> voxelServiceMethods;
+    static std::array<MethodDesc, 13> voxelServiceMethods;
     voxelServiceMethods = {{
         MethodDesc{
             .name = atoms.intern("RegisterBlock"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colours.\012\012`color` is the block's top, and every face when it is the only colour given. `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a grass block is green on top and earth everywhere else.",
+            .doc = "Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colours.\012\012`color` is the block's top, and every face when it is the only colour given. `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a grass block is green on top and earth everywhere else.\012\012A world holds up to 4,095 block types.",
         },
         MethodDesc{
             .name = atoms.intern("SetBlockTextures"),
@@ -2102,6 +2102,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "Says how much of what is behind a block type shows through it. `Cutout` blocks have holes where their image is transparent; `Translucent` ones blend, and `transparency` (0 to 1, default 0.5) is how much they let through where their image does not say. See-through blocks still collide -- glass is a wall -- and do not shade the corners around them.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetBlockFluid"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Makes a block type a fluid -- water, lava, oil -- or, with a `reach` of 0, an ordinary block again.\012\012A fluid block placed with `SetBlock` or `FillBlocks` is a SOURCE, and stays. From it the fluid flows DOWN first, filling every block below it that is empty; where it cannot fall it spreads SIDEWAYS, one level shallower per block, for `reach` blocks (1 to 7). Take the source away and what it fed drains. It moves once every `ticksPerStep` simulation ticks (default 5, a quarter of a second): a slower fluid is a larger number.\012\012A fluid is drawn see-through whatever its opacity, as deep as it is full, and it does not collide and does not stop `Raycast`: a character wades into a lake, and a pickaxe swung at the lake bed hits the bed. `GetBlock` answers its type at every level; `GetFluidDepth` says how full it is.",
+        },
+        MethodDesc{
+            .name = atoms.intern("GetFluidDepth"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Safe,
+            .doc = "How full a block is with fluid, from 0 to 1: 1 where the fluid is falling or has more of itself above, a little under 1 at a source, and shallower with every block it has spread. 0 for a block that is not a fluid.",
         },
         MethodDesc{
             .name = atoms.intern("GetBlockId"),
@@ -2119,7 +2131,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("GetBlock"),
             .yields = false,
             .threadSafety = ThreadSafety::Safe,
-            .doc = "The id of the block at a block coordinate, 0 for air.",
+            .doc = "The id of the block at a block coordinate, 0 for air. For a fluid it is the fluid's type at every level: how full the block is, is `GetFluidDepth`'s answer.",
         },
         MethodDesc{
             .name = atoms.intern("FillBlocks"),
@@ -2149,7 +2161,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("Raycast"),
             .yields = false,
             .threadSafety = ThreadSafety::Safe,
-            .doc = "Walks a ray block by block and returns the first solid block it enters and the face it entered through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length. The block is what a pickaxe breaks; the block plus the normal is where a placed block goes.",
+            .doc = "Walks a ray block by block and returns the first solid block it enters and the face it entered through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length. The block is what a pickaxe breaks; the block plus the normal is where a placed block goes. A fluid is passed through, as if it were air.",
         },
     }};
     ClassDescriptor voxelServiceDesc;

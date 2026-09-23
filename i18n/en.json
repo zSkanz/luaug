@@ -177,6 +177,8 @@
   "asset.chunk.err.magic": "That file is not a LuauG world chunk.",
   "scene.err.terrain_not_empty": "VoxelSize can only be set while the terrain is empty. Clear it first.",
   "scene.err.voxel_unknown_block": "No block type has id {id}: {count} are registered, and 0 is air.",
+  "scene.err.voxel_fluid_reach": "A fluid spreads 0 to {max} blocks sideways, not {reach}. 0 makes it an ordinary block again.",
+  "scene.err.voxel_fluid_ticks": "A fluid moves once every 1 to 65535 ticks, not {ticks}.",
   "scene.err.voxel_not_empty": "BlockSize can only be set while the block world is empty. Clear it first.",
   "asset.terrain.err.malformed": "The terrain cell is malformed: a count, an offset or a key points outside it.",
   "asset.terrain.err.too_large": "The terrain cell declares more tiles or bricks than this engine will load.",

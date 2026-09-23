@@ -1260,7 +1260,8 @@ local Classes: { Schema.Class } = {
                     .. "id it already has and updates its colours.\n\n"
                     .. "`color` is the block's top, and every face when it is the only colour given. "
                     .. "`sideColor` is the four sides and `bottomColor` the underside, which defaults to the "
-                    .. "sides: a grass block is green on top and earth everywhere else.",
+                    .. "sides: a grass block is green on top and earth everywhere else.\n\n"
+                    .. "A world holds up to 4,095 block types.",
             },
             {
                 Name = "SetBlockTextures",
@@ -1295,6 +1296,38 @@ local Classes: { Schema.Class } = {
                     .. "blocks still collide -- glass is a wall -- and do not shade the corners around them.",
             },
             {
+                Name = "SetBlockFluid",
+                Parameters = {
+                    { Name = "id", Type = "number" },
+                    { Name = "reach", Type = "number" },
+                    { Name = "ticksPerStep", Type = "number?" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Makes a block type a fluid -- water, lava, oil -- or, with a `reach` of 0, an ordinary "
+                    .. "block again.\n\n"
+                    .. "A fluid block placed with `SetBlock` or `FillBlocks` is a SOURCE, and stays. From it the "
+                    .. "fluid flows DOWN first, filling every block below it that is empty; where it cannot fall "
+                    .. "it spreads SIDEWAYS, one level shallower per block, for `reach` blocks (1 to 7). Take the "
+                    .. "source away and what it fed drains. It moves once every `ticksPerStep` simulation ticks "
+                    .. "(default 5, a quarter of a second): a slower fluid is a larger number.\n\n"
+                    .. "A fluid is drawn see-through whatever its opacity, as deep as it is full, and it does not "
+                    .. "collide and does not stop `Raycast`: a character wades into a lake, and a pickaxe swung "
+                    .. "at the lake bed hits the bed. `GetBlock` answers its type at every level; "
+                    .. "`GetFluidDepth` says how full it is.",
+            },
+            {
+                Name = "GetFluidDepth",
+                Parameters = {
+                    { Name = "block", Type = "vector" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Safe",
+                Doc = "How full a block is with fluid, from 0 to 1: 1 where the fluid is falling or has more of "
+                    .. "itself above, a little under 1 at a source, and shallower with every block it has "
+                    .. "spread. 0 for a block that is not a fluid.",
+            },
+            {
                 Name = "GetBlockId",
                 Parameters = {
                     { Name = "name", Type = "string" },
@@ -1321,7 +1354,8 @@ local Classes: { Schema.Class } = {
                 },
                 Returns = { "number" },
                 ThreadSafety = "Safe",
-                Doc = "The id of the block at a block coordinate, 0 for air.",
+                Doc = "The id of the block at a block coordinate, 0 for air. For a fluid it is the fluid's "
+                    .. "type at every level: how full the block is, is `GetFluidDepth`'s answer.",
             },
             {
                 Name = "FillBlocks",
@@ -1372,7 +1406,7 @@ local Classes: { Schema.Class } = {
                 Doc = "Walks a ray block by block and returns the first solid block it enters and the face "
                     .. "it entered through, as an outward normal -- or nil and nil if it hits nothing within "
                     .. "`direction`'s length. The block is what a pickaxe breaks; the block plus the normal "
-                    .. "is where a placed block goes.",
+                    .. "is where a placed block goes. A fluid is passed through, as if it were air.",
             },
         } :: { Schema.Method },
     },

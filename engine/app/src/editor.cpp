@@ -8,6 +8,7 @@
 #include <luaug/scene/class_registry.h>
 #include <luaug/scene/pivot.h>
 #include <luaug/scene/scene_file.h>
+#include <luaug/scene/voxel_fluid.h>
 #include <luaug/scene/world.h>
 
 #include <algorithm>
@@ -15,7 +16,9 @@
 #include <cstdio>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -3353,7 +3356,11 @@ bool Editor::applyBlockAt(scene::VoxelComponent& voxels)
     if (!target.has_value() || !blockEditChanges(voxels, *target))
         return false;
     const std::array<core::i32, 3>& at = *target;
-    return voxels.grid.set(at[0], at[1], at[2], m_blockOp == BlockOp::Break ? asset::AirBlock : m_blockType);
+    if (!voxels.grid.set(at[0], at[1], at[2], m_blockOp == BlockOp::Break ? asset::AirBlock : m_blockType))
+        return false;
+    // Water beside a broken wall is due to move -- when the world next plays.
+    scene::wakeFluids(voxels, at[0], at[1], at[2]);
+    return true;
 }
 
 bool Editor::driveBlocks(scene::World& world, Inspector& inspector)
@@ -3372,8 +3379,15 @@ bool Editor::driveBlocks(scene::World& world, Inspector& inspector)
 
     const PickRay ray = rayThrough(m_pointer);
     const asset::VoxelGrid& aimAt = m_blockStroke.has_value() ? m_blockStroke->aimGrid : voxels->grid;
+    // Aimed through water, as a game's pickaxe is: building a lake bed means
+    // pointing at the bed.
+    const core::usize typeCount = voxels->types.size() + 1;
+    const std::unique_ptr<bool[]> fluids = std::make_unique<bool[]>(typeCount);
+    for (core::usize type = 0; type < voxels->types.size(); ++type)
+        fluids[type + 1] = voxels->types[type].fluidReach > 0;
     if (const std::optional<asset::VoxelHit> hit =
-            asset::raycastVoxels(aimAt, voxels->blockSize, ray.origin, ray.direction, BrushReach);
+            asset::raycastVoxels(aimAt, voxels->blockSize, ray.origin, ray.direction, BrushReach,
+                                 std::span<const bool>{fluids.get(), typeCount});
         hit.has_value()) {
         m_blockAim = BlockAim{hit->block, hit->face, false};
     }

@@ -32,6 +32,18 @@ struct Face
 
 } // namespace
 
+float fluidSurface(BlockId id, BlockId above, core::u8 reach) noexcept
+{
+    if (above != AirBlock && blockTypeOf(above) == blockTypeOf(id))
+        return 1.0f;
+    const u32 state = blockStateOf(id);
+    if ((state & FluidFalling) != 0)
+        return 1.0f;
+    const float span = static_cast<float>(std::max<u32>(reach, 1u)) + 1.0f;
+    const float level = static_cast<float>(std::min<u32>(state & FluidLevelMask, reach));
+    return (8.0f / 9.0f) * (span - level) / span;
+}
+
 VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<const BlockLook> looks, float blockSize)
 {
     VoxelMesh out;
@@ -59,8 +71,16 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
         }
     }
 
-    const auto opacityOf = [&looks](BlockId id) noexcept {
-        return id < looks.size() ? looks[id].opacity : BlockOpacity::Opaque;
+    // Everything about a block is its TYPE's; the state bits say only which
+    // way a fluid is flowing.
+    const auto lookOf = [&looks](BlockId id) noexcept {
+        const BlockId type = blockTypeOf(id);
+        return type < looks.size() ? looks[type] : BlockLook{};
+    };
+    const auto isFluid = [&](BlockId id) noexcept { return id != AirBlock && lookOf(id).fluid; };
+    const auto opacityOf = [&](BlockId id) noexcept {
+        const BlockLook look = lookOf(id);
+        return look.fluid ? BlockOpacity::Translucent : look.opacity;
     };
     // Only an opaque block hides a face or darkens a corner: light passes
     // through glass and between leaves.
@@ -73,14 +93,17 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
     // shows unless the two are the same see-through kind -- water against water
     // and glass against glass have no face between them -- except for cutout,
     // where the leaves behind leaves are exactly what makes a tree look full.
+    //
+    // A fluid's own faces are not this pass's: they have a height, and are
+    // drawn below.
     const auto faceShows = [&](BlockId id, BlockId front) noexcept {
-        if (id == AirBlock)
+        if (id == AirBlock || isFluid(id))
             return false;
         if (front == AirBlock)
             return true;
         if (opacityOf(front) == BlockOpacity::Opaque)
             return false;
-        return front != id || opacityOf(id) == BlockOpacity::Cutout;
+        return blockTypeOf(front) != blockTypeOf(id) || opacityOf(id) == BlockOpacity::Cutout;
     };
 
     std::array<Face, VoxelChunkVolume / VoxelChunkEdge> mask{};
@@ -106,7 +129,7 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
                         if (!faceShows(id, padded[paddedIndex(front[0], front[1], front[2])]))
                             continue;
                         face.present = true;
-                        face.id = id;
+                        face.id = blockTypeOf(id);
                         // Each corner: the two blocks beside it and the one
                         // diagonal to it, in the layer the face looks into.
                         static constexpr std::array<std::array<i32, 2>, 4> Corners{
@@ -210,6 +233,103 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
                             out.colliderIndices.push_back(colliderFirst + index);
                         }
                         i += width;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Fluids ---------------------------------------------------------------
+    //
+    // One block at a time rather than swept into rectangles: two neighbours
+    // at different levels have surfaces at different heights, and the step
+    // between them is a face of its own. Translucent, and never in the
+    // collider.
+    const auto fluidQuad = [&](const std::array<std::array<float, 3>, 4>& corners, const Vec3& normal, BlockId type) {
+        Mesh& target = out.translucent;
+        const auto first = static_cast<u32>(target.vertices.size());
+        for (usize corner = 0; corner < 4; ++corner) {
+            Vertex vertex;
+            vertex.position = Vec3{(static_cast<float>(baseX) + corners[corner][0]) * blockSize,
+                                   (static_cast<float>(baseY) + corners[corner][1]) * blockSize,
+                                   (static_cast<float>(baseZ) + corners[corner][2]) * blockSize};
+            vertex.normal = normal;
+            vertex.tangent[0] = static_cast<float>(type);
+            vertex.tangent[1] = 1.0f;
+            vertex.tangent[2] = 0.0f;
+            vertex.tangent[3] = 1.0f;
+            // The face's own two axes, in blocks, for the procedural grain.
+            const bool vertical = normal.y == 0.0f;
+            vertex.uv[0] = vertical ? corners[corner][normal.x != 0.0f ? 2 : 0] : corners[corner][0];
+            vertex.uv[1] = vertical ? corners[corner][1] : corners[corner][2];
+            target.vertices.push_back(vertex);
+        }
+        // Counter-clockwise seen from the side the normal points to.
+        for (const u32 index : {0u, 1u, 2u, 0u, 2u, 3u})
+            target.indices.push_back(first + index);
+    };
+    for (i32 y = 0; y < Edge; ++y) {
+        for (i32 z = 0; z < Edge; ++z) {
+            for (i32 x = 0; x < Edge; ++x) {
+                const BlockId id = padded[paddedIndex(x, y, z)];
+                if (!isFluid(id))
+                    continue;
+                const BlockId type = blockTypeOf(id);
+                const u8 reach = lookOf(id).reach;
+                const auto fx = static_cast<float>(x);
+                const auto fy = static_cast<float>(y);
+                const auto fz = static_cast<float>(z);
+                const float top = fy + fluidSurface(id, padded[paddedIndex(x, y + 1, z)], reach);
+                const auto sameFluid = [type](BlockId other) noexcept {
+                    return other != AirBlock && blockTypeOf(other) == type;
+                };
+
+                const BlockId above = padded[paddedIndex(x, y + 1, z)];
+                if (!sameFluid(above) && !opaqueId(above)) {
+                    fluidQuad(
+                        {{{fx, top, fz}, {fx, top, fz + 1.0f}, {fx + 1.0f, top, fz + 1.0f}, {fx + 1.0f, top, fz}}},
+                        Vec3{0.0f, 1.0f, 0.0f}, type);
+                }
+                const BlockId below = padded[paddedIndex(x, y - 1, z)];
+                if (!sameFluid(below) && !opaqueId(below)) {
+                    fluidQuad({{{fx, fy, fz}, {fx + 1.0f, fy, fz}, {fx + 1.0f, fy, fz + 1.0f}, {fx, fy, fz + 1.0f}}},
+                              Vec3{0.0f, -1.0f, 0.0f}, type);
+                }
+
+                // The four sides: whole against air or anything see-through, and
+                // against the same fluid only the part standing above it.
+                static constexpr std::array<std::array<i32, 2>, 4> Sides{{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}};
+                for (const std::array<i32, 2>& side : Sides) {
+                    const i32 nx = x + side[0];
+                    const i32 nz = z + side[1];
+                    const BlockId next = padded[paddedIndex(nx, y, nz)];
+                    float low = fy;
+                    if (sameFluid(next)) {
+                        low = fy + fluidSurface(next, padded[paddedIndex(nx, y + 1, nz)], reach);
+                        if (low >= top)
+                            continue;
+                    }
+                    else if (opaqueId(next)) {
+                        continue;
+                    }
+                    const Vec3 normal{static_cast<float>(side[0]), 0.0f, static_cast<float>(side[1])};
+                    if (side[0] > 0) {
+                        const float at = fx + 1.0f;
+                        fluidQuad({{{at, low, fz}, {at, top, fz}, {at, top, fz + 1.0f}, {at, low, fz + 1.0f}}}, normal,
+                                  type);
+                    }
+                    else if (side[0] < 0) {
+                        fluidQuad({{{fx, low, fz}, {fx, low, fz + 1.0f}, {fx, top, fz + 1.0f}, {fx, top, fz}}}, normal,
+                                  type);
+                    }
+                    else if (side[1] > 0) {
+                        const float at = fz + 1.0f;
+                        fluidQuad({{{fx, low, at}, {fx + 1.0f, low, at}, {fx + 1.0f, top, at}, {fx, top, at}}}, normal,
+                                  type);
+                    }
+                    else {
+                        fluidQuad({{{fx, low, fz}, {fx, top, fz}, {fx + 1.0f, top, fz}, {fx + 1.0f, low, fz}}}, normal,
+                                  type);
                     }
                 }
             }
