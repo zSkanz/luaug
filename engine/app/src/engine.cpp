@@ -2059,15 +2059,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(), inspector);
             if (brushTook)
                 editor.touch();
+            // The block tool, on the brush's terms and after it: at most one
+            // of the two is the selected tool, so at most one can take.
+            const bool blockTook = !brushTook && editor.driveBlocks(authored(), inspector);
+            if (blockTook)
+                editor.touch();
 
-            const bool gizmoTook = !brushTook && editor.driveGizmo(authored(), inspector);
+            const bool gizmoTook = !brushTook && !blockTook && editor.driveGizmo(authored(), inspector);
             // A drag moves parts without ever producing a command, so the one
             // place that knows it happened is here.
             if (gizmoTook)
                 editor.touch();
 
             const core::InstanceId wasSelected = inspector.selection();
-            if (!gizmoTook && !brushTook)
+            if (!gizmoTook && !brushTook && !blockTook)
                 // The root the VIEWPORT is drawing, so a click can only land
                 // on something that is on screen -- the stage's workspace while
                 // a stamp is open, the host's otherwise.
@@ -3117,6 +3122,23 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                             static_cast<f32>(aim->position.y - origin.y),
                                             static_cast<f32>(aim->position.z - origin.z)};
                     drawBrushRing(centre, aim->normal, editor.brush().radius, debugDraw);
+                }
+                // **The cell a block click would change**, as a box a hair
+                // larger than the block so it is not buried in the faces it
+                // outlines. Amber to place, red to take away, the brush's
+                // colour otherwise.
+                if (const std::optional<std::array<core::i32, 3>> cell = editor.blockTarget(); cell.has_value()) {
+                    const double size = static_cast<double>(editor.voxelBlockSize());
+                    const core::DVec3 origin = snapshot.camera.origin;
+                    const core::Vec3 centre{
+                        static_cast<f32>((static_cast<double>((*cell)[0]) + 0.5) * size - origin.x),
+                        static_cast<f32>((static_cast<double>((*cell)[1]) + 0.5) * size - origin.y),
+                        static_cast<f32>((static_cast<double>((*cell)[2]) + 0.5) * size - origin.z)};
+                    const auto half = static_cast<f32>(size * 0.51);
+                    const render::DebugColor color = editor.blockOp() == Editor::BlockOp::Break
+                                                         ? render::DebugColor::fromLinear(0.95f, 0.25f, 0.2f, 1.0f)
+                                                         : render::DebugColor::fromLinear(0.95f, 0.75f, 0.25f, 1.0f);
+                    debugDraw.wireBox(centre, core::Vec3{half, half, half}, color);
                 }
             }
 

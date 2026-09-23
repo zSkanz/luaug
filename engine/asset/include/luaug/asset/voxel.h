@@ -20,7 +20,9 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
+#include <array>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -119,5 +121,27 @@ private:
 
 // Which chunk a block coordinate is in, and where inside it.
 [[nodiscard]] VoxelChunkKey voxelChunkOf(core::i32 x, core::i32 y, core::i32 z) noexcept;
+
+// The first solid block a ray meets, and the face it entered through.
+struct VoxelHit
+{
+    std::array<core::i32, 3> block{};
+    // The entered face's outward normal, one axis of +-1 -- or all zero when the
+    // ray STARTED inside the block, which it then hits through no face at all.
+    // `block + face` is where a block placed against this one goes.
+    std::array<core::i32, 3> face{};
+    // Metres along the ray to the face.
+    core::f64 distance = 0.0;
+};
+
+// Walks the grid cell by cell (Amanatides and Woo's DDA), so the answer is exact
+// -- the first block the ray actually crosses -- and costs one step per cell
+// crossed rather than a sample every few centimetres. `direction` need not be
+// unit length; `reach` is in metres. One implementation for the script's
+// `Raycast` and the editor's block tool, so a tool and a game can never
+// disagree about which block is under the pointer.
+[[nodiscard]] std::optional<VoxelHit> raycastVoxels(const VoxelGrid& grid, core::f32 blockSize,
+                                                    const core::DVec3& origin, const core::Vec3& direction,
+                                                    core::f64 reach) noexcept;
 
 } // namespace luaug::asset

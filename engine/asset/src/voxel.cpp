@@ -2,6 +2,8 @@
 
 #define XXH_INLINE_ALL
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <utility>
 
 #include "xxhash.h"
@@ -226,6 +228,72 @@ void VoxelGrid::setChunk(VoxelChunkKey key, std::span<const BlockId> blocks)
         at->second = std::move(chunk);
     else
         m_chunks.insert(at, {key, std::move(chunk)});
+}
+
+std::optional<VoxelHit> raycastVoxels(const VoxelGrid& grid, core::f32 blockSize, const core::DVec3& origin,
+                                      const core::Vec3& direction, core::f64 reach) noexcept
+{
+    const auto size = static_cast<core::f64>(blockSize);
+    const core::f64 length = std::sqrt(static_cast<core::f64>(direction.x) * static_cast<core::f64>(direction.x) +
+                                       static_cast<core::f64>(direction.y) * static_cast<core::f64>(direction.y) +
+                                       static_cast<core::f64>(direction.z) * static_cast<core::f64>(direction.z));
+    if (!(length > 0.0) || !(size > 0.0) || !(reach > 0.0))
+        return std::nullopt;
+
+    // In block units from here on.
+    const std::array<core::f64, 3> start{origin.x / size, origin.y / size, origin.z / size};
+    const std::array<core::f64, 3> step{static_cast<core::f64>(direction.x) / length,
+                                        static_cast<core::f64>(direction.y) / length,
+                                        static_cast<core::f64>(direction.z) / length};
+    const core::f64 limit = reach / size;
+
+    std::array<i32, 3> block{static_cast<i32>(std::floor(start[0])), static_cast<i32>(std::floor(start[1])),
+                             static_cast<i32>(std::floor(start[2]))};
+    std::array<i32, 3> stepSign{};
+    std::array<core::f64, 3> nextBoundary{};
+    std::array<core::f64, 3> delta{};
+    for (usize axis = 0; axis < 3; ++axis) {
+        if (step[axis] > 0.0) {
+            stepSign[axis] = 1;
+            nextBoundary[axis] = (static_cast<core::f64>(block[axis]) + 1.0 - start[axis]) / step[axis];
+            delta[axis] = 1.0 / step[axis];
+        }
+        else if (step[axis] < 0.0) {
+            stepSign[axis] = -1;
+            nextBoundary[axis] = (start[axis] - static_cast<core::f64>(block[axis])) / -step[axis];
+            delta[axis] = 1.0 / -step[axis];
+        }
+        else {
+            nextBoundary[axis] = std::numeric_limits<core::f64>::infinity();
+            delta[axis] = std::numeric_limits<core::f64>::infinity();
+        }
+    }
+
+    if (grid.get(block[0], block[1], block[2]) != AirBlock)
+        return VoxelHit{block, {0, 0, 0}, 0.0};
+
+    // A ray crosses at most one cell per axis per block of length, so this
+    // bounds the walk by the reach -- and the hard cap stops a ray a million
+    // blocks long stalling a tick.
+    const auto steps = static_cast<i32>(std::min(3.0 * limit + 3.0, 65536.0));
+    for (i32 taken = 0; taken < steps; ++taken) {
+        usize axis = 0;
+        if (nextBoundary[1] < nextBoundary[axis])
+            axis = 1;
+        if (nextBoundary[2] < nextBoundary[axis])
+            axis = 2;
+        if (nextBoundary[axis] > limit)
+            break;
+        const core::f64 along = nextBoundary[axis];
+        block[axis] += stepSign[axis];
+        nextBoundary[axis] += delta[axis];
+        if (grid.get(block[0], block[1], block[2]) != AirBlock) {
+            std::array<i32, 3> face{0, 0, 0};
+            face[axis] = -stepSign[axis];
+            return VoxelHit{block, face, along * size};
+        }
+    }
+    return std::nullopt;
 }
 
 u64 VoxelGrid::digest() const noexcept

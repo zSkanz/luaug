@@ -3583,7 +3583,9 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
                 ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
             if (ImGui::Button(word)) {
                 editor.setTool(tool);
-                if (tool != Editor::Tool::Select)
+                if (tool == Editor::Tool::Blocks)
+                    panels.blocks = true;
+                else if (tool != Editor::Tool::Select)
                     panels.terrain = true;
             }
             if (on)
@@ -3593,6 +3595,7 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
         toolChip(Editor::Tool::Select, "pick", "click to select  (Q)");
         toolChip(Editor::Tool::Sculpt, "dig", "shape the ground  (T) -- the Terrain panel has the brush");
         toolChip(Editor::Tool::Paint, "paint", "change what ground is made of, without moving it  (Y)");
+        toolChip(Editor::Tool::Blocks, "blocks", "place and break blocks  (B) -- the Blocks panel has the types");
     }
 
     ImGui::SameLine();
@@ -3985,6 +3988,7 @@ void buildDefaultLayout(ImGuiID dockspace)
     // it has ground would be furniture -- and the toolbar's `dig` and `paint`
     // open it, as does Window > Terrain.
     ImGui::DockBuilderDockWindow("Terrain", right);
+    ImGui::DockBuilderDockWindow("Blocks", right);
     // Content first, so it is the tab that opens. The two share a node on
     // purpose -- they are both "the thing under the viewport" and neither
     // deserves permanent floor space -- but which one greets somebody is a
@@ -4885,6 +4889,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::MenuItem("Console", nullptr, &panels.console);
         ImGui::MenuItem("Stats", nullptr, &panels.stats);
         ImGui::MenuItem("Terrain", nullptr, &panels.terrain);
+        ImGui::MenuItem("Blocks", nullptr, &panels.blocks);
         ImGui::MenuItem("Debug", nullptr, &panels.debug);
         ImGui::Separator();
         // Not a panel, but it is a question about what the panels SHOW, and
@@ -5834,6 +5839,137 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
     }
 }
 
+// The Blocks panel's contents (V1, `VoxelService`).
+//
+// **Types first, then what a click does.** A block world is a palette before
+// it is anything else -- nothing can be placed until a type exists -- so the
+// panel opens on the palette, and making a type is one row under it rather
+// than a dialog. The colours are the three faces a type has: top, sides and
+// bottom, because a grass block is green on top and earth everywhere else.
+void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
+{
+    scene::VoxelComponent* voxels = Editor::voxelsIn(world);
+    if (voxels == nullptr) {
+        // A stamp stage: no services, so no block world. Said rather than
+        // shown as an empty palette nobody could fill.
+        ImGui::TextWrapped("This world has no block world. Open the game world to place blocks.");
+        return;
+    }
+
+    // --- What a click does -------------------------------------------
+    {
+        const auto opButton = [&](Editor::BlockOp op, const char* word, const char* tip) {
+            const bool on = editor.blockOp() == op && editor.tool() == Editor::Tool::Blocks;
+            if (on)
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(word, ImVec2(76.0f, 0.0f))) {
+                editor.setBlockOp(op);
+                editor.setTool(Editor::Tool::Blocks);
+            }
+            if (on)
+                ImGui::PopStyleColor();
+            ImGui::SetItemTooltip("%s", tip);
+        };
+        opButton(Editor::BlockOp::Place, "place", "a block against the face under the pointer");
+        ImGui::SameLine();
+        opButton(Editor::BlockOp::Break, "break", "the block under the pointer goes");
+        ImGui::SameLine();
+        opButton(Editor::BlockOp::Replace, "replace", "the block under the pointer becomes the selected type");
+        ImGui::TextDisabled("%zu chunk(s), blocks of %.2f m", voxels->grid.chunkCount(),
+                            static_cast<double>(voxels->blockSize));
+    }
+
+    // --- Types ------------------------------------------------------
+    if (ImGui::CollapsingHeader("Types", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (voxels->types.empty())
+            ImGui::TextWrapped("No block types yet. Add one below -- a script registering the same name gets the "
+                               "same type.");
+
+        const f32 swatch = ImGui::GetFrameHeight() * 1.4f;
+        for (core::usize at = 0; at < voxels->types.size(); ++at) {
+            const scene::VoxelBlockType& type = voxels->types[at];
+            const auto id = static_cast<asset::BlockId>(at + 1);
+            if (at % 6 != 0)
+                ImGui::SameLine();
+            ImGui::PushID(static_cast<int>(id));
+            const bool on = editor.blockType() == id;
+            if (on) {
+                ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+            }
+            if (ImGui::ColorButton("##type", ImVec4(type.color.r, type.color.g, type.color.b, 1.0f),
+                                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoAlpha,
+                                   ImVec2(swatch, swatch))) {
+                editor.setBlockType(id);
+            }
+            if (on) {
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor();
+            }
+            const std::string_view name = world.atoms().text(type.name);
+            ImGui::SetItemTooltip("%.*s  (id %u)", static_cast<int>(name.size()), name.data(),
+                                  static_cast<unsigned>(id));
+            ImGui::PopID();
+        }
+
+        // The selected type's three colours, edited in place. One undo step
+        // per drag of a picker, through the inspector's gesture.
+        if (const asset::BlockId selected = editor.blockType();
+            selected != asset::AirBlock && selected <= voxels->types.size()) {
+            const scene::VoxelBlockType type = voxels->types[selected - 1u];
+            const std::string_view name = world.atoms().text(type.name);
+            ImGui::Separator();
+            ImGui::Text("%.*s", static_cast<int>(name.size()), name.data());
+            float top[3] = {type.color.r, type.color.g, type.color.b};
+            float side[3] = {type.side.r, type.side.g, type.side.b};
+            float bottom[3] = {type.bottom.r, type.bottom.g, type.bottom.b};
+            bool changed = ImGui::ColorEdit3("top", top, ImGuiColorEditFlags_NoInputs);
+            ImGui::SameLine();
+            changed |= ImGui::ColorEdit3("sides", side, ImGuiColorEditFlags_NoInputs);
+            ImGui::SameLine();
+            changed |= ImGui::ColorEdit3("bottom", bottom, ImGuiColorEditFlags_NoInputs);
+            static core::u64 recolour = 0;
+            if (changed) {
+                if (recolour == 0)
+                    recolour = inspector.beginGesture();
+                (void)editor.setBlockTypeColors(world, inspector, selected, core::Color3{top[0], top[1], top[2]},
+                                                core::Color3{side[0], side[1], side[2]},
+                                                core::Color3{bottom[0], bottom[1], bottom[2]}, recolour);
+            }
+            if (recolour != 0 && !ImGui::IsAnyItemActive()) {
+                inspector.endGesture();
+                recolour = 0;
+            }
+        }
+
+        ImGui::Separator();
+        static char newName[64] = "";
+        static float newTop[3] = {0.36f, 0.62f, 0.24f};
+        static float newSide[3] = {0.47f, 0.33f, 0.2f};
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##newName", "new type name", newName, sizeof(newName));
+        ImGui::ColorEdit3("top##new", newTop, ImGuiColorEditFlags_NoInputs);
+        ImGui::SameLine();
+        ImGui::ColorEdit3("sides and bottom##new", newSide, ImGuiColorEditFlags_NoInputs);
+        if (ImGui::Button("Add Type", ImVec2(-FLT_MIN, 0.0f))) {
+            const core::Color3 side{newSide[0], newSide[1], newSide[2]};
+            if (editor.addBlockType(world, inspector, newName, core::Color3{newTop[0], newTop[1], newTop[2]}, side,
+                                    side) != asset::AirBlock) {
+                newName[0] = '\0';
+                editor.setTool(Editor::Tool::Blocks);
+            }
+        }
+        ImGui::SetItemTooltip("registers a type and selects it. The same name again updates its colours");
+    }
+
+    // --- World --------------------------------------------------------
+    if (ImGui::CollapsingHeader("World")) {
+        if (ImGui::Button("Clear Blocks", ImVec2(-FLT_MIN, 0.0f)))
+            (void)editor.clearBlocks(world, inspector);
+        ImGui::SetItemTooltip("removes every block and keeps the types. One ctrl-Z brings them back");
+    }
+}
+
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
@@ -6013,6 +6149,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
             lastSelection = chosen;
             if (chosen.valid() && world->terrains().find(chosen) != nullptr)
                 panels.terrain = true;
+            if (chosen.valid() && world->voxels().find(chosen) != nullptr)
+                panels.blocks = true;
         }
     }
 
@@ -6036,6 +6174,17 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
 terrainPanelDone:;
+    if (panels.blocks) {
+        if (rightColumn != 0)
+            ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Blocks", &panels.blocks)) {
+            if (editor == nullptr || world == nullptr || inspector == nullptr)
+                ImGui::TextDisabled("no world");
+            else
+                drawBlocksPanel(*editor, *world, *inspector);
+        }
+        ImGui::End();
+    }
     if (panels.stats) {
         if (ImGui::Begin("Stats", &panels.stats)) {
             drawStats(frame, counters);
@@ -6130,6 +6279,14 @@ terrainPanelDone:;
                 editor->setTool(Editor::Tool::Sculpt);
             if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
                 editor->setTool(Editor::Tool::Paint);
+        }
+        // B for blocks, and Q back out of it, on the same condition: only
+        // where there is a block world to act on.
+        if (editor->hasVoxels()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+                editor->setTool(Editor::Tool::Select);
+            if (ImGui::IsKeyPressed(ImGuiKey_B, false))
+                editor->setTool(Editor::Tool::Blocks);
         }
 
         // **F frames the selection**, which is the one camera shortcut every

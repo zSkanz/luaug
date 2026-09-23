@@ -4,6 +4,7 @@
 #include <luaug/app/inspector.h>
 #include <luaug/app/picking.h>
 #include <luaug/asset/terrain.h>
+#include <luaug/asset/voxel.h>
 #include <luaug/core/id.h>
 #include <luaug/core/math.h>
 #include <luaug/platform/window.h>
@@ -11,6 +12,7 @@
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/world.h>
 
+#include <array>
 #include <deque>
 #include <filesystem>
 #include <map>
@@ -292,6 +294,9 @@ struct EditorPanels
     // panel every project sees whether or not it has ground would be furniture,
     // and the toolbar's `dig` and `paint` open it.
     bool terrain = false;
+    // **The block world's dock (V1)**, on the same terms: off until the
+    // toolbar's `blocks` or selecting `VoxelService` asks for it.
+    bool blocks = false;
     // The stack, the variables and the transport (ADR 0057). On by default
     // because a debugger nobody can find is a debugger nobody uses, and it says
     // "running" when nothing is stopped rather than being empty.
@@ -1638,12 +1643,14 @@ public:
     //
     // A tool is what a click MEANS. `Select` is the editor as it has always
     // been: the manipulator gets the pointer, then a pick. `Sculpt` and `Paint`
-    // put a brush in front of both.
+    // put a brush in front of both, and `Blocks` puts the block world's
+    // place-and-break in front of both (V1).
     enum class Tool : core::u8
     {
         Select,
         Sculpt,
         Paint,
+        Blocks,
     };
     [[nodiscard]] Tool tool() const noexcept { return m_tool; }
     // Refused mid-stroke, for the reason `setGizmoMode` is refused mid-drag:
@@ -1815,6 +1822,88 @@ public:
     // `resolvePick` takes one: the terrain a click can reach is the terrain on
     // screen.
     bool driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector);
+
+    // --- The block world (V1, `VoxelService`) ------------------------------
+    //
+    // **Not the terrain brush with a cube on it.** A brush has a radius and a
+    // falloff and acts on ground; a block tool acts on exactly one cell, and
+    // the cell it acts on is decided by which FACE the pointer is over -- place
+    // goes against that face, break takes the block behind it. That is the
+    // interaction every block-building game converges on, because it is the
+    // only one where a person can say which of two adjacent cells they meant.
+
+    // What a click does with the block tool.
+    enum class BlockOp : core::u8
+    {
+        // A block of the selected type against the face under the pointer.
+        Place,
+        // The block under the pointer goes.
+        Break,
+        // The block under the pointer becomes the selected type, and nothing
+        // is added or removed -- the block world's `Paint`.
+        Replace,
+    };
+    [[nodiscard]] BlockOp blockOp() const noexcept { return m_blockOp; }
+    void setBlockOp(BlockOp op) noexcept
+    {
+        m_blockOp = op;
+        m_preferencesDirty = true;
+    }
+    // The type placing and replacing lay down, by id. Ids start at 1; air is
+    // `Break`, for the reason `setBrushMaterial` refuses zero.
+    [[nodiscard]] asset::BlockId blockType() const noexcept { return m_blockType; }
+    void setBlockType(asset::BlockId id) noexcept
+    {
+        m_blockType = id == asset::AirBlock ? 1 : id;
+        m_preferencesDirty = true;
+    }
+
+    // The block world of `world`, or nothing: the first `VoxelService`'s. A
+    // stamp stage has no services, so it has no block world either.
+    [[nodiscard]] static scene::VoxelComponent* voxelsIn(scene::World& world) noexcept;
+
+    // Registers a block type from the editor and selects it. Records an undo
+    // step. A name already registered updates that type's colours and answers
+    // its id -- exactly what `VoxelService:RegisterBlock` does, so a type made
+    // here and one a script registers by the same name are the same type.
+    // Answers air when the world has no block world or the name is empty.
+    asset::BlockId addBlockType(scene::World& world, Inspector& inspector, std::string_view name, core::Color3 top,
+                                core::Color3 side, core::Color3 bottom);
+    // Recolours a type. `gesture` coalesces a colour-picker drag into one undo
+    // step; zero records one step per call.
+    bool setBlockTypeColors(scene::World& world, Inspector& inspector, asset::BlockId id, core::Color3 top,
+                            core::Color3 side, core::Color3 bottom, core::u64 gesture = 0);
+    // Removes every block and keeps the types. Records an undo step.
+    bool clearBlocks(scene::World& world, Inspector& inspector);
+
+    // Where the block tool is aiming.
+    struct BlockAim
+    {
+        // The block under the pointer, and the face the pointer is over.
+        std::array<core::i32, 3> block{};
+        std::array<core::i32, 3> face{};
+        // No block was under the pointer and the aim is the ground plane at
+        // y = 0 instead: `block` is the cell just below it, so `block + face`
+        // is the first layer -- which is how an empty block world gets its
+        // first block at all.
+        bool onPlane = false;
+    };
+    [[nodiscard]] std::optional<BlockAim> blockAim() const noexcept { return m_blockAim; }
+    // The cell the current op would change, in block coordinates, or nothing.
+    [[nodiscard]] std::optional<std::array<core::i32, 3>> blockTarget() const noexcept;
+    // Whether the drawn world has a block world at all, as of the last
+    // `driveBlocks`, and its block size.
+    [[nodiscard]] bool hasVoxels() const noexcept { return m_hasVoxels; }
+    [[nodiscard]] f32 voxelBlockSize() const noexcept { return m_voxelBlockSize; }
+    // How many blocks the last finished stroke changed.
+    [[nodiscard]] core::u32 lastBlockEdits() const noexcept { return m_lastBlockEdits; }
+
+    // Runs the block tool for this frame, beside `driveSculpt` and on the same
+    // terms: true when the pointer belongs to it. A drag is one undo step and
+    // edits each new cell the pointer crosses, aimed against the blocks as they
+    // were when it began -- so dragging `Place` across a floor lays a layer
+    // instead of building a staircase towards the camera.
+    bool driveBlocks(scene::World& world, Inspector& inspector);
 
     [[nodiscard]] GizmoMode gizmoMode() const noexcept { return m_gizmoMode; }
     // Refused mid-drag: changing what a drag means half way through it is not
@@ -2139,6 +2228,32 @@ private:
     // One stamp, in WORLD space. Converted to the field's own inside, because a
     // terrain can be moved and the field does not know it.
     void applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt);
+
+    // A block stroke: the grid it aims against, frozen for the reason
+    // `Stroke::aimField` is, and the last cell it changed so a drag held over
+    // one cell edits it once.
+    struct BlockStroke
+    {
+        asset::VoxelGrid aimGrid;
+        std::optional<std::array<core::i32, 3>> last;
+        core::u64 gesture = 0;
+        core::u32 edits = 0;
+    };
+    // One click of the block tool at the current aim. Answers whether a block
+    // changed.
+    bool applyBlockAt(scene::VoxelComponent& voxels);
+    // Whether the current op at `at` would change a block -- asked before the
+    // undo step is recorded, so a click that does nothing records nothing.
+    [[nodiscard]] bool blockEditChanges(const scene::VoxelComponent& voxels,
+                                        const std::array<core::i32, 3>& at) const noexcept;
+
+    BlockOp m_blockOp = BlockOp::Place;
+    asset::BlockId m_blockType = 1;
+    bool m_hasVoxels = false;
+    f32 m_voxelBlockSize = 1.0f;
+    core::u32 m_lastBlockEdits = 0;
+    std::optional<BlockAim> m_blockAim;
+    std::optional<BlockStroke> m_blockStroke;
 
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;

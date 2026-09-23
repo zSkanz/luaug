@@ -161,6 +161,48 @@ TEST_CASE("the block size scales the mesh and nothing else")
     CHECK(mesh.mesh.bounds.max.x == doctest::Approx(1.0));
 }
 
+TEST_CASE("a ray meets the first block it crosses, and names the face it entered")
+{
+    VoxelGrid grid;
+    (void)grid.set(5, 0, 0, Stone);
+    (void)grid.set(9, 0, 0, Dirt);
+
+    const std::optional<VoxelHit> hit =
+        raycastVoxels(grid, 1.0f, core::DVec3{0.5, 0.5, 0.5}, core::Vec3{1.0f, 0.0f, 0.0f}, 100.0);
+    REQUIRE(hit.has_value());
+    CHECK(hit->block == std::array<core::i32, 3>{5, 0, 0});
+    CHECK(hit->face == std::array<core::i32, 3>{-1, 0, 0});
+    CHECK(hit->distance == doctest::Approx(4.5));
+
+    // Negative coordinates floor rather than truncate: the block at -1 is the
+    // one whose cube spans -1 to 0.
+    (void)grid.set(-1, -3, 0, Stone);
+    const std::optional<VoxelHit> down =
+        raycastVoxels(grid, 1.0f, core::DVec3{-0.5, 2.0, 0.5}, core::Vec3{0.0f, -1.0f, 0.0f}, 100.0);
+    REQUIRE(down.has_value());
+    CHECK(down->block == std::array<core::i32, 3>{-1, -3, 0});
+    CHECK(down->face == std::array<core::i32, 3>{0, 1, 0});
+}
+
+TEST_CASE("a ray stops at its reach, and one that starts inside a block hits it through no face")
+{
+    VoxelGrid grid;
+    (void)grid.set(5, 0, 0, Stone);
+    CHECK_FALSE(raycastVoxels(grid, 1.0f, core::DVec3{0.5, 0.5, 0.5}, core::Vec3{1.0f, 0.0f, 0.0f}, 4.0).has_value());
+
+    const std::optional<VoxelHit> inside =
+        raycastVoxels(grid, 1.0f, core::DVec3{5.5, 0.5, 0.5}, core::Vec3{0.0f, 1.0f, 0.0f}, 10.0);
+    REQUIRE(inside.has_value());
+    CHECK(inside->face == std::array<core::i32, 3>{0, 0, 0});
+
+    // The block size scales where a block is: half-metre blocks put block 5 at
+    // x = 2.5 m.
+    const std::optional<VoxelHit> half =
+        raycastVoxels(grid, 0.5f, core::DVec3{0.25, 0.25, 0.25}, core::Vec3{1.0f, 0.0f, 0.0f}, 100.0);
+    REQUIRE(half.has_value());
+    CHECK(half->distance == doctest::Approx(2.25));
+}
+
 TEST_CASE("what meshing a block world costs" * doctest::skip())
 {
     // The V1 bench: run by name (`--test-case="what meshing*" --no-skip`).

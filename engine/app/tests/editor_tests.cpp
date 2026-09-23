@@ -4921,3 +4921,182 @@ TEST_CASE("the plane follows the stroke rather than the origin")
     // Six metres up, not zero: the plane is the stroke's own height.
     CHECK(aim->position.y == doctest::Approx(6.0).epsilon(0.15));
 }
+
+// --- The block tool (V1) -----------------------------------------------------
+
+namespace {
+
+// The brush rig with a block world in it: a `VoxelService` under the data
+// model, as every booted world has one, and one type registered.
+struct BlockRig : BrushRig
+{
+    core::InstanceId service;
+    asset::BlockId stone = asset::AirBlock;
+
+    BlockRig()
+    {
+        service = world.create(classes.findId(atoms.intern("VoxelService")));
+        REQUIRE(service.valid());
+        REQUIRE_FALSE(world.setParent(service, root).has_value());
+        // The terrain is taken away so a block click can only mean a block.
+        world.destroy(terrain);
+        world.retireDestroyed();
+        stone = editor.addBlockType(world, inspector, "Stone", core::Color3{0.5f, 0.5f, 0.5f},
+                                    core::Color3{0.5f, 0.5f, 0.5f}, core::Color3{0.5f, 0.5f, 0.5f});
+        REQUIRE(stone == 1);
+        editor.setTool(Editor::Tool::Blocks);
+    }
+
+    [[nodiscard]] asset::VoxelGrid& grid()
+    {
+        scene::VoxelComponent* voxels = Editor::voxelsIn(world);
+        REQUIRE(voxels != nullptr);
+        return voxels->grid;
+    }
+
+    // One frame with the block tool in front, as the shell runs it.
+    bool blockFrame(core::Vec2 pixel, bool pressed, bool down)
+    {
+        if (pressed)
+            editor.requestPick(pixel);
+        editor.setPointer(pixel, pressed, down);
+        const bool took = editor.driveBlocks(world, inspector);
+        if (!took && !editor.driveGizmo(world, inspector))
+            editor.resolvePick(world, workspace, inspector);
+        inspector.applyPending(world);
+        return took;
+    }
+
+    void click(core::DVec3 at)
+    {
+        CHECK(blockFrame(pixelOf(at), true, true));
+        CHECK(blockFrame(pixelOf(at), false, false));
+    }
+};
+
+} // namespace
+
+TEST_CASE("the first block goes on the ground plane, and the click is the tool's")
+{
+    BlockRig rig;
+    rig.lookDown(40.0);
+    const core::InstanceId decoy = rig.part({0.5, -3.0, 0.5});
+    (void)decoy;
+
+    rig.click(core::DVec3{0.5, 0.0, 0.5});
+    CHECK(rig.grid().get(0, 0, 0) == rig.stone);
+    CHECK_FALSE(rig.inspector.selection().valid());
+    CHECK(rig.editor.lastBlockEdits() == 1);
+}
+
+TEST_CASE("place goes against the face under the pointer, and break takes the block behind it")
+{
+    BlockRig rig;
+    rig.lookDown(40.0);
+    (void)rig.grid().set(2, 0, 2, rig.stone);
+
+    // Looking down at the block's top face: place stacks on it.
+    rig.click(core::DVec3{2.5, 1.0, 2.5});
+    CHECK(rig.grid().get(2, 1, 2) == rig.stone);
+
+    // Break the one just placed, and only it.
+    rig.editor.setBlockOp(Editor::BlockOp::Break);
+    rig.click(core::DVec3{2.5, 2.0, 2.5});
+    CHECK(rig.grid().get(2, 1, 2) == asset::AirBlock);
+    CHECK(rig.grid().get(2, 0, 2) == rig.stone);
+
+    // Breaking the ground plane breaks nothing and still does not select.
+    rig.click(core::DVec3{10.5, 0.0, 10.5});
+    CHECK(rig.grid().get(2, 0, 2) == rig.stone);
+}
+
+TEST_CASE("replace changes a block's type and never adds one")
+{
+    BlockRig rig;
+    rig.lookDown(40.0);
+    const asset::BlockId dirt =
+        rig.editor.addBlockType(rig.world, rig.inspector, "Dirt", core::Color3{0.4f, 0.3f, 0.2f},
+                                core::Color3{0.4f, 0.3f, 0.2f}, core::Color3{0.4f, 0.3f, 0.2f});
+    REQUIRE(dirt == 2);
+    CHECK(rig.editor.blockType() == dirt);
+    (void)rig.grid().set(0, 0, 0, rig.stone);
+
+    rig.editor.setBlockOp(Editor::BlockOp::Replace);
+    rig.click(core::DVec3{0.5, 1.0, 0.5});
+    CHECK(rig.grid().get(0, 0, 0) == dirt);
+    // Over the empty plane there is nothing to replace.
+    rig.click(core::DVec3{6.5, 0.0, 6.5});
+    CHECK(rig.grid().get(6, 0, 6) == asset::AirBlock);
+    CHECK(rig.grid().get(6, -1, 6) == asset::AirBlock);
+}
+
+TEST_CASE("a place drag lays one layer instead of climbing towards the camera")
+{
+    // The block world's version of the burrowing brush: aimed at the LIVE grid,
+    // each frame's ray would land on the block the previous frame placed and
+    // put the next one on top of it.
+    BlockRig rig;
+    rig.lookDown(40.0);
+
+    CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{0.5, 0.0, 0.5}), true, true));
+    for (int x = 0; x <= 6; ++x) {
+        // Held over each cell for two frames, which must still be one edit.
+        CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{static_cast<double>(x) + 0.5, 0.0, 0.5}), false, true));
+        CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{static_cast<double>(x) + 0.5, 0.0, 0.5}), false, true));
+    }
+    CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{6.5, 0.0, 0.5}), false, false));
+
+    for (int x = 0; x <= 6; ++x) {
+        CHECK(rig.grid().get(x, 0, 0) == rig.stone);
+        CHECK(rig.grid().get(x, 1, 0) == asset::AirBlock);
+    }
+    CHECK(rig.editor.lastBlockEdits() == 7);
+}
+
+TEST_CASE("a block stroke is one undo step")
+{
+    BlockRig rig;
+    rig.lookDown(40.0);
+    CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{0.5, 0.0, 0.5}), true, true));
+    CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{3.5, 0.0, 0.5}), false, true));
+    CHECK(rig.blockFrame(rig.pixelOf(core::DVec3{3.5, 0.0, 0.5}), false, false));
+    REQUIRE(rig.grid().get(0, 0, 0) == rig.stone);
+    REQUIRE(rig.grid().get(3, 0, 0) == rig.stone);
+
+    REQUIRE(rig.editor.undo(rig.world, rig.inspector));
+    CHECK(rig.grid().chunkCount() == 0);
+    // The type survives: it was registered by its own step, before the stroke.
+    CHECK(Editor::voxelsIn(rig.world)->types.size() == 1);
+}
+
+TEST_CASE("registering a name twice is the same type, recoloured")
+{
+    BlockRig rig;
+    const asset::BlockId again =
+        rig.editor.addBlockType(rig.world, rig.inspector, "Stone", core::Color3{1.0f, 0.0f, 0.0f},
+                                core::Color3{0.0f, 1.0f, 0.0f}, core::Color3{0.0f, 0.0f, 1.0f});
+    CHECK(again == rig.stone);
+    const scene::VoxelComponent* voxels = Editor::voxelsIn(rig.world);
+    REQUIRE(voxels->types.size() == 1);
+    CHECK(voxels->types[0].side == core::Color3{0.0f, 1.0f, 0.0f});
+    CHECK(rig.editor.addBlockType(rig.world, rig.inspector, "", core::Color3{}, core::Color3{}, core::Color3{}) ==
+          asset::AirBlock);
+}
+
+TEST_CASE("the block tool with no block world does not eat the click")
+{
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.world.destroy(rig.terrain);
+    rig.world.retireDestroyed();
+    rig.editor.setTool(Editor::Tool::Blocks);
+
+    const core::InstanceId subject = rig.part({0.0, 0.0, 0.0});
+    rig.editor.requestPick(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}));
+    rig.editor.setPointer(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    CHECK_FALSE(rig.editor.driveBlocks(rig.world, rig.inspector));
+    CHECK_FALSE(rig.editor.hasVoxels());
+    rig.editor.resolvePick(rig.world, rig.workspace, rig.inspector);
+    rig.inspector.applyPending(rig.world);
+    CHECK(rig.inspector.selection() == subject);
+}

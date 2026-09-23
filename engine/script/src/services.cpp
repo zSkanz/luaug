@@ -1136,74 +1136,20 @@ int voxelRaycast(lua_State* L)
     const scene::VoxelComponent& voxels = voxelsOf(L);
     const core::Vec3 origin = checkVector3(L, 2);
     const core::Vec3 direction = checkVector3(L, 3);
-    const f32 size = voxels.blockSize;
-    const f32 length = core::length(direction);
-    if (!(length > 0.0f) || !(size > 0.0f)) {
+    // The direction's length is the reach, as `Workspace:Raycast` has it.
+    const std::optional<asset::VoxelHit> hit = asset::raycastVoxels(
+        voxels.grid, voxels.blockSize,
+        core::DVec3{static_cast<f64>(origin.x), static_cast<f64>(origin.y), static_cast<f64>(origin.z)}, direction,
+        static_cast<f64>(core::length(direction)));
+    if (!hit.has_value()) {
         lua_pushnil(L);
         lua_pushnil(L);
         return 2;
     }
-
-    // In block units from here on.
-    const std::array<f64, 3> start{static_cast<f64>(origin.x / size), static_cast<f64>(origin.y / size),
-                                   static_cast<f64>(origin.z / size)};
-    const std::array<f64, 3> step{static_cast<f64>(direction.x / length), static_cast<f64>(direction.y / length),
-                                  static_cast<f64>(direction.z / length)};
-    const f64 reach = static_cast<f64>(length / size);
-
-    std::array<core::i32, 3> block{static_cast<core::i32>(std::floor(start[0])),
-                                   static_cast<core::i32>(std::floor(start[1])),
-                                   static_cast<core::i32>(std::floor(start[2]))};
-    std::array<core::i32, 3> stepSign{};
-    std::array<f64, 3> nextBoundary{};
-    std::array<f64, 3> delta{};
-    for (usize axis = 0; axis < 3; ++axis) {
-        if (step[axis] > 0.0) {
-            stepSign[axis] = 1;
-            nextBoundary[axis] = (static_cast<f64>(block[axis]) + 1.0 - start[axis]) / step[axis];
-            delta[axis] = 1.0 / step[axis];
-        }
-        else if (step[axis] < 0.0) {
-            stepSign[axis] = -1;
-            nextBoundary[axis] = (start[axis] - static_cast<f64>(block[axis])) / -step[axis];
-            delta[axis] = 1.0 / -step[axis];
-        }
-        else {
-            nextBoundary[axis] = std::numeric_limits<f64>::infinity();
-            delta[axis] = std::numeric_limits<f64>::infinity();
-        }
-    }
-
-    // A ray that starts inside a block hits it, through no face at all.
-    if (voxels.grid.get(block[0], block[1], block[2]) != asset::AirBlock) {
-        pushVector3(L, core::Vec3{static_cast<f32>(block[0]), static_cast<f32>(block[1]), static_cast<f32>(block[2])});
-        pushVector3(L, core::Vec3{0.0f, 0.0f, 0.0f});
-        return 2;
-    }
-
-    // Bounded by the ray's length, and by a hard step count so a ray a million
-    // blocks long cannot stall a tick.
-    for (int steps = 0; steps < 4096; ++steps) {
-        usize axis = 0;
-        if (nextBoundary[1] < nextBoundary[axis])
-            axis = 1;
-        if (nextBoundary[2] < nextBoundary[axis])
-            axis = 2;
-        if (nextBoundary[axis] > reach)
-            break;
-        block[axis] += stepSign[axis];
-        nextBoundary[axis] += delta[axis];
-        if (voxels.grid.get(block[0], block[1], block[2]) != asset::AirBlock) {
-            core::Vec3 normal{0.0f, 0.0f, 0.0f};
-            (axis == 0 ? normal.x : axis == 1 ? normal.y : normal.z) = static_cast<f32>(-stepSign[axis]);
-            pushVector3(L,
-                        core::Vec3{static_cast<f32>(block[0]), static_cast<f32>(block[1]), static_cast<f32>(block[2])});
-            pushVector3(L, normal);
-            return 2;
-        }
-    }
-    lua_pushnil(L);
-    lua_pushnil(L);
+    pushVector3(L, core::Vec3{static_cast<f32>(hit->block[0]), static_cast<f32>(hit->block[1]),
+                              static_cast<f32>(hit->block[2])});
+    pushVector3(
+        L, core::Vec3{static_cast<f32>(hit->face[0]), static_cast<f32>(hit->face[1]), static_cast<f32>(hit->face[2])});
     return 2;
 }
 

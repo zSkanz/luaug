@@ -416,6 +416,8 @@ namespace {
         return "sculpt";
     case Editor::Tool::Paint:
         return "paint";
+    case Editor::Tool::Blocks:
+        return "blocks";
     case Editor::Tool::Select:
         break;
     }
@@ -449,6 +451,8 @@ namespace {
         return Editor::Tool::Sculpt;
     if (name == "paint")
         return Editor::Tool::Paint;
+    if (name == "blocks")
+        return Editor::Tool::Blocks;
     return Editor::Tool::Select;
 }
 
@@ -564,6 +568,11 @@ void Editor::rememberState(const std::filesystem::path& stateDirectory) const
     writer.field("op", brushOpName(m_brush.op));
     writer.field("shape", m_brush.shape == BrushShape::Box ? "box" : "sphere");
     writer.endObject();
+    writer.key("blocks");
+    writer.beginObject();
+    writer.field("op", m_blockOp == BlockOp::Break ? "break" : m_blockOp == BlockOp::Replace ? "replace" : "place");
+    writer.field("type", static_cast<core::f64>(m_blockType));
+    writer.endObject();
     writer.endObject();
 
     writer.key("panels");
@@ -655,6 +664,12 @@ void Editor::recallState(const std::filesystem::path& stateDirectory)
                 setBrushStrength(static_cast<f32>(strength.asNumber()));
             m_brush.op = brushOpFrom(brush["op"].asString());
             m_brush.shape = brush["shape"].asString() == "box" ? BrushShape::Box : BrushShape::Sphere;
+        }
+        if (const core::JsonValue blocks = tools["blocks"]; blocks.type() == core::JsonType::Object) {
+            const std::string_view op = blocks["op"].asString();
+            m_blockOp = op == "break" ? BlockOp::Break : op == "replace" ? BlockOp::Replace : BlockOp::Place;
+            if (const core::JsonValue type = blocks["type"]; type.type() == core::JsonType::Number)
+                setBlockType(static_cast<asset::BlockId>(std::clamp(type.asNumber(), 1.0, 65535.0)));
         }
     }
 
@@ -2846,7 +2861,7 @@ void Editor::setPointer(core::Vec2 pixelInViewport, bool pressed, bool down) noe
 void Editor::setTool(Tool tool) noexcept
 {
     // Refused mid-stroke, exactly as `setGizmoMode` is refused mid-drag.
-    if (m_stroke.has_value())
+    if (m_stroke.has_value() || m_blockStroke.has_value())
         return;
     m_tool = tool;
     m_preferencesDirty = true;
@@ -3136,6 +3151,210 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
     // both learn about a stamp through the one path they already read.
     terrain.fieldRevision += 1;
     m_sceneDirty = true;
+}
+
+// --- The block world (V1) ------------------------------------------------------
+
+scene::VoxelComponent* Editor::voxelsIn(scene::World& world) noexcept
+{
+    scene::VoxelComponent* found = nullptr;
+    world.voxels().forEach([&found](core::InstanceId, scene::VoxelComponent& voxels) {
+        if (found == nullptr)
+            found = &voxels;
+    });
+    return found;
+}
+
+asset::BlockId Editor::addBlockType(scene::World& world, Inspector& inspector, std::string_view name, core::Color3 top,
+                                    core::Color3 side, core::Color3 bottom)
+{
+    scene::VoxelComponent* voxels = voxelsIn(world);
+    if (voxels == nullptr || name.empty()) {
+        m_status =
+            EditorStatus{voxels == nullptr ? "this world has no block world" : "a block type needs a name", true};
+        return asset::AirBlock;
+    }
+    (void)inspector;
+    const core::NameAtom atom = world.atoms().intern(name);
+    for (core::usize at = 0; at < voxels->types.size(); ++at) {
+        if (voxels->types[at].name == atom) {
+            const auto id = static_cast<asset::BlockId>(at + 1);
+            (void)setBlockTypeColors(world, inspector, id, top, side, bottom);
+            setBlockType(id);
+            return id;
+        }
+    }
+    if (voxels->types.size() >= 65535) {
+        m_status = EditorStatus{"the block world has every type it can hold", true};
+        return asset::AirBlock;
+    }
+    m_history.record(world, "Add Block Type");
+    // Recorded before the write, so look the component up again: the record
+    // does not move pools, but nothing here should depend on that.
+    voxels = voxelsIn(world);
+    voxels->types.push_back(scene::VoxelBlockType{atom, top, side, bottom});
+    voxels->revision += 1;
+    const auto id = static_cast<asset::BlockId>(voxels->types.size());
+    setBlockType(id);
+    m_sceneDirty = true;
+    return id;
+}
+
+bool Editor::setBlockTypeColors(scene::World& world, Inspector& inspector, asset::BlockId id, core::Color3 top,
+                                core::Color3 side, core::Color3 bottom, core::u64 gesture)
+{
+    (void)inspector;
+    scene::VoxelComponent* voxels = voxelsIn(world);
+    if (voxels == nullptr || id == asset::AirBlock || id > voxels->types.size())
+        return false;
+    scene::VoxelBlockType& type = voxels->types[id - 1u];
+    if (type.color == top && type.side == side && type.bottom == bottom)
+        return false;
+    m_history.record(world, "Recolour Block Type", gesture);
+    scene::VoxelBlockType& live = voxelsIn(world)->types[id - 1u];
+    live.color = top;
+    live.side = side;
+    live.bottom = bottom;
+    voxelsIn(world)->revision += 1;
+    m_sceneDirty = true;
+    return true;
+}
+
+bool Editor::clearBlocks(scene::World& world, Inspector& inspector)
+{
+    (void)inspector;
+    scene::VoxelComponent* voxels = voxelsIn(world);
+    if (voxels == nullptr || voxels->grid.chunkCount() == 0)
+        return false;
+    m_history.record(world, "Clear Blocks");
+    voxelsIn(world)->grid.clear();
+    m_sceneDirty = true;
+    m_status = EditorStatus{"every block removed; one ctrl-Z brings them back", false};
+    return true;
+}
+
+std::optional<std::array<core::i32, 3>> Editor::blockTarget() const noexcept
+{
+    if (!m_blockAim.has_value())
+        return std::nullopt;
+    const BlockAim& aim = *m_blockAim;
+    if (m_blockOp == BlockOp::Place) {
+        // A ray that started inside a block has no face to place against.
+        if (aim.face == std::array<core::i32, 3>{0, 0, 0})
+            return std::nullopt;
+        return std::array<core::i32, 3>{aim.block[0] + aim.face[0], aim.block[1] + aim.face[1],
+                                        aim.block[2] + aim.face[2]};
+    }
+    // Breaking or replacing the plane is breaking nothing.
+    if (aim.onPlane)
+        return std::nullopt;
+    return aim.block;
+}
+
+bool Editor::blockEditChanges(const scene::VoxelComponent& voxels, const std::array<core::i32, 3>& at) const noexcept
+{
+    const asset::BlockId there = voxels.grid.get(at[0], at[1], at[2]);
+    const bool typeKnown = m_blockType != asset::AirBlock && m_blockType <= voxels.types.size();
+    switch (m_blockOp) {
+    case BlockOp::Place:
+        return typeKnown && there != m_blockType;
+    case BlockOp::Break:
+        return there != asset::AirBlock;
+    case BlockOp::Replace:
+        return typeKnown && there != asset::AirBlock && there != m_blockType;
+    }
+    return false;
+}
+
+bool Editor::applyBlockAt(scene::VoxelComponent& voxels)
+{
+    const std::optional<std::array<core::i32, 3>> target = blockTarget();
+    if (!target.has_value() || !blockEditChanges(voxels, *target))
+        return false;
+    const std::array<core::i32, 3>& at = *target;
+    return voxels.grid.set(at[0], at[1], at[2], m_blockOp == BlockOp::Break ? asset::AirBlock : m_blockType);
+}
+
+bool Editor::driveBlocks(scene::World& world, Inspector& inspector)
+{
+    m_blockAim.reset();
+    scene::VoxelComponent* voxels = voxelsIn(world);
+    m_hasVoxels = voxels != nullptr;
+    m_voxelBlockSize = voxels != nullptr ? voxels->blockSize : 1.0f;
+
+    if (m_tool != Tool::Blocks || voxels == nullptr) {
+        m_blockStroke.reset();
+        // A tool with nothing to act on does not eat the click, for the
+        // reason `driveSculpt` gives.
+        return false;
+    }
+
+    const PickRay ray = rayThrough(m_pointer);
+    const asset::VoxelGrid& aimAt = m_blockStroke.has_value() ? m_blockStroke->aimGrid : voxels->grid;
+    if (const std::optional<asset::VoxelHit> hit =
+            asset::raycastVoxels(aimAt, voxels->blockSize, ray.origin, ray.direction, BrushReach);
+        hit.has_value()) {
+        m_blockAim = BlockAim{hit->block, hit->face, false};
+    }
+    else if (std::abs(static_cast<double>(ray.direction.y)) > 1e-6) {
+        // **The ground plane, when the ray met no block** -- the block world's
+        // version of the brush's plane lock, and for the same reason: an empty
+        // block world is one a ray misses, and a tool that cannot place the
+        // first block cannot place any.
+        const double along = -ray.origin.y / static_cast<double>(ray.direction.y);
+        if (along > 0.0 && along <= BrushReach) {
+            const double size = static_cast<double>(voxels->blockSize);
+            const double x = ray.origin.x + static_cast<double>(ray.direction.x) * along;
+            const double z = ray.origin.z + static_cast<double>(ray.direction.z) * along;
+            // From above, the plane is the top of the layer below 0; from
+            // below, the bottom of the layer at 0.
+            const bool fromAbove = ray.direction.y < 0.0f;
+            m_blockAim = BlockAim{{static_cast<core::i32>(std::floor(x / size)), fromAbove ? -1 : 0,
+                                   static_cast<core::i32>(std::floor(z / size))},
+                                  {0, fromAbove ? 1 : -1, 0},
+                                  true};
+        }
+    }
+
+    if (m_blockStroke.has_value() && !m_pointerDown) {
+        m_lastBlockEdits = m_blockStroke->edits;
+        m_blockStroke.reset();
+        m_pending.reset();
+        return true;
+    }
+
+    if (!m_blockStroke.has_value()) {
+        if (!m_pointerPressed || !m_blockAim.has_value())
+            return false;
+        BlockStroke stroke;
+        stroke.aimGrid = voxels->grid;
+        m_blockStroke = std::move(stroke);
+    }
+
+    // A drag edits each new cell once; holding still over one edits it once.
+    if (const std::optional<std::array<core::i32, 3>> target = blockTarget();
+        target.has_value() && target != m_blockStroke->last) {
+        m_blockStroke->last = target;
+        if (blockEditChanges(*voxels, *target)) {
+            // **Recorded on the first edit that changes something**, not on
+            // the press: a click that breaks the empty plane changes nothing,
+            // and an undo step that undoes nothing is a step somebody presses
+            // ctrl-Z through wondering what it was.
+            if (m_blockStroke->gesture == 0) {
+                m_blockStroke->gesture = inspector.beginGesture();
+                const char* label = m_blockOp == BlockOp::Break     ? "Break Block"
+                                    : m_blockOp == BlockOp::Replace ? "Replace Block"
+                                                                    : "Place Block";
+                m_history.record(world, label, m_blockStroke->gesture);
+                voxels = voxelsIn(world);
+            }
+            (void)applyBlockAt(*voxels);
+            m_blockStroke->edits += 1;
+            m_sceneDirty = true;
+        }
+    }
+    m_pending.reset();
+    return true;
 }
 
 // --- Making ground exist -----------------------------------------------------
