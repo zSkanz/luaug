@@ -141,7 +141,7 @@ struct EngineState
     // hierarchy of its own has nothing a component would buy, and the host
     // reads these once per frame to build the manager's focus list.
     //
-    // The radii are in studs and the pair is a RANGE rather than a value: the
+    // The radii are in metres and the pair is a RANGE rather than a value: the
     // engine keeps chunks inside `streamingLoadRadius` and guarantees the ones
     // inside `streamingMinRadius` before a focus may advance into them.
     bool streamingEnabled = true;

@@ -96,13 +96,14 @@ done < <(git ls-files -z -- . ':(exclude)third_party' ':(exclude).github' \
     | xargs -0 grep -liE "$vendor" 2>/dev/null || true)
 
 # **The indirect names, in code.** A type or class name that exists only on that
-# platform, or its editor's product name standing alone, is the same reference
+# platform, its editor's product name standing alone, or its unit of length, is
+# the same reference
 # spelled another way -- and one of each had survived the sweep above because it
 # never contained the word. Code only: the documentation set may still explain
 # a divergence by naming what it diverges from. "Visual Studio" and "Android
 # Studio" are toolchains, not the reference, and are excluded by name.
 echo "== legal sweep (R7, indirect names in code) =="
-indirect="$(printf '%s|%s|%s' 'RBX[A-Z]' 'Bindable(Event|Function)' '(^|[^A-Za-z])Studio([^A-Za-z]|$)')"
+indirect="$(printf '%s|%s|%s|%s' 'RBX[A-Z]' 'Bindable(Event|Function)' '(^|[^A-Za-z])Studio([^A-Za-z]|$)'     '(^|[^A-Za-z])[Ss]tuds?([^A-Za-z]|$)')"
 while IFS= read -r hit; do
     case "$hit" in
     *"Visual Studio"* | *"Android Studio"*) continue ;;

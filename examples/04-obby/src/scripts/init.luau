@@ -232,7 +232,7 @@ character.Color = Color3.fromRGB(96, 172, 220)
 character.WalkSpeed = 5
 -- Gravity is 9.81 m/s^2 and this engine's units are METRES (divergence 15), so a
 -- jump speed of 5.5 is a rise of 1.5 m and about 1.1 s in the air. The number that
--- looks right from a platformer measured in studs is four times too big here,
+-- looks right in an engine whose unit is a fraction of a metre is four times too big here,
 -- and a character that clears the whole course in one leap is what that mistake
 -- looks like.
 character.JumpSpeed = 5.5
