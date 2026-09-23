@@ -579,6 +579,41 @@ that predated the property that had moved them. Caught because the Clang errors
 were read rather than the recording being trusted — which is D040's lesson
 arriving through a different door.
 
+### The ground rebuilt, and shadows (2026-09-22)
+
+**A person playing the package reported the terrain as laggy and wrong from
+below, and both were true.** A brush stroke cost 49.5 ms: every touched tile was
+re-meshed by marching tetrahedra on the CPU and re-uploaded, and every tile
+carried skirts, which are exactly the curtains somebody sees from underneath. The
+answer is [ADR 0071](../decisions/0071-terrain-ground-is-drawn-from-a-height-atlas.md):
+the height layer is not meshed at all. Heights and materials live in two GPU
+atlases, one slot per tile; a CDLOD quadtree selects nodes whose leaves are
+tiles; one shared 33-by-33 grid is displaced and geomorphed in the vertex shader;
+and because a neighbour is never more than one level away there are no skirts.
+A stroke costs 8.4 ms now, most of it the collider.
+
+**Only bricked columns are meshes, and they became surface nets.** Marching
+tetrahedra's zig-zag walls were the second half of "looks wrong", and a cave
+has to meet an atlas ground it is no longer the same mesher as. One vertex per
+cell fixes the first; snapping the rim ring to the height field's own boundary
+vertices fixes the second, and what remains at a steep crater is a crease
+rather than an overlap. B1's deviation above is therefore superseded for caves,
+and B1's watertightness argument is replaced by the snap.
+
+**Jolt 5.6.0 corrupts a height field whose block count is not a power of two**
+on `SetHeights` -- found by a cube falling through freshly sculpted ground. The
+backend pads to a power of two with no-collision samples and widens every edit
+rectangle to whole blocks. `third_party/` is untouched (R13).
+
+**Shadows were bad everywhere, and the causes were three.** A receiver slope
+bias lifted every shadow off the base that cast it; a penumbra sized in texels
+grew and shrank with cascade distance; and the terrain's huge quadtree nodes
+entering the cascade fit inflated the depth range. What replaced them follows
+the open engines' shape rather than their code: a world-unit penumbra, a
+sixteen-tap Vogel disc rotated per pixel with each tap a bilinear PCF, a lateral
+normal offset, terrain casting as sixteen-metre tiles pushed a few texels in
+light depth, and a screen-space contact pass for the last few centimetres.
+
 ## Risks entering F1
 
 1. **The slope precondition cascades.** Measured at A5 before anything depends
@@ -812,7 +847,7 @@ They are two features that share a word and nothing else:
 | Editing | a brush with a radius and a falloff | place one, break one |
 | The game | an open world, a hillside, a cave | Minecraft-shaped: mining, building, chunks |
 | Storage | two encodings under one field (ADR 0067) | a dense chunk of block ids |
-| Mesher | marching tetrahedra | greedy face merging, hidden faces culled |
+| Mesher | a GPU height atlas; surface nets for caves (ADR 0071) | greedy face merging, hidden faces culled |
 
 **Sharing the mesher would be wrong**, and it is worth saying now rather than
 discovering it: a marching mesher rounds every corner, which is exactly what a
@@ -829,6 +864,32 @@ of blocks is a `TriangleMesh`, which ADR 0066 already added.
 
 Sized L rather than XXL: the field, the seam and the streaming it would need all
 exist, and what it adds is one representation and one mesher.
+
+### Built (2026-09-22)
+
+Three commits, bench first. `engine/asset/voxel.h` is the store: copy-on-write
+16-cubed chunks of `u16` block ids, kept sorted by a key that has a `y`, each
+with a lazily computed digest, and a run-coded encoding the scene file carries
+under its own `"voxels"` key. `voxel_mesher.h` is the greedy mesher: faces
+between a block and air, merged into the largest rectangles whose block id AND
+four corner occlusions agree, so the occlusion interpolated across a merged quad
+is exact rather than smeared. `VoxelService` exposes `RegisterBlock` (top, side
+and bottom colours), `SetBlock`, `GetBlock`, `FillBlocks`, `Clear`,
+`WorldToBlock`, `BlockToWorld` and a DDA `Raycast` that answers the block and
+the face it entered through -- which is exactly what "place a block against the
+one you are looking at" needs. The renderer meshes chunks across the job pool
+within 384 m and keys each on the digests of the 27 chunks that can change it;
+physics builds a `TriangleMesh` per chunk within 24 m of anything that moves,
+two a tick. `examples/14-voxels` plays it.
+
+**Measured first, as F1 learned to:** a full chunk meshes in 0.37 ms and a
+single-block edit re-meshes in 0.33 ms, so an edit is inside a frame without a
+dirty-region mesher, and the design did not need one.
+
+**Not built yet, and named so it is not mistaken for done:** an editor tool that
+places and breaks blocks; transparent blocks (glass, water), which need their own
+pass and a sort; per-face textures rather than colours; and chunks streamed from
+disk, which waits on the same streaming work F1's Part E does.
 
 ## The unresolved list, carried forward rather than closed
 

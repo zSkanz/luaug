@@ -14,88 +14,16 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   the part that section deliberately did not commit — replication semantics.
   Phase 3 and phase 5 stay closed.
 
-- **E8 — The Script Editor — BUILT, awaiting review, 2026-08-24.** Its entry
-  moved to
-  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) with
-  E7's, E6's and E5's on 2026-08-26, when this file was archived back under its
-  cap (§11). ADR 0057 settles it and
-  [`docs/briefs/e8-kickoff.md`](docs/briefs/e8-kickoff.md) carries the Gate
-  Record and ten findings. **You can write Luau inside the engine**, debugger
-  included, and one of those findings corrects five milestones of this ledger:
-  E1 recorded that "SDL does not accept injected input", which is true of
-  ImGui-level injection and **false of real Win32 input** -- `SetCursorPos` +
-  `mouse_event` + `SendKeys` drives this editor exactly as a person does, and
-  three defects were found that way. It does not replace a person, since it
-  cannot judge whether a colour is pleasant, but "there is no automated path to
-  a click inside the editor" should stop being repeated.
-
-- **E7 — The Look — BUILT, awaiting review, 2026-08-24.** Its entry moved to the
-  same archive on the same day.
-  [`docs/briefs/e7-kickoff.md`](docs/briefs/e7-kickoff.md) carries the Gate
-  Record, and **every row of it is green, the pictures included** -- the four in
-  `docs/images/e7/` were looked at by a person, which is what that row records,
-  so E7 is waiting on the sign-off itself rather than on evidence for it. The
-  one thing worth keeping here: **the palette is measured, and the measurement
-  found two failures on its first run.** `textMuted` and `danger` cleared 4.5:1
-  against the window and failed against a HOVERED ROW, which is the ground
-  somebody is looking at exactly when they are about to act — and none of that
-  is visible by looking, which is the argument for measuring it.
-
-- **E6 — The Launcher — COMPLETE, signed off 2026-08-24**, tagged
-  `milestone/e6`; entry archived with the others.
-  [`docs/briefs/e6-kickoff.md`](docs/briefs/e6-kickoff.md) carries the Gate
-  Record. The one thing worth keeping here: **the smoke test found what the plan
-  got wrong**, and reading it could not have. `SDL_GetPrefPath` returns a
-  trailing separator, so `parent_path()` answered the directory itself and every
-  new project was scaffolded inside `AppData\Roaming`, where nobody would look
-  for one.
-
-- **E5 — The World You Build — BUILT, awaiting review, 2026-08-24.** Entry
-  archived with the others; the reconnaissance and the Gate Record are in
-  [`docs/briefs/e5-kickoff.md`](docs/briefs/e5-kickoff.md), and **two of its
-  rows are still PENDING**, both of them a person at a window: the screenshot of
-  the chunk-state overlay on `examples/06-scene`, and somebody playing it. The
-  one thing worth keeping here: **a measurement overturned the design.** The
-  size-class cuts were proposed at 8 m and 64 m and put the flagship's ground --
-  69% of its world, and the one thing that has to be visible at distance -- in
-  the middle class, because that terrain is 18,496 tiles of 32 m and classifying
-  by a PART's extent will never find terrain authored as many small pieces. The
-  cuts are 12 m and 24 m, in the gap the data has.
-
-- **E4 — The Editor Ships — COMPLETE, signed off 2026-08-24**, tagged
-  `milestone/e4`. Its entry moved to
-  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) when E6
-  was written up. [`docs/briefs/e4-kickoff.md`](docs/briefs/e4-kickoff.md)
-  carries the Gate Record, and the one row still pending at sign-off is recorded
-  there as pending. **The archive exists**: `LuauG-1.0.0-win64.zip`, built by
-  `scripts/package.ps1`, which proves the folder works from outside this
-  repository before it compresses it.
-
-- **E3 — Content and Prefabs — COMPLETE, signed off 2026-08-23**, tagged
-  `milestone/e3` on 2026-08-26. Its entry is in
-  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) and
-  [`docs/briefs/e3-kickoff.md`](docs/briefs/e3-kickoff.md) carries the Gate
-  Record. The one thing worth keeping here: **three written decisions were
-  reversed within a day of shipping**, each by the person who asked for the
-  first one, and each reversal took one sentence to argue — because the first
-  one was in a file somebody could argue with.
-
-- **E2 — Moving Things — COMPLETE, 2026-08-23**, tagged `milestone/e2` on
-  2026-08-26; entry archived beside E1's, and
-  [`docs/briefs/e2-kickoff.md`](docs/briefs/e2-kickoff.md) carries the Gate
-  Record. The pattern worth keeping here: **nine defects, seven found by a
-  person using the thing**, and three of them were the same shape -- a piece of
-  arithmetic that is right for ONE and wrong for many.
-
-- **E1 — The Editor — COMPLETE, signed off 2026-08-22**, tagged `milestone/e1`.
-  Its entry moved to
-  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) when E5
-  was written up. [`docs/briefs/e1-kickoff.md`](docs/briefs/e1-kickoff.md)
-  carries the Gate Record. One limit from it is worth keeping here, in the
-  narrower form E8 measured it into: **the ImGui shell cannot render
-  headlessly**, so there is no automated path to a PICTURE of the editor. The
-  other half of the sentence E1 wrote — that there is no path to a click either
-  — is false, and E8's entry above says what does drive it.
+- **Phase 1, the editor (E1–E9), is built.** E1, E2, E3, E4 and E6 are signed
+  off and tagged; **E5, E7 and E8 are BUILT and awaiting review**, and what each
+  waits for is under Now / Next. Each brief in `docs/briefs/` carries its Gate
+  Record and Findings, and the State bullets this file carried for them moved to
+  [`docs/progress-archive/2026-08.md`](docs/progress-archive/2026-08.md) on
+  2026-09-22. Three lessons from them are worth keeping in front of a reader:
+  **a person using the thing finds what a test does not** (E2: seven of nine
+  defects); **real Win32 input drives this editor** (E8 corrected five
+  milestones that said nothing could click it); and **the ImGui shell cannot
+  render headlessly**, so there is still no automated PICTURE of the editor.
 
 - **M8 — Flagship, Hardening, Docs, v1.0 — COMPLETE and RELEASED 2026-08-22**,
   tagged `milestone/m8` and `v1.0.0`, both on `origin`, with the GitHub release
@@ -115,14 +43,10 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   (`milestone/m4`), its five gate items green against re-recorded artifacts.
   **M3** (`milestone/m3`), **M2** (`milestone/m2`), **M1**, **M0** — all signed
   off.
-- **CI has executed no step since 2026-08-21, and GitHub now says why in words.**
-  Every job since `5a542b7a` completes in a few seconds having run ZERO steps,
-  and the annotation on each of them is *"The job was not started because recent
-  account payments have failed or your spending limit needs to be increased"* --
-  a billing block on this private repository, which is the owner's to clear and
-  is under Blocked below. The 2026-08-26 push re-tested it and nothing had
-  changed. **So macOS is unverified from M6 onward**; the last all-green run
-  across all three tiers is 32429107275, at M5.
+- **CI is running again, and has been since 2026-08-27**, when the repository
+  went public and the billing block stopped applying. Every push of the
+  2026-09-22 session went green on all three tiers, macOS included -- the first
+  unbroken macOS record since M5.
 
 ### The state before this one, and what does not exist yet
 
@@ -159,18 +83,28 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   ban and never was — it says v1's scope is closed and that a scope change is an
   escalation item, and the post-v1 phase list is that escalation.
 
-  **F1, the terrain milestone, is built through Part G.** One signed-distance
-  field under two encodings (ADR 0067), sculpted from a script or from the
-  editor's brush, meshed, collided, saved with the scene, and reached as
-  `workspace.Terrain`. What is left of F1 is named in the roadmap and is not
-  pretended away: terrain does not stream (Part E), cave *surfaces* have no
-  collision because a `TriangleMesh` rebuild is 12 ms for 32k triangles and
-  needs an off-frame budget, and Part H's seam gate, benches and the flagship
-  swap are unstarted.
+  **F1, the terrain milestone, is built through Part G, and its ground was
+  rebuilt on 2026-09-22.** One signed-distance field under two encodings
+  (ADR 0067), sculpted from a script or from the editor's brush, collided, saved
+  with the scene, and reached as `workspace.Terrain`. **What changed is how it is
+  drawn** ([ADR 0071](docs/decisions/0071-terrain-ground-is-drawn-from-a-height-atlas.md)):
+  the height layer is a GPU atlas under a CDLOD quadtree, so a brush stroke
+  uploads the tiles it touched instead of re-meshing them, and only bricked
+  columns -- caves and overhangs -- are CPU meshes, now surface nets. Cave
+  surfaces collide, built lazily within reach of something that moves. What is
+  left of F1 is still named in the roadmap: terrain does not stream from disk
+  (Part E), and Part H's seam gate and flagship swap are unstarted.
 
-  **The next action, as a sentence:** read
-  [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md) and continue
-  from F1 Part H, or open N1 (multiplayer), which is designed and unstarted.
+  **V1, `VoxelService`, is built** -- a block world with a registry, place and
+  break, a DDA raycast, a greedy mesher with corner occlusion, colliders near
+  movers, and `examples/14-voxels`. It is not `Terrain` and shares nothing with
+  it but a word; [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md)
+  says why. What it does not have yet: an editor tool that places a block,
+  transparent blocks, and chunks streamed from disk.
+
+  **The next action, as a sentence:** give the editor a block tool for
+  `VoxelService`, then open N1 (multiplayer), which is designed and has its
+  wire schema but no transport wiring.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is
@@ -319,58 +253,49 @@ there each time this file passed its ~300-line cap (§11). What was worth
 carrying out of session 19 is under E3 above. Session 26's -- the campaign
 opening, and what a `git push` found -- and session 27's -- S7 closed, and what
 a gate reports when it did not run -- both went there on 2026-08-27, each to
-make room for the next.
+make room for the next. Session 29's -- the ground, and two ways a brush can lie
+-- followed them on 2026-09-22.
 
-- **Session 29 — the ground, and two ways a brush can lie, 2026-08-27.** F1
-  built through Part G: a `Terrain` you can sculpt from a script or with a
-  brush, that collides, draws, saves and reloads.
+- **Session 30 — the ground is drawn by the GPU, shadows stop floating, and a
+  block world, 2026-09-22.** Four things a person reported by playing the
+  package, and one feature the owner asked for by name.
 
-  **The representation is both, not either** ([ADR 0067](docs/decisions/0067-terrain-is-one-field-with-two-encodings.md)).
-  The owner's answer to "height field or voxel" was voxel, and taking it
-  literally would have paid a voxel's memory for every hillside in every world.
-  What shipped is one signed-distance field under two encodings — dense height
-  tiles and sparse voxel bricks — with a per-column promotion rule that asks the
-  RESULTING field one question rather than predicting from the brush's shape:
-  is this still a height function? `sd(p) = p.y − H(x,z)` makes the seam an
-  equality rather than a stitch, so the mesher never learns which branch
-  answered.
+  **"The terrain lags and looks wrong from below."** Both were measured before
+  either was fixed: a brush stroke cost 49.5 ms, because every touched tile was
+  re-meshed on the CPU and every tile carried skirts that read as curtains from
+  underneath. The answer is the one open terrains converge on, and ADR 0071
+  records it: heights in an `R32Float` atlas, a CDLOD quadtree whose leaves are
+  tiles, one shared grid, geomorphing in the vertex shader and neighbours never
+  more than one level apart, so there are no skirts at all. A stroke costs
+  8.4 ms now, and most of that is the collider. Only caves stay CPU meshes, and
+  they became **surface nets** rather than marching tetrahedra: one vertex per
+  cell stops the zig-zag walls, and snapping the rim ring to the heightfield's
+  own vertices turns the cave seam from an overlap into a crease.
 
-  **D153 — a placed block kept its material in one column out of a thousand.**
-  Two causes wearing one symptom, and each was verified by breaking it alone.
-  `afterEdit`'s add branch tested `inside > 0`, so a sample exactly ON a
-  flat-topped brush's face fell through to what was already there — and the
-  height layer reads its material from precisely that sample. It also cost four
-  tenths of a metre of height, because the crossing was then found a voxel
-  lower. Underneath that: a tile is 32 by 32 columns written one column at a
-  time, so filling the first left 1023 with a height and material of zero, read
-  as a real surface. Creating a tile created a plane. Material zero now means
-  "no ground in this column", which is a rule the encoding was already implying.
+  **Jolt 5.6.0 corrupts a height field whose block count is not a power of two**
+  on `SetHeights`, and a cube fell through the ground to prove it. The backend
+  pads the grid with no-collision samples and widens every edit rectangle to
+  whole blocks, so the library is not edited (R13) and the defect cannot reach a
+  game.
 
-  **Two design defects in the brush, both found by a headless rig that drives
-  the pointer, both measured rather than argued.** A brush that aims at the
-  surface it is CHANGING burrows: each stamp lowers the ground, the next frame's
-  ray lands lower, and holding the button still digs to the floor — 337 stamps
-  where 21 were due, and a trench fifteen metres deeper at one framerate than
-  another. The ray is cast against the field as it was when the stroke began,
-  which is affordable only because a terrain snapshot is a vector of shared
-  pointers. And a stroke walked backwards from the pointer loses its fractional
-  remainder every frame: stamping the pointer's own position reads as obviously
-  right, but it puts the leftover at the far end where a continuing caller drops
-  it. Forward from the last stamp, and the remainder is carried by the pointer.
+  **"Shadows are bad everywhere, not only on the terrain."** Researched against
+  the open engines rather than guessed at: a penumbra in world units rather than
+  texels, a rotated sixteen-tap Vogel disc of bilinear PCF, a normal offset that
+  moves the sample sideways only, and no receiver slope bias -- which had been
+  lifting every shadow off the base that casts it. A screen-space contact pass
+  closes the last gap, where a shadow map cannot resolve a foot on a floor. The
+  terrain casts as sixteen-metre tiles so its enormous nodes stop inflating the
+  cascade fit, and the tile is 2048 by default.
 
-  **The save wrote every instance and none of the ground**, found by looking
-  rather than by a failure — the brush had landed one commit earlier and
-  sculpt-save-reopen lost the afternoon silently. Terrain is the one piece of
-  world state that is not a property, so nothing in the property loop reached
-  it. It rides as its own key now, base64 over a versioned run-coded binary,
-  because `writeScene` returns a string and "a scene is one text file" is a
-  contract the editor, the packager and every round-trip test depend on.
+  **V1, `VoxelService`, from its bench first.** A greedy chunk costs 0.37 ms to
+  mesh and a single-block edit 0.33 ms to re-mesh, measured before the service
+  existed so the design could be refused cheaply. Copy-on-write 16-cubed chunks
+  keyed with a `y`, a registry whose ids are a pure function of the script,
+  per-face colours, corner occlusion merged only where it agrees, colliders only
+  near things that move, and a run-coded save under the scene's own key.
 
-  **Also**: `paintBall` and `Terrain:PaintBall`, which change what ground is
-  made of and no distance at all; `core::base64`, which refuses malformed text
-  rather than repairing it; and a conformance spec that pins every rule the
-  brush relies on against the shipped API rather than the C++ under it.
-
-  **The gate was green on all nine stages before each of the three commits**,
-  and CI was dark for all three: every job fails in 8 to 12 seconds with zero
-  steps recorded. It is the billing block, confirmed rather than inferred.
+  **Two things a gate caught that nothing else would have**: D3D12 refuses a
+  pipeline whose vertex stage reads a cbuffer from the fragment space, and a
+  texture read only through `Load` is reflected as a storage texture. Both
+  failed at pipeline creation rather than at compile, so both are written into
+  the shaders' comments.
