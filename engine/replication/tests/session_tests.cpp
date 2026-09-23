@@ -256,6 +256,64 @@ TEST_CASE("solo is no replication at all, and an impossible peer count is refuse
     CHECK(error->message.find("net.err.replication_peer_cap") != std::string::npos);
 }
 
+TEST_CASE("a replica whose connection drops dials again by itself, and a restarted server takes it back")
+{
+    // The redial half of ADR 0085. The server goes away and comes back as a
+    // new process: it does not know the player's token, so the player is new
+    // to it -- and the replica is in its world again without anybody at
+    // either machine doing anything.
+    seedCatalog();
+    auto network = net::createMemoryNetwork();
+    std::optional<core::EngineError> error;
+    Config hostConfig;
+    hostConfig.topology = Topology::Host;
+    hostConfig.port = Port;
+    auto host = createReplicationOver(net::createMemoryTransport(network), hostConfig, error);
+    REQUIRE(host != nullptr);
+    Config joinConfig;
+    joinConfig.topology = Topology::Replica;
+    joinConfig.port = Port;
+    joinConfig.address = "memory";
+    auto join = createReplicationOver(net::createMemoryTransport(network), joinConfig, error);
+    REQUIRE(join != nullptr);
+
+    Side server;
+    Side client;
+    (void)server.part("Beacon", {9.0, 0.0, 0.0}, server.root);
+    core::u64 tick = 0;
+    const auto run = [&](int ticks) {
+        for (int at = 0; at < ticks; ++at) {
+            tick += 1;
+            host->receive(server.world(), server.root);
+            host->send(server.world(), server.root, tick);
+            join->receive(client.world(), client.root);
+            join->send(client.world(), client.root, tick);
+        }
+    };
+    run(8);
+    REQUIRE(join->status().peerCount == 1);
+
+    // The server process ends, and a new one takes the port.
+    host->shutdown();
+    host = createReplicationOver(net::createMemoryTransport(network), hostConfig, error);
+    REQUIRE(host != nullptr);
+    run(2);
+    CHECK(join->status().peerCount == 0);
+
+    // A second of ticks later the replica has dialled, been welcomed, and holds
+    // the world again -- once, not twice.
+    run(80);
+    CHECK(join->status().peerCount == 1);
+    CHECK(host->status().peerCount == 1);
+    int beacons = 0;
+    for (core::InstanceId at = client.world().firstChild(client.root); at.valid();
+         at = client.world().nextSibling(at)) {
+        if (client.world().name(at) == client.fixture.atom("Beacon"))
+            ++beacons;
+    }
+    CHECK(beacons == 1);
+}
+
 TEST_CASE("createReplicationOver drives both postures through the seam")
 {
     seedCatalog();
@@ -474,6 +532,7 @@ struct PlayedMatch
     core::InstanceId me;
     std::optional<AuthoritySession> authority;
     std::optional<ReplicaSession> replica;
+    net::PeerId toServer;
     core::u64 tick = 0;
 
     explicit PlayedMatch(const net::LossConfig* loss = nullptr)
@@ -484,7 +543,6 @@ struct PlayedMatch
         REQUIRE_FALSE(
             serverTransport->open(net::TransportConfig{.port = Port, .maxPeers = 4, .channels = 4}).has_value());
         REQUIRE_FALSE(clientTransport->open(net::TransportConfig{.port = 0, .maxPeers = 1, .channels = 4}).has_value());
-        net::PeerId toServer;
         REQUIRE_FALSE(clientTransport->connect("memory", Port, toServer).has_value());
         host = scene::createPlayer(server.world, server.network, 1, true);
         me = scene::createPlayer(client.world, client.network, 0, true);
@@ -627,6 +685,81 @@ TEST_CASE("interest is a sphere: a player deep under the world is not sent what 
     match.server.world.parts().find(caver)->cframe.position = core::DVec3{0.0, -50.0, 0.0};
     match.run(3);
     CHECK(match.copyOf(overhead).valid());
+}
+
+TEST_CASE("a player who drops and comes back is the same player, and gets the world back whole")
+{
+    // **ADR 0085.** The peer id is the connection and is never reused; the
+    // token is the player. A game that keys a score or an inventory on
+    // `UserId` finds it again.
+    PlayedMatch match;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    match.run(3);
+    REQUIRE(match.copyOf(racer).valid());
+    const core::u32 who = match.replica->playerId();
+    CHECK(who == 2);
+    const PlayerToken token = match.replica->playerToken();
+    CHECK(token.valid());
+
+    // The link goes.
+    match.clientTransport->disconnect(match.toServer);
+    match.run(2);
+    CHECK(match.replica->lost());
+    CHECK_FALSE(scene::playerByUserId(match.server.world, who).valid());
+
+    // And comes back: the same player, and the world arrives again, once.
+    net::PeerId again;
+    REQUIRE_FALSE(match.clientTransport->connect("memory", Port, again).has_value());
+    match.replica->rebind(again);
+    match.run(4);
+    CHECK(match.replica->welcomed());
+    CHECK_FALSE(match.replica->lost());
+    CHECK(match.replica->playerId() == who);
+    CHECK(match.replica->playerToken() == token);
+    CHECK(scene::playerByUserId(match.server.world, who).valid());
+    REQUIRE(match.copyOf(racer).valid());
+    int racers = 0;
+    for (core::InstanceId at = match.client.world.firstChild(match.client.workspace); at.valid();
+         at = match.client.world.nextSibling(at)) {
+        if (match.client.world.name(at) == match.client.atoms.intern("Racer"))
+            ++racers;
+    }
+    CHECK(racers == 1);
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a connection still holding a player who is back already is let go")
+{
+    // A link that died without saying so stays open on the authority until it
+    // times out. The player redials on another before that: the new one is the
+    // player, and the old one is dropped rather than leaving two of them.
+    PlayedMatch match;
+    const PlayerToken token = match.replica->playerToken();
+    REQUIRE(token.valid());
+
+    auto otherTransport = net::createMemoryTransport(match.network);
+    REQUIRE_FALSE(otherTransport->open(net::TransportConfig{.port = 0, .maxPeers = 1, .channels = 4}).has_value());
+    net::PeerId toServer;
+    REQUIRE_FALSE(otherTransport->connect("memory", Port, toServer).has_value());
+    RealSide other;
+    (void)scene::createPlayer(other.world, other.network, 0, true);
+    ReplicaSession second(*otherTransport, toServer);
+    second.setPlayerToken(token);
+    for (int at = 0; at < 4; ++at) {
+        match.step();
+        second.receive(other.world, other.workspace);
+    }
+
+    CHECK(second.playerId() == 2);
+    CHECK(match.replica->lost());
+    int copies = 0;
+    for (core::InstanceId at = match.server.world.firstChild(match.server.network); at.valid();
+         at = match.server.world.nextSibling(at)) {
+        if (const scene::PlayerComponent* player = match.server.world.players().find(at);
+            player != nullptr && player->userId == 2)
+            ++copies;
+    }
+    CHECK(copies == 1);
 }
 
 TEST_CASE("a replica moves its own character at once, and the snapshots only correct it")

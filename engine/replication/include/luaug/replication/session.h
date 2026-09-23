@@ -147,6 +147,8 @@ private:
         // arriving late are dropped, because what a player did last tick is
         // superseded by what they did this one.
         u32 userId = 0;
+        // Who that player is, across connections (ADR 0085).
+        PlayerToken token;
         core::InstanceId player;
         u64 intentTick = 0;
         // The roster this peer was last sent, so it is sent again only when it
@@ -203,6 +205,9 @@ private:
     // start at 2 -- on a dedicated server too, so a number means the same kind
     // of player whichever way the match is served.
     u32 m_nextUserId = 2;
+    // Every player this authority has welcomed, by the token it gave them, for
+    // as long as it runs (ADR 0085). One entry per player, not per connection.
+    std::map<PlayerToken, u32> m_identities;
     // What each id is spawned as, by the authority's class name atom.
     std::map<u32, core::NameAtom> m_classNames;
     std::deque<std::shared_ptr<const WorldState>> m_history;
@@ -239,6 +244,22 @@ public:
 
     [[nodiscard]] bool welcomed() const noexcept { return m_welcomed; }
     [[nodiscard]] bool connected() const noexcept { return m_connected; }
+    // Whether the connection went and has not come back: the host's cue to
+    // dial again (`rebind`).
+    [[nodiscard]] bool lost() const noexcept { return m_lost; }
+    // A new connection to the authority, dialled after the last one was lost.
+    // The handshake starts when it connects, and presents the token, so the
+    // authority welcomes the same player back (ADR 0085).
+    void rebind(net::PeerId authority) noexcept
+    {
+        m_authority = authority;
+        m_connected = false;
+        m_welcomed = false;
+    }
+    // Who this machine's player is to the authority: invalid before the first
+    // welcome. Settable, so an identity can outlive the process that got it.
+    [[nodiscard]] const PlayerToken& playerToken() const noexcept { return m_token; }
+    void setPlayerToken(const PlayerToken& token) noexcept { m_token = token; }
     // The newest state applied to the world. Zero before the first.
     [[nodiscard]] u64 appliedTick() const noexcept { return m_applied; }
     // This replica's player number, as the authority's welcome named it.
@@ -256,6 +277,12 @@ private:
     // Every record of `id` this session keeps, gone: the local mapping, what
     // was written, the samples, and the id in every remembered state.
     void forget(u32 id);
+    // **A welcome after a lost connection starts the world again.** The new
+    // connection's baseline is empty on the authority's side, so everything
+    // is sent afresh; what this replica held from the old one leaves as a
+    // chunk streaming out does -- a husk if a script holds it -- and nothing
+    // stale survives to be updated by nobody.
+    void resetForRejoin(scene::World& world);
     void onPlayers(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
     void resolveCharacters(scene::World& world, core::InstanceId root);
@@ -267,6 +294,10 @@ private:
     net::PeerId m_authority;
     bool m_connected = false;
     bool m_welcomed = false;
+    bool m_lost = false;
+    // Welcomed at least once on any connection, so the next welcome is a rejoin.
+    bool m_joinedBefore = false;
+    PlayerToken m_token;
     u32 m_playerId = 0;
     u64 m_applied = 0;
     // The authority's name atoms, as this world's.

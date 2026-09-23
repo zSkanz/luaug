@@ -72,6 +72,24 @@ struct NetId
     [[nodiscard]] constexpr bool operator==(const NetId& other) const noexcept { return value == other.value; }
 };
 
+// **Who a player is, across connections** (ADR 0085). A peer id is one
+// connection and is never reused; this is the player. The authority makes one
+// at a player's first welcome and gives it back the same `UserId` whenever it
+// is presented again -- a replica that dropped and redialled, without the
+// game losing track of whose score, inventory or seat it was.
+//
+// Opaque and unguessable rather than a counter, because it is a bearer claim:
+// whoever presents it is that player. That is exactly as strong as the rest of
+// an ENet session, which is a LAN or a trusted link (ADR 0012).
+struct PlayerToken
+{
+    u64 high = 0;
+    u64 low = 0;
+
+    [[nodiscard]] constexpr bool valid() const noexcept { return high != 0 || low != 0; }
+    [[nodiscard]] constexpr auto operator<=>(const PlayerToken&) const noexcept = default;
+};
+
 // What `app` hands the module at startup, from arguments and from nowhere else
 // (ADR 0070).
 struct Config

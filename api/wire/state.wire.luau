@@ -693,17 +693,20 @@ local Messages: { Schema.Message } = {
         Id = 1,
         Channel = "Control",
         Direction = "ToAuthority",
-        Doc = "A replica announcing itself: protocol version and nothing else. **Version first, so a "
-            .. "mismatch is refused before a single field is parsed** rather than after a decoder has "
-            .. "already read a field id it does not have.",
+        Doc = "A replica announcing itself: protocol version, then the player token the authority "
+            .. "gave it last time, or zeros the first time. **Version first, so a mismatch is refused "
+            .. "before a single field is parsed** rather than after a decoder has already read a field "
+            .. "id it does not have. The token is how a player who drops and comes back is the same "
+            .. "player (ADR 0085).",
     },
     {
         Name = "Welcome",
         Id = 2,
         Channel = "Control",
         Direction = "ToReplica",
-        Doc = "Accepted: the peer's own `Player` id and the authority's tick. A refusal is a "
-            .. "disconnect with a keyed reason rather than a silence.",
+        Doc = "Accepted: the peer's own `Player` id, the authority's tick, and the player token to "
+            .. "send back on a reconnect -- the same id again (ADR 0085). A refusal is a disconnect "
+            .. "with a keyed reason rather than a silence.",
     },
     {
         Name = "Spawn",

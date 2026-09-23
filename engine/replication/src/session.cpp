@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <random>
 #include <string>
 #include <string_view>
 
@@ -16,6 +17,22 @@
 
 namespace luaug::replication {
 namespace {
+
+// **A token nobody can guess** (ADR 0085), from the operating system's
+// entropy. Not simulation state -- it never reaches the world or its hash --
+// so this is not the unseeded randomness R10 forbids; the `UserId` it maps to
+// is assigned in welcome order, as it always was.
+[[nodiscard]] PlayerToken freshToken()
+{
+    std::random_device device;
+    const auto word = [&device] { return (static_cast<u64>(device()) << 32) | static_cast<u64>(device()); };
+    PlayerToken token;
+    while (!token.valid()) {
+        token.high = word();
+        token.low = word();
+    }
+    return token;
+}
 
 using core::f64;
 using core::i32;
@@ -437,12 +454,48 @@ void AuthoritySession::receive(scene::World& world, InstanceId root)
                 // **Version first, and a mismatch is a refusal rather than a
                 // guess** -- a decoder reading field ids it does not have is a
                 // replica confidently wrong about the world.
-                if (!reader.ok() || version != generated::ProtocolVersion) {
+                PlayerToken token;
+                token.high = reader.u64v();
+                token.low = reader.u64v();
+                if (!reader.ok() || version != generated::ProtocolVersion || peer->welcomed) {
                     m_transport.disconnect(peer->id);
                     break;
                 }
+                // **A token this authority gave is the same player again**
+                // (ADR 0085): the same `UserId`, so a game keyed on it finds
+                // the score, the seat and the inventory it left. Anything else
+                // -- the first time, or a token from an authority that has
+                // since restarted -- is a new player with a new token.
+                u32 userId = 0;
+                if (const auto known = m_identities.find(token); token.valid() && known != m_identities.end())
+                    userId = known->second;
+                if (userId != 0) {
+                    // A connection that still holds this player is one that
+                    // died without saying so and has not timed out yet: the
+                    // player is here now, so that one is let go.
+                    std::vector<net::PeerId> stale;
+                    for (const Peer& other : m_peers) {
+                        if (!(other.id == event.peer) && other.welcomed && other.token == token)
+                            stale.push_back(other.id);
+                    }
+                    for (const net::PeerId gone : stale) {
+                        if (Peer* old = peerFor(gone); old != nullptr && old->player.valid())
+                            scene::removePlayer(world, network, old->player);
+                        m_transport.disconnect(gone);
+                        std::erase_if(m_peers, [&](const Peer& candidate) { return candidate.id == gone; });
+                    }
+                    peer = peerFor(event.peer);
+                    if (peer == nullptr)
+                        break;
+                }
+                else {
+                    userId = m_nextUserId++;
+                    token = freshToken();
+                    m_identities[token] = userId;
+                }
                 peer->welcomed = true;
-                peer->userId = m_nextUserId++;
+                peer->userId = userId;
+                peer->token = token;
                 if (network.valid())
                     peer->player = scene::createPlayer(world, network, peer->userId, false);
                 Writer welcome;
@@ -450,6 +503,8 @@ void AuthoritySession::receive(scene::World& world, InstanceId root)
                 welcome.u32v(generated::ProtocolVersion);
                 welcome.u32v(peer->userId);
                 welcome.u64v(m_tick);
+                welcome.u64v(token.high);
+                welcome.u64v(token.low);
                 sendBytes(m_transport, peer->id, welcome.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
             }
             else if (type == MessageType::Ack) {
@@ -907,15 +962,19 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
             continue;
         if (event.kind == net::TransportEvent::Kind::Connected) {
             m_connected = true;
+            m_lost = false;
             Writer hello;
             hello.u8v(static_cast<u8>(MessageType::Hello));
             hello.u32v(generated::ProtocolVersion);
+            hello.u64v(m_token.high);
+            hello.u64v(m_token.low);
             sendBytes(m_transport, m_authority, hello.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
             continue;
         }
         if (event.kind == net::TransportEvent::Kind::Disconnected) {
             m_connected = false;
             m_welcomed = false;
+            m_lost = true;
             continue;
         }
         if (event.kind != net::TransportEvent::Kind::Message || event.payload.empty())
@@ -928,12 +987,19 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
             const u32 version = reader.u32v();
             const u32 player = reader.u32v();
             (void)reader.u64v();
+            PlayerToken token;
+            token.high = reader.u64v();
+            token.low = reader.u64v();
             if (!reader.ok() || version != generated::ProtocolVersion) {
                 m_transport.disconnect(m_authority);
                 break;
             }
+            if (m_joinedBefore)
+                resetForRejoin(world);
+            m_joinedBefore = true;
             m_welcomed = true;
             m_playerId = player;
+            m_token = token;
             // The player at this machine takes the number the authority gave
             // it, so `LocalPlayer.UserId` on a replica is the same number the
             // authority's copy of that player has.
@@ -1253,6 +1319,39 @@ void ReplicaSession::onDespawn(scene::World& world, std::span<const u8> bytes)
         for (const u32 id : *list)
             forget(id);
     }
+}
+
+void ReplicaSession::resetForRejoin(scene::World& world)
+{
+    // Held ones become husks first, as `onDespawn` does it: `destroy` takes a
+    // whole subtree, and a part a script holds must survive its parent going.
+    std::vector<InstanceId> removed;
+    for (const auto& [id, local] : m_locals) {
+        if (!world.alive(local))
+            continue;
+        if (m_probe && m_probe(local)) {
+            (void)world.setParent(local, InstanceId{});
+            m_streamedOut.push_back(local);
+        }
+        else {
+            removed.push_back(local);
+        }
+    }
+    for (const InstanceId gone : removed) {
+        if (world.alive(gone))
+            (void)world.destroy(gone);
+    }
+    m_locals.clear();
+    m_written.clear();
+    m_departed.clear();
+    m_names.clear();
+    m_states.clear();
+    m_samples.clear();
+    m_characters.clear();
+    m_predicted.clear();
+    m_owned = 0;
+    m_ackedIntent = 0;
+    m_applied = 0;
 }
 
 void ReplicaSession::forget(u32 id)

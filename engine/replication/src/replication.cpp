@@ -3,8 +3,10 @@
 
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
+#include "luaug/core/log.h"
 #include "luaug/replication/session.h"
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
@@ -53,10 +55,13 @@ public:
 
     void receive(scene::World& world, core::InstanceId root) override
     {
-        if (m_authority.has_value())
+        if (m_authority.has_value()) {
             m_authority->receive(world, root);
-        else if (m_replica.has_value())
+        }
+        else if (m_replica.has_value()) {
             m_replica->receive(world, root);
+            redial();
+        }
     }
 
     void send(const scene::World& world, core::InstanceId root, u64 tick) override
@@ -131,8 +136,44 @@ public:
     Replication& operator=(const Replication&) = delete;
 
 private:
+    // **A replica whose connection went dials again, and keeps dialling**
+    // (ADR 0085): after one second, then two, four and so on to thirty, counted
+    // in ticks so a slow machine waits as long in game time as a fast one. The
+    // authority welcomes the same player back when it answers; until then the
+    // world the replica holds stands still rather than vanishing.
+    void redial()
+    {
+        m_receives += 1;
+        if (!m_replica->lost()) {
+            if (m_attempts > 0)
+                core::log(core::LogLevel::Info, LUAUG_TR("net.info.reconnected"));
+            m_attempts = 0;
+            m_redialAt = 0;
+            return;
+        }
+        if (m_redialAt == 0) {
+            core::log(core::LogLevel::Warn, LUAUG_TR("net.warn.connection_lost"));
+            m_redialAt = m_receives + RedialFirstTicks;
+            return;
+        }
+        if (m_receives < m_redialAt)
+            return;
+        net::PeerId authority;
+        if (!m_transport->connect(m_config.address, m_config.port, authority).has_value())
+            m_replica->rebind(authority);
+        m_attempts = std::min<u32>(m_attempts + 1, RedialDoublings);
+        m_redialAt = m_receives + (RedialFirstTicks << m_attempts);
+    }
+
+    // One second at the fixed rate, doubled up to five times: thirty-two.
+    static constexpr u64 RedialFirstTicks = 60;
+    static constexpr u32 RedialDoublings = 5;
+
     std::unique_ptr<net::ITransport> m_transport;
     Config m_config;
+    u64 m_receives = 0;
+    u64 m_redialAt = 0;
+    u32 m_attempts = 0;
     std::optional<AuthoritySession> m_authority;
     std::optional<ReplicaSession> m_replica;
     std::function<bool(core::InstanceId)> m_probe;
