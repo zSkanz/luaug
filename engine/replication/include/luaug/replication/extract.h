@@ -85,6 +85,18 @@ void diffFields(const generated::ClassDesc& desc, std::span<const FieldValue> ba
 // an index into this build's table.
 [[nodiscard]] core::u16 wireIdAt(const generated::ClassDesc& desc, core::usize index);
 
+// Destroys every instance under `root` that replicates, subtree and all, and
+// answers how many it destroyed.
+//
+// **What a replica does to its own scene before the first snapshot.** A replica
+// boots the same project the authority does -- the same scene, the same
+// scripts -- and everything in that scene the authority replicates is about to
+// arrive from the authority with network ids. Kept, it would be every part
+// twice: one local copy nothing moves and one the snapshots do. What does NOT
+// replicate stays -- the terrain (ADR 0069, decision 7), the camera, the
+// scripts -- which is exactly what a replica needs from its own files.
+core::usize clearReplicated(scene::World& world, core::InstanceId root);
+
 // Applies one field to an instance. Returns false when the id is not one this
 // class has -- which is what a peer speaking a newer protocol looks like, and is
 // a refusal rather than a guess.

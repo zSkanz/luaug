@@ -1,0 +1,15 @@
+# Two copies of one game, one of them deciding (N1, ADR 0069 and ADR 0070).
+#
+# **No scene file**: the authority builds the world in its script and the
+# replica receives it, which is the whole of what this example shows.
+
+[project]
+name = "LuauG Multiplayer"
+id = "dev.luaug.multiplayer"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Multiplayer"
+width = 1280
+height = 720

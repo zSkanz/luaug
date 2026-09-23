@@ -15,6 +15,9 @@ automated headless gate script (screenshot/capture + asserted behavior):
 | `10-open-world` | M8 | the v1 flagship: streamed open world + character + day/night + hot reload. The first example with a `luaug.toml` the engine reads, and the one the soak gate drives |
 | `11-ocean` | post-v1 | one wave function shared by the water, the boat and the cargo: instanced opaque tiles, a fixed pool that follows the boat, and Archimedes buoyancy through `ApplyImpulse`. Unnumbered — the first example not born of a milestone, and the one that measured what moving a part from Luau costs |
 | `12-ragdoll` | post-v1 | `Ragdoll:Build` over a real rig: sixteen limbs, fifteen joints and a `Bone` per joint, all of them ordinary instances. The example the pose blend exists for — going down is a ramp rather than a flag, which is the difference between a fall and a glitch. Unnumbered by milestone, like `11-ocean` |
+| `13-terrain` | post-v1 phase 2 | the sculpted ground: a height atlas drawn on the GPU, caves as surface nets, and a brush from a script |
+| `14-voxels` | post-v1 phase 2 | `VoxelService`: a block world registered, filled, mined with `Raycast` and collided — not the terrain |
+| `15-multiplayer` | post-v1 phase 4 | one project in every posture: `--host`, `--join`, `--serve` or solo. The authority builds and moves the world, the replica is sent it, and `NetworkService.Authority` is the one question the script asks |
 
 Assets used by examples must be permissively licensed and recorded in
 `THIRD_PARTY_NOTICES.md`. Keep binary assets tiny until the git-LFS ADR (M4);

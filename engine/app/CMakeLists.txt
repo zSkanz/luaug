@@ -55,6 +55,7 @@ luaug_add_module(app
         input
         physics_api
         render
+        replication_api
         scene
         script
         ui
@@ -79,6 +80,13 @@ if(LUAUG_RHI_CAPTURE)
 endif()
 if(LUAUG_RHI_NULL)
     target_link_libraries(luaug_app PRIVATE luaug::rhi_null)
+endif()
+
+# The replication module, by the same rule and for a stronger reason (ADR 0070,
+# clause 3): with it off there is no socket code in the binary to reach, and the
+# engine refuses a networked posture by name rather than failing to connect.
+if(LUAUG_ENABLE_REPLICATION)
+    target_link_libraries(luaug_app PRIVATE luaug::replication)
 endif()
 
 # The physics backend, for the same reason and by the same rule (ADR 0023): the

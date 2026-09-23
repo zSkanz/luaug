@@ -97,9 +97,6 @@ describe("game:GetService", function()
             dataModel:GetService("Players")
         end):ToThrow()
         expect(function()
-            dataModel:GetService("NetworkService")
-        end):ToThrow()
-        expect(function()
             dataModel:GetService("ReplicationService")
         end):ToThrow()
         expect(function()
@@ -126,7 +123,6 @@ describe("game:FindService", function()
 
     it("returns nil for a name 2.1 reserves for a later version", function()
         expect(game:FindService("Players")):ToBeNil()
-        expect(game:FindService("NetworkService")):ToBeNil()
         expect(game:FindService("ReplicationService")):ToBeNil()
         expect(game:FindService("NavigationService")):ToBeNil()
     end)
@@ -192,15 +188,41 @@ describe("service construction", function()
         expect(function()
             instanceLibrary.new("Players")
         end):ToThrow()
-        expect(function()
-            instanceLibrary.new("NetworkService")
-        end):ToThrow()
     end)
 
     it("keeps no reserved name in the DataModel's children", function()
         expect(game:FindFirstChild("Players")):ToBeNil()
-        expect(game:FindFirstChild("NetworkService")):ToBeNil()
         expect(game:FindFirstChild("ReplicationService")):ToBeNil()
         expect(game:FindFirstChild("NavigationService")):ToBeNil()
+    end)
+end)
+
+-- **`NetworkService` left the reserved list when N1 built it** (ADR 0069,
+-- ADR 0070): it is a service every world has from boot, and its answers in a
+-- world nobody networked are the solo truth.
+describe("NetworkService", function()
+    it("exists from boot and answers the solo truth", function()
+        local network = game:GetService("NetworkService")
+        expect(network.Authority):ToBe(true)
+        expect(network.Topology):ToBe(Enum.NetworkTopology.Solo)
+        expect(network.ServerTick):ToBe(0)
+        expect(network.PeerCount):ToBe(0)
+    end)
+
+    it("is read-only, because a posture is chosen before any script runs", function()
+        local network = game:GetService("NetworkService") :: any
+        expect(function()
+            network.Authority = false
+        end):ToThrow()
+        expect(function()
+            network.Topology = Enum.NetworkTopology.Host
+        end):ToThrow()
+    end)
+
+    it("cannot be created by a script", function()
+        local instanceLibrary = Instance :: any
+        expect(function()
+            instanceLibrary.new("NetworkService")
+        end):ToThrow()
     end)
 end)

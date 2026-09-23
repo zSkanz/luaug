@@ -217,6 +217,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     m_world.emplace(m_classes, m_enums, m_atoms, options.seed);
     m_world->engineState().engineVersion = LUAUG_VERSION_STRING;
     m_world->engineState().luauVersion = LUAUG_LUAU_VERSION;
+    m_world->engineState().networkTopology = options.networkTopology;
     m_world->engineState().fixedTimestep = options.fixedTimestep;
     // Both, so a read before any write gives what the scheduler is running on
     // rather than the struct's default.

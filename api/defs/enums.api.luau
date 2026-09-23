@@ -716,6 +716,35 @@ local Definition: Schema.Definition = {
                 },
             } :: { Schema.EnumItem },
         },
+        {
+            Name = "NetworkTopology",
+            Doc = "Which of the four postures this process runs in (ADR 0070). Decided at start from the "
+                .. "command line and never changed, so a script reads it and never sets it.",
+            Items = {
+                {
+                    Name = "Solo",
+                    Value = 0,
+                    Doc = "Nothing is networked. This process decides everything, which is why "
+                        .. "`NetworkService.Authority` is true here too.",
+                },
+                {
+                    Name = "Host",
+                    Value = 1,
+                    Doc = "The authority, and a player of its own game in the same process.",
+                },
+                {
+                    Name = "Dedicated",
+                    Value = 2,
+                    Doc = "The authority with no player of its own: a server with no window.",
+                },
+                {
+                    Name = "Replica",
+                    Value = 3,
+                    Doc = "A client of somebody else's authority. It shows the world it is sent and decides "
+                        .. "none of it.",
+                },
+            } :: { Schema.EnumItem },
+        },
     },
 }
 

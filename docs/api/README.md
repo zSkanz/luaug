@@ -26,6 +26,7 @@ guided tour.
 | [`HotReloadService`](hotreloadservice.md) | [`Instance`](instance.md) | The hot-reload loop as a script can see it (ADR 0024). |
 | [`InputService`](inputservice.md) | [`Instance`](instance.md) | The host of the Input Action System (§2.4, ADR 0029) and the only place device-wide state is readable. |
 | [`Lighting`](lighting.md) | [`Instance`](instance.md) | Day/night and the environment every surface is lit against. |
+| [`NetworkService`](networkservice.md) | [`Instance`](instance.md) | What this process is in a networked game, and nothing it can change (ADR 0069, ADR 0070). |
 | [`PhysicsService`](physicsservice.md) | [`Instance`](instance.md) | The simulation tick grid and the physics controls that do not belong on an individual part. |
 | [`RunService`](runservice.md) | [`Instance`](instance.md) | The frame loop: the phase signals per-frame work hangs off, and the clock that work reads. |
 | [`ScriptService`](scriptservice.md) | [`Instance`](instance.md) | The mount point for entry scripts. |

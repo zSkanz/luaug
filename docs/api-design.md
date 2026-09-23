@@ -362,13 +362,15 @@ does. All three are additive to build, and `Enum.WindowMode` went with the third
 of them (§2.3).
 
 **Reserved meanings, not implemented in v1** (do not squat them): the service
-names `Players`, `NetworkService`, `ReplicationService` and
-`NavigationService`, which name no class at all in v1; and `Enum.RunContext`,
+names `Players`, `ReplicationService` and `NavigationService`, which name no
+class at all; and `Enum.RunContext`,
 which *is* declared and does carry `Client` and `Server` (§2.3) — the items
 exist, nothing reads them, and a `Script` runs identically whatever its
 `RunContext` says. Reserving a meaning is not the same as withholding a name:
 these are reserved so that v1 code cannot come to mean something else by them
-once the client/server split ships.
+once the client/server split ships. `NetworkService` was on this list until
+post-v1 phase 4 built it (ADR 0069, ADR 0070): it reports the process's posture
+-- `Authority`, `Topology`, `ServerTick`, `PeerCount` -- and sets none of it.
 
 **Networking is not a service in v1**: `require("@std/net")` (§7) is the
 network surface, so backend code is portable to Lute verbatim (ADR 0012). What

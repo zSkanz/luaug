@@ -1420,6 +1420,43 @@
       "Events": []
     },
     {
+      "Name": "NetworkService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "Authority",
+          "Type": "boolean",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe",
+          "Transient": true
+        },
+        {
+          "Name": "PeerCount",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe",
+          "Transient": true
+        },
+        {
+          "Name": "ServerTick",
+          "Type": "number",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe",
+          "Transient": true
+        },
+        {
+          "Name": "Topology",
+          "Type": "Enum.NetworkTopology",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe",
+          "Transient": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "PVInstance",
       "Extends": "Instance",
       "Tags": ["Abstract", "NotCreatable"],
@@ -5137,6 +5174,27 @@
         {
           "Name": "Warning",
           "Value": 3
+        }
+      ]
+    },
+    {
+      "Name": "NetworkTopology",
+      "Items": [
+        {
+          "Name": "Dedicated",
+          "Value": 2
+        },
+        {
+          "Name": "Host",
+          "Value": 1
+        },
+        {
+          "Name": "Replica",
+          "Value": 3
+        },
+        {
+          "Name": "Solo",
+          "Value": 0
         }
       ]
     },

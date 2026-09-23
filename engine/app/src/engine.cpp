@@ -55,6 +55,8 @@
 #include "luaug/render/transform_history.h"
 #include "luaug/render/ui_renderer.h"
 #include "luaug/render/voxel_loader.h"
+#include "luaug/replication/extract.h"
+#include "luaug/replication/replication.h"
 #include "luaug/rhi/device.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/script/modules.h"
@@ -62,6 +64,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -70,6 +73,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if LUAUG_RHI_CAPTURE
@@ -937,6 +941,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // did, and that asymmetry is the whole decision: a tool shows the world
         // it was given, and behaviour begins when somebody presses play.
         .startScripts = !options.editor,
+        .networkTopology = static_cast<scene::NetworkTopology>(options.network.topology),
     };
 
     auto host = std::make_unique<WorldHost>();
@@ -972,6 +977,33 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // the whole point of putting it there. This just declines to run a frame.
     if (options.partitionOnly)
         return std::nullopt;
+
+    // **The posture's one door** (ADR 0070, clause 2): argument parsing chose a
+    // topology, and this is the only line in the engine that can turn that into
+    // a socket. Solo builds nothing and pays one null check a tick.
+    std::unique_ptr<replication::IReplication> network;
+    if (options.network.topology != replication::Topology::Solo) {
+#if LUAUG_ENABLE_REPLICATION
+        std::optional<core::EngineError> networkError;
+        network = replication::createReplication(options.network, networkError);
+        if (networkError.has_value())
+            return networkError;
+        if (options.network.topology == replication::Topology::Replica) {
+            // What the authority is about to send, removed from this copy of
+            // the scene so it is not everything twice. See `clearReplicated`.
+            (void)replication::clearReplicated(host->world(), host->workspace());
+            const core::I18nArg args[] = {{"address", options.network.address},
+                                          {"port", static_cast<core::i64>(options.network.port)}};
+            core::log(core::LogLevel::Info, LUAUG_TR("net.info.joining"), args);
+        }
+        else {
+            const core::I18nArg args[] = {{"port", static_cast<core::i64>(options.network.port)}};
+            core::log(core::LogLevel::Info, LUAUG_TR("net.info.hosting"), args);
+        }
+#else
+        return core::makeError(LUAUG_TR("engine.cli.err.no_replication"));
+#endif
+    }
 
     // The editor is told which scene the world holds, so its save writes back
     // to that one rather than refusing for want of an open scene.
@@ -1073,7 +1105,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // synthetic it runs tens of thousands of ticks per second, so "the hash
         // at tick 40" is a tick the world blew past before the request for it
         // finished crossing the socket.
-        const bool syntheticClock = options.headless && options.devControlUrl.empty();
+        // A networked session is on the real clock for the dev session's
+        // reason and a stronger one: a peer on another machine is ticking in
+        // real time, and a server that simulated as fast as it could would be
+        // an hour ahead of its players in a minute.
+        const bool syntheticClock = options.headless && options.devControlUrl.empty() && network == nullptr;
         const u64 nowNs = syntheticClock ? scheduler.totalFrames() * headlessStepNs : platform::nowNs();
 
         const Frame frame = scheduler.beginFrame(nowNs);
@@ -2348,11 +2384,33 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // The simulation, before anything is drawn: rendering shows the state a
         // tick settled on, never one being written.
         for (u32 step = 0; step < simTicks; ++step) {
+            // What arrived is input to the tick that follows it, and what is
+            // sent is the tick's result -- reversed, both directions cost a
+            // tick of latency and nothing in a loopback test would show it.
+            if (network != nullptr)
+                network->receive(host->world(), host->workspace());
             // BEFORE the tick, so that once the loop is done the history holds
             // where everything was one tick ago and the world holds where it is
             // now -- the two ends `render::extract` interpolates between (D047).
             transformHistory.capture(host->world());
             host->tick();
+            if (network != nullptr)
+                network->send(host->world(), host->workspace(), host->world().engineState().tick);
+        }
+        if (network != nullptr) {
+            // A frame that ran no tick still services the connection: a paused
+            // editor, or a frame that arrived early, must not look like a peer
+            // that stopped answering.
+            if (simTicks == 0)
+                network->receive(host->world(), host->workspace());
+            const replication::Status status = network->status();
+            scene::EngineState& engineState = host->world().engineState();
+            engineState.networkServerTick = status.serverTick;
+            engineState.networkPeerCount = status.peerCount;
+            // A windowless server would otherwise spin a core waiting for its
+            // next tick. A millisecond is far below a tick and far above a spin.
+            if (options.headless && simTicks == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
         // **The pointer's state, applied to the window it belongs to.** Both

@@ -1447,6 +1447,68 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     workspaceDesc.detachComponents = native::detachWorkspaceComponents;
     classes.registerClass(workspaceDesc);
 
+    // --- NetworkService ---
+    static std::array<PropertyDesc, 4> networkServiceProperties;
+    networkServiceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Authority"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Safe,
+            .readOnly = true,
+            .inert = false,
+            .hostFact = true,
+            .doc = "Whether this process decides the world: true solo, hosting or serving; false on a replica, which shows what it is sent.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getNetworkServiceAuthority,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Topology"),
+            .type = ValueType::EnumItem,
+            .enumName = atoms.intern("NetworkTopology"),
+            .threadSafety = ThreadSafety::Safe,
+            .readOnly = true,
+            .inert = false,
+            .hostFact = true,
+            .doc = "Which posture this process runs in. Branch on `Authority` for gameplay; this is for a menu that wants to say which one it is.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getNetworkServiceTopology,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("ServerTick"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Safe,
+            .readOnly = true,
+            .inert = false,
+            .hostFact = true,
+            .doc = "The authority's tick: its own on an authority, the newest one applied on a replica. Zero solo. **A count of ticks and never a time**, because two machines agree on the first and never on the second.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getNetworkServiceServerTick,
+            .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("PeerCount"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Safe,
+            .readOnly = true,
+            .inert = false,
+            .hostFact = true,
+            .doc = "Connected peers, not counting this process: the replicas an authority is serving, or 1 on a replica that is connected to its authority.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getNetworkServicePeerCount,
+            .set = nullptr,
+        },
+    }};
+    ClassDescriptor networkServiceDesc;
+    networkServiceDesc.name = atoms.intern("NetworkService");
+    networkServiceDesc.super = instanceClass;
+    networkServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    networkServiceDesc.defaultName = atoms.intern("NetworkService");
+    networkServiceDesc.doc = "What this process is in a networked game, and nothing it can change (ADR 0069, ADR 0070). **A script asks it a gameplay question -- do I decide this? -- and never a configuration one.** `if NetworkService.Authority then` is a branch that is present and TAKEN in a game nobody networked, because solo is an authority of one. No property, method or service opens a connection: the posture is chosen on the command line, before any script exists.";
+    networkServiceDesc.properties = networkServiceProperties;
+    classes.registerClass(networkServiceDesc);
+
     // --- RunService ---
     static std::array<PropertyDesc, 1> runServiceProperties;
     runServiceProperties = {{
@@ -3197,6 +3259,36 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     scaleTypeDesc.docKey = {};
     scaleTypeDesc.items = scaleTypeItems;
     enums.registerEnum(scaleTypeDesc);
+
+    // --- NetworkTopology ---
+    static std::array<EnumItemDesc, 4> networkTopologyItems;
+    networkTopologyItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Solo"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Host"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Dedicated"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Replica"),
+            .value = 3,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor networkTopologyDesc;
+    networkTopologyDesc.name = atoms.intern("NetworkTopology");
+    networkTopologyDesc.docKey = {};
+    networkTopologyDesc.items = networkTopologyItems;
+    enums.registerEnum(networkTopologyDesc);
 }
 
 } // namespace luaug::scene::generated

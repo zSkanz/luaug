@@ -149,6 +149,13 @@ struct WorldHostOptions
     // tree, the Explorer shows them, `Source` is editable and a tab can open one
     // (ADR 0057). What waits is the first resumption, and with it `game.Loaded`.
     bool startScripts = true;
+
+    // **The posture, set before a single script runs** (ADR 0070). A script's
+    // file scope reads `NetworkService.Authority` in the boot drain -- that is
+    // where "build the level only if I decide the world" lives -- so a value
+    // that arrived after boot would be read wrong exactly once, by the code
+    // that most needs it right.
+    scene::NetworkTopology networkTopology = scene::NetworkTopology::Solo;
 };
 
 // What the conformance run reported. Read after the loop, because the run ends

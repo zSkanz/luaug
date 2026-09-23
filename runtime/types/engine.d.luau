@@ -96,6 +96,9 @@ end
 declare extern type EnumScaleType extends EnumItem with
 end
 
+declare extern type EnumNetworkTopology extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -1438,6 +1441,7 @@ declare extern type DataModel extends Instance with
     read Loaded: Signal<()>
     function GetService(self, name: "Workspace"): Workspace
     function GetService(self, name: "Lighting"): Lighting
+    function GetService(self, name: "NetworkService"): NetworkService
     function GetService(self, name: "RunService"): RunService
     function GetService(self, name: "ScriptService"): ScriptService
     function GetService(self, name: "StreamingService"): StreamingService
@@ -1528,6 +1532,22 @@ declare extern type Lighting extends Instance with
     --- GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same
     --- ClockTime always gives the same direction.
     read SunDirection: vector
+end
+
+declare extern type NetworkService extends Instance with
+    --- Whether this process decides the world: true solo, hosting or serving; false on a replica, which
+    --- shows what it is sent.
+    read Authority: boolean
+    --- Which posture this process runs in. Branch on `Authority` for gameplay; this is for a menu that
+    --- wants to say which one it is.
+    read Topology: EnumNetworkTopology
+    --- The authority's tick: its own on an authority, the newest one applied on a replica. Zero solo.
+    --- **A count of ticks and never a time**, because two machines agree on the first and never on the
+    --- second.
+    read ServerTick: number
+    --- Connected peers, not counting this process: the replicas an authority is serving, or 1 on a
+    --- replica that is connected to its authority.
+    read PeerCount: number
 end
 
 declare extern type RunService extends Instance with
@@ -2146,6 +2166,13 @@ declare Enum: {
         Slice: EnumScaleType,
         Tile: EnumScaleType,
         GetEnumItems: (self: any) -> { EnumScaleType },
+    },
+    NetworkTopology: {
+        Solo: EnumNetworkTopology,
+        Host: EnumNetworkTopology,
+        Dedicated: EnumNetworkTopology,
+        Replica: EnumNetworkTopology,
+        GetEnumItems: (self: any) -> { EnumNetworkTopology },
     },
 }
 

@@ -112,6 +112,18 @@ using TagSet = std::vector<core::NameAtom>;
 // here and the accessors read here. One instance per world rather than a
 // component per service, because there is exactly one of each service in a
 // world and a component would be ceremony around a single struct.
+// The four postures a process can run in (ADR 0070), as `NetworkService`
+// reports them. Numbered as `Enum.NetworkTopology` is, and as
+// `replication::Topology` is -- `scene` cannot see that module (it is L4), so
+// the numbers are the agreement.
+enum class NetworkTopology : u8
+{
+    Solo = 0,
+    Host = 1,
+    Dedicated = 2,
+    Replica = 3,
+};
+
 struct EngineState
 {
     // Seconds, constant for the whole tick and advanced by the scheduler
@@ -186,6 +198,16 @@ struct EngineState
     f32 masterVolume = 1.0f;
     std::string engineVersion;
     std::string luauVersion;
+
+    // **What `NetworkService` reports** (N1). Written by the host from the
+    // replication module's status, once a frame, and never by a script. All
+    // three are facts about the process rather than the world, so none of them
+    // reaches the world hash: a trace recorded as a host replays solo.
+    //
+    // Solo's values are the defaults, and they are the solo truth.
+    NetworkTopology networkTopology = NetworkTopology::Solo;
+    u64 networkServerTick = 0;
+    u32 networkPeerCount = 0;
 };
 
 // Per-parent name index. Held in its own pool rather than inline in the record

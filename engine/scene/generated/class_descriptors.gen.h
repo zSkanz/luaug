@@ -61,6 +61,7 @@ inline constexpr EnumId VerticalAlignmentEnumId = 20;
 inline constexpr EnumId SortOrderEnumId = 21;
 inline constexpr EnumId AutomaticSizeEnumId = 22;
 inline constexpr EnumId ScaleTypeEnumId = 23;
+inline constexpr EnumId NetworkTopologyEnumId = 24;
 
 } // namespace generated
 
@@ -264,6 +265,12 @@ bool setWorkspaceCurrentCamera(World& world, core::InstanceId id, const Value& v
 Value getWorkspaceTerrain(const World& world, core::InstanceId id);
 void attachWorkspaceComponents(World& world, core::InstanceId id);
 void detachWorkspaceComponents(World& world, core::InstanceId id);
+
+// NetworkService
+Value getNetworkServiceAuthority(const World& world, core::InstanceId id);
+Value getNetworkServiceTopology(const World& world, core::InstanceId id);
+Value getNetworkServiceServerTick(const World& world, core::InstanceId id);
+Value getNetworkServicePeerCount(const World& world, core::InstanceId id);
 
 // RunService
 Value getRunServiceSimTime(const World& world, core::InstanceId id);

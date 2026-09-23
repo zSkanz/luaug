@@ -38,6 +38,11 @@ constexpr int kExitUsage = 2;
 constexpr int kExitScriptError = 1;
 constexpr int kExitNoCatalog = 3;
 
+// The port a networked posture uses when none is given. Any unprivileged number
+// would do; a fixed one means `--host` and `--join=address` meet without either
+// person having to agree on anything.
+constexpr luaug::core::u16 kDefaultGamePort = 7777;
+
 // Distinct because "this machine has no usable GPU" is not a failure of
 // anything under test. CTest maps it to SKIP, so a runner without a driver
 // reports a skipped render test instead of a red build nobody can act on.
@@ -125,6 +130,66 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
 
         if (arg == "--headless") {
             options.headless = true;
+            continue;
+        }
+        // **The three networked postures** (ADR 0070). Each is a flag rather
+        // than a subcommand because each is still the same game -- the same
+        // project, the same scene -- run in a different relationship to other
+        // copies of itself. One posture per process: two is a usage error.
+        if (arg == "--host" || arg.starts_with("--host=") || arg == "--serve" || arg.starts_with("--serve=")) {
+            const bool serve = arg.starts_with("--serve");
+            if (options.network.topology != luaug::replication::Topology::Solo) {
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.one_posture"));
+                return kExitUsage;
+            }
+            options.network.topology =
+                serve ? luaug::replication::Topology::Dedicated : luaug::replication::Topology::Host;
+            options.network.port = kDefaultGamePort;
+            if (const std::size_t equals = arg.find('='); equals != std::string_view::npos) {
+                luaug::core::u64 port = 0;
+                if (!numericValue(arg.substr(equals + 1), port) || port == 0 || port > 65535) {
+                    luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_port"));
+                    return kExitUsage;
+                }
+                options.network.port = static_cast<luaug::core::u16>(port);
+            }
+            // A dedicated server has no window by definition.
+            if (serve)
+                options.headless = true;
+            continue;
+        }
+        if (arg.starts_with("--join=")) {
+            if (options.network.topology != luaug::replication::Topology::Solo) {
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.one_posture"));
+                return kExitUsage;
+            }
+            std::string_view target = arg.substr(std::string_view("--join=").size());
+            options.network.topology = luaug::replication::Topology::Replica;
+            options.network.port = kDefaultGamePort;
+            if (const std::size_t colon = target.rfind(':'); colon != std::string_view::npos) {
+                luaug::core::u64 port = 0;
+                if (!numericValue(target.substr(colon + 1), port) || port == 0 || port > 65535) {
+                    luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_port"));
+                    return kExitUsage;
+                }
+                options.network.port = static_cast<luaug::core::u16>(port);
+                target = target.substr(0, colon);
+            }
+            if (target.empty()) {
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_port"));
+                return kExitUsage;
+            }
+            options.network.address = std::string(target);
+            continue;
+        }
+        if (arg.starts_with("--max-players=")) {
+            luaug::core::u64 count = 0;
+            if (!numericValue(arg.substr(std::string_view("--max-players=").size()), count) || count == 0 ||
+                count > 4095) {
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_max_players"));
+                return kExitUsage;
+            }
+            options.network.maxPeers = static_cast<luaug::core::u32>(count);
             continue;
         }
         if (arg == "--exit") {
@@ -405,7 +470,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // A headless run with no frame budget would never terminate and nothing
     // could tell you why, since there is no window to close. Saying so beats
     // hanging a CI job until its timeout.
-    if (options.headless && options.frames == 0) {
+    // **A server is the one headless run that is meant to run until stopped**,
+    // so it is the one exception: its end is a signal, not a frame count.
+    if (options.headless && options.frames == 0 &&
+        options.network.topology != luaug::replication::Topology::Dedicated) {
         luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.headless_needs_frames"));
         return kExitUsage;
     }

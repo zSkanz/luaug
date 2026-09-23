@@ -63,6 +63,7 @@ inline constexpr scene::EnumId VerticalAlignmentEnumId = 20;
 inline constexpr scene::EnumId SortOrderEnumId = 21;
 inline constexpr scene::EnumId AutomaticSizeEnumId = 22;
 inline constexpr scene::EnumId ScaleTypeEnumId = 23;
+inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
 
 } // namespace generated
 

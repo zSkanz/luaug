@@ -276,6 +276,62 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Property },
     },
     {
+        Name = "NetworkService",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "What this process is in a networked game, and nothing it can change (ADR 0069, ADR 0070). "
+            .. "**A script asks it a gameplay question -- do I decide this? -- and never a configuration "
+            .. "one.** `if NetworkService.Authority then` is a branch that is present and TAKEN in a game "
+            .. "nobody networked, because solo is an authority of one. No property, method or service "
+            .. "opens a connection: the posture is chosen on the command line, before any script exists.",
+        Properties = {
+            {
+                Name = "Authority",
+                Type = "boolean",
+                ReadOnly = true,
+                Transient = true,
+                ThreadSafety = "Safe",
+                -- A fact about the process, not about the world: a trace recorded
+                -- as a host must replay solo.
+                HostFact = true,
+                Doc = "Whether this process decides the world: true solo, hosting or serving; false on a "
+                    .. "replica, which shows what it is sent.",
+            },
+            {
+                Name = "Topology",
+                Type = "Enum.NetworkTopology",
+                ReadOnly = true,
+                Transient = true,
+                ThreadSafety = "Safe",
+                HostFact = true,
+                Doc = "Which posture this process runs in. Branch on `Authority` for gameplay; this is for a "
+                    .. "menu that wants to say which one it is.",
+            },
+            {
+                Name = "ServerTick",
+                Type = "number",
+                ReadOnly = true,
+                Transient = true,
+                ThreadSafety = "Safe",
+                HostFact = true,
+                Doc = "The authority's tick: its own on an authority, the newest one applied on a replica. "
+                    .. "Zero solo. **A count of ticks and never a time**, because two machines agree on the "
+                    .. "first and never on the second.",
+            },
+            {
+                Name = "PeerCount",
+                Type = "number",
+                ReadOnly = true,
+                Transient = true,
+                ThreadSafety = "Safe",
+                HostFact = true,
+                Doc = "Connected peers, not counting this process: the replicas an authority is serving, "
+                    .. "or 1 on a replica that is connected to its authority.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         Name = "RunService",
         Extends = "Instance",
         Module = "scene",

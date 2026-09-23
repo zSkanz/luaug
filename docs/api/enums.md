@@ -249,6 +249,17 @@ The severity of a log line, ascending: `Value` orders the levels, so a handler f
 | `Warning` | 3 | Something is wrong and the run continues; `warn` reports at this level. |
 | `Error` | 4 | A failure the emitting code could not handle, a contained handler error among them (§3.1). |
 
+## Enum.NetworkTopology
+
+Which of the four postures this process runs in (ADR 0070). Decided at start from the command line and never changed, so a script reads it and never sets it.
+
+| Item | Value | Description |
+|---|---|---|
+| `Solo` | 0 | Nothing is networked. This process decides everything, which is why `NetworkService.Authority` is true here too. |
+| `Host` | 1 | The authority, and a player of its own game in the same process. |
+| `Dedicated` | 2 | The authority with no player of its own: a server with no window. |
+| `Replica` | 3 | A client of somebody else's authority. It shows the world it is sent and decides none of it. |
+
 ## Enum.PartShape
 
 The solid a `Part` renders and collides as; `MeshPart` carries geometry instead (§2.2).

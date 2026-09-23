@@ -319,6 +319,19 @@ void diffFields(const ClassDesc& desc, std::span<const FieldValue> baseline, std
     }
 }
 
+usize clearReplicated(scene::World& world, InstanceId root)
+{
+    std::vector<InstanceId> doomed;
+    for (InstanceId child = world.firstChild(root); child.valid(); child = world.nextSibling(child)) {
+        if (schemaFor(world, child) != nullptr)
+            doomed.push_back(child);
+    }
+    for (const InstanceId id : doomed)
+        (void)world.destroy(id);
+    world.retireDestroyed();
+    return doomed.size();
+}
+
 bool applyField(scene::World& world, InstanceId id, const ClassDesc& desc, const FieldDelta& delta)
 {
     const usize count = fieldCount(desc);

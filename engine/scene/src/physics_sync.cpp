@@ -229,7 +229,14 @@ physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& 
     // `NonMoving` and `Moving`, and making every floor and wall kinematic would
     // put a world of never-moving bodies into the layer that is updated every
     // tick, to solve a problem two platforms have.
-    const bool driven = isDriven(id) || (body.anchored && movingAnchored);
+    // **On a replica every loose body is driven** (ADR 0069, decision 5): the
+    // authority simulates it and the snapshots say where it is, so the local
+    // solver must neither fight the incoming transforms nor overwrite them.
+    // Kinematic does both -- it follows a written target, and `writeBack` skips
+    // it -- with no branch in game script and no second authority over where a
+    // thing is.
+    const bool replicated = m_scene.engineState().networkTopology == NetworkTopology::Replica && !body.anchored;
+    const bool driven = isDriven(id) || replicated || (body.anchored && movingAnchored);
     desc.motion = driven          ? physics::MotionType::Kinematic
                   : body.anchored ? physics::MotionType::Static
                                   : physics::MotionType::Dynamic;

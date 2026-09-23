@@ -1632,6 +1632,28 @@ Value getDataModelLuauVersion(const World& world, core::InstanceId)
     return world.engineState().luauVersion;
 }
 
+Value getNetworkServiceAuthority(const World& world, core::InstanceId)
+{
+    // Every posture but a replica decides the world -- solo included, which is
+    // the whole point of the property.
+    return Value{world.engineState().networkTopology != NetworkTopology::Replica};
+}
+
+Value getNetworkServiceTopology(const World& world, core::InstanceId)
+{
+    return Value{EnumValue{generated::NetworkTopologyEnumId, static_cast<i32>(world.engineState().networkTopology)}};
+}
+
+Value getNetworkServiceServerTick(const World& world, core::InstanceId)
+{
+    return Value{static_cast<f64>(world.engineState().networkServerTick)};
+}
+
+Value getNetworkServicePeerCount(const World& world, core::InstanceId)
+{
+    return Value{static_cast<f64>(world.engineState().networkPeerCount)};
+}
+
 Value getRunServiceSimTime(const World& world, core::InstanceId)
 {
     return world.engineState().simTime;

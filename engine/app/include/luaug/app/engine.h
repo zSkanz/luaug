@@ -4,6 +4,7 @@
 #include "luaug/core/error.h"
 #include "luaug/core/types.h"
 #include "luaug/render/settings.h"
+#include "luaug/replication/types.h"
 #include "luaug/rhi/types.h"
 
 #include <filesystem>
@@ -152,6 +153,11 @@ struct EngineOptions
     bool partitionOnly = false;
 
     bool frameStats = false;
+
+    // **The posture, from the command line and from nowhere else** (ADR 0070):
+    // `--host`, `--serve` or `--join`. Solo when none was given, which builds no
+    // replication object at all.
+    replication::Config network;
 
     // M7's gate, as a flag. Empty writes no report and asserts nothing.
     //
