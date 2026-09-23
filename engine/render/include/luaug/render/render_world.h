@@ -288,6 +288,22 @@ struct RenderTerrain
     bool outlined = false;
 };
 
+// One decal as drawn (F2): its box, in camera-relative space, and what it paints.
+struct RenderDecal
+{
+    // The unit box (-0.5 to 0.5) into camera-relative world space, and back.
+    Mat4 boxToWorld;
+    Mat4 worldToBox;
+    // Invalid for none, or for an image that has not loaded yet -- which then
+    // paints its colour alone rather than nothing.
+    rhi::TextureHandle texture;
+    Color3 color{1.0f, 1.0f, 1.0f};
+    // 1 - transparency.
+    f32 opacity = 1.0f;
+    // The projection axis in camera-relative world space.
+    Vec3 axis{0.0f, 0.0f, 1.0f};
+};
+
 // One particle as drawn: a camera-facing square of `size` metres at `position`.
 struct RenderParticle
 {
@@ -342,6 +358,8 @@ struct RenderWorld
     // appended by `ParticleSystem::append` after the extract, because they are
     // simulated on the frame and are not in the world the extract reads.
     std::vector<RenderParticle> particles;
+    // This frame's decals, in pool order.
+    std::vector<RenderDecal> decals;
     // The block world's block size, which the block shader needs to name the
     // block a fragment belongs to.
     f32 voxelBlockSize = 1.0f;
@@ -368,6 +386,7 @@ struct RenderWorld
         voxelColors.clear();
         voxelTextures.clear();
         particles.clear();
+        decals.clear();
         voxelBlockSize = 1.0f;
         candidateDraws = 0;
         culledDraws = 0;

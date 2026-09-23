@@ -155,15 +155,14 @@ TEST_CASE("a theme's ground and its raised surface are distinguishable")
     }
 }
 
-TEST_CASE("the shell is square")
+TEST_CASE("Orbit controls fit inside their shared container geometry")
 {
-    // The one visual claim this repository makes about its own shell, so it is
-    // asserted rather than trusted to survive the next person who likes a
-    // rounded button.
-    CHECK(app::themeMetrics().rounding == 0.0f);
-    // With no radius the border is what separates two panels, so it cannot be
-    // zero at the same time.
-    CHECK(app::themeMetrics().borderSize >= 1.0f);
+    const app::ThemeMetrics metrics = app::themeMetrics();
+    CHECK(metrics.rounding > 0.0f);
+    CHECK(metrics.containerRounding >= metrics.rounding);
+    CHECK(metrics.rounding <= metrics.framePaddingY);
+    CHECK(metrics.borderSize >= 1.0f);
+    CHECK(metrics.dockingSeparatorSize >= metrics.borderSize);
 }
 
 TEST_CASE("contrast is symmetric and bounded")

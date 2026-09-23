@@ -1,5 +1,10 @@
 # art/branding/ — the request for a new LuauG mark
 
+> **Historical brief.** The 2026-09-23 refresh is [Orbit G](orbit/STYLE.md).
+> Its shipping assets are in `branding/`, with a [new gallery](orbit/index.html)
+> and [identity overview](orbit/brand-board.png). The earlier candidates and
+> decisions below are retained as design history.
+
 `branding/` at the repository root is what ships. **This is where a replacement
 is drawn and argued about**, the same split `art/editor-icons/` has against
 `icons/`.

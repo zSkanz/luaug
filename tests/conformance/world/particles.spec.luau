@@ -83,3 +83,28 @@ describe("ParticleEmitter", function()
         part:Destroy()
     end)
 end)
+
+describe("Decal", function()
+    it("is a box with an image, placed like a raycast hit", function()
+        local decal = Instance.new("Decal")
+        expect(decal.Size):ToBe(vector.create(2, 2, 1))
+        expect(decal.Color):ToBe(Color3.new(1, 1, 1))
+        expect(decal.Transparency):ToBe(0)
+        decal.CFrame = CFrame.lookAt(vector.create(0, 0, 0), vector.create(0, 1, 0))
+        decal.Texture = "asset://textures/mark.png"
+        expect(decal.Texture):ToBe("asset://textures/mark.png")
+        decal.Parent = workspace
+        decal:Destroy()
+    end)
+
+    it("refuses a box with no extent and a transparency past one", function()
+        local decal = Instance.new("Decal") :: any
+        expect(function()
+            decal.Size = vector.create(0, 2, 1)
+        end):ToThrow()
+        expect(function()
+            decal.Transparency = 2
+        end):ToThrow()
+        decal:Destroy()
+    end)
+end)

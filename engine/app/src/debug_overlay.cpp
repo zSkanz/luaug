@@ -588,6 +588,72 @@ bool iconButton(const IconAtlas* icons, std::string_view id, float size, const c
     return pressed;
 }
 
+// Paint without submitting another ImGui item: keyboard navigation, tooltips
+// and disabled state must still belong to the labeled control underneath.
+void paintActionIcon(const IconAtlas* atlas, std::string_view id, ImVec2 origin, float size)
+{
+    if (atlas == nullptr || !atlas->ready() || !atlas->has(id) || g_device == nullptr)
+        return;
+    const IconSprite sprite = atlas->find(id, static_cast<core::u32>(size + 0.5f));
+    SDL_GPUTexture* texture = rhi::nativeTexture(*g_device, atlas->texture());
+    if (!sprite.valid || texture == nullptr)
+        return;
+    ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture)), origin,
+                                         ImVec2(origin.x + size, origin.y + size), ImVec2(sprite.u0, sprite.v0),
+                                         ImVec2(sprite.u1, sprite.v1), ImGui::GetColorU32(ImGuiCol_Text));
+}
+
+bool labeledIconButton(const IconAtlas* atlas, std::string_view id, const char* label, ImVec2 size = ImVec2())
+{
+    if (atlas == nullptr || !atlas->ready() || !atlas->has(id))
+        return ImGui::Button(label, size);
+    const std::string face = tabIconPad() + label;
+    const std::string stableLabel = face + "###" + label;
+    const bool pressed = ImGui::Button(stableLabel.c_str(), size);
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 extent = ImGui::GetItemRectSize();
+    const float glyph = ImGui::GetFontSize();
+    paintActionIcon(atlas, id,
+                    ImVec2(min.x + std::max(ImGui::GetStyle().FramePadding.x,
+                                            (extent.x - ImGui::CalcTextSize(face.c_str()).x) * 0.5f),
+                           min.y + (extent.y - glyph) * 0.5f),
+                    glyph);
+    return pressed;
+}
+
+bool iconMenuItem(const IconAtlas* atlas, std::string_view id, const char* label, const char* shortcut = nullptr,
+                  bool selected = false, bool enabled = true)
+{
+    if (atlas == nullptr || !atlas->ready() || !atlas->has(id))
+        return ImGui::MenuItem(label, shortcut, selected, enabled);
+    const std::string padded = tabIconPad() + label + "###" + label;
+    const bool pressed = ImGui::MenuItem(padded.c_str(), shortcut, selected, enabled);
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const float glyph = ImGui::GetFontSize();
+    ImGui::BeginDisabled(!enabled);
+    paintActionIcon(
+        atlas, id,
+        ImVec2(min.x + ImGui::GetStyle().ItemSpacing.x * 0.5f, min.y + (ImGui::GetItemRectSize().y - glyph) * 0.5f),
+        glyph);
+    ImGui::EndDisabled();
+    return pressed;
+}
+
+// Shared Orbit G geometry from branding/luaug-mark.svg, tinted by the theme.
+void drawBrandMark(ImVec2 origin, float size)
+{
+    const float unit = size / 64.0f;
+    const ImVec2 center(origin.x + 30.0f * unit, origin.y + 33.0f * unit);
+    const ImU32 color = ImGui::GetColorU32(themeColor(palette().accent));
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PathArcTo(center, 21.0f * unit, -55.0f * 3.14159265f / 180.0f, -2.0f * 3.14159265f, 64);
+    draw->PathLineTo(ImVec2(origin.x + 37.0f * unit, center.y));
+    draw->PathStroke(color, ImDrawFlags_None, 7.0f * unit);
+    draw->AddCircleFilled(ImVec2(origin.x + 42.0451f * unit, origin.y + 15.7978f * unit), 3.5f * unit, color);
+    draw->AddCircleFilled(ImVec2(origin.x + 37.0f * unit, center.y), 3.5f * unit, color);
+    draw->AddCircleFilled(ImVec2(origin.x + 54.0f * unit, origin.y + 10.0f * unit), 4.5f * unit, color);
+}
+
 // One step of the content browser's path, as a control that looks like the text
 // it is.
 //
@@ -4811,10 +4877,16 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
 // Drawn BEFORE the dockspace, because `DockSpaceOverViewport` measures the work
 // area and a menu bar declared after it would overlap the panels by its own
 // height.
-void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands, EditorDialogs& dialogs)
+void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands, EditorDialogs& dialogs,
+                 const IconAtlas* icons)
 {
     if (!ImGui::BeginMainMenuBar())
         return;
+
+    const float brandSize = ImGui::GetFontSize() * 1.25f;
+    drawBrandMark(ImGui::GetCursorScreenPos(), brandSize);
+    ImGui::Dummy(ImVec2(brandSize, ImGui::GetFontSize()));
+    ImGui::SameLine();
 
     if (ImGui::BeginMenu("File")) {
         // **Anything that would throw work away asks first**, and it asks in one
@@ -4828,12 +4900,12 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         // browser and close this editor rather than swapping a project inside a
         // running one. The browser is where a project is made and where one is
         // picked, which is why File has no second copy of either.
-        if (ImGui::MenuItem("New Project..."))
+        if (iconMenuItem(icons, icons::ActionNew, "New Project..."))
             verb(EditorDialogs::Pending::NewProject);
-        if (ImGui::MenuItem("Open Project..."))
+        if (iconMenuItem(icons, icons::ActionOpen, "Open Project..."))
             verb(EditorDialogs::Pending::OpenProject);
         ImGui::Separator();
-        if (ImGui::MenuItem("New Scene"))
+        if (iconMenuItem(icons, icons::ContentScene, "New Scene"))
             verb(EditorDialogs::Pending::NewScene);
         ImGui::Separator();
         // **Ctrl+S saves whatever is being edited**, and on a stamp stage that
@@ -4843,20 +4915,20 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         // the wrong document without saying so.
         const bool stampOpen = editor.stampSession().open();
         if (stampOpen) {
-            if (ImGui::MenuItem("Save Stamp", "Ctrl+S"))
+            if (iconMenuItem(icons, icons::ActionSave, "Save Stamp", "Ctrl+S"))
                 commands.saveStamp = true;
         }
         else {
             // Greyed rather than hidden when there is nothing to save to: the
             // item has to be where somebody expects it even when it cannot act,
             // or they conclude the editor cannot do it at all.
-            if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !editor.openScenePath().empty()))
+            if (iconMenuItem(icons, icons::ActionSave, "Save Scene", "Ctrl+S", false, !editor.openScenePath().empty()))
                 commands.save = true;
         }
-        if (ImGui::MenuItem("Save Scene As..."))
+        if (iconMenuItem(icons, icons::ActionSave, "Save Scene As..."))
             dialogs.saveAs = true;
         ImGui::Separator();
-        if (ImGui::MenuItem("Exit"))
+        if (iconMenuItem(icons, icons::ActionClose, "Exit"))
             verb(EditorDialogs::Pending::Quit);
         ImGui::EndMenu();
     }
@@ -4869,28 +4941,33 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         const std::string redoLabel =
             editor.history().canRedo() ? "Redo " + std::string(editor.history().redoLabel()) : std::string("Redo");
 
-        if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, editor.history().canUndo()))
+        if (iconMenuItem(icons, icons::ActionUndo, undoLabel.c_str(), "Ctrl+Z", false, editor.history().canUndo()))
             commands.undo = true;
-        if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false, editor.history().canRedo()))
+        if (iconMenuItem(icons, icons::ActionRedo, redoLabel.c_str(), "Ctrl+Y / Ctrl+Shift+Z", false,
+                         editor.history().canRedo()))
             commands.redo = true;
         ImGui::Separator();
-        if (ImGui::MenuItem("Preferences..."))
+        if (iconMenuItem(icons, icons::ActionSettings, "Preferences..."))
             dialogs.preferences = true;
-        if (ImGui::MenuItem("Project Settings..."))
+        if (iconMenuItem(icons, icons::ClassWorkspace, "Project Settings..."))
             dialogs.projectSettings = true;
         ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Window")) {
-        ImGui::MenuItem("Explorer", nullptr, &panels.explorer);
-        ImGui::MenuItem("Properties", nullptr, &panels.properties);
-        ImGui::MenuItem("Viewport", nullptr, &panels.viewport);
-        ImGui::MenuItem("Content", nullptr, &panels.content);
-        ImGui::MenuItem("Console", nullptr, &panels.console);
-        ImGui::MenuItem("Stats", nullptr, &panels.stats);
-        ImGui::MenuItem("Terrain", nullptr, &panels.terrain);
-        ImGui::MenuItem("Blocks", nullptr, &panels.blocks);
-        ImGui::MenuItem("Debug", nullptr, &panels.debug);
+        const auto panelItem = [&](const char* label, std::string_view icon, bool& visible) {
+            if (iconMenuItem(icons, icon, label, nullptr, visible))
+                visible = !visible;
+        };
+        panelItem("Explorer", icons::ClassModel, panels.explorer);
+        panelItem("Properties", icons::ActionSettings, panels.properties);
+        panelItem("Viewport", icons::ClassCamera, panels.viewport);
+        panelItem("Content", icons::ContentFolder, panels.content);
+        panelItem("Console", icons::ClassScriptService, panels.console);
+        panelItem("Stats", icons::ClassDebugService, panels.stats);
+        panelItem("Terrain", icons::ClassWorkspace, panels.terrain);
+        panelItem("Blocks", icons::ClassPart, panels.blocks);
+        panelItem("Debug", icons::ClassDebugService, panels.debug);
         ImGui::Separator();
         // Not a panel, but it is a question about what the panels SHOW, and
         // this is the menu a person opens to ask one.
@@ -4922,13 +4999,13 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         ImGui::Separator();
         // Not "close everything": somebody who has lost a panel behind another
         // wants the arrangement back, not an empty window.
-        if (ImGui::MenuItem("Reset Layout"))
+        if (iconMenuItem(icons, icons::ClassUIService, "Reset Layout"))
             commands.resetLayout = true;
         ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Help")) {
-        if (ImGui::MenuItem("About LuauG"))
+        if (iconMenuItem(icons, icons::ClassInstance, "About LuauG"))
             dialogs.about = true;
         ImGui::EndMenu();
     }
@@ -4938,8 +5015,11 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
     // over something.
     const std::string open = editor.openScenePath().empty() ? std::string("untitled") : editor.openScenePath();
     const float width = ImGui::CalcTextSize(open.c_str()).x;
-    ImGui::SameLine(ImGui::GetWindowWidth() - width - 16.0f);
-    ImGui::TextDisabled("%s", open.c_str());
+    const float right = ImGui::GetWindowWidth() - width - ImGui::GetStyle().WindowPadding.x;
+    if (right > ImGui::GetCursorPosX() + ImGui::GetStyle().ItemSpacing.x) {
+        ImGui::SameLine(right);
+        ImGui::TextDisabled("%s", open.c_str());
+    }
 
     ImGui::EndMainMenuBar();
 }
@@ -5999,7 +6079,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // a menu bar declared after it would sit on top of the panels by its own
     // height.
     if (editor != nullptr)
-        drawMenuBar(*editor, panels, commands, dialogs);
+        drawMenuBar(*editor, panels, commands, dialogs, icons);
 
     // A transparent central node, so a layout that has not been built yet shows
     // the frame underneath instead of a slab of grey.
@@ -6578,9 +6658,11 @@ void copyInto(char* buffer, std::size_t size, std::string_view text)
 // A quiet label over a block. With no rounding and no cards, a label and the
 // space under it are what make a group read as one thing -- which is the whole
 // technique this screen is drawn with.
-void sectionLabel(const char* text)
+void sectionLabel(const char* text, const IconAtlas* icons, std::string_view icon)
 {
-    ImGui::TextDisabled("%s", text);
+    if (drawIcon(icons, icon, ImGui::GetFontSize(), palette().accent))
+        ImGui::SameLine();
+    ImGui::TextUnformatted(text);
     ImGui::Spacing();
 }
 
@@ -6594,7 +6676,7 @@ void sectionLabel(const char* text)
 // one place on this screen where being wrong costs somebody a click into
 // nothing. Refusing looks like a surface; the caller still wraps it in
 // `BeginDisabled`, which is what makes it actually refuse.
-bool primaryButton(const char* label, ImVec2 size, bool enabled)
+bool primaryButton(const char* label, ImVec2 size, bool enabled, const IconAtlas* icons)
 {
     const ThemePalette& p = palette();
     const core::Color3 face = enabled ? p.accent : p.surfaceRaised;
@@ -6602,13 +6684,13 @@ bool primaryButton(const char* label, ImVec2 size, bool enabled)
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, themeBlend(face, p.text, 0.20f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, themeBlend(face, p.onAccent, 0.20f));
     ImGui::PushStyleColor(ImGuiCol_Text, themeColor(enabled ? p.onAccent : p.textMuted));
-    const bool pressed = ImGui::Button(label, size);
+    const bool pressed = labeledIconButton(icons, icons::ActionAdd, label, size);
     ImGui::PopStyleColor(4);
     return pressed;
 }
 
 // The list, and the two things a row can do.
-void drawLauncherProjects(LauncherView& view)
+void drawLauncherProjects(LauncherView& view, const IconAtlas* icons)
 {
     ProjectList& projects = *view.projects;
     if (projects.entries().empty()) {
@@ -6618,7 +6700,7 @@ void drawLauncherProjects(LauncherView& view)
         if (ImGui::BeginChild("##projects", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
             ImGui::Spacing();
             ImGui::TextDisabled("No projects yet.");
-            ImGui::TextDisabled("Make one on the right, or open a folder you already have.");
+            ImGui::TextWrapped("Create a project or open an existing folder to get started.");
         }
         ImGui::EndChild();
         return;
@@ -6660,21 +6742,17 @@ void drawLauncherProjects(LauncherView& view)
             // over it, which is what "the pointer is on this row" means.
             const bool hovered = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(rowMin, rowMax);
             ImDrawList* draw = ImGui::GetWindowDrawList();
-            // **A bar on the left rather than a tint across the row.** A square
-            // list has no shape of its own to mark, and a filled row competes
-            // with the selection colour the rest of the shell already spends
-            // the accent on.
             if (hovered) {
-                draw->AddRectFilled(rowMin, ImVec2(rowMin.x + 3.0f * ImGui::GetStyle().FontScaleMain, rowMax.y),
-                                    ImGui::ColorConvertFloat4ToU32(themeColor(palette().accent)));
+                draw->AddRect(rowMin, rowMax, ImGui::GetColorU32(ImGuiCol_Border), ImGui::GetStyle().FrameRounding);
             }
-            // One hairline per row, which is what separates rows when nothing is
-            // rounded and nothing is filled.
-            draw->AddLine(ImVec2(rowMin.x, rowMax.y), ImVec2(rowMax.x, rowMax.y),
-                          ImGui::ColorConvertFloat4ToU32(themeColor(palette().border)));
-
-            const float textX = origin.x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            const float glyph = ImGui::GetFontSize() * 1.5f;
+            const ImVec2 glyphPos(rowMin.x + ImGui::GetStyle().FramePadding.x, rowMin.y + (rowHeight - glyph) * 0.5f);
+            paintActionIcon(icons, icons::ContentFolder, glyphPos, glyph);
+            const float textX = origin.x + glyph + ImGui::GetStyle().FramePadding.x * 2.0f;
             ImGui::SetCursorPos(ImVec2(textX, origin.y + ImGui::GetStyle().FramePadding.y));
+            const float removeWidth = ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 3.0f;
+            ImGui::PushClipRect(ImVec2(glyphPos.x + glyph, rowMin.y),
+                                ImVec2(std::max(glyphPos.x + glyph, rowMax.x - removeWidth), rowMax.y), true);
             if (entry.missing) {
                 ImGui::TextDisabled("%s", entry.name.c_str());
                 ImGui::SetCursorPos(ImVec2(textX, origin.y + ImGui::GetTextLineHeightWithSpacing()));
@@ -6687,6 +6765,8 @@ void drawLauncherProjects(LauncherView& view)
                 ImGui::SetCursorPos(ImVec2(textX, origin.y + ImGui::GetTextLineHeightWithSpacing()));
                 ImGui::TextDisabled("%s", entry.path.string().c_str());
             }
+
+            ImGui::PopClipRect();
 
             // **Emitted every row, every frame, and drawn at nothing when the
             // pointer is elsewhere.** A button that comes into being on the
@@ -6711,7 +6791,8 @@ void drawLauncherProjects(LauncherView& view)
             ImGui::SetItemTooltip("%s", entry.missing ? "forget this project -- the folder is already gone"
                                                       : "forget this project -- the folder stays where it is");
 
-            ImGui::SetCursorPos(ImVec2(origin.x, origin.y + rowHeight));
+            ImGui::SetCursorPos(ImVec2(origin.x, origin.y + rowHeight + ImGui::GetStyle().ItemSpacing.y));
+            ImGui::Dummy(ImVec2(0.0f, 0.0f));
             ImGui::PopID();
         }
         if (!forget.empty()) {
@@ -6724,7 +6805,7 @@ void drawLauncherProjects(LauncherView& view)
     ImGui::EndChild();
 }
 
-void drawLauncherNew(LauncherView& view)
+void drawLauncherNew(LauncherView& view, const IconAtlas* icons)
 {
     LauncherForm& form = g_launcherForm;
 
@@ -6755,12 +6836,13 @@ void drawLauncherNew(LauncherView& view)
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Location");
-    const float browseWidth = ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+    const float browseWidth =
+        ImGui::CalcTextSize("Browse...").x + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(browseWidth + ImGui::GetStyle().ItemSpacing.x));
     ImGui::InputText("##parent", form.parent, sizeof(form.parent));
     ImGui::SameLine();
     ImGui::BeginDisabled(!view.canBrowse);
-    if (ImGui::Button("Browse...", ImVec2(browseWidth, 0.0f)))
+    if (labeledIconButton(icons, icons::ContentFolder, "Browse...", ImVec2(browseWidth, 0.0f)))
         view.browse = true;
     ImGui::EndDisabled();
     if (!view.canBrowse && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -6779,7 +6861,7 @@ void drawLauncherNew(LauncherView& view)
         ImGui::NewLine();
 
     ImGui::BeginDisabled(!nameOk);
-    if (primaryButton("Create project", ImVec2(-1.0f, ImGui::GetFrameHeight() * 1.4f), nameOk)) {
+    if (primaryButton("Create project", ImVec2(-1.0f, ImGui::GetFrameHeight() * 1.4f), nameOk, icons)) {
         const NewProjectResult result =
             createProject(view.templatesDir, view.definitions,
                           {.parent = std::filesystem::path(form.parent),
@@ -6799,15 +6881,16 @@ void drawLauncherNew(LauncherView& view)
     ImGui::EndDisabled();
 }
 
-void drawLauncherOpen(LauncherView& view)
+void drawLauncherOpen(LauncherView& view, const IconAtlas* icons)
 {
     LauncherForm& form = g_launcherForm;
 
-    const float buttonWidth = ImGui::CalcTextSize("Open").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+    const float buttonWidth =
+        ImGui::CalcTextSize("Open").x + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(buttonWidth + ImGui::GetStyle().ItemSpacing.x));
     ImGui::InputTextWithHint("##openpath", "path to a project", form.open, sizeof(form.open));
     ImGui::SameLine();
-    if (ImGui::Button("Open", ImVec2(buttonWidth, 0.0f))) {
+    if (labeledIconButton(icons, icons::ActionOpen, "Open", ImVec2(buttonWidth, 0.0f))) {
         const std::filesystem::path chosen(form.open);
         if (chosen.empty())
             view.message = "Type a path, or press Browse beside the location field.";
@@ -6817,7 +6900,7 @@ void drawLauncherOpen(LauncherView& view)
             view.open = chosen;
     }
     ImGui::BeginDisabled(!view.canBrowse);
-    if (ImGui::Button("Browse for a project...", ImVec2(-1.0f, 0.0f)))
+    if (labeledIconButton(icons, icons::ContentFolder, "Browse for a project...", ImVec2(-1.0f, 0.0f)))
         view.browse = true;
     ImGui::EndDisabled();
 }
@@ -6833,18 +6916,17 @@ void drawLauncherHeader()
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ThemePalette& p = palette();
     const ImGuiStyle& style = ImGui::GetStyle();
-    const float pad = style.WindowPadding.x;
-    const float height = ImGui::GetFrameHeight() * 2.2f;
+    const float pad = themeMetrics().windowPaddingX * style.FontScaleMain * 2.0f;
+    const float height = ImGui::GetFrameHeight() * 3.0f;
 
     const ImVec2 min = ImGui::GetCursorScreenPos();
     const ImVec2 max(min.x + viewport->WorkSize.x, min.y + height);
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(themeColor(p.surfaceRaised)));
-    // The one accent rule on the screen, and it is under the name rather than
-    // around a button: it says which product this is, which is the only thing
-    // the header is for.
-    draw->AddLine(ImVec2(min.x, max.y), ImVec2(max.x, max.y), ImGui::ColorConvertFloat4ToU32(themeColor(p.accent)),
-                  2.0f);
+    draw->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(themeColor(p.background)));
+    draw->AddLine(ImVec2(min.x, max.y), ImVec2(max.x, max.y), ImGui::GetColorU32(themeColor(p.border)));
+    const float markSize = ImGui::GetFrameHeight() * 1.65f;
+    drawBrandMark(ImVec2(min.x + pad, min.y + (height - markSize) * 0.5f), markSize);
+    const float titleX = min.x + pad + markSize + style.ItemSpacing.x;
 
     // **`FontSizeBase`, not `GetFontSize()`.** The second is the size AFTER the
     // global scale factors, so feeding it back into `PushFont` multiplies the
@@ -6852,13 +6934,13 @@ void drawLauncherHeader()
     // saw it because the scale was one until this milestone gave it a setting.
     ImGui::PushFont(nullptr, style.FontSizeBase * 1.75f);
     const float titleHeight = ImGui::GetFontSize();
-    ImGui::SetCursorScreenPos(ImVec2(min.x + pad, min.y + (height - titleHeight) * 0.5f));
+    ImGui::SetCursorScreenPos(ImVec2(titleX, min.y + (height - titleHeight) * 0.5f));
     ImGui::TextUnformatted("LuauG");
     const float titleWidth = ImGui::GetItemRectSize().x;
     ImGui::PopFont();
 
     ImGui::SetCursorScreenPos(
-        ImVec2(min.x + pad + titleWidth + style.ItemSpacing.x * 1.5f, min.y + (height - ImGui::GetFontSize()) * 0.5f));
+        ImVec2(titleX + titleWidth + style.ItemSpacing.x * 1.5f, min.y + (height - ImGui::GetFontSize()) * 0.5f));
     ImGui::TextDisabled("%s", LUAUG_VERSION_STRING);
 
     ImGui::SetCursorScreenPos(ImVec2(min.x, max.y));
@@ -6882,7 +6964,7 @@ void drawLauncherFooter(const LauncherView& view, float height)
     ImGui::TextColored(themeColor(palette().warning), "%s", view.message.c_str());
 }
 
-void drawLauncher(LauncherView* view)
+void drawLauncher(LauncherView* view, const IconAtlas* icons)
 {
     if (view == nullptr || view->projects == nullptr)
         return;
@@ -6921,8 +7003,8 @@ void drawLauncher(LauncherView* view)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            sectionLabel("YOUR PROJECTS");
-            drawLauncherProjects(*view);
+            sectionLabel("Your projects", icons, icons::ContentFolder);
+            drawLauncherProjects(*view, icons);
 
             ImGui::TableSetColumnIndex(1);
             // **Making one comes before opening one**, which is the opposite of
@@ -6930,15 +7012,15 @@ void drawLauncher(LauncherView* view)
             // opens them from the list on the left; the right-hand column is
             // where somebody who has none goes, and for them the first thing
             // should be the thing they need.
-            sectionLabel("NEW PROJECT");
-            drawLauncherNew(*view);
+            sectionLabel("Create a project", icons, icons::ActionNew);
+            drawLauncherNew(*view, icons);
 
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
 
-            sectionLabel("OPEN AN EXISTING FOLDER");
-            drawLauncherOpen(*view);
+            sectionLabel("Open a project", icons, icons::ActionOpen);
+            drawLauncherOpen(*view, icons);
 
             ImGui::EndTable();
         }
@@ -7212,7 +7294,7 @@ void DebugOverlay::render(rhi::ICmdList& cmd, rhi::TextureHandle target, const F
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     if (shell_ == Shell::Launcher)
-        drawLauncher(launcher_);
+        drawLauncher(launcher_, icons_);
     else if (shell_ == Shell::Editor)
         drawEditorShell(frame, world_, root_, inspector_, runtime_, editor_, viewportTexture_, layoutBuilt_, commands_,
                         panels_, dialogs_, icons_, scripts_, scriptCommands_, debugView_, audio_, streaming_, visible_,

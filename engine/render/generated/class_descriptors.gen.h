@@ -153,6 +153,20 @@ bool setPointLightShadows(scene::World& world, core::InstanceId id, const scene:
 void attachPointLightComponents(scene::World& world, core::InstanceId id);
 void detachPointLightComponents(scene::World& world, core::InstanceId id);
 
+// Decal
+scene::Value getDecalCFrame(const scene::World& world, core::InstanceId id);
+bool setDecalCFrame(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDecalSize(const scene::World& world, core::InstanceId id);
+bool setDecalSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDecalTexture(const scene::World& world, core::InstanceId id);
+bool setDecalTexture(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDecalColor(const scene::World& world, core::InstanceId id);
+bool setDecalColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDecalTransparency(const scene::World& world, core::InstanceId id);
+bool setDecalTransparency(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachDecalComponents(scene::World& world, core::InstanceId id);
+void detachDecalComponents(scene::World& world, core::InstanceId id);
+
 // ParticleEmitter
 scene::Value getParticleEmitterEnabled(const scene::World& world, core::InstanceId id);
 bool setParticleEmitterEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);

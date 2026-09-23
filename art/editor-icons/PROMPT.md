@@ -1,5 +1,10 @@
 # The generation prompt
 
+> **Historical brief.** The active default theme now uses
+> [Orbit](orbit/STYLE.md), which records the replacement style, exact design
+> prompt and reproducible generator. This document and the earlier masters are
+> retained for reference; their drawing rules do not govern the Orbit family.
+
 Two parts. **Part A never changes** — paste it every single time, unedited, or
 the set stops matching itself. **Part B is one line** from the table in
 [`README.md`](README.md).

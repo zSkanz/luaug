@@ -473,6 +473,8 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
         load(material.metallicRoughnessMap, false);
         load(material.emissiveMap, true);
     });
+    // Decal images (F2): colours, like base colours.
+    world.decals().forEach([&](core::InstanceId, const scene::DecalComponent& decal) { load(decal.texture, true); });
     // A block world's images (V1), through the same door: compiled when the
     // compiler has seen them, a loose file when it has not.
     world.voxels().forEach([&](core::InstanceId, const scene::VoxelComponent& voxels) {

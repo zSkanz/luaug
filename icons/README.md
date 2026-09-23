@@ -1,5 +1,11 @@
 # icons/ — the editor's icon themes
 
+> **Current artwork: Orbit (2026-09-23).** All 87 IDs resolve to 82 geometric
+> drawings. See [the style and exact prompt](../art/editor-icons/orbit/STYLE.md)
+> and [the visual gallery](../art/editor-icons/orbit/index.html). The loader,
+> palette and alias contracts below still apply; historical counts and
+> silhouette-review measurements describe the previous artwork.
+
 The runtime form of the editor's icons. `art/editor-icons/` is where they are
 *drawn* and reviewed; this is what the engine *loads*.
 
@@ -247,17 +253,13 @@ the set, and what has to survive is the silhouette underneath it.
 
 ## Re-baking
 
-The masters live in `art/editor-icons/`. The bake reads the keyline for each
-icon **out of the art brief's own tables** rather than from a copied list, so a
-row that changes keyline changes the output on the next run and the two cannot
-drift.
+Run `python icons/bake.py` from the repository root (or any working directory
+with an absolute script path). It delegates to `tools/repo/draw_icons.py`, which
+rebuilds the Orbit SVG exports, the 256-pixel runtime masks, and the light/dark
+review sheets from shared geometry. Pillow is the only art-tool dependency.
 
-Each master is levelled (clamping JPEG ringing and any grey haze to the ends
-while keeping real edge antialiasing), trimmed to its shape, scaled to fit its
-keyline exactly, centred on 256, and written as alpha.
-
-That last step is the one worth knowing about: **every icon here sits exactly on
-its keyline**, which was never true of any master — they came back anywhere
-between 89% and 112%. A folder and a cube now look the same *size* rather than
-having the same number of pixels, and that is what makes a column of them read
-as one set.
+The existing `default/theme.json` is the manifest: the bake preserves its IDs,
+aliases, colors and overlay settings. See the
+[Orbit specification](../art/editor-icons/orbit/STYLE.md) for the exact prompt,
+editing instructions and review sizes. Earlier PNG masters remain historical
+references and are no longer bake inputs.

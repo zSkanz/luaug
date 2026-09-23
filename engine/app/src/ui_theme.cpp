@@ -49,23 +49,19 @@ using core::f32;
 
 constexpr Theme kDark{
     .id = "dark",
-    .name = "LuauG Dark",
+    .name = "Orbit Dark",
     .dark = true,
     .palette =
         {
-            // Near-neutral with a slight blue cast, so the brand cyan sits in
-            // the same family as the ground instead of on top of it.
-            .background = rgb(0x1B1D21),
-            .surface = rgb(0x141619),
-            .surfaceRaised = rgb(0x2A2E35),
-            .border = rgb(0x34383F),
-            .text = rgb(0xDDE1E6),
-            .textMuted = rgb(0x9AA1A9),
-            // The mark's own colour, unmodified: on this ground it already
-            // clears the bar, so the brand is the accent rather than a
-            // near-miss of it.
-            .accent = rgb(0x12B0FF),
-            .onAccent = rgb(0x06121A),
+            // Graphite surfaces pair with the Orbit mint accent.
+            .background = rgb(0x17242C),
+            .surface = rgb(0x101C24),
+            .surfaceRaised = rgb(0x263740),
+            .border = rgb(0x344851),
+            .text = rgb(0xE8F0F2),
+            .textMuted = rgb(0xA6B8C0),
+            .accent = rgb(0x55E0C5),
+            .onAccent = rgb(0x102B27),
             .warning = rgb(0xE0A34A),
             .danger = rgb(0xF87F73),
             .success = rgb(0x46C46E),
@@ -73,10 +69,10 @@ constexpr Theme kDark{
     .syntax =
         {
             .keyword = rgb(0xC9A0FF),
-            .identifier = rgb(0xDDE1E6),
+            .identifier = rgb(0xE8F0F2),
             .number = rgb(0xF5B682),
             .string = rgb(0x9CD67F),
-            .comment = rgb(0x7E8894),
+            .comment = rgb(0x94A7B2),
             .operatorToken = rgb(0xA9B2BD),
             .attribute = rgb(0xFFD479),
             .errorToken = rgb(0xF87F73),
@@ -85,22 +81,18 @@ constexpr Theme kDark{
 
 constexpr Theme kLight{
     .id = "light",
-    .name = "LuauG Light",
+    .name = "Orbit Light",
     .dark = false,
     .palette =
         {
-            .background = rgb(0xF4F5F7),
+            .background = rgb(0xF4F8F9),
             .surface = rgb(0xFFFFFF),
-            .surfaceRaised = rgb(0xE7E9EC),
-            .border = rgb(0xD0D4DA),
-            .text = rgb(0x1A1D21),
-            .textMuted = rgb(0x5B6169),
-            // The same hue, darkened until it clears 4.5:1 against the LIGHTEST
-            // ground it is drawn on, which is the raised surface rather than
-            // the window. `#12B0FF` on this background is 2.2:1 -- the right
-            // colour and the wrong value, which is exactly the case
-            // `icons/README.md` says a single colour cannot cover.
-            .accent = rgb(0x09629C),
+            .surfaceRaised = rgb(0xE4ECEE),
+            .border = rgb(0xCBD8DD),
+            .text = rgb(0x14252D),
+            .textMuted = rgb(0x52666E),
+            // Deep teal retains contrast for links on the light surfaces.
+            .accent = rgb(0x076C63),
             .onAccent = rgb(0xFFFFFF),
             .warning = rgb(0x8A5A00),
             .danger = rgb(0xB3261E),
@@ -109,7 +101,7 @@ constexpr Theme kLight{
     .syntax =
         {
             .keyword = rgb(0x7B24C4),
-            .identifier = rgb(0x1A1D21),
+            .identifier = rgb(0x14252D),
             .number = rgb(0xA6431F),
             .string = rgb(0x17693C),
             .comment = rgb(0x5E6773),
@@ -294,12 +286,10 @@ void applyTheme(const Theme& theme, f32 scale)
     style.ScrollbarSize = metrics.scrollbarSize;
     style.GrabMinSize = metrics.grabMinSize;
 
-    // Square, everywhere there is a corner. Eleven members rather than one,
-    // because ImGui has eleven -- and a shell that is square except for its
-    // menu items is a shell somebody notices without being able to say why.
-    style.WindowRounding = metrics.rounding;
-    style.ChildRounding = metrics.rounding;
-    style.PopupRounding = metrics.rounding;
+    // Docked edges remain flush; controls and floating surfaces share a radius.
+    style.WindowRounding = metrics.containerRounding;
+    style.ChildRounding = metrics.containerRounding;
+    style.PopupRounding = metrics.containerRounding;
     style.FrameRounding = metrics.rounding;
     style.ScrollbarRounding = metrics.rounding;
     style.GrabRounding = metrics.rounding;
@@ -309,11 +299,11 @@ void applyTheme(const Theme& theme, f32 scale)
     style.SelectableRounding = metrics.rounding;
     style.TreeLinesRounding = metrics.rounding;
 
-    // With no radius, the line IS the edge. Every container gets one.
+    // Containers keep a fine boundary; filled controls do not need a second outline.
     style.WindowBorderSize = metrics.borderSize;
     style.ChildBorderSize = metrics.borderSize;
     style.PopupBorderSize = metrics.borderSize;
-    style.FrameBorderSize = metrics.borderSize;
+    style.FrameBorderSize = 0.0f;
     style.TabBorderSize = 0.0f;
     style.TabBarBorderSize = metrics.tabBarBorderSize;
     style.TabBarOverlineSize = metrics.tabBarOverlineSize;
@@ -323,9 +313,7 @@ void applyTheme(const Theme& theme, f32 scale)
 
     style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
     style.WindowMenuButtonPosition = ImGuiDir_None;
-    // Left, not centred. A column of buttons whose labels start at different x
-    // positions is a column somebody has to read twice, and every button in
-    // this shell that is wider than its text is wider because it was stretched.
+    // Center action labels; navigation rows retain a shared left edge.
     style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
     style.SelectableTextAlign = ImVec2(0.0f, 0.5f);
     style.SeparatorTextAlign = ImVec2(0.0f, 0.5f);
@@ -348,7 +336,7 @@ void applyTheme(const Theme& theme, f32 scale)
     colors[ImGuiCol_TitleBg] = opaque(p.surface);
     colors[ImGuiCol_TitleBgActive] = opaque(p.surfaceRaised);
     colors[ImGuiCol_TitleBgCollapsed] = opaque(p.surface);
-    colors[ImGuiCol_MenuBarBg] = opaque(p.surfaceRaised);
+    colors[ImGuiCol_MenuBarBg] = opaque(p.background);
 
     colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
     colors[ImGuiCol_ScrollbarGrab] = opaque(mix(p.border, p.textMuted, 0.25f));
@@ -365,12 +353,12 @@ void applyTheme(const Theme& theme, f32 scale)
     // every button and it stops meaning anything, which is the failure mode of
     // every palette that starts from a brand colour.
     colors[ImGuiCol_Button] = opaque(p.surfaceRaised);
-    colors[ImGuiCol_ButtonHovered] = opaque(mix(p.surfaceRaised, p.accent, 0.22f));
-    colors[ImGuiCol_ButtonActive] = opaque(mix(p.surfaceRaised, p.accent, 0.36f));
+    colors[ImGuiCol_ButtonHovered] = opaque(mix(p.surfaceRaised, p.accent, 0.10f));
+    colors[ImGuiCol_ButtonActive] = opaque(mix(p.surfaceRaised, p.accent, 0.18f));
 
-    colors[ImGuiCol_Header] = fade(p.accent, 0.24f);
+    colors[ImGuiCol_Header] = fade(p.accent, 0.16f);
     colors[ImGuiCol_HeaderHovered] = fade(p.accent, 0.16f);
-    colors[ImGuiCol_HeaderActive] = fade(p.accent, 0.34f);
+    colors[ImGuiCol_HeaderActive] = fade(p.accent, 0.22f);
 
     colors[ImGuiCol_Separator] = opaque(p.border);
     colors[ImGuiCol_SeparatorHovered] = opaque(p.accent);

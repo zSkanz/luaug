@@ -45,12 +45,18 @@ read-only depth attachment stays unmade: soft particles are the one thing F2
 gives up for it, and the decal half of the same need is answered differently
 (below), so the change would buy one visual refinement for a frozen interface.
 
-**5. Decals will be clustered, not screen-space.** When F2's decal half is
-built, a decal is an entry in the cluster grid the lights already use, applied
-to a surface's albedo and normal inside the forward shader before lighting --
-the approach forward-plus renderers converge on. It needs no depth read at all,
-it is lit exactly like the surface under it, and it costs per pixel only where
-a decal is.
+**5. Decals multiply, in a pass of their own between the opaque surfaces and
+the transparent ones** -- revised on 2026-09-23 when they were built, from the
+clustered design first written here. The cluster design needed a decal atlas
+bound in the forward shader, and the terrain shader already uses all sixteen
+fragment texture slots, so the one surface decals are most wanted on could not
+have had them. Instead the forward pass closes after the opaque surfaces on a
+frame that has decals, each decal draws its box and reads the depth those
+surfaces wrote (a pass with no depth attachment may), and it MULTIPLIES the lit
+colour: the surface's light is its albedo times what reaches it, so this is
+the albedo multiplied, with the surface's sun and shadow kept exactly. It works
+on parts, terrain and blocks alike and needs no RHI change. What it gives up is
+brightening -- a white pixel is no change -- and that is stated in `Decal`'s doc.
 
 ## Consequences
 

@@ -135,6 +135,16 @@ blast.LightEmission = 0.7
 blast.Brightness = 2.5
 blast.Parent = charge
 
+-- **A scorch mark on the ground in front**: a `Decal` projects an image down onto
+-- whatever is in its box -- the ground here -- and darkens it, keeping the
+-- ground's own light and shadow. Placed the way a raycast hit would place it.
+local scorch = Instance.new("Decal")
+scorch.Name = "Scorch"
+scorch.CFrame = CFrame.lookAt(vector.create(-3, 0, 5), vector.create(-3, 1, 5))
+scorch.Size = vector.create(5, 5, 1)
+scorch.Texture = "asset://textures/scorch.png"
+scorch.Parent = Workspace
+
 local elapsed = 0
 RunService.Heartbeat:Connect(function(dt: number)
     elapsed += dt

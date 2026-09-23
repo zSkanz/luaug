@@ -1032,6 +1032,21 @@ declare extern type PointLight extends Instance with
     Shadows: boolean
 end
 
+declare extern type Decal extends Instance with
+    --- Where the box is -- relative to the parent part when there is one. The image lies in the box's
+    --- right and up, and is projected along its look direction.
+    CFrame: CFrame
+    --- Width, height and depth of the box, in metres. Only what is inside it is painted, so a shallow
+    --- box paints one wall and a deep one reaches round a corner.
+    Size: vector
+    --- The image. Its alpha is how much of it lands; none paints `Color` alone.
+    Texture: Content
+    --- Multiplies the image.
+    Color: Color3
+    --- 0 paints the image as it is; 1 paints nothing.
+    Transparency: number
+end
+
 declare extern type ParticleEmitter extends Instance with
     --- Whether it emits continuously. `Emit` works either way: a burst is a separate thing from a
     --- stream.
@@ -2375,6 +2390,7 @@ declare Instance: {
         & (("CharacterBody") -> CharacterBody)
         & (("Camera") -> Camera)
         & (("PointLight") -> PointLight)
+        & (("Decal") -> Decal)
         & (("ParticleEmitter") -> ParticleEmitter)
         & (("SpotLight") -> SpotLight)
         & (("InputContext") -> InputContext)

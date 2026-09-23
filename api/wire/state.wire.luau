@@ -349,6 +349,12 @@ local Excluded: { Schema.Excluded } = {
             .. "does not have to work out whether it was considered.",
     },
     {
+        Name = "Decal",
+        Reason = "Its image is a content URN, and a field that carries a string needs the string table "
+            .. "every other name uses to reach component fields first -- owed with the next protocol "
+            .. "version. Until then a decal a script places on an authority is not seen on a replica.",
+    },
+    {
         Name = "Player",
         Reason = "Lives under `NetworkService`, which is not replicated, and each end makes its own: an "
             .. "authority one per peer, a replica one for itself. A replica does not yet see the OTHER "

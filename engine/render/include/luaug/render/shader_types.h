@@ -418,6 +418,28 @@ struct GpuTerrainSurfaceUniforms
 
 static_assert(sizeof(GpuTerrainSurfaceUniforms) == 32 * 16 + 80, "GpuTerrainSurfaceUniforms is a cbuffer layout");
 
+// Vertex stage, `b0 space1`, for `decal` (F2).
+struct GpuDecalUniforms
+{
+    core::Mat4 boxToWorld;
+    core::Mat4 viewProjection;
+};
+
+static_assert(sizeof(GpuDecalUniforms) == 128, "GpuDecalUniforms is a cbuffer layout");
+
+// Fragment stage, `b0 space3`, for `decal`.
+struct GpuDecalFragment
+{
+    core::Mat4 worldToBox;
+    core::Mat4 inverseViewProjection;
+    f32 color[4]{1.0f, 1.0f, 1.0f, 1.0f};
+    // xy: 1 / render size; z: 1 when there is an image.
+    f32 params[4]{};
+    f32 axis[4]{0.0f, 0.0f, 1.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuDecalFragment) == 176, "GpuDecalFragment is a cbuffer layout");
+
 // One particle, as `particle.hlsl` reads its instance stream (F2).
 struct GpuParticle
 {

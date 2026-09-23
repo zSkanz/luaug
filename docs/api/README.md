@@ -52,6 +52,7 @@ guided tour.
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
 | [`Constraint`](constraint.md) | [`Instance`](instance.md) | The base of anything the SOLVER holds together. |
 | [`DataModel`](datamodel.md) | [`Instance`](instance.md) | The root of the instance tree, reached through the `game` global. |
+| [`Decal`](decal.md) | [`Instance`](instance.md) | An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, a crack. |
 | [`FixedConstraint`](fixedconstraint.md) | [`Constraint`](constraint.md) | A joint with no freedom at all: two bodies the solver treats as one rigid assembly. |
 | [`Folder`](folder.md) | [`Instance`](instance.md) | A node with no behaviour of its own, for grouping instances; mounting src/scripts also builds one per subdirectory. |
 | [`Frame`](frame.md) | [`UIObject`](uiobject.md) | A rectangle and nothing else: a background, a border of children, and the layout it imposes on them. |

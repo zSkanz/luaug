@@ -1,5 +1,10 @@
 # art/editor-icons/ — the class icons for the editor's Explorer
 
+> **Historical brief.** The active default theme now uses
+> [Orbit](orbit/STYLE.md), which records the replacement style, exact design
+> prompt and reproducible generator. This document and the earlier masters are
+> retained for reference; their drawing rules do not govern the Orbit family.
+
 Forty-two icons, one per class the Explorer can show. They are authored art and
 therefore a human decision, which is why they live at the top level beside
 `branding/` rather than under `docs/`.

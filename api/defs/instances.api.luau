@@ -1489,6 +1489,53 @@ local Classes: { Schema.Class } = {
         },
     },
     {
+        Name = "Decal",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "Decal",
+        Doc = "An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, "
+            .. "a crack. **No face to choose and no parent required** -- `CFrame.lookAt(hit.Position, "
+            .. "hit.Position + hit.Normal)` from a `Raycast` and a size is the whole placement, and it lands on "
+            .. "parts, terrain and blocks alike. Parented to a `BasePart` its `CFrame` is relative to the part, "
+            .. "so it moves with it.\n\nA decal MULTIPLIES what it lands on, after lighting, which keeps the "
+            .. "surface's own light and shadow on it exactly: it darkens and tints, and it cannot make a surface "
+            .. "brighter than it was. A white pixel is no change.",
+        Properties = {
+            {
+                Name = "CFrame",
+                Type = "CFrame",
+                Doc = "Where the box is -- relative to the parent part when there is one. The image lies in the "
+                    .. "box's right and up, and is projected along its look direction.",
+            },
+            {
+                Name = "Size",
+                Type = "vector",
+                Default = "vector.create(2, 2, 1)",
+                Doc = "Width, height and depth of the box, in metres. Only what is inside it is painted, so a "
+                    .. "shallow box paints one wall and a deep one reaches round a corner.",
+            },
+            {
+                Name = "Texture",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "The image. Its alpha is how much of it lands; none paints `Color` alone.",
+            },
+            {
+                Name = "Color",
+                Type = "Color3",
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "Multiplies the image.",
+            },
+            {
+                Name = "Transparency",
+                Type = "number",
+                Default = "0",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "0 paints the image as it is; 1 paints nothing.",
+            },
+        },
+    },
+    {
         Name = "ParticleEmitter",
         Extends = "Instance",
         Module = "render",

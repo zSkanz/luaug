@@ -1,4 +1,7 @@
-<img src="branding/luaug-lockup-horizontal.png" alt="LuauG" width="420">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="branding/luaug-lockup-horizontal-dark.png">
+  <img src="branding/luaug-lockup-horizontal-light.png" alt="LuauG" width="420">
+</picture>
 
 **A standalone, open-source game engine scripted in Luau — built for developers coming from Roblox.**
 

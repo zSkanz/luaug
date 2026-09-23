@@ -1,37 +1,5 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!--
-  The LuauG mark: a crescent inside an orbit, with a satellite sitting on the
-  ring where the ring breaks for it.
-
-  WRITTEN, not traced. Every shape here is one circle or one circular arc, and
-  the numbers are the ones the rasters in icon/ are rendered from -- there is one
-  source and it is this file. The mark it replaced was an autotraced bitmap: 31
-  paths, thirty near-identical colours and eleven decimal places per coordinate,
-  which is why its letterforms could never be corrected.
-
-  Geometry, in viewBox units. The orbit is NOT centred: the satellite overhangs
-  the ring on the right, so the artwork is wider than the orbit and centring the
-  circle would push the whole mark left.
-
-      orbit      centre (482, 512)   outer radius 470   stroke 86
-                 drawn as an arc of radius 427, broken +-26 degrees at the right
-      crescent   circle r 288 at the centre, minus a circle r 250 at x + 182
-      satellite  circle r 129 at x + 400, on the ring's centreline
-
-  ONE COLOUR, deliberately. The satellite was a second colour in the design and a
-  dark second colour disappears on a dark taskbar -- and it never needed one,
-  because the gap around it already makes it a distinct object. See
-  branding/README.md.
--->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <mask id="crescent">
-    <circle cx="482" cy="512" r="288" fill="#fff"/>
-    <circle cx="664" cy="512" r="250" fill="#000"/>
-  </mask>
-  <g fill="#12B0FF">
-    <path d="M 865.8 324.8 A 427 427 0 1 1 865.8 699.2"
-          fill="none" stroke="#12B0FF" stroke-width="86"/>
-    <circle cx="482" cy="512" r="288" mask="url(#crescent)"/>
-    <circle cx="882" cy="512" r="129"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" role="img" aria-labelledby="title">
+<title id="title">LuauG — Orbit G</title>
+<path d="M 42.0451 15.7978 A 21 21 0 1 0 51 33 L 37 33" fill="none" stroke="#17BDA6" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="54" cy="10" r="4.5" fill="#17BDA6"/>
 </svg>

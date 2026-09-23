@@ -388,6 +388,8 @@ private:
     [[nodiscard]] bool ensureVoxel(rhi::IDevice& device);
     // The particle pipeline and its instance buffer, on the same lazy terms.
     [[nodiscard]] bool ensureParticles(rhi::IDevice& device);
+    // The decal pipeline, on the same lazy terms.
+    [[nodiscard]] bool ensureDecals(rhi::IDevice& device);
     // Picks this frame's nodes for every terrain in `world`, from its camera.
     void selectTerrain(const RenderWorld& world);
     // Draws the selected nodes. `cull` is a cascade's or a light's sphere;
@@ -589,6 +591,9 @@ private:
     // Particles (F2): the pipeline, made the first frame one is drawn, and
     // the instance stream this frame uploads into.
     rhi::PipelineHandle particlePipeline_{};
+    // Decals (F2), made the first frame one is drawn.
+    rhi::PipelineHandle decalPipeline_{};
+    bool decalTried_ = false;
     rhi::BufferHandle particleBuffer_{};
     bool particleTried_ = false;
     std::vector<GpuParticle> particleStaging_;
@@ -1431,7 +1436,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     for (rhi::PipelineHandle* pipeline :
          {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_, &voxelPipeline_,
-          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_}) {
+          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_, &decalPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1452,6 +1457,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     voxelAtlas_ = {};
     voxelTiles_.clear();
     particleTried_ = false;
+    decalTried_ = false;
     terrainGridUploaded_ = false;
 
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
@@ -1941,6 +1947,46 @@ void uploadTerrainGrid(rhi::ICmdList& cmd, rhi::BufferHandle vertices, rhi::Buff
 }
 
 } // namespace
+
+bool DefaultRenderer::ensureDecals(rhi::IDevice& device)
+{
+    if (decalTried_)
+        return decalPipeline_.valid();
+    decalTried_ = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+    core::EngineError error;
+    const rhi::ShaderHandle vertex = shaderLibrary_->create(device, "decal", rhi::ShaderStage::Vertex, &error);
+    const rhi::ShaderHandle fragment = shaderLibrary_->create(device, "decal", rhi::ShaderStage::Fragment, &error);
+    for (const rhi::ShaderHandle handle : {vertex, fragment}) {
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+    }
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+    // **Multiplied into what is there**: the colour this writes is a factor,
+    // one where nothing lands. Alpha is left as it was.
+    const std::array<rhi::ColorTargetDesc, 1> multiplyTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true,
+                  .srcColor = rhi::BlendFactor::DstColor,
+                  .dstColor = rhi::BlendFactor::Zero,
+                  .srcAlpha = rhi::BlendFactor::Zero,
+                  .dstAlpha = rhi::BlendFactor::One},
+    }};
+    decalPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        // Both sides reach the fragment stage, which keeps the far one: see
+        // the shader. No depth attachment -- the pass reads depth instead.
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        .colorTargets = multiplyTarget,
+        .debugName = "decal",
+    });
+    return decalPipeline_.valid();
+}
 
 bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
 {
@@ -2987,6 +3033,72 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         drawGeometry(cmd, world, meshes, world.camera.viewProjection, pbrPipeline_, pbrSkinnedPipeline_,
                      Selection::Opaque);
         drawTerrain(cmd, world, world.camera.viewProjection, terrainPipeline_, Selection::Opaque);
+
+        // **Decals, between the opaque surfaces and the transparent ones**
+        // (F2). They read the depth the opaque surfaces wrote, which a pass
+        // that has it attached cannot, so the forward pass is closed around
+        // them and reopened after -- only on a frame that has any, so every
+        // other frame's command stream is what it always was.
+        if (!world.decals.empty() && ensureDecals(device)) {
+            cmd.endRenderPass();
+            const std::array<rhi::ColorAttachment, 1> decalTarget{rhi::ColorAttachment{
+                .texture = hdr_,
+                .loadOp = rhi::LoadOp::Load,
+                .storeOp = rhi::StoreOp::Store,
+            }};
+            cmd.beginRenderPass({.colorAttachments = decalTarget, .debugName = "decals"});
+            cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+            cmd.setScissor(
+                {.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
+            cmd.setPipeline(decalPipeline_);
+            const Mat4 inverseViewProjection = core::inverse(world.camera.viewProjection);
+            for (const RenderDecal& decal : world.decals) {
+                GpuDecalUniforms vertex;
+                vertex.boxToWorld = decal.boxToWorld;
+                vertex.viewProjection = world.camera.viewProjection;
+                GpuDecalFragment fragment;
+                fragment.worldToBox = decal.worldToBox;
+                fragment.inverseViewProjection = inverseViewProjection;
+                fragment.color[0] = decal.color.r;
+                fragment.color[1] = decal.color.g;
+                fragment.color[2] = decal.color.b;
+                fragment.color[3] = decal.opacity;
+                fragment.params[0] = 1.0f / static_cast<f32>(renderWidth_);
+                fragment.params[1] = 1.0f / static_cast<f32>(renderHeight_);
+                fragment.params[2] = decal.texture.valid() ? 1.0f : 0.0f;
+                fragment.axis[0] = decal.axis.x;
+                fragment.axis[1] = decal.axis.y;
+                fragment.axis[2] = decal.axis.z;
+                cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&vertex, sizeof(vertex)));
+                cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&fragment, sizeof(fragment)));
+                const std::array<rhi::TextureBinding, 2> textures{
+                    rhi::TextureBinding{decal.texture.valid() ? decal.texture : whitePixel_, linearSampler_},
+                    rhi::TextureBinding{depth_, pointSampler_},
+                };
+                cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+                cmd.draw(36, 1, 0, 0);
+                stats_.drawCalls += 1;
+            }
+            cmd.endRenderPass();
+
+            const std::array<rhi::ColorAttachment, 1> resumeTarget{rhi::ColorAttachment{
+                .texture = hdr_,
+                .loadOp = rhi::LoadOp::Load,
+                .storeOp = rhi::StoreOp::Store,
+            }};
+            cmd.beginRenderPass({
+                .colorAttachments = resumeTarget,
+                .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Load, .storeOp = rhi::StoreOp::Store},
+                .debugName = "forward-blended",
+            });
+            cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+            cmd.setScissor(
+                {.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
+            // The frame block again: the decal pass bound its own at the same
+            // slot, and the blended surfaces below read this one.
+            cmd.setPipeline(pbrBlendPipeline_);
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
+        }
 
         // Blended, after the opaque pass has filled depth, back to front. The
         // frame uniforms are still bound -- same block, same slot, same values

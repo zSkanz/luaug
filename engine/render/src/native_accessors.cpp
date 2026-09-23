@@ -545,6 +545,101 @@ void detachCameraComponents(scene::World& world, core::InstanceId id)
     world.cameras().remove(id);
 }
 
+// --- Decal (F2) -------------------------------------------------------------------
+
+void attachDecalComponents(scene::World& world, core::InstanceId id)
+{
+    world.decals().add(id, scene::DecalComponent{});
+}
+
+void detachDecalComponents(scene::World& world, core::InstanceId id)
+{
+    world.decals().remove(id);
+}
+
+Value getDecalCFrame(const scene::World& world, core::InstanceId id)
+{
+    const scene::DecalComponent* decal = world.decals().find(id);
+    return decal == nullptr ? Value{} : Value{decal->cframe};
+}
+
+bool setDecalCFrame(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* cframe = std::get_if<core::CFrameD>(&value);
+    scene::DecalComponent* decal = world.decals().find(id);
+    if (cframe == nullptr || decal == nullptr)
+        return false;
+    decal->cframe = *cframe;
+    return true;
+}
+
+Value getDecalSize(const scene::World& world, core::InstanceId id)
+{
+    const scene::DecalComponent* decal = world.decals().find(id);
+    return decal == nullptr ? Value{} : Value{decal->size};
+}
+
+bool setDecalSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* size = std::get_if<core::Vec3>(&value);
+    scene::DecalComponent* decal = world.decals().find(id);
+    // A box with no extent paints nothing and divides by zero on the way.
+    if (size == nullptr || decal == nullptr || !(size->x > 0.0f) || !(size->y > 0.0f) || !(size->z > 0.0f) ||
+        !std::isfinite(size->x) || !std::isfinite(size->y) || !std::isfinite(size->z))
+        return false;
+    decal->size = *size;
+    return true;
+}
+
+Value getDecalTexture(const scene::World& world, core::InstanceId id)
+{
+    const scene::DecalComponent* decal = world.decals().find(id);
+    return decal == nullptr ? Value{} : Value{std::string(world.atoms().text(decal->texture))};
+}
+
+bool setDecalTexture(scene::World& world, core::InstanceId id, const Value& value)
+{
+    // Not `setMap`, which checks for a material component: this is a decal's.
+    const auto* text = std::get_if<std::string>(&value);
+    scene::DecalComponent* decal = world.decals().find(id);
+    if (text == nullptr || decal == nullptr)
+        return false;
+    decal->texture = world.atoms().intern(*text);
+    return true;
+}
+
+Value getDecalColor(const scene::World& world, core::InstanceId id)
+{
+    const scene::DecalComponent* decal = world.decals().find(id);
+    return decal == nullptr ? Value{} : Value{decal->color};
+}
+
+bool setDecalColor(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* color = std::get_if<core::Color3>(&value);
+    scene::DecalComponent* decal = world.decals().find(id);
+    if (color == nullptr || decal == nullptr)
+        return false;
+    decal->color = *color;
+    return true;
+}
+
+Value getDecalTransparency(const scene::World& world, core::InstanceId id)
+{
+    const scene::DecalComponent* decal = world.decals().find(id);
+    return decal == nullptr ? Value{} : Value{static_cast<f64>(decal->transparency)};
+}
+
+bool setDecalTransparency(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::DecalComponent* decal = world.decals().find(id);
+    f32 next = 0.0f;
+    if (decal == nullptr || !takeFinite(value, next) || next < 0.0f || next > 1.0f)
+        return false;
+    decal->transparency = next;
+    return true;
+}
+
 // --- ParticleEmitter (F2) ------------------------------------------------------
 //
 // Every number is refused when negative, and the three that are fractions --

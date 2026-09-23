@@ -582,6 +582,38 @@
       ]
     },
     {
+      "Name": "Decal",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CFrame",
+          "Type": "CFrame"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "Size",
+          "Type": "vector",
+          "Default": "vector.create(2, 2, 1)"
+        },
+        {
+          "Name": "Texture",
+          "Type": "Content"
+        },
+        {
+          "Name": "Transparency",
+          "Type": "number",
+          "Default": "0"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "FixedConstraint",
       "Extends": "Constraint",
       "Tags": [],

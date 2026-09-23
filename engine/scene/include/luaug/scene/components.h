@@ -448,6 +448,22 @@ struct ParticleEmitterComponent
     u64 emitted = 0;
 };
 
+// `Decal` (F2): an image projected onto whatever is inside a box.
+struct DecalComponent
+{
+    // Where the box is. Relative to the parent `BasePart` when it has one, so a
+    // decal on a moving crate moves with it; in the world otherwise. The image
+    // lies in the box's X and Y and is projected along its Z.
+    core::CFrameD cframe;
+    // The box, in metres: width, height, and how deep it reaches.
+    core::Vec3 size{2.0f, 2.0f, 1.0f};
+    // The image, by content URN; none paints a solid colour.
+    core::NameAtom texture;
+    // Multiplies the image.
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+    f32 transparency = 0.0f;
+};
+
 struct SpotLightComponent
 {
     core::Color3 color{1.0f, 1.0f, 1.0f};

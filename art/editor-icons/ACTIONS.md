@@ -1,5 +1,10 @@
 # Toolbar and action icons
 
+> **Historical brief.** The active default theme now uses
+> [Orbit](orbit/STYLE.md), which records the replacement style, exact design
+> prompt and reproducible generator. This document and the earlier masters are
+> retained for reference; their drawing rules do not govern the Orbit family.
+
 The second set. `src/` holds one icon per **class** the Explorer can show;
 [`actions/`](actions/) holds the editor's own chrome — the things a person
 clicks rather than the things a scene contains.

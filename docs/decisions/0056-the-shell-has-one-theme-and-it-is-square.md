@@ -4,6 +4,14 @@
 - Date: 2026-08-24
 - Extends: 0011, 0046, 0055
 
+## Visual amendment — 2026-09-23
+
+The user requested a modern shell matching the Orbit icons and Orbit G logo.
+The [Orbit shell brief](../briefs/orbit-shell.md) supersedes the square-corner
+requirement with shared rounded metrics and a graphite/teal palette. Centralized
+theme data, stable appearance IDs, display scaling and the contrast floor remain
+unchanged. The original decision and its rationale below are historical.
+
 ## Context
 
 E1 through E6 built an editor and a launcher. Nothing in any of them decided

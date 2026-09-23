@@ -1,5 +1,10 @@
 # Content-browser icons
 
+> **Historical brief.** The active default theme now uses
+> [Orbit](orbit/STYLE.md), which records the replacement style, exact design
+> prompt and reproducible generator. This document and the earlier masters are
+> retained for reference; their drawing rules do not govern the Orbit family.
+
 The **third** set, and it exists because the editor grew a content browser while
 the other two were being drawn. `src/` is what a scene *contains*, `actions/` is
 what a person *clicks*, and [`content/`](content/) is what a project's folder

@@ -851,6 +851,32 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         }
     });
 
+    // --- Decals (F2) --------------------------------------------------------
+    //
+    // A box each, relative to the parent part when there is one so a mark on a
+    // moving crate moves with it. Skipped when fully transparent, and when the
+    // box is nowhere near the view -- the renderer draws every one it is given.
+    world.decals().forEach([&](core::InstanceId id, const scene::DecalComponent& decal) {
+        if (!inWorld(world, id, root) || decal.transparency >= 1.0f)
+            return;
+        CFrameD frame = decal.cframe;
+        if (const scene::PartComponent* part = world.parts().find(world.parentOf(id)); part != nullptr)
+            frame = at(world.parentOf(id), part->cframe) * decal.cframe;
+        RenderDecal drawn;
+        drawn.boxToWorld = core::toRenderMatrix(frame, origin) * core::scaling(decal.size);
+        const AABB bounds =
+            core::transformed(drawn.boxToWorld, AABB{Vec3{-0.5f, -0.5f, -0.5f}, Vec3{0.5f, 0.5f, 0.5f}});
+        if (!core::intersects(out.camera.frustum, bounds))
+            return;
+        drawn.worldToBox = core::inverse(drawn.boxToWorld);
+        drawn.texture =
+            materials != nullptr && decal.texture.valid() ? materials->find(decal.texture) : rhi::TextureHandle{};
+        drawn.color = decal.color;
+        drawn.opacity = 1.0f - decal.transparency;
+        drawn.axis = core::transformDirection(drawn.boxToWorld, Vec3{0.0f, 0.0f, 1.0f});
+        out.decals.push_back(drawn);
+    });
+
     // --- Solid parts (M6) ---------------------------------------------------
     //
     // **The renderer changes not at all for this**, which is the answer M4's

@@ -1,44 +1,8 @@
-// What the shells look like: the palette, the metrics, and the typeface
-// (ADR 0056).
-//
-// **This is the only file that decides a colour or a corner radius.** Before it,
-// the look was `ImGui::StyleColorsDark()` plus a warning orange written out
-// three times at three call sites, and there was no answer to "what colour is a
-// warning here" other than reading all three. A token has a name, one
-// definition, and a test.
-//
-// ## The split, and why the data half is the testable half
-//
-// A theme is DATA -- eleven colours and a table of numbers -- and applying it to
-// Dear ImGui is one function that writes a struct. The data compiles in every
-// profile and every claim about it is assertable with no window: that each theme
-// defines every token, that its text clears 4.5:1 against its own ground, and
-// that every rounding is zero. `applyTheme` is the ImGui half and is a no-op in
-// shipping, exactly as `DebugOverlay` is.
-//
-// That matters here more than it usually would: **the ImGui shell cannot render
-// headlessly and SDL does not accept injected input** (E1's finding, repeated by
-// every milestone since), so a picture of the editor needs a person. Everything
-// that is not a picture belongs on this side of the line.
-//
-// ## Square is not a per-theme choice
-//
-// Rounding is one number, it is zero, and it is in `ThemeMetrics` rather than in
-// `Theme`. A theme that could round its own corners would be a second answer to
-// what this engine's shell looks like, and the shape IS the identity -- a person
-// switching from dark to light is changing the light, not the product.
-//
-// ## Contrast is a rule, not a taste
-//
-// Every foreground token clears **4.5:1** against the ground it is drawn on, and
-// `ui_theme_tests.cpp` computes it rather than trusting the person who picked
-// the hex. This is R18's habit applied to the shell: a stated reference beats an
-// opinion, and "looks fine" is not a result. The rule is WCAG 2.1's AA threshold
-// for body text, which is the only widely published number for this and is what
-// `icons/README.md` already holds the icon palette to.
-//
-// R3 does not apply to the names here, for the reason `debug_overlay.h` states:
-// the shell exists for whoever is building a game, never for a player.
+// Shared Orbit shell palette, metrics and typography (ADR 0056, refreshed 2026-09-23).
+// Theme data is testable without a window; applyTheme owns the ImGui mapping.
+// Light and dark share shape and spacing. Text and semantic foregrounds retain
+// the 4.5:1 contrast floor. See docs/briefs/orbit-shell.md for the visual brief.
+// The development shell's labels follow the debug_overlay.h R3 exemption.
 #pragma once
 
 #include "luaug/core/math.h"
@@ -68,19 +32,14 @@ struct ThemePalette
     core::Color3 surface;
     // A raised area: a header, a hovered row, the selected tab.
     core::Color3 surfaceRaised;
-    // The one-pixel line. Square corners make borders load-bearing -- with no
-    // radius to separate two panels, the line is what does it.
+    // Quiet separators between adjacent panels and popup boundaries.
     core::Color3 border;
     core::Color3 text;
     // Secondary text: a path under a name, a hint, a unit. Still 4.5:1 -- muted
     // means quieter, not unreadable, and the usual failure of a "subtle" grey is
     // that it is subtle to whoever has the same monitor as its author.
     core::Color3 textMuted;
-    // The brand hue (`branding/luaug-mark.svg`, `#12B0FF`) at the value that
-    // clears 4.5:1 against THIS theme's ground. Two values of one hue rather
-    // than two decisions, which is the rule `icons/README.md` already states for
-    // the icon palette and the reason it states it: a single colour cannot clear
-    // the bar against both a near-white panel and a dark one.
+    // Orbit teal, adjusted per surface to retain the text contrast floor.
     core::Color3 accent;
     // What is legible ON the accent -- the label of a primary button. Not
     // derivable from the accent by a rule anybody would trust, so it is a token.
@@ -127,32 +86,28 @@ struct SyntaxPalette
 // The numbers. One set, shared by every theme -- see the header note.
 struct ThemeMetrics
 {
-    // **Zero, and that is the whole point.** Kept as a field rather than written
-    // as a literal at each of the eleven ImGui rounding members so that the test
-    // asserting it has one thing to assert.
-    core::f32 rounding = 0.0f;
+    // Compact controls and larger containers share the Orbit rounded geometry.
+    core::f32 rounding = 5.0f;
+    core::f32 containerRounding = 8.0f;
     core::f32 borderSize = 1.0f;
 
-    core::f32 windowPaddingX = 10.0f;
-    core::f32 windowPaddingY = 10.0f;
-    core::f32 framePaddingX = 8.0f;
-    core::f32 framePaddingY = 5.0f;
+    core::f32 windowPaddingX = 14.0f;
+    core::f32 windowPaddingY = 12.0f;
+    core::f32 framePaddingX = 10.0f;
+    core::f32 framePaddingY = 6.0f;
     core::f32 itemSpacingX = 8.0f;
-    core::f32 itemSpacingY = 6.0f;
+    core::f32 itemSpacingY = 8.0f;
     core::f32 itemInnerSpacingX = 6.0f;
     core::f32 itemInnerSpacingY = 5.0f;
     core::f32 cellPaddingX = 7.0f;
     core::f32 cellPaddingY = 4.0f;
     core::f32 indentSpacing = 18.0f;
-    core::f32 scrollbarSize = 12.0f;
+    core::f32 scrollbarSize = 10.0f;
     core::f32 grabMinSize = 12.0f;
-    // The tab bar's own line and the selected tab's overline. Two pixels rather
-    // than one because with no rounding the selected tab has nothing else
-    // distinguishing it from its neighbour, and an accent bar over it is how
-    // every editor in this shape says "here".
-    core::f32 tabBarBorderSize = 2.0f;
+    // A quiet baseline and a mint overline identify the active document.
+    core::f32 tabBarBorderSize = 1.0f;
     core::f32 tabBarOverlineSize = 2.0f;
-    core::f32 dockingSeparatorSize = 2.0f;
+    core::f32 dockingSeparatorSize = 4.0f;
 
     // Inter at 16 px. The default ImGui font is a 13 px bitmap face designed for
     // a debugger, and drawing an application in it is most of why the editor

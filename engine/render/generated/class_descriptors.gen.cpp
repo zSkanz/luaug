@@ -435,6 +435,77 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     pointLightDesc.detachComponents = native::detachPointLightComponents;
     classes.registerClass(pointLightDesc);
 
+    // --- Decal ---
+    static std::array<scene::PropertyDesc, 5> decalProperties;
+    decalProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("CFrame"),
+            .type = scene::ValueType::CFrame,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where the box is -- relative to the parent part when there is one. The image lies in the box's right and up, and is projected along its look direction.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getDecalCFrame,
+            .set = native::setDecalCFrame,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Size"),
+            .type = scene::ValueType::Vector3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Width, height and depth of the box, in metres. Only what is inside it is painted, so a shallow box paints one wall and a deep one reaches round a corner.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getDecalSize,
+            .set = native::setDecalSize,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Texture"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The image. Its alpha is how much of it lands; none paints `Color` alone.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getDecalTexture,
+            .set = native::setDecalTexture,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Multiplies the image.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getDecalColor,
+            .set = native::setDecalColor,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Transparency"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "0 paints the image as it is; 1 paints nothing.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getDecalTransparency,
+            .set = native::setDecalTransparency,
+        },
+    }};
+    scene::ClassDescriptor decalDesc;
+    decalDesc.name = atoms.intern("Decal");
+    decalDesc.super = instanceClass;
+    decalDesc.flags = scene::ClassFlags::None;
+    decalDesc.defaultName = atoms.intern("Decal");
+    decalDesc.doc = "An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, a crack. **No face to choose and no parent required** -- `CFrame.lookAt(hit.Position, hit.Position + hit.Normal)` from a `Raycast` and a size is the whole placement, and it lands on parts, terrain and blocks alike. Parented to a `BasePart` its `CFrame` is relative to the part, so it moves with it.\012\012A decal MULTIPLIES what it lands on, after lighting, which keeps the surface's own light and shadow on it exactly: it darkens and tints, and it cannot make a surface brighter than it was. A white pixel is no change.";
+    decalDesc.properties = decalProperties;
+    decalDesc.attachComponents = native::attachDecalComponents;
+    decalDesc.detachComponents = native::detachDecalComponents;
+    classes.registerClass(decalDesc);
+
     // --- ParticleEmitter ---
     static std::array<scene::PropertyDesc, 16> particleEmitterProperties;
     particleEmitterProperties = {{

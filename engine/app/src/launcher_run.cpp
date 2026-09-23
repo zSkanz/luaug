@@ -14,6 +14,7 @@
 #include "luaug/app/backends.h"
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/engine.h"
+#include "luaug/app/icons.h"
 #include "luaug/app/launcher.h"
 #include "luaug/asset/image.h"
 #include "luaug/core/build_info.h"
@@ -105,6 +106,15 @@ std::optional<core::EngineError> runLauncher(const EngineOptions& options)
     if (!device->claimWindow(*window))
         return core::makeError(LUAUG_TR("rhi.err.window_claim_failed"), {}, "SDL_ClaimWindowForGPUDevice");
 
+    IconAtlas icons;
+    struct IconsScope
+    {
+        IconAtlas& atlas;
+        rhi::IDevice& device;
+        ~IconsScope() { atlas.destroy(device); }
+    } iconsScope{icons, *device};
+    bool iconsAttempted = false;
+
     DebugOverlay overlay(*window, *device, Shell::Launcher);
     if (!overlay.active()) {
         // A build with no ImGui cannot draw a launcher, and reaching here means
@@ -113,6 +123,7 @@ std::optional<core::EngineError> runLauncher(const EngineOptions& options)
         return core::makeError(LUAUG_TR("engine.cli.err.no_script"));
     }
     overlay.setVisible(true);
+    overlay.setIcons(&icons);
 
     ProjectList projects;
     projects.load(projectListPath());
@@ -199,6 +210,11 @@ std::optional<core::EngineError> runLauncher(const EngineOptions& options)
 
         const rhi::Swapchain swapchain = device->acquireSwapchain(*window);
         if (swapchain.texture.valid()) {
+            if (!iconsAttempted) {
+                iconsAttempted = true;
+                (void)icons.load(*device, *cmd, platform::paths().contentDir, {});
+            }
+
             // The launcher has nothing behind its panel, so the backdrop IS the
             // frame -- the same clear the editor's screen gets, for the same
             // reason: whatever ImGui leaves transparent must not show a previous
