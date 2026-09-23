@@ -770,10 +770,10 @@ TEST_CASE("flattening levels towards the height it is given")
     CHECK(std::abs(*levelled) < 0.2f);
 }
 
-TEST_CASE("smoothing leaves bricked columns alone")
+TEST_CASE("smoothing flat ground over a cave changes nothing, and the cave stays")
 {
-    // A column with a cave in it has no single height, and a smoother that
-    // invented one would pull the roof down onto the floor.
+    // A bricked column is smoothed by its TOP (D162), so over flat ground --
+    // every top the same -- there is nothing to move, and no brick is made.
     TerrainField field(FieldSettings{.voxelSize = 0.5f, .minHeight = -32.0f, .maxHeight = 32.0f});
     fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{32.0f, 40.0f, 32.0f}, 1);
     fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 3.0, 0);
@@ -861,7 +861,7 @@ TEST_CASE("a bowl carved from the top of flat ground is still a height function"
     CHECK(*bottom < -3.0f);
 }
 
-TEST_CASE("a heightmap is written whole, row after row, clamped, and a cave is left alone")
+TEST_CASE("a heightmap is written whole, row after row, clamped, and a cave stays under it")
 {
     TerrainField field(FieldSettings{.voxelSize = 1.0f});
     field.setHeightRange(-8.0f, 8.0f);
@@ -878,12 +878,137 @@ TEST_CASE("a heightmap is written whole, row after row, clamped, and a cave is l
     CHECK(writeHeights(field, 0, 0, 0, heights, 2).touched == 0);
     CHECK(writeHeights(field, 0, 0, 3, heights, 0).touched == 0);
 
-    // A column that carries voxels has no single height, so it is skipped.
+    // A column that carries voxels has its TOP moved, and the cave under it
+    // stays (D162). It used to be skipped, which left a slot in the ground.
     (void)fillBlock(field, core::DVec3{40.0, -4.0, 40.0}, core::Vec3{8.0f, 8.0f, 8.0f}, 1);
     (void)fillBall(field, core::DVec3{40.0, -4.0, 40.0}, 2.0, 0);
     REQUIRE(field.isBricked(40, 40));
     const std::vector<float> one{5.0f};
-    const EditReport skipped = writeHeights(field, 40, 40, 1, one, 1);
-    CHECK(skipped.touched == 0);
-    CHECK(skipped.promoted == 1);
+    const EditReport moved = writeHeights(field, 40, 40, 1, one, 1);
+    CHECK(moved.touched == 1);
+    CHECK(field.sample(40, 6, 40).distance > 0.0f);
+    CHECK(field.sample(40, 4, 40).distance <= 0.0f);
+    CHECK(field.sample(40, -4, 40).distance > 0.0f);
+}
+
+namespace {
+
+// The highest place a column's ground meets the air, from the field alone, the
+// way anything drawing or colliding with it sees it.
+[[nodiscard]] float topOf(const TerrainField& field, core::i32 x, core::i32 z)
+{
+    for (core::i32 y = 120; y > -64; --y) {
+        const FieldSample here = field.sample(x, y, z);
+        if (here.distance <= 0.0f) {
+            const FieldSample above = field.sample(x, y + 1, z);
+            const float t = here.distance / (here.distance - above.distance);
+            return (static_cast<float>(y) + t) * kVoxel;
+        }
+    }
+    return -1000.0f;
+}
+
+} // namespace
+
+TEST_CASE("a hill raised over a tunnel rises there too, and the tunnel stays")
+{
+    // **D162.** A height brush skipped every column carrying voxels, so a hill
+    // raised over a tunnel had a slot through it as wide as the tunnel's brick
+    // columns, down to the old ground. It moves such a column by its top now.
+    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{64.0f, 40.0f, 64.0f}, 1);
+    fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 2.0, 0);
+    REQUIRE(field.isBricked(0, 0));
+    REQUIRE_FALSE(field.isBricked(0, 20));
+
+    for (int stamp = 0; stamp < 5; ++stamp)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 16.0, 2.0f, 1);
+
+    // Every column ends where the brush's own falloff puts it, bricked or not:
+    // five stamps of two metres, weighted by the smoothstep from the rim.
+    const auto expected = [](double metres) {
+        const double t = metres / 16.0;
+        return 10.0 * (1.0 - t * t * (3.0 - 2.0 * t));
+    };
+    REQUIRE(field.isBricked(6, 0));
+    REQUIRE_FALSE(field.isBricked(0, 20));
+    CHECK(static_cast<double>(topOf(field, 6, 0)) == doctest::Approx(expected(3.0)).epsilon(0.002));
+    CHECK(static_cast<double>(topOf(field, 0, 20)) == doctest::Approx(expected(10.0)).epsilon(0.002));
+    // The centre rose by the whole amount.
+    CHECK(static_cast<double>(topOf(field, 0, 0)) == doctest::Approx(10.0).epsilon(0.05));
+    // And the tunnel is still there, under the hill.
+    CHECK(field.sample(0, -8, 0).distance > 0.0f);
+
+    // Lowering takes it back down the same way.
+    for (int stamp = 0; stamp < 5; ++stamp)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 16.0, -2.0f, 1);
+    CHECK(std::abs(topOf(field, 0, 0)) < 0.05f);
+    CHECK(field.sample(0, -8, 0).distance > 0.0f);
+}
+
+TEST_CASE("a long stroke over a tunnel does not walk the ground away")
+{
+    // A stroke is many small stamps. A band laid on a bricked column is joined
+    // exactly, with no fillet, because a fillet re-applied at every stamp moved
+    // the surface a few centimetres each time: a hundred stamps were metres.
+    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -32.0f, .maxHeight = 32.0f});
+    fillBlock(field, core::DVec3{0.0, -20.0, 0.0}, core::Vec3{64.0f, 40.0f, 64.0f}, 1);
+    fillBall(field, core::DVec3{0.0, -4.0, 0.0}, 2.0, 0);
+    REQUIRE(field.isBricked(0, 0));
+
+    for (int stamp = 0; stamp < 100; ++stamp)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, 0.05f, 1);
+    CHECK(static_cast<double>(topOf(field, 0, 0)) == doctest::Approx(5.0).epsilon(0.01));
+    for (int stamp = 0; stamp < 100; ++stamp)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 8.0, -0.05f, 1);
+    CHECK(std::abs(topOf(field, 0, 0)) < 0.05f);
+    CHECK(field.sample(0, -8, 0).distance > 0.0f);
+}
+
+TEST_CASE("a dig at the foot of a hill leaves the hill's height alone")
+{
+    // **D163.** A column the brush's range holds entirely as ground has its
+    // surface ABOVE the range, and the brush never touched it. It was given the
+    // range's own top as its height instead, so a dig at the foot of a hill
+    // cut every taller column in its footprint off flat, eight metres above
+    // the dig.
+    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -64.0f, .maxHeight = 64.0f});
+    fillBlock(field, core::DVec3{0.0, -32.0, 0.0}, core::Vec3{64.0f, 64.0f, 64.0f}, 1);
+    for (int stamp = 0; stamp < 12; ++stamp)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 10.0, 2.0f, 1);
+    const std::optional<float> peak = heightAt(field, 0.0, 0.0);
+    const std::optional<float> shoulder = heightAt(field, 3.0, 0.0);
+    REQUIRE(peak.has_value());
+    REQUIRE(shoulder.has_value());
+    REQUIRE(*peak > 20.0f);
+
+    // A box dug at the foot, a metre down, reaching in under the hill.
+    (void)fillBlock(field, core::DVec3{3.0, -1.0, 0.0}, core::Vec3{4.0f, 4.0f, 4.0f}, 0);
+    CHECK(static_cast<double>(*heightAt(field, 0.0, 0.0)) == doctest::Approx(static_cast<double>(*peak)));
+    CHECK(static_cast<double>(*heightAt(field, 3.0, 0.0)) == doctest::Approx(static_cast<double>(*shoulder)));
+}
+
+TEST_CASE("a dig high on a hill leaves the lower ground under its reach")
+{
+    // **D163's other half.** A column the range holds entirely as air has its
+    // ground BELOW the range, and was written as no ground at all -- so a dig
+    // high on a hill deleted every lower column in its footprint down to the
+    // world's floor.
+    TerrainField field(FieldSettings{.voxelSize = kVoxel, .minHeight = -64.0f, .maxHeight = 64.0f});
+    // The plain a metre up: under the dig's reach, and not a height any
+    // default a broken write could fall back to.
+    fillBlock(field, core::DVec3{0.0, -31.5, 0.0}, core::Vec3{64.0f, 65.0f, 64.0f}, 1);
+    for (int stamp = 0; stamp < 12; ++stamp)
+        (void)raiseBall(field, core::DVec3{0.0, 0.0, 0.0}, 6.0, 2.0f, 1);
+    REQUIRE(*heightAt(field, 0.0, 0.0) > 20.0f);
+    const std::optional<float> plain = heightAt(field, 8.0, 0.0);
+    REQUIRE(plain.has_value());
+    REQUIRE(static_cast<double>(*plain) == doctest::Approx(1.0));
+
+    // A ball taken out of the peak, twenty metres up, with the plain under its
+    // reach.
+    (void)fillBall(field, core::DVec3{0.0, 20.0, 0.0}, 9.0, 0);
+    const std::optional<float> after = heightAt(field, 8.0, 0.0);
+    REQUIRE(after.has_value());
+    CHECK(static_cast<double>(*after) == doctest::Approx(static_cast<double>(*plain)));
 }

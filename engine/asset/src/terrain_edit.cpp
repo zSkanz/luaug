@@ -139,7 +139,7 @@ constexpr float SmoothEditVoxels = 2.0f;
 // needs to know what the column WILL look like, and computing that twice -- once
 // to decide and once to write -- is how the two come to disagree.
 [[nodiscard]] FieldSample afterEdit(const TerrainField& field, const ColumnView& view, i32 x, i32 y, i32 z, Depth depth,
-                                    const void* shape, u8 material)
+                                    const void* shape, u8 material, float blendVoxels = SmoothEditVoxels)
 {
     // **R9's f32/f64 split, made explicit.** A lattice coordinate is an integer,
     // a voxel size is `f32` and a world position is `f64`, so every place they
@@ -159,7 +159,18 @@ constexpr float SmoothEditVoxels = 2.0f;
     // of every ball. A fillet two voxels wide closes the crease, and a crater's
     // lip is rounded instead of a knife edge. Away from where the brush meets
     // the existing surface both are exactly the hard versions.
-    const float blend = SmoothEditVoxels * static_cast<float>(voxel);
+    // **No fillet for a band laid along the surface** (D162): its face is
+    // parallel to the ground rather than crossing it, so there is no crease to
+    // round, and a fillet re-applied at every stamp of a stroke walked the
+    // surface a few centimetres further each time.
+    if (!(blendVoxels > 0.0f)) {
+        if (material == 0)
+            return FieldSample{std::max(existing.distance, inside), existing.material};
+        if (inside >= 0.0f)
+            return FieldSample{std::min(existing.distance, -inside), material};
+        return existing.distance <= -inside ? existing : FieldSample{-inside, existing.material};
+    }
+    const float blend = blendVoxels * static_cast<float>(voxel);
     const auto mix = [blend](float a, float b) noexcept { return std::max(blend - std::abs(a - b), 0.0f) / blend; };
 
     if (material == 0) {
@@ -206,6 +217,9 @@ constexpr float SmoothEditVoxels = 2.0f;
 struct ColumnVerdict
 {
     bool singleValued = false;
+    // The brush left no surface in range, so the column is as it was and is
+    // not written (D163).
+    bool keep = false;
     float height = 0.0f;
     u8 material = 0;
     i32 lowY = 0;
@@ -256,16 +270,34 @@ struct ColumnVerdict
     // means solid as far as the world goes.
     verdict.singleValued = crossings == 0 || (crossings == 1 && !previousSolid);
     if (crossings == 0) {
-        // All air or all ground. All ground has no surface in range, which means
-        // the surface is above the range examined -- so the column keeps whatever
-        // height it had rather than being given one.
+        // **All ground or all air in range: the surface is OUTSIDE the range,
+        // and the column keeps the height it had** (D163). The range is the
+        // brush's reach plus a margin, and nothing outside the brush moves, so
+        // a column with no surface in it is one the brush never touched.
+        //
+        // This comment said so for a year while the code wrote the range's own
+        // top as the height, and its bottom with no material: a dig at the foot
+        // of a hill cut every taller column in its footprint off flat at eight
+        // metres above the dig, and a dig high on a hill deleted the ground of
+        // every lower column under it, down to the floor. The owner's world was
+        // full of both -- plates of ground left floating over holes.
         verdict.singleValued = true;
-        verdict.height = previousSolid ? static_cast<float>(highY + 1) * voxel : static_cast<float>(lowY) * voxel;
-        if (!previousSolid) {
-            // **All air is stated, not implied** (D153). Material zero is what
-            // the height layer reads as "no ground in this column", so a column
-            // carved away entirely has to say zero rather than keep the material
-            // of the ground that used to be there.
+        verdict.keep = true;
+        const auto floorY = static_cast<i32>(std::floor(field.settings().minHeight / voxel));
+        const auto ceilingY = static_cast<i32>(std::ceil(field.settings().maxHeight / voxel));
+        if (previousSolid && highY >= ceilingY) {
+            // Ground to the ceiling of the world: that IS its height.
+            verdict.keep = false;
+            verdict.height = static_cast<float>(highY) * voxel;
+        }
+        else if (!previousSolid && lowY <= floorY) {
+            // **Air to the floor of the world is no ground at all, and that is
+            // stated, not implied** (D153). Material zero is what the height
+            // layer reads as "no ground in this column", so a column carved
+            // away entirely says zero rather than keeping the material of the
+            // ground that used to be there.
+            verdict.keep = false;
+            verdict.height = static_cast<float>(lowY) * voxel;
             verdict.material = 0;
         }
     }
@@ -285,7 +317,8 @@ void writeHeight(TerrainField& field, i32 x, i32 z, float height, u8 material)
 }
 
 // Writes one column as bricks, cloning each brick it spans.
-void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth depth, const void* shape, u8 material)
+void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth depth, const void* shape, u8 material,
+                 float blendVoxels = SmoothEditVoxels)
 {
     const float voxel = field.settings().voxelSize;
     const i32 lowBrick = floorDiv(lowY, static_cast<i32>(BrickEdge));
@@ -319,7 +352,8 @@ void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth d
                     continue;
                 }
                 const FieldSample before = field.sample(x, worldY, z);
-                const FieldSample after = afterEdit(field, viewOf(field, x, z), x, worldY, z, depth, shape, material);
+                const FieldSample after =
+                    afterEdit(field, viewOf(field, x, z), x, worldY, z, depth, shape, material, blendVoxels);
                 if ((before.distance <= 0.0f) != (after.distance <= 0.0f)) {
                     differs = true;
                 }
@@ -364,7 +398,7 @@ void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth d
             if (worldY < lowY || worldY > highY) {
                 continue;
             }
-            const FieldSample edited = afterEdit(field, brickView, x, worldY, z, depth, shape, material);
+            const FieldSample edited = afterEdit(field, brickView, x, worldY, z, depth, shape, material, blendVoxels);
             const u32 index = (y * BrickEdge + localZ) * BrickEdge + localX;
             distances[index] = quantiseDistance(edited.distance, voxel);
             materials[index] = edited.material;
@@ -373,6 +407,8 @@ void writeBricks(TerrainField& field, i32 x, i32 z, i32 lowY, i32 highY, Depth d
         field.setBrick(key, distances, materials);
     }
 }
+
+void syncHeightToTop(TerrainField& field, i32 x, i32 z);
 
 // The shared core of every brush.
 EditReport applyBrush(TerrainField& field, const core::AABB& bounds, Depth depth, const void* shape, u8 material)
@@ -440,13 +476,15 @@ EditReport applyBrush(TerrainField& field, const core::AABB& bounds, Depth depth
         // the representation is part of the world and a field that recompacted
         // itself would be a world that changed when nobody touched it.
         if (verdict.singleValued && !wasBricked) {
-            writeHeight(field, column.x, column.z, verdict.height, verdict.material);
+            if (!verdict.keep)
+                writeHeight(field, column.x, column.z, verdict.height, verdict.material);
         }
         else {
             if (!wasBricked) {
                 report.promoted += 1;
             }
             writeBricks(field, column.x, column.z, minY, maxY, depth, shape, material);
+            syncHeightToTop(field, column.x, column.z);
         }
         report.touched += 1;
     }
@@ -485,16 +523,245 @@ EditReport fillBlock(TerrainField& field, DVec3 center, Vec3 size, u8 material)
 
 namespace {
 
-// The columns a ball covers, with the height each currently has.
+// **The top of a column: the highest place its ground meets the air above.**
 //
-// **Height-layer columns only.** A bricked column has no single height, and a
-// smoother that invented one would pull a cave's roof down onto its floor.
+// A bricked column has no single height -- a cave is two surfaces -- but it
+// always has a TOP, and the top is what a height brush means. Raising a hill
+// over a tunnel raises the hill and leaves the tunnel; skipping the column,
+// which is what every height brush did, left a slot through the hill exactly as
+// wide as the brick columns the tunnel had made (D162).
+//
+// Found by walking down from above the column's highest brick and its height
+// layer, and placed between the two lattice samples that straddle it.
+struct ColumnTop
+{
+    float height = 0.0f;
+    u8 material = 0;
+};
+
+[[nodiscard]] std::optional<ColumnTop> bricksTop(const TerrainField& field, i32 x, i32 z)
+{
+    const float voxel = field.settings().voxelSize;
+    const auto floorY = static_cast<i32>(std::floor(field.settings().minHeight / voxel));
+    const auto ceilingY = static_cast<i32>(std::ceil(field.settings().maxHeight / voxel));
+    const auto brickEdge = static_cast<i32>(BrickEdge);
+
+    // Above everything that could be ground: the height layer's surface and the
+    // highest brick this column has.
+    i32 start = floorY;
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    if (const HeightTile* tile = field.findTile(key); tile != nullptr) {
+        const u32 index = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge))) * TileEdge +
+                          static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+        if (tile->material[index] != 0)
+            start = std::max(start, static_cast<i32>(std::ceil(tile->height[index] / voxel)) + 1);
+    }
+    const i32 brickX = floorDiv(x, brickEdge);
+    const i32 brickZ = floorDiv(z, brickEdge);
+    for (i32 level = floorDiv(ceilingY, brickEdge); level >= floorDiv(floorY, brickEdge); --level) {
+        if (field.findBrick(BrickKey{brickX, level, brickZ}) != nullptr) {
+            start = std::max(start, (level + 1) * brickEdge);
+            break;
+        }
+    }
+    start = std::min(start, ceilingY);
+
+    FieldSample above = field.sample(x, start, z);
+    if (above.distance <= 0.0f)
+        return ColumnTop{static_cast<float>(start) * voxel, above.material};
+    for (i32 y = start - 1; y >= floorY; --y) {
+        const FieldSample here = field.sample(x, y, z);
+        if (here.distance <= 0.0f) {
+            const float t = here.distance / (here.distance - above.distance);
+            return ColumnTop{(static_cast<float>(y) + t) * voxel, here.material};
+        }
+        above = here;
+    }
+    return std::nullopt;
+}
+
+// **A bricked column's height layer follows its top** (D162).
+//
+// The height layer is what everything that does not mesh a column reads: the
+// ground's normals beside a cave, the ground drawn where a cave is too far to
+// mesh, `HeightAt`, a collider's bounds. A bricked column's height used to be
+// whatever it was when the column was first promoted, so every volumetric edit
+// left it behind -- and the ground beside a dug hillside was shaded from a
+// height metres off (a staircase of flat snow down a rock face), and a hill
+// with a cave in it was drawn from far away as a hole.
+//
+// **The field does not change.** Where a column has no brick the height layer
+// answers, `y < H` is ground; moving H would turn the levels between the old
+// and the new height from air to ground or back. So those levels are made
+// bricks first, copied from the field exactly as it answers now, and only then
+// is H moved -- after which it changes no sample anywhere.
+void syncHeightToTop(TerrainField& field, i32 x, i32 z)
+{
+    const std::optional<ColumnTop> top = bricksTop(field, x, z);
+    if (!top.has_value())
+        return;
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    const HeightTile* tile = field.findTile(key);
+    const u32 index = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge))) * TileEdge +
+                      static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+    const bool ground = tile != nullptr && tile->material[index] != 0;
+    const float was = ground ? tile->height[index] : field.settings().minHeight;
+    if (ground && tile->height[index] == top->height && tile->material[index] == top->material)
+        return;
+
+    const float voxel = field.settings().voxelSize;
+    const auto brickEdge = static_cast<i32>(BrickEdge);
+    const i32 low = static_cast<i32>(std::floor(std::min(was, top->height) / voxel)) - 1;
+    const i32 high = static_cast<i32>(std::ceil(std::max(was, top->height) / voxel)) + 1;
+    const i32 brickX = floorDiv(x, brickEdge);
+    const i32 brickZ = floorDiv(z, brickEdge);
+    for (i32 level = floorDiv(low, brickEdge); level <= floorDiv(high, brickEdge); ++level) {
+        const BrickKey brick{brickX, level, brickZ};
+        if (field.findBrick(brick) != nullptr)
+            continue;
+        std::vector<u8> distances(BrickVolume);
+        std::vector<u8> materials(BrickVolume);
+        for (u32 y = 0; y < BrickEdge; ++y) {
+            for (u32 z2 = 0; z2 < BrickEdge; ++z2) {
+                for (u32 x2 = 0; x2 < BrickEdge; ++x2) {
+                    const FieldSample now =
+                        field.sample(brickX * brickEdge + static_cast<i32>(x2), level * brickEdge + static_cast<i32>(y),
+                                     brickZ * brickEdge + static_cast<i32>(z2));
+                    const u32 at = (y * BrickEdge + z2) * BrickEdge + x2;
+                    distances[at] = quantiseDistance(now.distance, voxel);
+                    materials[at] = now.material;
+                }
+            }
+        }
+        field.setBrick(brick, distances, materials);
+    }
+    writeHeight(field, x, z, top->height, top->material);
+}
+
+// The top of any column, from the height layer when it holds one and from the
+// voxels when it does not. Nothing where there is no ground at all.
+[[nodiscard]] std::optional<ColumnTop> columnTop(const TerrainField& field, i32 x, i32 z)
+{
+    if (field.isBricked(x, z))
+        return bricksTop(field, x, z);
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    const HeightTile* tile = field.findTile(key);
+    if (tile == nullptr)
+        return std::nullopt;
+    const u32 index = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge))) * TileEdge +
+                      static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+    if (tile->material[index] == 0)
+        return std::nullopt;
+    return ColumnTop{tile->height[index], tile->material[index]};
+}
+
+// A band of one column, between two heights. Depth is inside-positive, like
+// every shape here, and depends on height alone: `writeBricks` touches exactly
+// one column, so there is nothing sideways for it to reach.
+struct SlabShape
+{
+    double from = 0.0;
+    double to = 0.0;
+};
+
+[[nodiscard]] float slabDepth(const DVec3& at, const void* shape) noexcept
+{
+    const auto& slab = *static_cast<const SlabShape*>(shape);
+    return static_cast<float>(std::min(at.y - slab.from, slab.to - at.y));
+}
+
+// **Moves a bricked column's top to `target`, as volume.** Up is a band of
+// ground from the old top to the new one, made of what the top was made of;
+// down is the band above the new top taken out. Whatever is under the top --
+// a tunnel, a cave -- is not in either band and does not move.
+bool moveBricksTop(TerrainField& field, i32 x, i32 z, const ColumnTop& top, float target)
+{
+    const float voxel = field.settings().voxelSize;
+    const float clamped = std::clamp(target, field.settings().minHeight, field.settings().maxHeight);
+    if (clamped == top.height)
+        return false;
+    const auto wide = static_cast<double>(voxel);
+
+    // **A top the height layer holds moves in the height layer.** The bricks
+    // of a column with a tunnel in it are only round the tunnel; its surface is
+    // usually still the height layer's, and there a move is a float written in
+    // place. As voxels it would not be: a brick is only created where the move
+    // turns a lattice point from ground to air or back, so a move smaller than
+    // a voxel -- every stamp at a brush's rim -- was dropped, and the rim of a
+    // hill fell behind over every tunnel it crossed.
+    //
+    // Only when no brick is anywhere in the band the move sweeps: a brick there
+    // is an overhang or a roof, and moving the height layer under it would
+    // fill the air beneath it.
+    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
+    if (const HeightTile* tile = field.findTile(key); tile != nullptr) {
+        const u32 index = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge))) * TileEdge +
+                          static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
+        const bool heightHoldsTop =
+            tile->material[index] != 0 && std::abs(tile->height[index] - top.height) <= voxel * 0.01f;
+        if (heightHoldsTop) {
+            const auto brickEdge = static_cast<i32>(BrickEdge);
+            // The lattice points whose samples place the surface, before and
+            // after: the ones from below the lower height to above the higher.
+            const float low = std::min(top.height, clamped);
+            const float high = std::max(top.height, clamped);
+            bool brickInBand = false;
+            for (i32 level = floorDiv(static_cast<i32>(std::floor(low / voxel)), brickEdge);
+                 level <= floorDiv(static_cast<i32>(std::ceil(high / voxel)), brickEdge) && !brickInBand; ++level) {
+                brickInBand =
+                    field.findBrick(BrickKey{floorDiv(x, brickEdge), level, floorDiv(z, brickEdge)}) != nullptr;
+            }
+            if (!brickInBand) {
+                writeHeight(field, x, z, clamped, top.material);
+                return true;
+            }
+        }
+    }
+
+    SlabShape slab;
+    u8 material = 0;
+    if (clamped > top.height) {
+        // A voxel down into the old ground, so the band and the ground overlap
+        // rather than meet at a seam the lattice could catch as a crease.
+        slab = SlabShape{static_cast<double>(top.height) - wide, static_cast<double>(clamped)};
+        material = top.material;
+    }
+    else {
+        slab = SlabShape{static_cast<double>(clamped), static_cast<double>(top.height) + 2.0 * wide};
+    }
+    const auto floorY = static_cast<i32>(std::floor(field.settings().minHeight / voxel));
+    const auto ceilingY = static_cast<i32>(std::ceil(field.settings().maxHeight / voxel));
+    const i32 lowY = std::max(static_cast<i32>(std::floor(slab.from / wide)) - ColumnMargin, floorY);
+    const i32 highY = std::min(static_cast<i32>(std::ceil(slab.to / wide)) + ColumnMargin, ceilingY);
+    if (highY <= lowY)
+        return false;
+    writeBricks(field, x, z, lowY, highY, slabDepth, &slab, material, 0.0f);
+    syncHeightToTop(field, x, z);
+    return true;
+}
+
+// Moves any column's top: the height layer's by a write, a bricked column's as
+// volume.
+bool moveTop(TerrainField& field, i32 x, i32 z, const ColumnTop& top, float target, bool bricked)
+{
+    if (bricked)
+        return moveBricksTop(field, x, z, top, target);
+    const float clamped = std::clamp(target, field.settings().minHeight, field.settings().maxHeight);
+    if (clamped == top.height)
+        return false;
+    writeHeight(field, x, z, clamped, top.material);
+    return true;
+}
+
+// The columns a ball covers, with the top each currently has -- bricked ones
+// included, by their top (D162).
 struct Column2D
 {
     i32 x = 0;
     i32 z = 0;
     float height = 0.0f;
     u8 material = 0;
+    bool bricked = false;
 };
 
 [[nodiscard]] std::vector<Column2D> heightColumnsIn(const TerrainField& field, DVec3 center, double radius)
@@ -516,24 +783,14 @@ struct Column2D
             if (dx * dx + dz * dz > radiusSquared) {
                 continue;
             }
-            if (field.isBricked(x, z)) {
+            // No ground in this column is no top: material zero says so for the
+            // height layer (D153), and a smoother that averaged it in would pull
+            // a cliff edge down into the empty space beside it.
+            const std::optional<ColumnTop> top = columnTop(field, x, z);
+            if (!top.has_value()) {
                 continue;
             }
-            const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
-            const HeightTile* tile = field.findTile(key);
-            if (tile == nullptr) {
-                continue;
-            }
-            const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
-            const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
-            const u32 index = localZ * TileEdge + localX;
-            if (tile->material[index] == 0) {
-                // No ground in this column. Material zero says so (D153), and a
-                // smoother that averaged it in would pull a cliff edge down into
-                // the empty space beside it.
-                continue;
-            }
-            columns.push_back(Column2D{x, z, tile->height[index], tile->material[index]});
+            columns.push_back(Column2D{x, z, top->height, top->material, field.isBricked(x, z)});
         }
     }
     return columns;
@@ -543,21 +800,11 @@ struct Column2D
 // the smoother to average NEIGHBOURS, which may lie outside the brush.
 [[nodiscard]] std::optional<float> heightOfColumn(const TerrainField& field, i32 x, i32 z)
 {
-    if (field.isBricked(x, z)) {
+    const std::optional<ColumnTop> top = columnTop(field, x, z);
+    if (!top.has_value()) {
         return std::nullopt;
     }
-    const TileKey key{floorDiv(x, static_cast<i32>(TileEdge)), floorDiv(z, static_cast<i32>(TileEdge))};
-    const HeightTile* tile = field.findTile(key);
-    if (tile == nullptr) {
-        return std::nullopt;
-    }
-    const auto localX = static_cast<u32>(floorMod(x, static_cast<i32>(TileEdge)));
-    const auto localZ = static_cast<u32>(floorMod(z, static_cast<i32>(TileEdge)));
-    const u32 index = localZ * TileEdge + localX;
-    if (tile->material[index] == 0) {
-        return std::nullopt;
-    }
-    return tile->height[index];
+    return top->height;
 }
 
 } // namespace
@@ -580,9 +827,12 @@ EditReport fillFlat(TerrainField& field, DVec3 center, float size, float height,
     for (i32 z = low(center.z - half); z <= high(center.z + half); ++z) {
         for (i32 x = low(center.x - half); x <= high(center.x + half); ++x) {
             if (field.isBricked(x, z)) {
-                // Voxels are not a height, and this verb has no opinion about
-                // them. Counted so a caller can say what it did not do.
-                report.promoted += 1;
+                // **Its top goes to the height, as volume** (D162): the ground
+                // is flat over a tunnel too, and the tunnel stays under it.
+                if (const std::optional<ColumnTop> top = bricksTop(field, x, z);
+                    top.has_value() && moveBricksTop(field, x, z, *top, clamped)) {
+                    report.touched += 1;
+                }
                 continue;
             }
             field.setColumn(x, z, clamped, material);
@@ -603,15 +853,20 @@ EditReport writeHeights(TerrainField& field, i32 firstX, i32 firstZ, u32 columns
     for (usize at = 0; at < heights.size(); ++at) {
         const i32 x = firstX + static_cast<i32>(at % columns);
         const i32 z = firstZ + static_cast<i32>(at / columns);
-        if (field.isBricked(x, z)) {
-            report.promoted += 1;
-            continue;
-        }
         const float height = heights[at];
         // A NaN is not a height; it is a generator's bug, and writing it would
         // put a hole in the ground nobody could find.
         if (!std::isfinite(height))
             continue;
+        if (field.isBricked(x, z)) {
+            // By its top, as volume, and whatever is under the top stays
+            // (D162). A column with no ground at all has no top to move.
+            if (const std::optional<ColumnTop> top = bricksTop(field, x, z);
+                top.has_value() && moveBricksTop(field, x, z, *top, std::clamp(height, low, high))) {
+                report.touched += 1;
+            }
+            continue;
+        }
         field.setColumn(x, z, std::clamp(height, low, high), material);
         report.touched += 1;
     }
@@ -662,8 +917,8 @@ EditReport smoothBall(TerrainField& field, DVec3 center, double radius, float st
         if (moved == column.height) {
             continue;
         }
-        writeHeight(field, column.x, column.z, moved, column.material);
-        report.touched += 1;
+        if (moveTop(field, column.x, column.z, ColumnTop{column.height, column.material}, moved, column.bricked))
+            report.touched += 1;
     }
     return report;
 }
@@ -685,8 +940,8 @@ EditReport flattenBall(TerrainField& field, DVec3 center, double radius, float h
         if (moved == column.height) {
             continue;
         }
-        writeHeight(field, column.x, column.z, moved, column.material);
-        report.touched += 1;
+        if (moveTop(field, column.x, column.z, ColumnTop{column.height, column.material}, moved, column.bricked))
+            report.touched += 1;
     }
     return report;
 }
@@ -714,10 +969,19 @@ EditReport raiseBall(TerrainField& field, DVec3 center, double radius, float amo
             // the edge, and no crease anywhere -- a linear cone leaves a ridge
             // at the rim that every stamp of a drag would draw a line along.
             const double weight = t >= 1.0 ? 0.0 : 1.0 - t * t * (3.0 - 2.0 * t);
-            if (!(weight > 0.0) || field.isBricked(x, z)) {
+            if (!(weight > 0.0)) {
                 continue;
             }
             const float lift = static_cast<float>(static_cast<double>(amount) * weight);
+            if (field.isBricked(x, z)) {
+                // **By its top, as volume** (D162): the hill goes up over the
+                // tunnel, and the tunnel stays where it was.
+                if (const std::optional<ColumnTop> top = bricksTop(field, x, z);
+                    top.has_value() && moveBricksTop(field, x, z, *top, top->height + lift)) {
+                    report.touched += 1;
+                }
+                continue;
+            }
 
             const HeightTile* tile = field.findTile(TileKey{floorDiv(x, edge), floorDiv(z, edge)});
             const u32 index =

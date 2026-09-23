@@ -86,7 +86,7 @@ centred on the terrain's `Position`, and the image's top-left pixel is its
 corner with the smallest x and z. A 16-bit PNG, or a RAW file of square
 16-bit little-endian samples (`.r16`, `.raw`), keeps a slope smooth. An 8-bit
 image has 256 steps, and over a hundred metres a character walks up those
-steps as stairs. Caves under the square are left as they are, and one ctrl-Z
+steps as stairs. A cave under the square stays under the new ground, and one ctrl-Z
 takes the import back.
 
 **Settings** holds the three numbers a terrain is decided at:

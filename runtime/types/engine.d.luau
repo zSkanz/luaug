@@ -944,9 +944,9 @@ declare extern type Terrain extends Instance with
     --- Returns how many columns it wrote. **This is the verb for ground that comes from somewhere** --
     --- a generator's noise, an image, another tool -- where `FillBlock` per column would be a quarter
     --- of a million calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`;
-    --- `material` (default 1) is painted on every column written. A column with a cave in it has no
-    --- single height and is left as it is, and a height that is not a number is skipped rather than
-    --- written.
+    --- `material` (default 1) is painted on every column written. A column with a cave in it has its
+    --- top moved to the height and keeps the cave under it, and a height that is not a number is
+    --- skipped rather than written.
     function WriteHeights(self, corner: vector, columns: number, heights: { number }, material: number?): number
     --- Removes every cell. The terrain is empty afterwards and `VoxelSize` becomes settable again.
     function Clear(self): ()

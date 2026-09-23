@@ -40,6 +40,14 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **A dig near a hill no longer cuts it off, and a dig on a hill no longer
+  deletes the ground below it** (D163): a column the brush never touched was
+  written with the top or the bottom of the brush's range. This is what put
+  floating plates and see-through holes in sculpted worlds.
+- **Raising, lowering, smoothing and flattening work over caves** (D162): a
+  column with a cave in it moves by its top and keeps the cave, where it used
+  to be skipped and left a slot through the new ground. So do Generate Flat
+  Ground and `WriteHeights`.
 - **Digging into a selected terrain no longer draws a lid and boxes over the
   hole** (D161): the selection outline, which shows through everything, drew
   the cave meshes' buried sides. A cave draw is never outlined now.

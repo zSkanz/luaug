@@ -1258,8 +1258,8 @@ local Classes: { Schema.Class } = {
                     .. "image, another tool -- where `FillBlock` per column would be a quarter of a million "
                     .. "calls. Heights are in world metres and clamped between `MinHeight` and `MaxHeight`; "
                     .. "`material` (default 1) is painted on every column written. A column with a cave "
-                    .. "in it has no single height and is left as it is, and a height that is not a number "
-                    .. "is skipped rather than written.",
+                    .. "in it has its top moved to the height and keeps the cave under it, and a height "
+                    .. "that is not a number is skipped rather than written.",
             },
             {
                 Name = "Clear",

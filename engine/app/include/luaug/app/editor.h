@@ -1769,10 +1769,10 @@ public:
     // origin, black at `low` and white at `high`, in world metres.
     //
     // It is `Terrain:WriteHeights` with a file in front of it, so a column that
-    // carries voxels -- a cave -- is left alone, and heights past the terrain's
-    // `MinHeight` and `MaxHeight` are clamped to them; the status line says
-    // both. Creates the terrain when there is none, as `generateGround` does,
-    // and that is an undo step of its own.
+    // carries voxels -- a cave -- has its top moved and keeps the cave, and
+    // heights past the terrain's `MinHeight` and `MaxHeight` are clamped to
+    // them; the status line says so. Creates the terrain when there is none, as
+    // `generateGround` does, and that is an undo step of its own.
     struct HeightmapImport
     {
         std::filesystem::path source;

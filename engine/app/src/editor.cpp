@@ -3680,8 +3680,7 @@ bool Editor::importHeightmap(scene::World& world, core::InstanceId rootOrWorkspa
     const double halfRows = 0.5 * static_cast<double>(rows - 1u) * static_cast<double>(voxel);
     const auto firstX = static_cast<core::i32>(std::floor(-half / static_cast<double>(voxel)));
     const auto firstZ = static_cast<core::i32>(std::floor(-halfRows / static_cast<double>(voxel)));
-    const asset::EditReport report =
-        asset::writeHeights(terrain.field, firstX, firstZ, columns, heights, spec.material);
+    (void)asset::writeHeights(terrain.field, firstX, firstZ, columns, heights, spec.material);
     terrain.fieldRevision += 1;
     m_sceneDirty = true;
 
@@ -3690,8 +3689,6 @@ bool Editor::importHeightmap(scene::World& world, core::InstanceId rootOrWorkspa
                          std::max(spec.low, spec.high) - originY > settings.maxHeight;
     std::string message = name + ": " + std::to_string(image.width) + " x " + std::to_string(image.height) +
                           " pixels onto " + std::to_string(columns) + " x " + std::to_string(rows) + " columns";
-    if (report.promoted > 0)
-        message += ", " + std::to_string(report.promoted) + " cave column(s) left as they were";
     if (clamped)
         message += ", clamped to the terrain's MinHeight and MaxHeight";
     m_status = EditorStatus{message, false};

@@ -371,18 +371,17 @@ EditReport fillBlock(TerrainField& field, core::DVec3 center, core::Vec3 size, c
 // This writes the height layer directly: one column, one float, one material.
 // The same result, in about a thousandth of the time.
 //
-// **Columns that already carry voxels are left alone and counted.** Their shape
-// is not a height and this verb has no opinion about it; a generator that
-// flattened somebody's cave because they pressed the wrong button would be a
-// generator nobody trusts. `EditReport::promoted` carries the count skipped.
+// **A column that carries voxels has its TOP moved, as volume** (D162): the
+// ground is flat over a tunnel as well, and the tunnel stays under it. It used
+// to be skipped, which left a slot in the new ground over every cave.
 EditReport fillFlat(TerrainField& field, core::DVec3 center, float size, float height, core::u8 material);
 
 // **A heightmap, written whole**: one height per lattice column, row after row
 // along +z, starting at column (`firstX`, `firstZ`) and `columns` wide. What a
 // generator or an imported image hands over, in one call instead of a brush
 // stamp per column. Heights are clamped into the field's range; a column that
-// carries voxels -- a cave -- has no single height and is left alone, counted
-// as `promoted` so a caller can say what it did not do.
+// carries voxels -- a cave -- has its top moved to the height and keeps what is
+// under it (D162).
 EditReport writeHeights(TerrainField& field, core::i32 firstX, core::i32 firstZ, core::u32 columns,
                         std::span<const float> heights, core::u8 material);
 
@@ -391,10 +390,10 @@ EditReport writeHeights(TerrainField& field, core::i32 firstX, core::i32 firstZ,
 //
 // **The one verb here that is not a union or a subtraction**, and it is why the
 // height layer earns its keep: smoothing a height function is a blur over a
-// grid, which is cheap and stable. It is defined on the height layer only --
-// columns carrying voxels are left alone rather than approximated, because
-// there is no single height to pull towards and a smoother that invented one
-// would flatten a cave's roof into its floor.
+// grid, which is cheap and stable. A column carrying voxels is smoothed by its
+// TOP -- the highest place its ground meets the air -- as volume, so the cave
+// under it keeps its roof (D162). It used to be left alone, and a smoothed
+// hillside over a tunnel kept a ridge of the old shape along the tunnel.
 //
 // `strength` is how far towards the average each column moves, from 0 (nothing)
 // to 1 (all the way). Values outside that are clamped: a slider that overshoots
@@ -408,7 +407,7 @@ EditReport smoothBall(TerrainField& field, core::DVec3 center, double radius, fl
 // stroke started at, so dragging across a hillside levels it to where you first
 // clicked instead of to wherever the pointer happens to be.
 //
-// Height layer only, for the same reason `smoothBall` is.
+// A column carrying voxels by its top, as `smoothBall` does it.
 EditReport flattenBall(TerrainField& field, core::DVec3 center, double radius, float height, float strength);
 
 // Raises (or, with a negative `amount`, lowers) the ground under a disc, by
@@ -419,9 +418,10 @@ EditReport flattenBall(TerrainField& field, core::DVec3 center, double radius, f
 // underside is above the ground, which is an overhang, which is voxels -- so a
 // sphere brush dragged across a field leaves a trail of bricks along both
 // edges of the stroke, every one of which is a cave the renderer has to mesh on
-// the CPU. This moves heights and nothing else. It creates no brick, promotes
-// no column, and leaves columns that already carry voxels alone, for the reason
-// `smoothBall` does.
+// the CPU. On the height layer this moves heights and nothing else: it creates
+// no brick and promotes no column. A column that already carries voxels moves
+// by its top, as volume, so a hill raised over a tunnel rises there too and the
+// tunnel stays (D162); skipping it left a slot through the hill.
 //
 // Where a column under the disc has no ground at all and `material` is not
 // zero, raising MAKES ground there with that material, from the disc's own
