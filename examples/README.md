@@ -12,14 +12,14 @@ automated headless gate script (screenshot/capture + asserted behavior):
 | `03-physics-playground` | M5 | Jolt bodies, contacts→Touched, CharacterBody, third-person camera |
 | `04-obby` | M6 | IAS input, UI, tweens, audio, minimal animation — playable end-to-end |
 | `05-streaming` | M7 | chunk streaming, floating origin, LOD/HLOD, memory ceilings |
-| `10-open-world` | M8 | the v1 flagship: streamed open world + character + day/night + hot reload. The first example with a `luaug.toml` the engine reads, and the one the soak gate drives |
+| `10-open-world` | M8 | the v1 flagship: streamed open world + character + day/night + hot reload. The first example with a `luaug.toml` the engine reads, and the one the soak gate drives. Its middle 512 m is streamed `Terrain`, with a hill and a tunnel |
 | `11-ocean` | post-v1 | one wave function shared by the water, the boat and the cargo: instanced opaque tiles, a fixed pool that follows the boat, and Archimedes buoyancy through `ApplyImpulse`. Unnumbered — the first example not born of a milestone, and the one that measured what moving a part from Luau costs |
 | `12-ragdoll` | post-v1 | `Ragdoll:Build` over a real rig: sixteen limbs, fifteen joints and a `Bone` per joint, all of them ordinary instances. The example the pose blend exists for — going down is a ramp rather than a flag, which is the difference between a fall and a glitch. Unnumbered by milestone, like `11-ocean` |
 | `13-terrain` | post-v1 phase 2 | the sculpted ground: a height atlas drawn on the GPU, caves as surface nets, and a brush from a script |
-| `14-voxels` | post-v1 phase 2 | `VoxelService`: a block world registered, filled, mined with `Raycast` and collided — not the terrain |
-| `15-multiplayer` | post-v1 phase 4 | one project in every posture: `--host`, `--join`, `--serve` or solo. The authority builds and moves the world, the replica is sent it, and `NetworkService.Authority` is the one question the script asks |
+| `14-voxels` | post-v1 phase 2 | `VoxelService`: a block world registered, filled, mined with `Raycast` and collided — not the terrain. Blocks with images, leaves that cast their holes, glass, and a spring whose water runs down the hill into a pond |
+| `15-multiplayer` | post-v1 phase 4 | one project in every posture: `--host`, `--join`, `--serve` or solo. The authority builds and moves the world, the replica is sent it, and `NetworkService.Authority` is the one question the script asks. Space honks, through a `RemoteEvent` |
 | `16-particles` | post-v1 phase 2 | `ParticleEmitter`: fire, smoke, sparks, a fountain and a scripted burst -- additive and blended in one draw, from parts and from attachments |
-| `18-world-ui` | post-v1 phase 2 | `SurfaceGui` and `BillboardGui`: a scoreboard with rich text on a wall, name tags and health bars over crates, and a sign sized in metres -- all drawn in the world, hidden by what is in front |
+| `18-world-ui` | post-v1 phase 2 | `SurfaceGui` and `BillboardGui`: a scoreboard with rich text on a wall, name tags and health bars over crates, and a sign sized in metres -- all drawn in the world, hidden by what is in front. The scoreboard's "Next round" button is pressed like a screen's |
 | `17-cave` | post-v1 phase 2 | `Terrain` as a volume: a mountain with a tunnel dug into its side, a chamber and a skylight shaft, and a camera that flies through it -- dark inside, lit by its lamps |
 
 Assets used by examples must be permissively licensed and recorded in
