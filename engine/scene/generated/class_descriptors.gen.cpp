@@ -1943,7 +1943,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .name = atoms.intern("RegisterBlock"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colour.",
+            .doc = "Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colours.\012\012`color` is the block's top, and every face when it is the only colour given. `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a grass block is green on top and earth everywhere else.",
         },
         MethodDesc{
             .name = atoms.intern("GetBlockId"),

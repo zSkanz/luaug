@@ -250,6 +250,10 @@ struct DrawItem
     // which takes its material per vertex and its look from the ground's, so
     // the cave and the ground around its opening are one surface.
     bool terrainCave = false;
+    // A chunk of the block world (V1): drawn with the block shader, which takes
+    // its colour per vertex from the registry and its shading from the
+    // per-corner occlusion the mesher baked.
+    bool voxelBlock = false;
 };
 
 // One terrain the GPU draws from its height atlas (ADR 0071). Filled by
@@ -294,6 +298,18 @@ struct RenderWorld
     std::vector<Mat4> bones;
     // The GPU terrains, drawn by node rather than by `DrawItem`.
     std::vector<RenderTerrain> terrains;
+    // The block world's registry colours, by id minus one (id 0 is air): top,
+    // sides and bottom. What the block shader turns a vertex's block id into.
+    struct VoxelColors
+    {
+        Color3 top;
+        Color3 side;
+        Color3 bottom;
+    };
+    std::vector<VoxelColors> voxelColors;
+    // The block world's block size, which the block shader needs to name the
+    // block a fragment belongs to.
+    f32 voxelBlockSize = 1.0f;
 
     // Counters the perf table records beside frame time, because the roadmap
     // asks for the *why* next to the *what*. `culled` is the interesting one: a
@@ -314,6 +330,8 @@ struct RenderWorld
         draws.clear();
         bones.clear();
         terrains.clear();
+        voxelColors.clear();
+        voxelBlockSize = 1.0f;
         candidateDraws = 0;
         culledDraws = 0;
     }

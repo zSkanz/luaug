@@ -54,6 +54,7 @@
 #include "luaug/render/terrain_loader.h"
 #include "luaug/render/transform_history.h"
 #include "luaug/render/ui_renderer.h"
+#include "luaug/render/voxel_loader.h"
 #include "luaug/rhi/device.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/script/modules.h"
@@ -750,6 +751,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // computed from a field that is already in memory, so none of `MeshLoader`'s
     // mounts, budgets or failure memory means anything here.
     render::TerrainLoader terrainLoader;
+    // The block world's chunks (V1), meshed and uploaded the same way.
+    render::VoxelLoader voxelLoader;
     // **The editor reads its textures off the frame; everything else does not**
     // (D118). A decode is 14 to 36 ms for an ordinary 1024-square PNG, and the
     // synchronous path loads every missing map it finds in one frame -- so
@@ -2891,6 +2894,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // The atom table is the world's, because the URN a tile is filed
                 // under has to be the same atom `extract` looks up.
                 (void)terrainLoader.sync(*device, *cmd, world, world.atoms(), meshCache, meshLibrary);
+                (void)voxelLoader.sync(*device, *cmd, world, world.atoms(), meshCache, meshLibrary);
             };
             loadFor(host->world(), host->workspace());
             if (Editor::Stage* const openStage = stageOf(); openStage != nullptr)
@@ -2980,8 +2984,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // before `extract` has decided this frame's camera, so it is handed
             // the one this frame was drawn through -- a frame of lag in a
             // level-of-detail choice is invisible.
-            if (snapshot.camera.valid)
+            if (snapshot.camera.valid) {
                 terrainLoader.setFocus(snapshot.camera.origin);
+                voxelLoader.setFocus(snapshot.camera.origin);
+            }
 
             const core::Vec2 uiViewport{static_cast<f32>(targetWidth), static_cast<f32>(targetHeight)};
             if (uiViewport != lastUiViewport) {

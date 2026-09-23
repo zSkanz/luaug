@@ -1005,12 +1005,17 @@ void writeVoxels(JsonWriter& writer, const World& world)
     for (const VoxelBlockType& type : voxels->types) {
         writer.beginObject();
         writer.field("name", world.atoms().text(type.name));
-        writer.key("color");
-        writer.beginArray();
-        writer.value(static_cast<f64>(type.color.r));
-        writer.value(static_cast<f64>(type.color.g));
-        writer.value(static_cast<f64>(type.color.b));
-        writer.endArray();
+        const auto colour = [&writer](std::string_view key, const core::Color3& value) {
+            writer.key(key);
+            writer.beginArray();
+            writer.value(static_cast<f64>(value.r));
+            writer.value(static_cast<f64>(value.g));
+            writer.value(static_cast<f64>(value.b));
+            writer.endArray();
+        };
+        colour("color", type.color);
+        colour("side", type.side);
+        colour("bottom", type.bottom);
         writer.endObject();
     }
     writer.endArray();
@@ -1054,11 +1059,17 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
     if (const JsonValue types = node["types"]; types.type() == core::JsonType::Array) {
         for (core::usize at = 0; at < types.size(); ++at) {
             const JsonValue type = types.at(at);
-            const JsonValue color = type["color"];
-            voxels->types.push_back(VoxelBlockType{world.atoms().intern(type["name"].asString()),
-                                                   core::Color3{static_cast<f32>(color.at(0).asNumber(1.0)),
-                                                                static_cast<f32>(color.at(1).asNumber(1.0)),
-                                                                static_cast<f32>(color.at(2).asNumber(1.0))}});
+            const auto colour = [](const JsonValue& value, core::Color3 fallback) {
+                if (value.type() != core::JsonType::Array)
+                    return fallback;
+                return core::Color3{static_cast<f32>(value.at(0).asNumber(1.0)),
+                                    static_cast<f32>(value.at(1).asNumber(1.0)),
+                                    static_cast<f32>(value.at(2).asNumber(1.0))};
+            };
+            const core::Color3 top = colour(type["color"], core::Color3{1.0f, 1.0f, 1.0f});
+            const core::Color3 side = colour(type["side"], top);
+            voxels->types.push_back(
+                VoxelBlockType{world.atoms().intern(type["name"].asString()), top, side, colour(type["bottom"], side)});
         }
     }
     if (const JsonValue chunks = node["chunks"]; chunks.type() == core::JsonType::Array) {

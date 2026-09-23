@@ -1,0 +1,15 @@
+# A world made of blocks (V1, VoxelService).
+#
+# **No scene file**, like the terrain example: the world is built by the script,
+# because building it is the subject.
+
+[project]
+name = "LuauG Voxels"
+id = "dev.luaug.voxels"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Voxels"
+width = 1280
+height = 720

@@ -2581,6 +2581,14 @@
             {
               "Name": "color",
               "Type": "Color3"
+            },
+            {
+              "Name": "sideColor",
+              "Type": "Color3?"
+            },
+            {
+              "Name": "bottomColor",
+              "Type": "Color3?"
             }
           ],
           "Returns": ["number"],

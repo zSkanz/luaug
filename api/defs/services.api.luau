@@ -1108,13 +1108,18 @@ local Classes: { Schema.Class } = {
                 Parameters = {
                     { Name = "name", Type = "string" },
                     { Name = "color", Type = "Color3" },
+                    { Name = "sideColor", Type = "Color3?" },
+                    { Name = "bottomColor", Type = "Color3?" },
                 },
                 Returns = { "number" },
                 ThreadSafety = "Unsafe",
                 Doc = "Registers a block type and returns its id. Ids are handed out in registration order "
                     .. "from 1, which makes them a pure function of the script that registered them -- the "
                     .. "same script on every machine gets the same ids. Registering a name twice returns the "
-                    .. "id it already has and updates its colour.",
+                    .. "id it already has and updates its colours.\n\n"
+                    .. "`color` is the block's top, and every face when it is the only colour given. "
+                    .. "`sideColor` is the four sides and `bottomColor` the underside, which defaults to the "
+                    .. "sides: a grass block is green on top and earth everywhere else.",
             },
             {
                 Name = "GetBlockId",

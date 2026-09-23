@@ -418,4 +418,20 @@ struct GpuTerrainSurfaceUniforms
 
 static_assert(sizeof(GpuTerrainSurfaceUniforms) == 32 * 16 + 80, "GpuTerrainSurfaceUniforms is a cbuffer layout");
 
+// How many block types the block shader has colours for; ids past it wrap.
+inline constexpr u32 kVoxelPaletteSize = 256;
+
+// Vertex stage, `b1 space1`, for `voxel`: the block registry's colours by id
+// minus one -- top, sides and bottom -- and the block size.
+struct GpuVoxelPalette
+{
+    f32 top[kVoxelPaletteSize][4]{};
+    f32 side[kVoxelPaletteSize][4]{};
+    f32 bottom[kVoxelPaletteSize][4]{};
+    // x: block size in metres.
+    f32 params[4]{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(GpuVoxelPalette) == 3 * 256 * 16 + 16, "GpuVoxelPalette is a cbuffer layout");
+
 } // namespace luaug::render

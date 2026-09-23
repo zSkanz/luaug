@@ -419,6 +419,29 @@ private:
     void applyTerrain();
     void retireUnseenTerrain();
 
+    // **The block world's colliders (V1)**: one static triangle mesh per chunk,
+    // built from the same greedy faces the renderer draws, and only for chunks
+    // within reach of something that moves -- the caves' bargain, for the same
+    // reason. Sorted by key (R10): this decides body creation order.
+    struct VoxelCollider
+    {
+        asset::VoxelChunkKey key;
+        physics::BodyHandle body;
+        // The chunk's own digest and its six face neighbours' -- a face on the
+        // chunk's edge is hidden by a neighbour's block -- and the block size.
+        core::u64 content = 0;
+        bool seen = false;
+    };
+    std::vector<VoxelCollider> m_voxelColliders;
+    // A chunk's collider is a few thousand triangles at most; two a tick keeps a
+    // mining game inside its frame and still builds a region in well under a
+    // second.
+    static constexpr core::u32 VoxelRebuildsPerTick = 2;
+    // How close, in metres, something that moves must be to a chunk for the
+    // chunk to have a collider.
+    static constexpr double VoxelCollisionReach = 24.0;
+    void applyVoxels();
+
     std::vector<BodyRecord> m_bodies;
     // Characters are few and are not on this path, so a map stays a map.
     std::unordered_map<u64, CharacterRecord> m_characters;

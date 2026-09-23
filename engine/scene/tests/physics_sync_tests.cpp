@@ -2072,6 +2072,42 @@ TEST_CASE("two terrains with a tile at the same key each get their collider")
     CHECK(mirror.backend.destroyed.empty());
 }
 
+TEST_CASE("a block world collides near what moves, and nowhere else")
+{
+    // V1: one static triangle mesh per chunk, built from the same greedy faces
+    // the renderer draws, and only for chunks within reach of a moving body.
+    Mirror mirror;
+    const core::InstanceId service = mirror.fixture.folder("VoxelService");
+    mirror.fixture.world.voxels().add(service, VoxelComponent{});
+    VoxelComponent* voxels = mirror.fixture.world.voxels().find(service);
+    REQUIRE(voxels != nullptr);
+    (void)voxels->grid.fill(0, 0, 0, 15, 3, 15, 1);
+    (void)voxels->grid.fill(2000, 0, 0, 2015, 3, 15, 1);
+
+    // Nothing moves yet: no collider anywhere.
+    mirror.step();
+    for (const auto& made : mirror.backend.created)
+        CHECK(made.desc.shape.type != physics::ShapeType::TriangleMesh);
+
+    // A crate falling onto the first chunk: that chunk, and only that one.
+    (void)mirror.part("Crate", {8.0, 10.0, 8.0});
+    mirror.step();
+    int meshes = 0;
+    for (const auto& made : mirror.backend.created) {
+        if (made.desc.shape.type == physics::ShapeType::TriangleMesh) {
+            ++meshes;
+            CHECK(made.desc.motion == physics::MotionType::Static);
+            CHECK(made.indexCount >= 3);
+        }
+    }
+    CHECK(meshes == 1);
+
+    // A tick with nothing written builds nothing more.
+    const core::usize before = mirror.backend.created.size();
+    mirror.step();
+    CHECK(mirror.backend.created.size() == before);
+}
+
 TEST_CASE("a world with no terrain mirrors exactly as it did before")
 {
     // The claim every step of F1 has to keep: a project that never touches

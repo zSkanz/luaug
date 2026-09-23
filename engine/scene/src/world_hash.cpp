@@ -323,6 +323,11 @@ u64 World::worldHash() const
                 hasher.number(static_cast<f64>(type.color.r));
                 hasher.number(static_cast<f64>(type.color.g));
                 hasher.number(static_cast<f64>(type.color.b));
+                for (const core::Color3& face : {type.side, type.bottom}) {
+                    hasher.number(static_cast<f64>(face.r));
+                    hasher.number(static_cast<f64>(face.g));
+                    hasher.number(static_cast<f64>(face.b));
+                }
             }
             for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
                 hasher.pod(key.x);

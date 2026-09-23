@@ -1020,11 +1020,16 @@ int voxelRegisterBlock(lua_State* L)
     usize length = 0;
     const char* text = luaL_checklstring(L, 2, &length);
     const core::Color3 color = checkColor3(L, 3);
+    const core::Color3 side = lua_isnoneornil(L, 4) ? color : checkColor3(L, 4);
+    const core::Color3 bottom = lua_isnoneornil(L, 5) ? side : checkColor3(L, 5);
     const core::NameAtom name = world(L).atoms().intern(std::string_view{text, length});
     for (usize at = 0; at < voxels.types.size(); ++at) {
         if (voxels.types[at].name == name) {
-            if (!(voxels.types[at].color == color)) {
-                voxels.types[at].color = color;
+            scene::VoxelBlockType& type = voxels.types[at];
+            if (!(type.color == color) || !(type.side == side) || !(type.bottom == bottom)) {
+                type.color = color;
+                type.side = side;
+                type.bottom = bottom;
                 voxels.revision += 1;
             }
             lua_pushinteger(L, static_cast<int>(at + 1));
@@ -1038,7 +1043,7 @@ int voxelRegisterBlock(lua_State* L)
                                       {"count", static_cast<core::i64>(voxels.types.size())}};
         raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
     }
-    voxels.types.push_back(scene::VoxelBlockType{name, color});
+    voxels.types.push_back(scene::VoxelBlockType{name, color, side, bottom});
     voxels.revision += 1;
     lua_pushinteger(L, static_cast<int>(voxels.types.size()));
     return 1;

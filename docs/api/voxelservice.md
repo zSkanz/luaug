@@ -50,9 +50,11 @@ The id a block type was registered with, or nil for a name nobody registered.
 
 Walks a ray block by block and returns the first solid block it enters and the face it entered through, as an outward normal -- or nil and nil if it hits nothing within `direction`'s length. The block is what a pickaxe breaks; the block plus the normal is where a placed block goes.
 
-### `RegisterBlock(name: string, color: Color3): number`
+### `RegisterBlock(name: string, color: Color3, sideColor: Color3?, bottomColor: Color3?): number`
 
-Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colour.
+Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colours.
+
+`color` is the block's top, and every face when it is the only colour given. `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a grass block is green on top and earth everywhere else.
 
 ### `SetBlock(block: vector, id: number): boolean`
 

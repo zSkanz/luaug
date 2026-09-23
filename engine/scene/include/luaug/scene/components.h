@@ -511,7 +511,10 @@ struct TerrainComponent
 struct VoxelBlockType
 {
     core::NameAtom name;
+    // The top face, and every face of a block registered with one colour.
     core::Color3 color{1.0f, 1.0f, 1.0f};
+    core::Color3 side{1.0f, 1.0f, 1.0f};
+    core::Color3 bottom{1.0f, 1.0f, 1.0f};
 };
 
 // The block world `VoxelService` owns. **Not the terrain** -- see

@@ -1,6 +1,7 @@
 #include "luaug/scene/physics_sync.h"
 
 #include "luaug/asset/terrain_mesher.h"
+#include "luaug/asset/voxel_mesher.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
@@ -978,6 +979,105 @@ void PhysicsSync::applyTerrain()
     retireUnseenTerrain();
 }
 
+void PhysicsSync::applyVoxels()
+{
+    for (VoxelCollider& collider : m_voxelColliders)
+        collider.seen = false;
+
+    const VoxelComponent* voxels = nullptr;
+    m_scene.voxels().forEach([&voxels](core::InstanceId, const VoxelComponent& found) {
+        if (voxels == nullptr)
+            voxels = &found;
+    });
+
+    if (voxels != nullptr && voxels->grid.chunkCount() > 0) {
+        // Where things that move are: bodies not anchored, and characters.
+        std::vector<core::DVec3> movers;
+        m_scene.rigidBodies().forEach([&](core::InstanceId id, const RigidBodyComponent& body) {
+            if (body.anchored && m_scene.characterBodies().find(id) == nullptr)
+                return;
+            const PartComponent* part = m_scene.parts().find(id);
+            if (part != nullptr && inWorld(id))
+                movers.push_back(part->cframe.position);
+        });
+
+        const f64 chunkMetres = static_cast<f64>(asset::VoxelChunkEdge) * static_cast<f64>(voxels->blockSize);
+        u32 rebuilt = 0;
+        for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
+            bool near = false;
+            for (const core::DVec3& mover : movers) {
+                const auto axis = [&](i32 index, f64 at) {
+                    const f64 low = static_cast<f64>(index) * chunkMetres;
+                    return std::max({low - at, 0.0, at - (low + chunkMetres)});
+                };
+                const f64 dx = axis(key.x, mover.x);
+                const f64 dy = axis(key.y, mover.y);
+                const f64 dz = axis(key.z, mover.z);
+                if (dx * dx + dy * dy + dz * dz <= VoxelCollisionReach * VoxelCollisionReach) {
+                    near = true;
+                    break;
+                }
+            }
+            if (!near)
+                continue;
+
+            u64 content = static_cast<u64>(std::bit_cast<u32>(voxels->blockSize));
+            for (const asset::VoxelChunkKey neighbour :
+                 {key, asset::VoxelChunkKey{key.x - 1, key.y, key.z}, asset::VoxelChunkKey{key.x + 1, key.y, key.z},
+                  asset::VoxelChunkKey{key.x, key.y - 1, key.z}, asset::VoxelChunkKey{key.x, key.y + 1, key.z},
+                  asset::VoxelChunkKey{key.x, key.y, key.z - 1}, asset::VoxelChunkKey{key.x, key.y, key.z + 1}}) {
+                const asset::VoxelChunk* chunk = voxels->grid.findChunk(neighbour);
+                content = combine(content, chunk == nullptr ? 0x6E6F6E65ull : asset::digestOf(*chunk));
+            }
+
+            auto at = std::lower_bound(
+                m_voxelColliders.begin(), m_voxelColliders.end(), key,
+                [](const VoxelCollider& entry, asset::VoxelChunkKey probe) { return entry.key < probe; });
+            const bool exists = at != m_voxelColliders.end() && at->key == key;
+            if (exists) {
+                at->seen = true;
+                if (at->content == content)
+                    continue;
+            }
+            if (rebuilt >= VoxelRebuildsPerTick)
+                continue; // the old collider, if any, stands until its turn
+
+            const asset::VoxelMesh meshed = asset::meshVoxelChunk(voxels->grid, key, {}, voxels->blockSize);
+            physics::BodyHandle handle{};
+            if (meshed.colliderIndices.size() >= 3) {
+                physics::BodyDesc desc;
+                desc.shape.type = physics::ShapeType::TriangleMesh;
+                desc.shape.points = meshed.colliderPoints;
+                desc.shape.indices = meshed.colliderIndices;
+                desc.shape.pointsRevision = content;
+                desc.shape.geometryRevision = content;
+                desc.motion = physics::MotionType::Static;
+                handle = m_backend.createBody(m_world, desc);
+            }
+            if (exists) {
+                if (at->body.valid())
+                    m_backend.destroyBody(m_world, at->body);
+                at->body = handle;
+                at->content = content;
+            }
+            else {
+                m_voxelColliders.insert(at, VoxelCollider{key, handle, content, true});
+            }
+            rebuilt += 1;
+        }
+    }
+
+    // Chunks gone, or out of reach, give their bodies back.
+    for (usize at = m_voxelColliders.size(); at > 0; --at) {
+        VoxelCollider& collider = m_voxelColliders[at - 1];
+        if (collider.seen)
+            continue;
+        if (collider.body.valid())
+            m_backend.destroyBody(m_world, collider.body);
+        m_voxelColliders.erase(m_voxelColliders.begin() + static_cast<std::ptrdiff_t>(at - 1));
+    }
+}
+
 void PhysicsSync::retireUnseenTerrain()
 {
     // A tile the field no longer holds -- cleared, or its terrain destroyed --
@@ -1002,6 +1102,7 @@ void PhysicsSync::applyScene()
     // to be walked first would make the ids a fact about the walk rather than
     // about the world (R10).
     applyTerrain();
+    applyVoxels();
 
     // Cleared every tick: a part reparented between two ticks must not be
     // answered from the previous one's memo.

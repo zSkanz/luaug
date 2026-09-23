@@ -51,6 +51,7 @@ constexpr f32 kContactRayMetres = 0.6f;
 // The value `drawGeometry` records as the bound material while caves are
 // bound, so the next ordinary draw rebinds its own.
 constexpr u32 kCaveBinding = 0xFFFFFFFEu;
+constexpr u32 kVoxelBinding = 0xFFFFFFFDu;
 constexpr f32 kContactThicknessMetres = 0.25f;
 constexpr f32 kContactFadeDistance = 60.0f;
 constexpr rhi::TextureFormat kLuminanceFormat = rhi::TextureFormat::R32Float;
@@ -372,6 +373,8 @@ private:
     // golden of a scene that has no terrain at all. Deferred, a project that
     // never touches terrain pays nothing and its goldens do not move.
     [[nodiscard]] bool ensureTerrain(rhi::IDevice& device);
+    // The block shader's pipeline, on the same lazy terms as the terrain's.
+    [[nodiscard]] bool ensureVoxel(rhi::IDevice& device);
     // Picks this frame's nodes for every terrain in `world`, from its camera.
     void selectTerrain(const RenderWorld& world);
     // Draws the selected nodes. `cull` is a cascade's or a light's sphere;
@@ -556,6 +559,11 @@ private:
     rhi::PipelineHandle terrainShadowPipeline_{};
     // Caves: an ordinary static mesh's vertex layout, the terrain's look.
     rhi::PipelineHandle terrainCavePipeline_{};
+    // The block world's forward pipeline, made the first frame a block is
+    // drawn, and the palette it reads, filled each frame from the registry.
+    rhi::PipelineHandle voxelPipeline_{};
+    bool voxelTried_ = false;
+    GpuVoxelPalette voxelPalette_{};
     // The palette the terrain shaders read, filled once a frame.
     GpuTerrainSurfaceUniforms terrainSurface_{};
     // One grid for every node of every terrain: 33 by 33 lattice points.
@@ -1392,8 +1400,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(instanceBuffer_);
     instanceBuffer_ = {};
 
-    for (rhi::PipelineHandle* pipeline :
-         {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_}) {
+    for (rhi::PipelineHandle* pipeline : {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_,
+                                          &terrainCavePipeline_, &voxelPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1405,6 +1413,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     }
     terrainTried_ = false;
     terrainValid_ = false;
+    voxelTried_ = false;
     terrainGridUploaded_ = false;
 
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
@@ -1714,9 +1723,12 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // depth pass it is an ordinary static mesh.
         const bool caveDraw =
             selection == Selection::Opaque && batch == nullptr && draw.terrainCave && terrainCavePipeline_.valid();
+        const bool voxelDraw =
+            selection == Selection::Opaque && batch == nullptr && draw.voxelBlock && voxelPipeline_.valid();
         const rhi::PipelineHandle wanted = batch != nullptr ? instancedPipeline
                                            : skinnedDraw    ? skinnedPipeline
                                            : caveDraw       ? terrainCavePipeline_
+                                           : voxelDraw      ? voxelPipeline_
                                                             : staticPipeline;
         if (!(wanted == currentPipeline)) {
             cmd.setPipeline(wanted);
@@ -1737,7 +1749,32 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             uniforms.instanceAlphaUnused[0] = batch != nullptr ? 1.0f : draw.alpha;
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
 
-            if (caveDraw) {
+            if (voxelDraw) {
+                // The registry's colours at the vertex stage's second slot, and
+                // the standard textures bound to their neutral stand-ins -- once
+                // per run of chunks.
+                if (boundMaterial != kVoxelBinding) {
+                    cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(&voxelPalette_, sizeof(voxelPalette_)));
+                    const std::array<rhi::TextureBinding, 13> textures{
+                        rhi::TextureBinding{whitePixel_, linearSampler_},
+                        rhi::TextureBinding{flatNormalPixel_, linearSampler_},
+                        rhi::TextureBinding{whitePixel_, linearSampler_},
+                        rhi::TextureBinding{blackPixel_, linearSampler_},
+                        rhi::TextureBinding{shadowMap_, shadowSampler_},
+                        rhi::TextureBinding{environmentMap_, environmentSampler_},
+                        rhi::TextureBinding{brdfLut_, environmentSampler_},
+                        rhi::TextureBinding{clusterGrid_, pointSampler_},
+                        rhi::TextureBinding{lightIndices_, pointSampler_},
+                        rhi::TextureBinding{lightData_, pointSampler_},
+                        rhi::TextureBinding{occlusion_, linearSampler_},
+                        rhi::TextureBinding{localShadowMap_, shadowSampler_},
+                        rhi::TextureBinding{contact_, pointSampler_},
+                    };
+                    cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+                    boundMaterial = kVoxelBinding;
+                }
+            }
+            else if (caveDraw) {
                 // The palette at the material slot, and the standard textures
                 // bound to their neutral stand-ins -- once per run of caves.
                 if (boundMaterial != kCaveBinding) {
@@ -1859,6 +1896,52 @@ void uploadTerrainGrid(rhi::ICmdList& cmd, rhi::BufferHandle vertices, rhi::Buff
 }
 
 } // namespace
+
+bool DefaultRenderer::ensureVoxel(rhi::IDevice& device)
+{
+    if (voxelTried_)
+        return voxelPipeline_.valid();
+    voxelTried_ = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+
+    core::EngineError error;
+    const auto load = [&](std::string_view name, rhi::ShaderStage stage) -> rhi::ShaderHandle {
+        const rhi::ShaderHandle handle = shaderLibrary_->create(device, name, stage, &error);
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+        return handle;
+    };
+    const rhi::ShaderHandle vertex = load("voxel", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle fragment = load("voxel", rhi::ShaderStage::Fragment);
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+    // `asset::Vertex`, all four attributes: the block shader reads the UV.
+    const std::array<rhi::VertexAttribute, 4> attributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 12},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 24},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 0, .format = rhi::VertexFormat::Float2, .offsetBytes = 40},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> buffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
+    };
+    const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{.format = kHdrFormat}};
+    voxelPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "voxel",
+    });
+    return voxelPipeline_.valid();
+}
 
 bool DefaultRenderer::ensureTerrain(rhi::IDevice& device)
 {
@@ -2162,6 +2245,28 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // The terrain's nodes for this frame, chosen from the camera once and used
     // by every pass -- a shadow cast by different geometry than is drawn would
     // not match its caster. The grid goes up the first time, before any pass.
+    // The block world's palette, and its pipeline the first time a block is
+    // drawn -- before any pass, because a pipeline made mid-pass is not.
+    if (!world.voxelColors.empty() ||
+        std::any_of(world.draws.begin(), world.draws.end(), [](const DrawItem& draw) { return draw.voxelBlock; })) {
+        const RenderWorld::VoxelColors missing{Color3{1.0f, 0.0f, 1.0f}, Color3{1.0f, 0.0f, 1.0f},
+                                               Color3{1.0f, 0.0f, 1.0f}};
+        for (u32 id = 0; id < kVoxelPaletteSize; ++id) {
+            const RenderWorld::VoxelColors& colors = id < world.voxelColors.size() ? world.voxelColors[id] : missing;
+            const auto put = [](f32(&slot)[4], const Color3& color) {
+                slot[0] = color.r;
+                slot[1] = color.g;
+                slot[2] = color.b;
+                slot[3] = 1.0f;
+            };
+            put(voxelPalette_.top[id], colors.top);
+            put(voxelPalette_.side[id], colors.side);
+            put(voxelPalette_.bottom[id], colors.bottom);
+        }
+        voxelPalette_.params[0] = world.voxelBlockSize;
+        (void)ensureVoxel(device);
+    }
+
     terrainDraws_.clear();
     if (!world.terrains.empty()) {
         for (u32 id = 0; id < kTerrainPaletteSize; ++id) {

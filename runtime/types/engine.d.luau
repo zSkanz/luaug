@@ -1859,8 +1859,10 @@ declare extern type VoxelService extends Instance with
     --- Registers a block type and returns its id. Ids are handed out in registration order from 1,
     --- which makes them a pure function of the script that registered them -- the same script on every
     --- machine gets the same ids. Registering a name twice returns the id it already has and updates
-    --- its colour.
-    function RegisterBlock(self, name: string, color: Color3): number
+    --- its colours. `color` is the block's top, and every face when it is the only colour given.
+    --- `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a
+    --- grass block is green on top and earth everywhere else.
+    function RegisterBlock(self, name: string, color: Color3, sideColor: Color3?, bottomColor: Color3?): number
     --- The id a block type was registered with, or nil for a name nobody registered.
     function GetBlockId(self, name: string): number?
     --- Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are

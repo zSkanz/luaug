@@ -3,6 +3,7 @@
 #include "luaug/render/lighting.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/render/terrain_loader.h"
+#include "luaug/render/voxel_loader.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
@@ -676,6 +677,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                 .boneCount = boneCount,
                 .outlined = isOutlined(id),
                 .terrainCave = false,
+                .voxelBlock = false,
             });
         }
     });
@@ -775,8 +777,58 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                     .boneCount = 0,
                     .outlined = isOutlined(id),
                     .terrainCave = true,
+                    .voxelBlock = false,
                 });
             }
+        }
+    });
+
+    // --- The block world (V1) --------------------------------------------------
+    //
+    // `VoxelService` is a service, not a Workspace descendant, so it is found by
+    // its component rather than walked to. Chunks are meshed in the grid's own
+    // space, which sits at the world origin; the only placement is the
+    // floating-origin rebase every draw gets.
+    world.voxels().forEach([&](core::InstanceId, const scene::VoxelComponent& voxels) {
+        out.voxelColors.clear();
+        out.voxelBlockSize = voxels.blockSize;
+        out.voxelColors.reserve(voxels.types.size());
+        for (const scene::VoxelBlockType& type : voxels.types)
+            out.voxelColors.push_back(RenderWorld::VoxelColors{type.color, type.side, type.bottom});
+
+        u32 materialSlot = 0xFFFFFFFFu;
+        const Mat4 transform = core::toRenderMatrix(core::CFrameD{}, origin);
+        for (const asset::VoxelChunkKey key : voxels.grid.chunkKeys()) {
+            const core::NameAtom urn = world.atoms().lookup(voxelChunkUrn(key));
+            if (!urn.valid())
+                continue;
+            const MeshLibrary::Entry* entry = meshes.find(urn);
+            if (entry == nullptr || !entry->mesh.valid())
+                continue;
+            if (materialSlot == 0xFFFFFFFFu) {
+                materialSlot = static_cast<u32>(out.materials.size());
+                out.materials.push_back(RenderMaterial{});
+            }
+            const AABB worldBounds = core::transformed(transform, entry->bounds);
+            const Vec3 centre = core::center(worldBounds);
+            out.draws.push_back(DrawItem{
+                .sortKey = drawSortKey(kOpaquePass, kStaticPipeline, materialSlot,
+                                       drawGeometryKey(entry->mesh.index, 0), core::length(centre)),
+                .transform = transform,
+                .mesh = entry->mesh,
+                .section = 0,
+                .material = materialSlot,
+                .alpha = 1.0f,
+                .transparent = false,
+                .boundsCenter = centre,
+                .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
+                .inCameraFrustum = core::intersects(out.camera.frustum, worldBounds),
+                .firstBone = 0,
+                .boneCount = 0,
+                .outlined = false,
+                .terrainCave = false,
+                .voxelBlock = true,
+            });
         }
     });
 
@@ -888,6 +940,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .inCameraFrustum = visible,
             .outlined = isOutlined(id),
             .terrainCave = false,
+            .voxelBlock = false,
         });
     });
 
