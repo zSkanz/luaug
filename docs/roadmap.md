@@ -1273,10 +1273,12 @@ and the ecosystem work.
      from the pointer loses its fractional remainder every frame, which makes
      the ground a function of the framerate. Both were measured, not argued.
 
-     Still open, and honestly so: terrain does not stream yet (Part E), cave
-     *surfaces* have no collision — only the height layer does, because a
-     `TriangleMesh` rebuild is 12 ms for 32k triangles and needs an off-frame
-     budget — and `MeshUsage::Dynamic`'s ring-buffer hazard (A4) is unaddressed.
+     Since then: cave surfaces collide, built lazily near whatever moves; and
+     since 2026-09-23 a saved terrain and block world stream from disk in 64 m
+     cells (Part E, ADR 0075), with the world waiting for its ground on first
+     load and a changed cell never evicted. Still open, and honestly so:
+     streaming while editing -- the editor holds the whole field, as it holds
+     the whole scene -- and `MeshUsage::Dynamic`'s ring-buffer hazard (A4).
    - **`SurfaceGui` and billboards** — the UI tree rendered in world space: a
      screen on a wall, a name over a head, a health bar that follows a body. The
      tree, the layout and the `ui2d` pass all exist since M6; what does not is

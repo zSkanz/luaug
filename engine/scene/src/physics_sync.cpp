@@ -740,6 +740,21 @@ void PhysicsSync::applyTerrain()
 
         // --- Height tiles ---------------------------------------------------
         //
+        // **Two passes: what needs a collider, then the nearest of those.** The
+        // budget is a few rebuilds a tick, and it used to be spent in key order
+        // -- so a terrain of ten thousand tiles, arriving whole from a scene or
+        // streaming in, built its colliders from one corner, and a crate
+        // dropped in the middle fell through the ground for twenty seconds
+        // before its tile's turn came. Nearest to something that moves first,
+        // ties by key, which is a function of the world and nothing else (R10).
+        struct PendingTile
+        {
+            asset::TileKey key;
+            u64 content = 0;
+            f64 distance = 0.0;
+        };
+        std::vector<PendingTile> pending;
+
         // Sorted, because `tileKeys()` answers sorted.
         for (const asset::TileKey key : field.tileKeys()) {
             const asset::HeightTile* tile = field.findTile(key);
@@ -771,14 +786,41 @@ void PhysicsSync::applyTerrain()
 
             if (exists && current(*at, content))
                 continue;
-            if (rebuilt >= TerrainRebuildsPerTick) {
-                // Over budget: leave it as it was and come back next tick. Marked
-                // seen so it is not retired for being stale, which would destroy
-                // a collider somebody is standing on in order to rebuild it.
-                if (exists)
-                    at->seen = true;
-                continue;
+            // Kept, and marked seen, until its rebuild comes round: retiring a
+            // stale collider would destroy one somebody is standing on in order
+            // to rebuild it.
+            if (exists)
+                at->seen = true;
+            pending.push_back(PendingTile{key, content, 0.0});
+        }
+
+        if (pending.size() > static_cast<usize>(TerrainRebuildsPerTick - rebuilt)) {
+            gatherMovers();
+            const f64 tileMetres = static_cast<f64>(edge) * static_cast<f64>(voxel);
+            for (PendingTile& tile : pending) {
+                const f64 centreX = terrain.origin.x + (static_cast<f64>(tile.key.x) + 0.5) * tileMetres;
+                const f64 centreZ = terrain.origin.z + (static_cast<f64>(tile.key.z) + 0.5) * tileMetres;
+                tile.distance = movers.empty() ? 0.0 : std::numeric_limits<f64>::max();
+                for (const core::DVec3& mover : movers) {
+                    const f64 dx = centreX - mover.x;
+                    const f64 dz = centreZ - mover.z;
+                    tile.distance = std::min(tile.distance, dx * dx + dz * dz);
+                }
             }
+            std::stable_sort(pending.begin(), pending.end(), [](const PendingTile& a, const PendingTile& b) {
+                return a.distance != b.distance ? a.distance < b.distance : a.key < b.key;
+            });
+        }
+
+        for (const PendingTile& next : pending) {
+            if (rebuilt >= TerrainRebuildsPerTick)
+                break;
+            const asset::TileKey key = next.key;
+            const u64 content = next.content;
+            const asset::HeightTile* tile = field.findTile(key);
+            auto [at, exists] = locate(id, false, key);
+            const i32 firstColumn = key.x * edge;
+            const i32 firstRow = key.z * edge;
 
             // Row-major, `Samples` on a side. The last row and column come from
             // the neighbours, and are holes where there is no neighbour -- the

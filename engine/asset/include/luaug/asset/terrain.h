@@ -273,6 +273,24 @@ public:
     // Drops a brick and, when its column has no bricks left, unmarks the column.
     void removeBrick(BrickKey key);
 
+    // Drops a tile. Nothing else refers to one, so nothing else moves.
+    void removeTile(TileKey key);
+
+    // **Takes every tile and brick of `from` this field does not already hold,
+    // SHARING them rather than copying** -- the load path of a streamed cell.
+    //
+    // What this field already holds wins, because it is newer: a cell that
+    // loads after a script dug into ground there must not put the ground back.
+    // And because the objects are shared, whoever keeps `from` keeps a second
+    // reference to each one, so the first edit here clones it -- which is
+    // exactly how an evicting streamer tells a cell somebody changed from one
+    // nobody touched, with no flag for either side to forget.
+    void shareFrom(const TerrainField& from);
+
+    // Drops every tile and brick named, in one pass. Both lists sorted, as
+    // `tileKeys` and `brickKeys` give them.
+    void removeAll(std::span<const TileKey> tiles, std::span<const BrickKey> bricks);
+
     // Widens or narrows the world's floor and ceiling. Separate from the
     // constructor because a terrain's range is authored after it exists, and
     // changing it resamples nothing -- unlike `voxelSize`, which would.

@@ -578,7 +578,9 @@ local Classes: { Schema.Class } = {
                 ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "The must-have ring for cells of TERRAIN FEATURES, in metres. The longest of the three: it "
                     .. "is what puts a horizon further out than the props standing on it. Zero means follow "
-                    .. "`MinRadius`.",
+                    .. "`MinRadius`.\n\nIt is also the ring for a saved `Terrain` and block world streamed in "
+                    .. "cells, and on a world's first load the simulation waits until the ground inside it has "
+                    .. "arrived, so nothing standing on streamed ground falls through it.",
             },
             {
                 Name = "TerrainLoadRadius",
@@ -589,7 +591,8 @@ local Classes: { Schema.Class } = {
                 Doc = "How far from a focus cells of TERRAIN FEATURES are kept, in metres. Zero means follow "
                     .. "`LoadRadius`.\n\nRaising this is the cheapest distance there is, and it is cheap for a "
                     .. "reason worth knowing: a cell of terrain holds few large things, so a ring twice as wide "
-                    .. "costs far less than the same ring would cost in props.",
+                    .. "costs far less than the same ring would cost in props. A saved `Terrain` and block "
+                    .. "world streamed in cells are kept out to this radius too.",
             },
         } :: { Schema.Property },
         Methods = {

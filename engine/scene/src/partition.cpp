@@ -1,6 +1,9 @@
 #include "luaug/scene/partition.h"
 
+#include "luaug/asset/field_cells.h"
+#include "luaug/core/base64.h"
 #include "luaug/core/i18n.h"
+#include "luaug/core/json.h"
 #include "luaug/core/text_key.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/components.h"
@@ -138,6 +141,187 @@ void expand(core::DAABB& box, const core::DAABB& other) noexcept
     }
     const std::optional<std::string> text = jsonslice::unquote(*slice);
     return text.has_value() ? *text : std::string{};
+}
+
+// --- Fields: terrain and block worlds, cut into cells (ADR 0075) ------------
+
+// One replacement in the residual text: `length` bytes at `at` become `text`.
+// Collected and applied back to front, so no edit moves another's offset.
+struct Splice
+{
+    usize at = 0;
+    usize length = 0;
+    std::string text;
+};
+
+[[nodiscard]] usize offsetIn(std::string_view whole, std::string_view part) noexcept
+{
+    return static_cast<usize>(part.data() - whole.data());
+}
+
+[[nodiscard]] std::string jsonString(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size() + 2);
+    out.push_back('"');
+    out.append(text);
+    out.push_back('"');
+    return out;
+}
+
+// Hands every cell to the sink and indexes what it wrote. The index entry's
+// bounds are the cell's own, which is what the manager scores it by.
+template <typename Cell, typename Encode, typename Bounds>
+core::u32 writeFieldCells(const std::vector<Cell>& cells, core::i32 layer, const PartitionSettings& settings,
+                          asset::ChunkIndex& index, Encode&& encode, Bounds&& bounds)
+{
+    core::u32 written = 0;
+    for (const Cell& cell : cells) {
+        const asset::ChunkId id{cell.x, cell.z, layer};
+        const std::vector<std::byte> bytes = encode(cell);
+        const PartitionCellWritten result = settings.fieldSink(id, bytes);
+        if (result.urn.empty())
+            continue;
+        asset::ChunkIndexEntry entry;
+        entry.id = id;
+        entry.bounds = bounds(cell);
+        entry.urn = result.urn;
+        entry.bytes = result.bytes;
+        index.chunks.push_back(std::move(entry));
+        ++written;
+    }
+    return written;
+}
+
+// The block world: the top-level `voxels` member loses its `chunks` and keeps
+// its block size and types.
+void extractVoxels(std::string_view scene, const PartitionSettings& settings, PartitionResult& out,
+                   std::vector<Splice>& splices)
+{
+    const std::optional<std::string_view> member = jsonslice::member(scene, "voxels");
+    if (!member.has_value())
+        return;
+    const std::optional<std::string_view> chunksText = jsonslice::member(*member, "chunks");
+    if (!chunksText.has_value())
+        return;
+
+    core::JsonDocument document;
+    if (!document.parse(*member).ok)
+        return;
+    const core::JsonValue node = document.root();
+    const auto blockSize = static_cast<core::f32>(node["blockSize"].asNumber(1.0));
+    asset::VoxelGrid grid;
+    const core::JsonValue chunks = node["chunks"];
+    std::vector<asset::BlockId> blocks;
+    for (usize index = 0; index < chunks.size(); ++index) {
+        const core::JsonValue chunk = chunks.at(index);
+        const std::optional<std::vector<core::u8>> bytes = core::base64Decode(chunk["blocks"].asString());
+        // A chunk the scene reader would refuse is left to it: the field stays
+        // inline, and the reader says what is wrong, once, where it always has.
+        if (!bytes.has_value() || !asset::decodeVoxelChunk(*bytes, blocks))
+            return;
+        grid.setChunk(asset::VoxelChunkKey{static_cast<core::i32>(chunk["x"].asNumber()),
+                                           static_cast<core::i32>(chunk["y"].asNumber()),
+                                           static_cast<core::i32>(chunk["z"].asNumber())},
+                      blocks);
+    }
+
+    const std::vector<asset::VoxelCell> cells = asset::splitVoxels(grid, blockSize);
+    if (cells.size() < settings.minimumFieldCells)
+        return;
+    const core::u32 across = asset::voxelCellChunks(blockSize);
+    out.report.voxelCells = writeFieldCells(
+        cells, asset::FieldLayerVoxels, settings, out.fieldIndex,
+        [](const asset::VoxelCell& cell) { return asset::encodeVoxelCell(cell); },
+        [across](const asset::VoxelCell& cell) { return asset::voxelCellBounds(cell, across); });
+    splices.push_back(Splice{.at = offsetIn(scene, *chunksText), .length = chunksText->size(), .text = "[]"});
+}
+
+// The ground: the `Terrain` under the workspace keeps an empty field that
+// carries its settings -- voxel size and height range -- and nothing else.
+void extractTerrain(std::string_view scene, const PartitionSettings& settings, PartitionResult& out,
+                    std::vector<Splice>& splices)
+{
+    const std::optional<std::string_view> root = jsonslice::member(scene, "root");
+    if (!root.has_value())
+        return;
+    const std::optional<std::string_view> children = jsonslice::member(*root, "children");
+    if (!children.has_value())
+        return;
+
+    bool done = false;
+    (void)jsonslice::forEachElement(*children, [&](std::string_view child) {
+        // One terrain per workspace.
+        if (done || textOf(child, "class") != "Terrain")
+            return;
+        const std::optional<std::string_view> blob = jsonslice::member(child, "terrain");
+        if (!blob.has_value())
+            return;
+        const std::optional<std::string> text = jsonslice::unquote(*blob);
+        const std::optional<std::vector<core::u8>> bytes =
+            text.has_value() ? core::base64Decode(*text) : std::optional<std::vector<core::u8>>{};
+        asset::TerrainCell whole;
+        if (!bytes.has_value() ||
+            asset::decodeTerrainCell(std::as_bytes(std::span<const core::u8>(*bytes)), whole, asset::WholeFieldLimits)
+                .has_value())
+            return;
+        done = true;
+
+        // Where the terrain sits, so a cell is scored where it is in the world.
+        core::DVec3 origin;
+        if (const std::optional<std::string_view> properties = jsonslice::member(child, "properties");
+            properties.has_value()) {
+            core::JsonDocument document;
+            if (document.parse(*properties).ok) {
+                const core::JsonValue position = document.root()["Position"];
+                if (position.size() == 3)
+                    origin =
+                        core::DVec3{position.at(0).asNumber(), position.at(1).asNumber(), position.at(2).asNumber()};
+            }
+        }
+
+        const std::vector<asset::TerrainCell> cells = asset::splitTerrain(whole.field);
+        if (cells.size() < settings.minimumFieldCells)
+            return;
+        const core::u32 across = asset::terrainCellTiles(whole.field.settings().voxelSize);
+        out.report.terrainCells = writeFieldCells(
+            cells, asset::FieldLayerTerrain, settings, out.fieldIndex,
+            [](const asset::TerrainCell& cell) { return asset::encodeTerrainCell(cell); },
+            [across, origin](const asset::TerrainCell& cell) {
+                return asset::terrainCellBounds(cell, across, origin);
+            });
+
+        asset::TerrainCell empty;
+        empty.settings = whole.field.settings();
+        empty.field = asset::TerrainField(empty.settings);
+        const std::vector<std::byte> encoded = asset::encodeTerrainCell(empty);
+        const std::string base64 = core::base64Encode(
+            std::span<const core::u8>(reinterpret_cast<const core::u8*>(encoded.data()), encoded.size()));
+        Splice splice;
+        splice.at = offsetIn(scene, *blob);
+        splice.length = blob->size();
+        splice.text = jsonString(base64);
+        splices.push_back(std::move(splice));
+    });
+}
+
+// Cuts both fields out of the residual, when there is somewhere to put them.
+void extractFields(const PartitionSettings& settings, PartitionResult& out)
+{
+    if (!settings.fieldSink)
+        return;
+    std::vector<Splice> splices;
+    extractVoxels(out.scene, settings, out, splices);
+    extractTerrain(out.scene, settings, out, splices);
+    if (splices.empty())
+        return;
+
+    std::sort(splices.begin(), splices.end(), [](const Splice& a, const Splice& b) { return a.at > b.at; });
+    for (const Splice& splice : splices)
+        out.scene.replace(splice.at, splice.length, splice.text);
+    std::sort(out.fieldIndex.chunks.begin(), out.fieldIndex.chunks.end(),
+              [](const asset::ChunkIndexEntry& a, const asset::ChunkIndexEntry& b) { return a.id < b.id; });
+    out.fieldIndex.chunkSize = static_cast<core::f32>(asset::FieldCellMetres);
 }
 
 // A scratch world that holds one authored node at a time.
@@ -811,6 +995,7 @@ std::optional<core::EngineError> Partitioner::run(std::string_view sceneJson)
 
     m_out.scene = std::move(residual);
     finish();
+    extractFields(m_settings, m_out);
     return std::nullopt;
 }
 

@@ -135,6 +135,15 @@ struct StreamingCallbacks
     std::function<f64(ChunkId, const Chunk&)> materialize;
     // Take them out again.
     std::function<void(ChunkId)> evict;
+
+    // **A payload that is not a chunk of instances.** When set, a finished read
+    // is kept as its bytes and handed here instead of being decoded as a
+    // `Chunk` and handed to `materialize`: terrain and block-world cells stream
+    // through the same policy -- the scoring, the hysteresis, the budget, the
+    // terminal failure -- and decode their own format. Returns what it cost in
+    // milliseconds, as `materialize` does, or a NEGATIVE number when the bytes
+    // were not a payload it could read, which fails the entry terminally.
+    std::function<f64(ChunkId, std::span<const std::byte>)> materializeBytes;
 };
 
 class StreamingManager
@@ -202,6 +211,8 @@ private:
         f64 score = 0.0;
         bool wanted = false;
         Chunk decoded;
+        // What arrived, undecoded, for `StreamingCallbacks::materializeBytes`.
+        std::vector<std::byte> raw;
         u32 bytes = 0;
     };
 

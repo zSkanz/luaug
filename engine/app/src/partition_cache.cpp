@@ -1,5 +1,6 @@
 #include "luaug/app/partition_cache.h"
 
+#include "luaug/asset/field_cells.h"
 #include "luaug/core/content_hash.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/json.h"
@@ -22,15 +23,36 @@ using core::LogLevel;
 // older build is not believed. It is part of the key rather than a field to
 // check, which means an upgrade leaves the old directory to be pruned rather
 // than to be repaired.
-constexpr core::u32 PartitionRules = 1;
+// Two since terrain and block worlds leave the scene as cells of their own
+// (ADR 0075): a cache written by rules one holds a residual with the whole
+// field in it, which would boot correctly and stream nothing.
+constexpr core::u32 PartitionRules = 2;
 
 constexpr std::string_view kManifest = "partition.json";
 constexpr std::string_view kScene = "scene.json";
 constexpr std::string_view kIndex = "index.json";
+constexpr std::string_view kFieldIndex = "fields.json";
 
 [[nodiscard]] std::string cellName(asset::ChunkId id)
 {
     return "cell_" + std::to_string(id.x) + "_" + std::to_string(id.z) + "_" + std::to_string(id.layer) + ".lchunk";
+}
+
+// A field cell's file, named for what it holds so a person reading the cache
+// can tell the ground from the blocks.
+[[nodiscard]] std::string fieldCellName(asset::ChunkId id)
+{
+    const bool terrain = id.layer == asset::FieldLayerTerrain;
+    return std::string(terrain ? "terrain_" : "blocks_") + std::to_string(id.x) + "_" + std::to_string(id.z) +
+           (terrain ? ".lterrain" : ".lvoxel");
+}
+
+// What a partition's two indices say about streaming, in one place so the
+// cache hit and the fresh run cannot answer differently.
+void decideActive(PartitionOutcome& outcome)
+{
+    outcome.partsActive = outcome.index.chunks.size() >= MinimumStreamedCells;
+    outcome.active = outcome.partsActive || !outcome.fieldIndex.chunks.empty();
 }
 
 // What a cache directory records about the stamps its partition read, so that
@@ -144,8 +166,11 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
     if (manifestHolds(directory / std::filesystem::path(kManifest), contentRoot)) {
         std::string indexText;
         if (platform::readTextFile(indexPath, indexText)) {
-            if (!asset::readChunkIndex(indexText, outcome.index).has_value()) {
-                outcome.active = outcome.index.chunks.size() >= MinimumStreamedCells;
+            std::string fieldText;
+            if (!asset::readChunkIndex(indexText, outcome.index).has_value() &&
+                platform::readTextFile(directory / std::filesystem::path(kFieldIndex), fieldText) &&
+                !asset::readChunkIndex(fieldText, outcome.fieldIndex).has_value()) {
+                decideActive(outcome);
                 // A partition that produced no cells leaves the ORIGINAL scene
                 // to boot. The residual is byte-identical to it in that case,
                 // and pointing at a copy of a file would be a dependency on the
@@ -204,6 +229,19 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
         return written;
     };
 
+    // **Terrain and block worlds, cut into cells beside the parts'.**
+    settings.fieldSink = [&](asset::ChunkId id, std::span<const std::byte> bytes) {
+        scene::PartitionCellWritten written;
+        const std::string name = fieldCellName(id);
+        if (!platform::writeFile(directory / std::filesystem::path(name), bytes)) {
+            wroteEverything = false;
+            return written;
+        }
+        written.bytes = static_cast<core::u32>(bytes.size());
+        written.urn = name;
+        return written;
+    };
+
     scene::PartitionResult result;
     if (const std::optional<core::EngineError> error =
             scene::partitionScene(registries, sceneText, settings, stamps, sink, result);
@@ -212,9 +250,29 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
         return outcome;
     }
 
+    // **A field that streams does not drag a handful of parts in with it.**
+    // Below `MinimumStreamedCells` the parts would have stayed authored, and a
+    // small project with a big terrain must not find its `Model`s empty because
+    // the ground was large. So the partition runs again with every part cell
+    // taken, which keeps the parts in the residual and cuts only the fields;
+    // the cells the first run wrote for them are left for `pruneSiblings`' next
+    // pass, or overwritten, and are never in an index.
+    if (result.index.chunks.size() < MinimumStreamedCells && !result.fieldIndex.chunks.empty()) {
+        settings.cellTaken = [](asset::ChunkId) { return true; };
+        scene::PartitionResult fieldsOnly;
+        if (const std::optional<core::EngineError> error =
+                scene::partitionScene(registries, sceneText, settings, stamps, sink, fieldsOnly);
+            error.has_value()) {
+            core::logText(LogLevel::Warn, error->message);
+            return outcome;
+        }
+        result = std::move(fieldsOnly);
+    }
+
     outcome.report = result.report;
     outcome.repartitioned = true;
     outcome.index = std::move(result.index);
+    outcome.fieldIndex = std::move(result.fieldIndex);
 
     std::vector<StampHash> recorded;
     recorded.reserve(stampHashes.size());
@@ -228,6 +286,8 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
     const bool wrote = wroteEverything &&
                        platform::writeTextFile(directory / std::filesystem::path(kScene), result.scene) &&
                        platform::writeTextFile(indexPath, asset::writeChunkIndex(outcome.index)) &&
+                       platform::writeTextFile(directory / std::filesystem::path(kFieldIndex),
+                                               asset::writeChunkIndex(outcome.fieldIndex)) &&
                        platform::writeTextFile(directory / std::filesystem::path(kManifest), writeManifest(recorded));
     if (!wrote) {
         const core::I18nArg args[] = {{"path", directory.string()}};
@@ -238,7 +298,7 @@ PartitionOutcome partitionProject(scene::World& registries, const std::filesyste
 
     pruneSiblings(root, directory);
 
-    outcome.active = outcome.index.chunks.size() >= MinimumStreamedCells;
+    decideActive(outcome);
     if (outcome.active) {
         outcome.scenePath = directory / std::filesystem::path(kScene);
         const core::I18nArg args[] = {{"cells", static_cast<core::i64>(outcome.report.cells)},

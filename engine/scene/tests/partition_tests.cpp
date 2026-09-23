@@ -12,6 +12,8 @@
 // a fixture that mirrored them would be asserting a copy of the thing under
 // test.
 #include "luaug/asset/chunk.h"
+#include "luaug/asset/field_cells.h"
+#include "luaug/core/base64.h"
 #include "luaug/core/i18n.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/partition.h"
@@ -547,4 +549,130 @@ TEST_CASE("partitioning a partitioned scene moves nothing")
     // And it is a FIXED POINT, byte for byte: a second pass that reformatted
     // what it did not move would make the cache key change on every run.
     CHECK(twice.result.scene == once.result.scene);
+}
+
+namespace {
+
+// A `Terrain` node carrying `field`, the way the scene writer puts one down.
+[[nodiscard]] std::string terrainNode(const asset::TerrainField& field)
+{
+    asset::TerrainCell whole;
+    whole.settings = field.settings();
+    whole.field = field;
+    const std::vector<std::byte> bytes = asset::encodeTerrainCell(whole);
+    const std::string blob =
+        core::base64Encode(std::span<const core::u8>(reinterpret_cast<const core::u8*>(bytes.data()), bytes.size()));
+    return R"({"class":"Terrain","name":"Terrain","properties":{"Position":[100,0,0]},"terrain":")" + blob + "\"}";
+}
+
+// The `voxels` member for `grid`, on `writeVoxels`' terms.
+[[nodiscard]] std::string voxelsMember(const asset::VoxelGrid& grid)
+{
+    std::string text = R"({"blockSize":1,"types":[{"name":"Stone"}],"chunks":[)";
+    bool first = true;
+    for (const asset::VoxelChunkKey key : grid.chunkKeys()) {
+        const std::vector<core::u8> runs = asset::encodeVoxelChunk(*grid.findChunk(key));
+        text += (first ? "" : ",") + std::string(R"({"x":)") + std::to_string(key.x) + R"(,"y":)" +
+                std::to_string(key.y) + R"(,"z":)" + std::to_string(key.z) + R"(,"blocks":")" +
+                core::base64Encode(runs) + "\"}";
+        first = false;
+    }
+    return text + "]}";
+}
+
+struct FieldPartition
+{
+    PartitionResult result;
+    std::map<asset::ChunkId, std::vector<std::byte>> cells;
+};
+
+[[nodiscard]] FieldPartition partitionFields(Sandbox& sandbox, const std::string& text)
+{
+    FieldPartition out;
+    PartitionSettings settings;
+    settings.fieldSink = [&out](asset::ChunkId id, std::span<const std::byte> bytes) {
+        out.cells.emplace(id, std::vector<std::byte>(bytes.begin(), bytes.end()));
+        return scene::PartitionCellWritten{"field_" + std::to_string(id.x) + "_" + std::to_string(id.z) + "_" +
+                                               std::to_string(id.layer),
+                                           static_cast<core::u32>(bytes.size())};
+    };
+    const std::optional<core::EngineError> error =
+        scene::partitionScene(sandbox.world, text, settings, {}, {}, out.result);
+    REQUIRE(!error.has_value());
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("a large terrain and block world leave the scene as cells, and keep their settings")
+{
+    seedRealCatalog();
+    Sandbox sandbox;
+
+    asset::TerrainField field(asset::FieldSettings{.voxelSize = 1.0f, .minHeight = -40.0f, .maxHeight = 60.0f});
+    (void)asset::fillBlock(field, core::DVec3{0.0, -30.0, 0.0}, core::Vec3{300.0f, 60.0f, 300.0f}, 1);
+    asset::VoxelGrid grid;
+    (void)grid.fill(-100, 0, -100, 100, 3, 100, 1);
+
+    std::string text = sceneText(terrainNode(field));
+    text.pop_back();
+    text += R"(,"voxels":)" + voxelsMember(grid) + "}";
+
+    const FieldPartition partitioned = partitionFields(sandbox, text);
+    const scene::PartitionReport& report = partitioned.result.report;
+    CHECK(report.terrainCells >= 16);
+    CHECK(report.voxelCells >= 16);
+    CHECK(partitioned.result.fieldIndex.chunks.size() == report.terrainCells + report.voxelCells);
+    CHECK(std::is_sorted(partitioned.result.fieldIndex.chunks.begin(), partitioned.result.fieldIndex.chunks.end(),
+                         [](const asset::ChunkIndexEntry& a, const asset::ChunkIndexEntry& b) { return a.id < b.id; }));
+
+    // **Every cell reads back, and together they are the field.**
+    asset::TerrainField ground(field.settings());
+    asset::VoxelGrid blocks;
+    for (const auto& entry : partitioned.cells) {
+        if (entry.first.layer == asset::FieldLayerTerrain) {
+            asset::TerrainCell cell;
+            REQUIRE_FALSE(asset::decodeTerrainCell(entry.second, cell).has_value());
+            ground.shareFrom(cell.field);
+        }
+        else {
+            asset::VoxelCell cell;
+            REQUIRE_FALSE(asset::decodeVoxelCell(entry.second, cell).has_value());
+            blocks.shareFrom(cell.grid);
+        }
+    }
+    CHECK(ground.digest() == field.digest());
+    CHECK(blocks.digest() == grid.digest());
+
+    // **The terrain is scored where it sits**: the node's Position moves every
+    // cell's bounds a hundred metres east.
+    for (const asset::ChunkIndexEntry& entry : partitioned.result.fieldIndex.chunks) {
+        if (entry.id.layer != asset::FieldLayerTerrain)
+            continue;
+        const double side = 64.0;
+        CHECK(entry.bounds.min.x == doctest::Approx(100.0 + entry.id.x * side));
+        CHECK(entry.bounds.min.y == doctest::Approx(-40.0));
+        CHECK(entry.bounds.max.y == doctest::Approx(60.0));
+    }
+
+    // **And the scene boots with the settings and without the ground.**
+    const std::string& residual = partitioned.result.scene;
+    CHECK(residual.find(R"("chunks":[])") != std::string::npos);
+    CHECK(residual.find(R"("types":[{"name":"Stone"}])") != std::string::npos);
+    CHECK(residual.size() < text.size() / 4);
+}
+
+TEST_CASE("a field too small to stream stays in the scene, byte for byte")
+{
+    seedRealCatalog();
+    Sandbox sandbox;
+
+    asset::TerrainField field(asset::FieldSettings{.voxelSize = 1.0f, .minHeight = -40.0f, .maxHeight = 60.0f});
+    (void)asset::fillBlock(field, core::DVec3{0.0, -30.0, 0.0}, core::Vec3{40.0f, 60.0f, 40.0f}, 1);
+    const std::string text = sceneText(terrainNode(field));
+
+    const FieldPartition partitioned = partitionFields(sandbox, text);
+    CHECK(partitioned.result.report.terrainCells == 0);
+    CHECK(partitioned.cells.empty());
+    CHECK(partitioned.result.scene == text);
 }

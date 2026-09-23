@@ -1891,6 +1891,39 @@ TEST_CASE("a terrain's tiles become static height-field colliders")
     (void)terrain;
 }
 
+TEST_CASE("the ground under something that moves gets its collider first")
+{
+    // **Found by dropping a crate on a streamed kilometre of ground**: the few
+    // collider builds a tick went in key order, and the crate's tile came round
+    // after it had fallen through the world. Nearest to a mover first.
+    Mirror mirror;
+    const core::InstanceId id = mirror.fixture.folder("Terrain");
+    TerrainComponent terrain;
+    terrain.field = asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f});
+    const std::vector<float> heights(asset::TileArea, 0.0f);
+    const std::vector<core::u8> materials(asset::TileArea, core::u8{1});
+    for (core::i32 z = 0; z < 12; ++z) {
+        for (core::i32 x = 0; x < 12; ++x)
+            terrain.field.setTile(asset::TileKey{x, z}, heights, materials);
+    }
+    terrain.fieldRevision = 1;
+    mirror.fixture.world.terrains().add(id, terrain);
+    REQUIRE(mirror.fixture.world.setParent(id, mirror.workspace) == std::nullopt);
+
+    // Over the far corner's tile: key (11, 11), sixteen-metre tiles.
+    (void)mirror.part("Crate", {11.5 * 16.0, 4.0, 11.5 * 16.0});
+    mirror.step();
+
+    bool underCrate = false;
+    for (const auto& made : mirror.backend.created) {
+        if (made.desc.shape.type != physics::ShapeType::HeightField)
+            continue;
+        if (made.desc.transform.position.x > 11.0 * 16.0 && made.desc.transform.position.z > 11.0 * 16.0)
+            underCrate = true;
+    }
+    CHECK(underCrate);
+}
+
 TEST_CASE("a sculpted tile is edited in place rather than rebuilt")
 {
     // **The reason a height field is its own kind** (ADR 0066). A3 measured

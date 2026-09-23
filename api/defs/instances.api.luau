@@ -1118,9 +1118,12 @@ local Classes: { Schema.Class } = {
                 Doc = "How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming "
                     .. "grid's own spacing, and a terrain that disagreed with it would have cells that "
                     .. "load and unload on different boundaries from everything else in the world.\n\n"
-                    .. "**Reads back faithfully and nothing acts on it yet.** The collider mirror and the "
-                    .. "streaming half of F1 are what will, and until one of them does this is a number "
-                    .. "that describes an intention rather than a behaviour.",
+                    .. "**What a saved terrain streams by.** A terrain written with a scene and large "
+                    .. "enough to span sixteen cells or more is cut into cells of this size, rounded to "
+                    .. "whole tiles at its `VoxelSize`, and each one is loaded and dropped around "
+                    .. "`StreamingService`'s foci on its terrain radii. A cell somebody changed is never "
+                    .. "dropped. The number is the grid's rather than this terrain's, which is why it is "
+                    .. "read-only and why nothing reads it back from here.",
             },
             {
                 Name = "Position",

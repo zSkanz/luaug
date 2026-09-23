@@ -208,6 +208,52 @@ std::vector<VoxelChunkKey> VoxelGrid::chunkKeys() const
     return keys;
 }
 
+void VoxelGrid::removeChunk(VoxelChunkKey key)
+{
+    const auto at = std::lower_bound(m_chunks.begin(), m_chunks.end(), key,
+                                     [](const auto& entry, const VoxelChunkKey& probe) { return entry.first < probe; });
+    if (at != m_chunks.end() && at->first == key)
+        m_chunks.erase(at);
+}
+
+// One pass, for `TerrainField::shareFrom`'s reason.
+void VoxelGrid::shareFrom(const VoxelGrid& from)
+{
+    if (from.m_chunks.empty())
+        return;
+    decltype(m_chunks) merged;
+    merged.reserve(m_chunks.size() + from.m_chunks.size());
+    auto held = m_chunks.begin();
+    for (const auto& entry : from.m_chunks) {
+        while (held != m_chunks.end() && held->first < entry.first)
+            merged.push_back(std::move(*held++));
+        if (held != m_chunks.end() && held->first == entry.first)
+            continue;
+        merged.push_back(entry);
+    }
+    while (held != m_chunks.end())
+        merged.push_back(std::move(*held++));
+    m_chunks = std::move(merged);
+}
+
+void VoxelGrid::removeAll(std::span<const VoxelChunkKey> keys)
+{
+    if (keys.empty())
+        return;
+    auto key = keys.begin();
+    auto kept = m_chunks.begin();
+    for (auto at = m_chunks.begin(); at != m_chunks.end(); ++at) {
+        while (key != keys.end() && *key < at->first)
+            ++key;
+        if (key != keys.end() && *key == at->first)
+            continue;
+        if (kept != at)
+            *kept = std::move(*at);
+        ++kept;
+    }
+    m_chunks.erase(kept, m_chunks.end());
+}
+
 void VoxelGrid::setChunk(VoxelChunkKey key, std::span<const BlockId> blocks)
 {
     if (blocks.size() != VoxelChunkVolume)

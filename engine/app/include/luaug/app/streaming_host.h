@@ -41,6 +41,13 @@ using core::u32;
 using core::u64;
 using core::usize;
 
+// The foci a world streams around, on the rules `StreamingHost` applies: every
+// registered focus with its per-layer radii, or the camera of the workspace
+// above `streamRoot` when nothing is registered (D098). A free function so the
+// terrain and block-world streamer asks the same question the same way.
+[[nodiscard]] std::vector<asset::StreamingFocus> collectStreamingFoci(const scene::World& world,
+                                                                      core::InstanceId streamRoot);
+
 class StreamingHost
 {
 public:
@@ -149,6 +156,9 @@ private:
     // Which chunk an outstanding read belongs to. The IO service answers with
     // its own handle and nothing else, and a chunk id does not fit in a
     // callback that was declared before chunks existed.
+    // Chunks whose read could not start, reported after the manager's tick.
+    std::vector<asset::ChunkId> m_failedStarts;
+
     struct Pending
     {
         asset::ChunkId id;

@@ -883,9 +883,12 @@ declare extern type Terrain extends Instance with
     VoxelSize: number
     --- How wide one streamed cell of terrain is, in metres. Read-only: it is the streaming grid's own
     --- spacing, and a terrain that disagreed with it would have cells that load and unload on different
-    --- boundaries from everything else in the world. **Reads back faithfully and nothing acts on it
-    --- yet.** The collider mirror and the streaming half of F1 are what will, and until one of them
-    --- does this is a number that describes an intention rather than a behaviour.
+    --- boundaries from everything else in the world. **What a saved terrain streams by.** A terrain
+    --- written with a scene and large enough to span sixteen cells or more is cut into cells of this
+    --- size, rounded to whole tiles at its `VoxelSize`, and each one is loaded and dropped around
+    --- `StreamingService`'s foci on its terrain radii. A cell somebody changed is never dropped. The
+    --- number is the grid's rather than this terrain's, which is why it is read-only and why nothing
+    --- reads it back from here.
     read CellSize: number
     --- Where this terrain's own origin sits in the world, in metres. **A terrain is an instance and it
     --- can be moved.** Every sample, every collider and every brush stroke is offset by this rather
@@ -1708,12 +1711,16 @@ declare extern type StreamingService extends Instance with
     --- exactly as `LoadRadius` is. Zero means follow `LoadRadius`.
     StructureLoadRadius: number
     --- The must-have ring for cells of TERRAIN FEATURES, in metres. The longest of the three: it is
-    --- what puts a horizon further out than the props standing on it. Zero means follow `MinRadius`.
+    --- what puts a horizon further out than the props standing on it. Zero means follow `MinRadius`. It
+    --- is also the ring for a saved `Terrain` and block world streamed in cells, and on a world's first
+    --- load the simulation waits until the ground inside it has arrived, so nothing standing on
+    --- streamed ground falls through it.
     TerrainMinRadius: number
     --- How far from a focus cells of TERRAIN FEATURES are kept, in metres. Zero means follow
     --- `LoadRadius`. Raising this is the cheapest distance there is, and it is cheap for a reason worth
     --- knowing: a cell of terrain holds few large things, so a ring twice as wide costs far less than
-    --- the same ring would cost in props.
+    --- the same ring would cost in props. A saved `Terrain` and block world streamed in cells are kept
+    --- out to this radius too.
     TerrainLoadRadius: number
     --- Fires when an area a script asked for has finished loading. Deferred like every signal.
     read AreaLoaded: Signal<vector, number>

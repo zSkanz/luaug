@@ -165,9 +165,14 @@ void StreamingHost::setWorld(scene::World* world, core::InstanceId streamRoot)
 void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& entry)
 {
     // A LOOKUP, not a resolution. See `load` for why.
+    // **Failures are reported after the tick, not here** (D158). This runs
+    // inside the manager's `beginLoad`, which marks the chunk loading once it
+    // returns true -- so a failure reported from in here was overwritten on the
+    // spot, and the chunk waited for ever on a read that never began, holding
+    // an in-flight slot as it did.
     const auto path = m_chunkPaths.find(id);
     if (path == m_chunkPaths.end()) {
-        m_manager.onChunkFailed(id);
+        m_failedStarts.push_back(id);
         return;
     }
 
@@ -182,7 +187,7 @@ void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& e
                                           m_manager.foci().empty() ? core::DVec3{} : m_manager.foci().front().position),
                     minRadius));
     if (!request.valid()) {
-        m_manager.onChunkFailed(id);
+        m_failedStarts.push_back(id);
         return;
     }
     m_reads.emplace_back(request, Pending{id});
@@ -190,12 +195,13 @@ void StreamingHost::beginRead(asset::ChunkId id, const asset::ChunkIndexEntry& e
 
 std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
 {
-    std::vector<asset::StreamingFocus> foci;
-    if (m_world == nullptr) {
-        return foci;
-    }
+    return m_world != nullptr ? collectStreamingFoci(*m_world, m_streamRoot) : std::vector<asset::StreamingFocus>{};
+}
 
-    const scene::EngineState& state = m_world->engineState();
+std::vector<asset::StreamingFocus> collectStreamingFoci(const scene::World& world, core::InstanceId streamRoot)
+{
+    std::vector<asset::StreamingFocus> foci;
+    const scene::EngineState& state = world.engineState();
 
     // The size classes (ADR 0053). Layer 0 is detail and IS the load/min pair
     // below, which is what makes a world of cells that are all layer 0 behave
@@ -212,13 +218,13 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
     // out of the loop so the camera fallback below is the same rule and not a
     // second copy of it.
     const auto focusAt = [&](core::InstanceId id, asset::StreamingFocus& out) {
-        if (!m_world->alive(id)) {
+        if (!world.alive(id)) {
             return false;
         }
-        if (const scene::PartComponent* part = m_world->parts().find(id); part != nullptr) {
+        if (const scene::PartComponent* part = world.parts().find(id); part != nullptr) {
             out.position = part->cframe.position;
         }
-        else if (const scene::CameraComponent* camera = m_world->cameras().find(id); camera != nullptr) {
+        else if (const scene::CameraComponent* camera = world.cameras().find(id); camera != nullptr) {
             out.position = camera->cframe.position;
         }
         else {
@@ -227,7 +233,7 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
         return true;
     };
 
-    for (const core::InstanceId id : m_world->streamingFoci()) {
+    for (const core::InstanceId id : world.streamingFoci()) {
         asset::StreamingFocus focus;
         if (!focusAt(id, focus)) {
             continue;
@@ -265,8 +271,8 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
         // `Workspace` above it is the one whose camera is the one being looked
         // through.
         const scene::WorkspaceComponent* workspace = nullptr;
-        for (core::InstanceId cursor = m_streamRoot; cursor.valid(); cursor = m_world->parentOf(cursor)) {
-            workspace = m_world->workspaces().find(cursor);
+        for (core::InstanceId cursor = streamRoot; cursor.valid(); cursor = world.parentOf(cursor)) {
+            workspace = world.workspaces().find(cursor);
             if (workspace != nullptr)
                 break;
         }
@@ -342,6 +348,10 @@ void StreamingHost::pump(f64 budgetMilliseconds)
     asset::StreamingBudget budget;
     budget.milliseconds = budgetMilliseconds;
     m_manager.tick(budget);
+    for (const asset::ChunkId id : m_failedStarts) {
+        m_manager.onChunkFailed(id);
+    }
+    m_failedStarts.clear();
 
     // The origin follows the PRIMARY focus -- the first one -- rather than an
     // average of them. An average between two characters walking apart is a

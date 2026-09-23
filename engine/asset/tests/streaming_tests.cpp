@@ -543,3 +543,53 @@ TEST_CASE("registering a focus takes the rule back off")
     CHECK(harness.manager.stats().resident < 25);
     CHECK(harness.manager.stateOf(ChunkId{0, 0, 0}) == ChunkState::Resident);
 }
+
+TEST_CASE("a payload that is not a chunk streams on the same policy and decodes itself")
+{
+    // **Terrain and block-world cells** (ADR 0075): the manager keeps the bytes
+    // and hands them to `materializeBytes`, never to `decodeChunk` -- which
+    // would refuse them, since they are not a chunk.
+    StreamingManager manager;
+    manager.setIndex(gridIndex(2));
+    std::vector<ChunkId> requested;
+    std::vector<ChunkId> materialized;
+    std::vector<std::size_t> sizes;
+    StreamingCallbacks callbacks;
+    callbacks.beginLoad = [&requested](ChunkId id, const ChunkIndexEntry&) {
+        requested.push_back(id);
+        return true;
+    };
+    callbacks.materializeBytes = [&](ChunkId id, std::span<const std::byte> bytes) {
+        materialized.push_back(id);
+        sizes.push_back(bytes.size());
+        // The first byte decides whether the payload reads, as a codec would.
+        return bytes.front() == std::byte{1} ? 0.1 : -1.0;
+    };
+    callbacks.evict = [](ChunkId) {};
+    manager.setCallbacks(std::move(callbacks));
+
+    const StreamingFocus focus = focusAt(CellCentre, 100.0, 200.0);
+    manager.setFoci(std::span<const StreamingFocus>(&focus, 1));
+    StreamingBudget budget;
+    budget.milliseconds = 100.0;
+    manager.tick(budget);
+    REQUIRE_FALSE(requested.empty());
+
+    const ChunkId good = requested.front();
+    const std::vector<std::byte> payload{std::byte{1}, std::byte{2}, std::byte{3}};
+    manager.onChunkLoaded(good, payload);
+    CHECK(manager.stateOf(good) == ChunkState::Decoded);
+    manager.tick(budget);
+    CHECK(manager.stateOf(good) == ChunkState::Resident);
+    REQUIRE(materialized.size() == 1);
+    CHECK(sizes.front() == 3);
+
+    // And a payload its codec refuses is terminal, like a malformed chunk.
+    if (requested.size() > 1) {
+        const ChunkId bad = requested[1];
+        const std::vector<std::byte> junk{std::byte{0}};
+        manager.onChunkLoaded(bad, junk);
+        manager.tick(budget);
+        CHECK(manager.stateOf(bad) == ChunkState::Failed);
+    }
+}

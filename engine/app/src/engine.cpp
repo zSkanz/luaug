@@ -17,6 +17,7 @@
 #include "luaug/app/debug_overlay.h"
 #include "luaug/app/dev_control.h"
 #include "luaug/app/editor.h"
+#include "luaug/app/field_streamer.h"
 #include "luaug/app/frame_scheduler.h"
 #include "luaug/app/icons.h"
 #include "luaug/app/inspector.h"
@@ -632,6 +633,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // The streamed world, if the project has one. Inactive and free for every
     // project that does not, which is every example before this milestone.
     StreamingHost streaming;
+    // Terrain and block worlds, streamed on a grid of their own (ADR 0075).
+    FieldStreamer fields;
     std::unique_ptr<render::IRenderer> renderer;
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
@@ -908,7 +911,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // back is the scene to apply; the cells go straight into the streaming
         // host, beside whatever a generator already built.
         .partitionScene =
-            [&streaming, &options, contentRoot](scene::World& registries, const std::filesystem::path& scene) {
+            [&streaming, &fields, &options, contentRoot](scene::World& registries, const std::filesystem::path& scene) {
                 if (!options.editor) {
                     // Not in the editor, and that is a decision rather than an
                     // omission: the editor holds the whole world because holding it
@@ -919,11 +922,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     const PartitionOutcome outcome =
                         partitionProject(registries, options.scriptPath, contentRoot, scene, built);
                     if (outcome.active) {
-                        (void)streaming.addIndex(
-                            outcome.index,
+                        const auto inCache =
                             [&outcome](const asset::ChunkIndexEntry& entry) -> std::optional<std::filesystem::path> {
-                                return outcome.directory / std::filesystem::path(entry.urn);
-                            });
+                            return outcome.directory / std::filesystem::path(entry.urn);
+                        };
+                        if (outcome.partsActive)
+                            (void)streaming.addIndex(outcome.index, inCache);
+                        if (!outcome.fieldIndex.chunks.empty())
+                            fields.setIndex(outcome.fieldIndex, inCache);
                         return outcome.scenePath;
                     }
                 }
@@ -2187,10 +2193,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // below is forbidden for. Two milliseconds is architecture.md §10's
         // budget, and it is denominated in time rather than in chunks because
         // a chunk's cost varies with what is in it.
+        //
+        // **The ground first, and the two share the two milliseconds** rather
+        // than each taking them: two managers are two budgets that do not know
+        // about each other, and would overrun together. The ground goes first
+        // because a missing collider is a fall and a missing prop is not.
+        const f64 streamBudget = streaming.active() && fields.active() ? 1.0 : 2.0;
+        if (fields.active()) {
+            fields.setWorld(&host->world(), host->workspace());
+            fields.pump(streamBudget);
+        }
         if (streaming.active()) {
             streaming.setWorld(&host->world(), host->workspace());
             streaming.setPhysics(host->physics());
-            streaming.pump(2.0);
+            streaming.pump(streamBudget);
         }
 
         // `@std/net` completions land here, at the same safe point, and for the
@@ -2352,9 +2368,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // with the same inputs, and the world hash after n ticks is the hash
         // after n ticks. The pump below keeps running while the world is
         // paused, which is what ends the pause.
-        const bool waitingForGround = streaming.active() &&
-                                      host->world().engineState().streamingPauseOutsideLoadedArea &&
-                                      !streaming.minimumRingResident();
+        //
+        // **Streamed ground adds one wait nobody opts into**: the first. Until
+        // the cells around the focus have arrived once, a character standing
+        // on streamed ground would fall through it on the first tick, so the
+        // simulation holds -- the initial load every streamed world has
+        // (ADR 0075). After that the property decides, for ground as for parts.
+        const bool pauseOutside = host->world().engineState().streamingPauseOutsideLoadedArea;
+        const bool waitingForGround = (fields.active() && !fields.primed()) ||
+                                      (fields.active() && pauseOutside && !fields.minimumRingResident()) ||
+                                      (streaming.active() && pauseOutside && !streaming.minimumRingResident());
         u32 simTicks = waitingForGround ? 0u : frame.simTicks;
 
         // **The editor's transport, and it gates ticks by exactly the same

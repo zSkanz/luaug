@@ -952,8 +952,11 @@ ADR 0073's sRGB defect on the way; and see-through blocks, cutout and
 translucent, with the face rules a block game needs and a third mesh per chunk
 so the depth prepass never writes a leaf's holes.
 
-**Not built yet, and named so it is not mistaken for done:** chunks streamed
-from disk, which waits on the same streaming work F1's Part E does; a block
+**Streamed from disk since 2026-09-23** (ADR 0075), with F1's Part E: a saved
+block world of sixteen cells or more leaves the scene as `.lvoxel` cells and
+streams around the foci, and a cell somebody built in is never evicted.
+
+**Not built yet, and named so it is not mistaken for done:** a block
 type's images and opacity set from the editor's panel rather than a script;
 cutout shadows (a leaf casts a full square); and water that behaves as a fluid
 rather than a see-through block.

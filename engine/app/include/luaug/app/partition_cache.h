@@ -65,6 +65,15 @@ struct PartitionOutcome
 
     asset::ChunkIndex index;
     scene::PartitionReport report;
+
+    // Whether `index` is worth streaming: at least `MinimumStreamedCells` cells
+    // of parts. A project whose TERRAIN streams and whose parts would not has
+    // its parts kept authored, so `index` is empty and this is false.
+    bool partsActive = false;
+
+    // The terrain and block-world cells (ADR 0075), on their own grid, and
+    // where each file is: `directory / entry.urn`, like `index`.
+    asset::ChunkIndex fieldIndex;
 };
 
 // Partitions the scene at `scenePath`, or reuses the cache under

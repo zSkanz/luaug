@@ -98,6 +98,17 @@ public:
     // Replaces a chunk wholesale -- the load path. An all-air chunk is not kept.
     void setChunk(VoxelChunkKey key, std::span<const BlockId> blocks);
 
+    // Drops a chunk, whatever it holds.
+    void removeChunk(VoxelChunkKey key);
+
+    // Takes every chunk of `from` this grid does not already hold, SHARING it:
+    // the load path of a streamed cell, on `TerrainField::shareFrom`'s terms --
+    // what is here wins, and the shared reference makes the first edit clone.
+    void shareFrom(const VoxelGrid& from);
+
+    // Drops every chunk named, in one pass. `keys` sorted.
+    void removeAll(std::span<const VoxelChunkKey> keys);
+
     // xxh3 over every chunk's key and digest, in key order.
     [[nodiscard]] core::u64 digest() const noexcept;
 

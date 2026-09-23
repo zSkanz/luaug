@@ -100,9 +100,15 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   sideways went nowhere: a dig aimed at a wall now carves into it and bores on
   the clock, caves are dark inside (a sky-visibility term baked per cave
   vertex), open per pixel so they are drawn to 256 m, and stop streaking on
-  steep walls (triplanar detail). `examples/17-cave` flies through one. What is
-  left of F1 is still named in the roadmap: terrain does not stream from disk
-  (Part E), and Part H's seam gate and flagship swap are unstarted.
+  steep walls (triplanar detail). `examples/17-cave` flies through one.
+
+  **Terrain and block worlds stream from disk since 2026-09-23** (ADR 0075,
+  Part E): a saved field of sixteen 64 m cells or more is cut into cells at
+  play, streamed by a second manager on the terrain radii, and never evicted
+  once somebody changed it; the world waits for its ground on first load, and
+  colliders are built nearest a mover first. Building it found two shipped
+  defects (D157, D159) and one latent one (D158). What is left of F1: Part H's
+  seam gate and flagship swap, and streaming while editing.
 
   **V1, `VoxelService`, is built** -- a block world with a registry, place and
   break, a DDA raycast, a greedy mesher with corner occlusion, colliders near

@@ -351,6 +351,75 @@ void TerrainField::setHeightRange(float minHeight, float maxHeight) noexcept
     m_settings.maxHeight = maxHeight;
 }
 
+void TerrainField::removeTile(TileKey key)
+{
+    const auto at = findEntry(m_tiles, key);
+    if (at != m_tiles.end()) {
+        m_tiles.erase(at);
+    }
+}
+
+namespace {
+
+// **One pass over both sorted lists, not an insertion per object.** A cell
+// streamed into a field of ten thousand tiles inserted each of its tiles into the
+// middle of the vector, shifting the rest every time -- measured, a kilometre
+// and a half of ground took seconds to arrive. A merge is linear in the two.
+template <typename Entries>
+void mergeMissing(Entries& into, const Entries& source)
+{
+    if (source.empty())
+        return;
+    Entries merged;
+    merged.reserve(into.size() + source.size());
+    auto held = into.begin();
+    for (const auto& entry : source) {
+        while (held != into.end() && held->first < entry.first)
+            merged.push_back(std::move(*held++));
+        if (held != into.end() && held->first == entry.first)
+            continue;
+        merged.push_back(entry);
+    }
+    while (held != into.end())
+        merged.push_back(std::move(*held++));
+    into = std::move(merged);
+}
+
+// Compacts `entries` in place, dropping every one whose key is in the sorted
+// `keys`: one walk down both.
+template <typename Entries, typename Key>
+void removeSorted(Entries& entries, std::span<const Key> keys)
+{
+    if (keys.empty())
+        return;
+    auto key = keys.begin();
+    auto kept = entries.begin();
+    for (auto at = entries.begin(); at != entries.end(); ++at) {
+        while (key != keys.end() && *key < at->first)
+            ++key;
+        if (key != keys.end() && *key == at->first)
+            continue;
+        if (kept != at)
+            *kept = std::move(*at);
+        ++kept;
+    }
+    entries.erase(kept, entries.end());
+}
+
+} // namespace
+
+void TerrainField::shareFrom(const TerrainField& from)
+{
+    mergeMissing(m_tiles, from.m_tiles);
+    mergeMissing(m_bricks, from.m_bricks);
+}
+
+void TerrainField::removeAll(std::span<const TileKey> tiles, std::span<const BrickKey> bricks)
+{
+    removeSorted(m_tiles, tiles);
+    removeSorted(m_bricks, bricks);
+}
+
 void TerrainField::removeBrick(BrickKey key)
 {
     const auto at = findEntry(m_bricks, key);

@@ -26,6 +26,7 @@ luaug_add_module(app
         src/script_editor_panel.cpp
         src/script_complete.cpp
         src/streaming_host.cpp
+        src/field_streamer.cpp
         src/debug_overlay.cpp
         src/inspector.cpp
         src/launcher.cpp
@@ -239,6 +240,7 @@ luaug_add_module_tests(app
         tests/partition_cache_tests.cpp
         tests/soak_tests.cpp
         tests/streaming_host_tests.cpp
+        tests/field_streamer_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp
         tests/ui_theme_tests.cpp

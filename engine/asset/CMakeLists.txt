@@ -18,6 +18,7 @@ luaug_add_module(asset
         src/terrain_mesher.cpp
         src/terrain_raycast.cpp
         src/terrain_cell.cpp
+        src/field_cells.cpp
         src/terrain_palette.cpp
         src/terrain_edit.cpp
         src/voxel.cpp
@@ -67,6 +68,7 @@ luaug_add_module_tests(asset
         tests/terrain_tests.cpp
         tests/terrain_mesher_tests.cpp
         tests/terrain_cell_tests.cpp
+        tests/field_cells_tests.cpp
         tests/voxel_tests.cpp
         tests/image_tests.cpp
         tests/gltf_tests.cpp

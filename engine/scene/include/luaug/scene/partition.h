@@ -36,8 +36,10 @@
 #include "luaug/core/error.h"
 #include "luaug/scene/scene_file.h"
 
+#include <cstddef>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,6 +67,20 @@ inline constexpr core::f32 TerrainExtent = 24.0f;
 // The size class an object of this extent belongs to, as a `ChunkId::layer`.
 [[nodiscard]] core::i32 layerForExtent(core::f32 extent) noexcept;
 
+// What one finished cell became on the way out. The partitioner does not know
+// where a cell is written or what it is called; the caller does, and answers
+// with what the index has to carry.
+struct PartitionCellWritten
+{
+    std::string urn;
+    core::u32 bytes = 0;
+};
+
+// Where a terrain or block-world cell goes (ADR 0075): its id on the field grid
+// -- `asset::FieldLayerTerrain` or `asset::FieldLayerVoxels` -- and its encoded
+// bytes, `.lterrain` or `.lvoxel`. Called in `ChunkId` order.
+using PartitionFieldSink = std::function<PartitionCellWritten(asset::ChunkId, std::span<const std::byte>)>;
+
 struct PartitionSettings
 {
     core::f32 chunkSize = asset::DefaultChunkSize;
@@ -75,15 +91,20 @@ struct PartitionSettings
     // can never reach. Rare by construction -- a project either authors its
     // world or generates it -- and counted when it happens rather than silent.
     std::function<bool(asset::ChunkId)> cellTaken;
-};
 
-// What one finished cell became on the way out. The partitioner does not know
-// where a cell is written or what it is called; the caller does, and answers
-// with what the index has to carry.
-struct PartitionCellWritten
-{
-    std::string urn;
-    core::u32 bytes = 0;
+    // **Terrain and block worlds, cut into cells of their own** (ADR 0075).
+    // Unset, both stay inline in the residual scene, which is what a partition
+    // nothing will stream wants. Set, a field that falls into at least
+    // `minimumFieldCells` cells leaves the scene for the sink, and the residual
+    // keeps only what describes it -- the voxel size and height range, the block
+    // size and the types -- so the world boots with the settings and without
+    // the ground, and the ground streams in around whoever is in it.
+    PartitionFieldSink fieldSink;
+    // Sixteen, a 256 m square, rather than the parts' four. A field that
+    // streams arrives a few frames after the world boots, and the simulation
+    // waits for the ground under whoever is in it; a terrain small enough to
+    // sit inside any load radius would pay that wait and buy nothing.
+    core::usize minimumFieldCells = 16;
 };
 
 // Called once per finished cell, in `ChunkId` order. The cell is not kept
@@ -115,6 +136,10 @@ struct PartitionReport
     // Stamps the scene names that could not be read.
     core::u32 missingStamps = 0;
 
+    // Field cells written, of each kind. Zero for a field that stayed inline.
+    core::u32 terrainCells = 0;
+    core::u32 voxelCells = 0;
+
     // The high-water mark of instances the scratch world held at once, which is
     // the measurement behind "it never holds the world": it is a property of
     // how the scene is SHAPED -- the widest model, the largest stamp -- and not
@@ -125,6 +150,9 @@ struct PartitionReport
 struct PartitionResult
 {
     asset::ChunkIndex index;
+    // The terrain and block-world cells, on their own grid: a `ChunkId` there
+    // names a different square from the same id in `index`.
+    asset::ChunkIndex fieldIndex;
     // The scene as it is left: everything that stays authored, spliced from the
     // original text so that nothing which stays is ever rewritten.
     std::string scene;

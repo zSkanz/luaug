@@ -93,6 +93,13 @@ void StreamingManager::onChunkLoaded(ChunkId id, std::span<const std::byte> byte
         m_inFlight -= 1;
     }
 
+    if (m_callbacks.materializeBytes) {
+        entry.raw.assign(bytes.begin(), bytes.end());
+        entry.bytes = static_cast<u32>(bytes.size());
+        entry.state = ChunkState::Decoded;
+        return;
+    }
+
     Chunk chunk;
     if (decodeChunk(bytes, chunk).has_value()) {
         entry.state = ChunkState::Failed;
@@ -249,6 +256,20 @@ void StreamingManager::tick(const StreamingBudget& budget)
             Entry& entry = m_entries[slot];
             const ChunkIndexEntry& indexEntry = m_index.chunks[slot];
 
+            if (entry.state == ChunkState::Decoded && m_callbacks.materializeBytes) {
+                const f64 cost = m_callbacks.materializeBytes(indexEntry.id, entry.raw);
+                entry.raw = {};
+                if (cost < 0.0) {
+                    entry.state = ChunkState::Failed;
+                    m_stats.failed += 1;
+                    continue;
+                }
+                charged += cost;
+                entry.state = ChunkState::Resident;
+                m_stats.chunksLoaded += 1;
+                m_stats.bytesResident += entry.bytes;
+                continue;
+            }
             if (entry.state == ChunkState::Decoded) {
                 if (!m_callbacks.materialize) {
                     continue;
