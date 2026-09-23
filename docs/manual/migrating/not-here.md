@@ -12,10 +12,12 @@ where it is not, it says that too.
 | Accounts, a players service, friends, avatars | **Not planned.** This is an engine, not a hosted platform. |
 | Data stores | **Not planned.** Persistence is a backend you write. |
 | Marketplace, monetization, analytics | **Not planned.** |
-| Matchmaking, servers, replication | **Planned**, as a later phase. There is none today. |
+| Matchmaking and hosted servers | **Not planned.** A match is hosted by a player's machine (`--host`) or a server you run (`--serve`); finding one is your backend's job. |
+| A call that waits for an answer from the other machine | **Not present.** A `RemoteEvent` carries messages both ways; a reply is a second message. |
 
-The shape of the replacement is one HTTP client and your own server. See
-[Talking to a backend](manual:guides/backend).
+Replication and a game's own messages are here: see
+[Multiplayer](manual:guides/multiplayer). Anything that outlives a match is one
+HTTP client and your own server: see [Talking to a backend](manual:guides/backend).
 
 ## Rendering and world content
 
@@ -24,8 +26,6 @@ The shape of the replacement is one HTTP client and your own server. See
 | Complex-script shaping | **Not scheduled.** A label lays its codepoints out left to right, so Arabic, Devanagari and Thai do not join. Rich text is here: `TextLabel.RichText`. |
 | Skyboxes and custom environments | **Not present.** The sky is analytic, from `Lighting`, and it is also the reflection environment — right outdoors and wrong in a cave. |
 | Screen-space reflections | **Not scheduled.** What ships is image-based lighting from that sky. |
-| Shadows from point and spot lights | **Stored and not yet acted on.** The sun is the only caster. |
-| `BasePart.Material` | **Not shipped.** A surface look rather than body state; a property nothing reads would look like a working API. |
 | Temporal anti-aliasing, upscalers, frame generation | **Not present**, and blocked on a velocity buffer that does not exist. |
 | Motion blur, depth of field, colour grading | **Not present.** |
 
@@ -33,8 +33,7 @@ The shape of the replacement is one HTTP client and your own server. See
 
 | Missing | State |
 |---|---|
-| Every constraint except a rigid weld | **Not scheduled.** No hinge, no spring, no motor, no solver joint. |
-| `Attachment` | **Not present.** A weld carries its offsets directly. |
+| Springs, ropes, prismatic joints | **Not present.** The joints are `BallSocketConstraint`, `HingeConstraint` and `FixedConstraint`, between two `Attachment`s, plus welds and ragdolls. |
 | Concave mesh colliders | **Accepted and not implemented** — `Precise` reads back and behaves as a convex hull. |
 | A sleep or wake API | **Not present.** Sleeping is real internally and is not scriptable. |
 | Per-part gravity, velocity clamps | **Not present.** `Workspace.Gravity` is the knob. |
@@ -63,21 +62,8 @@ The shape of the replacement is one HTTP client and your own server. See
 |---|---|
 | Targets other than 64-bit Windows | **Not present.** `luaug build` refuses the rest rather than approximating one. |
 | Mobile | **Planned**, a later phase. |
-| Asset hot-swapping | **Reserved.** The protocol has a message for it and the engine answers "not implemented" rather than ignoring it. |
-| Viewport manipulators in the editor | **In progress.** Transforms are edited by typing numbers today. |
+| Hot-swapping a compiled asset | **Not present.** Under `luaug dev`, a loose file you save is reloaded on the next frame; a packed or compiled one reloads the bytes it was built into. |
 | A package manager | **Not present.** |
-
-## Two things that are thinner than they look
-
-Worth calling out separately, because both *appear* to work:
-
-**A sound's timeline is one second long, whatever the file is.** Audio decodes
-and plays, but the timeline the engine counts against is fixed — so a looped
-sound repeats after one second, and `Sound.Ended` fires after one second
-whatever the clip.
-
-**`AudioService.PlayLocal` does not clean up after itself.** The sound it makes
-stays parented to the service once it has ended.
 
 ## What to take from this
 

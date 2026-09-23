@@ -164,9 +164,10 @@ pipeline, and a build step you can run.
 
 ### DataStore → your own backend
 
-There is no data store and no remote event. `net.request` is an HTTP client and
-your backend is yours, in any language. See
-[Talking to a backend](manual:guides/backend).
+There is no data store. `net.request` is an HTTP client and your backend is
+yours, in any language. See [Talking to a backend](manual:guides/backend).
+Messages between the machines of a match are a `RemoteEvent`: see
+[Multiplayer](manual:guides/multiplayer).
 
 ### Studio → an editor, and a terminal
 
