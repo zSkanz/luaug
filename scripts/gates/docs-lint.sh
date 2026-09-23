@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The documentation gate: relative links resolve, pinned versions are named
-# consistently, no stray Roblox references, the ledger keeps its shape.
+# consistently, no stray references to the platform R7 keeps us clear of, the
+# ledger keeps its shape.
 #
 # This file is the gate. `.github/workflows/ci.yml` runs it and so does
 # `scripts/localgate.ps1`, which is the point: the logic used to live only in
@@ -30,8 +31,9 @@ status=0
 # NOTE ON `--exclude-dir=third_party` THROUGHOUT: every check here is about
 # documentation *we* authored. Vendored upstream trees are governed by ADR 0021
 # (pinned, never edited in place, R13), carry their own licenses, and
-# legitimately contain both broken relative links and the word "Roblox" (Luau is
-# a Roblox project). Linting them would be meaningless and a permanent source of
+# legitimately contain both broken relative links and the name R7 sweeps for
+# (Luau's upstream is that platform's). Linting them would be meaningless and a
+# permanent source of
 # false failures.
 echo "== relative links =="
 while IFS=: read -r file link; do
@@ -66,41 +68,23 @@ check_version "lute@1.0.0" "lute@0\." "Lute"
 check_version "luau-lsp@1.69.0" "luau-lsp@1\.6[0-8]\." "luau-lsp"
 
 # --- Legal sweep (R7) -------------------------------------------------------
-# `.vscode/settings.json` is allowed for the reason the rule exists: it is the
-# file that points luau-lsp AWAY from Roblox's platform mode, and the comment
-# explaining why cites ADR 0020. A rule that forbade naming the thing being
-# avoided would push that reasoning out of the file where the next person needs
-# it -- and that person would then "fix" the setting by reverting it.
-echo "== legal sweep (R7) =="
-# `scripts/gates/` is allowed for the same reason `.vscode/settings.json` is:
-# these files implement the sweep, so the comment explaining what it forbids has
-# to name it. The rule aims at content the project publishes, not at the code
-# that enforces the rule.
+# **The name is assembled rather than written**, so this file -- which is code
+# -- does not spell the thing it forbids. The owner's rule is that no corner of
+# the code refers to that platform, and the gate enforcing it is not an
+# exception to it.
 #
-# `api/generator/gen_reference.luau` is allowed for a third version of the same
-# reason and is named individually rather than by directory: it GENERATES a page
-# in `docs/`, which is allowed, and one of the links on that page points at
-# `coming-from-roblox.md`. A generator cannot emit a filename it may not spell.
-# `api/generator/site/nav.luau` is allowed for the same reason as
-# `gen_reference.luau` and is named individually for the same care: it is the
-# documentation site's table of contents, and one of the sections it declares is
-# the migration guide. A generator cannot emit a section title it may not spell,
-# and moving the title out of the file would only move the problem.
-# `art/` is allowed for the first reason as well, and it is the largest case of
-# it: the briefs and review notes in that directory state R7 AS A DRAWING
-# CONSTRAINT -- "it must resemble no existing engine's mark, and not Roblox,
-# which here is a legal line and not a taste one" -- and that sentence is the
-# rule doing its job. An artist who cannot be told what not to draw will draw it.
-# `branding/README.md` is allowed for the first reason too, and it is the
-# clearest case of it in the repository: the sentence that trips this lint is
-# the one explaining why the wordmark does NOT split `Luau` from `G`, because
-# splitting them would point at the language. That is R7's own reasoning
-# written down, and a lint that forbids stating a rule is a lint working
-# against it.
-allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|branding/README\.md|\.vscode/settings\.json|scripts/gates/|api/generator/gen_reference\.luau|api/generator/site/nav\.luau|art/)'
+# What may name it is DOCUMENTATION a person reads to decide whether this engine
+# is for them: the migration guide, the design notes that explain a divergence,
+# the ledger, the art briefs that say what a mark must not resemble. Nothing
+# executable, nothing generated from code, and no configuration file is on that
+# list any more -- the generators emit the migration section under a neutral
+# slug, and the editor settings explain themselves without naming anybody.
+echo "== legal sweep (R7) =="
+vendor="$(printf '%s%s' 'rob' 'lox')"
+allowed='^(\./)?(README\.md|CONTRIBUTING\.md|NOTICE|MASTER_PROMPT\.md|CLAUDE\.md|PROGRESS\.md|docs/|templates/README\.md|examples/README\.md|tests/README\.md|runtime/README\.md|api/README\.md|engine/README\.md|tools/README\.md|third_party/README\.md|branding/README\.md|art/)'
 while IFS= read -r f; do
     if ! [[ "$f" =~ $allowed ]]; then
-        err "'Roblox' referenced outside the allowed docs set (rule R7)" "$f"
+        err "the platform R7 forbids is named outside the allowed docs set" "$f"
         status=1
     fi
     # Tracked files only. R7 is about what this repository publishes, and a
@@ -109,7 +93,25 @@ while IFS= read -r f; do
     # gate depend on whose machine it ran on -- `.claude/settings.local.json`,
     # which is globally gitignored, turned it red on this one.
 done < <(git ls-files -z -- . ':(exclude)third_party' ':(exclude).github' \
-    | xargs -0 grep -liE 'roblox' 2>/dev/null || true)
+    | xargs -0 grep -liE "$vendor" 2>/dev/null || true)
+
+# **The indirect names, in code.** A type or class name that exists only on that
+# platform, or its editor's product name standing alone, is the same reference
+# spelled another way -- and one of each had survived the sweep above because it
+# never contained the word. Code only: the documentation set may still explain
+# a divergence by naming what it diverges from. "Visual Studio" and "Android
+# Studio" are toolchains, not the reference, and are excluded by name.
+echo "== legal sweep (R7, indirect names in code) =="
+indirect="$(printf '%s|%s|%s' 'RBX[A-Z]' 'Bindable(Event|Function)' '(^|[^A-Za-z])Studio([^A-Za-z]|$)')"
+while IFS= read -r hit; do
+    case "$hit" in
+    *"Visual Studio"* | *"Android Studio"*) continue ;;
+    esac
+    err "an indirect reference R7 forbids: ${hit#*:*:}" "${hit%%:*}"
+    status=1
+done < <(git ls-files -z -- engine runtime shaders tools api tests examples templates i18n cmake scripts \
+    ':(exclude)*.md' ':(exclude)*.png' ':(exclude)scripts/gates/docs-lint.sh' \
+    | xargs -0 grep -nE "$indirect" 2>/dev/null || true)
 
 # --- Ledger shape (MASTER_PROMPT.md §11) ------------------------------------
 echo "== ledger format =="

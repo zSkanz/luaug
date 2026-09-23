@@ -1178,10 +1178,10 @@ local Datatypes: { Schema.Datatype } = {
         Name = "Signal",
         Module = "script",
         Doc = "THE signal type, spelled `Signal<T...>` where the pack is what handlers receive and `Wait` "
-            .. "returns -- never `RBXScriptSignal` (divergence #4). Delivery is **deferred only** (ADR 0015): "
+            .. "returns. Delivery is **deferred only** (ADR 0015): "
             .. "a fire enqueues, and handlers run at the next drain in the order they were raised, with "
-            .. "connection order guaranteed within one fire. Script-created signals replace BindableEvent and "
-            .. "BindableFunction outright (divergence #5). Handler errors are contained: each runs on its own "
+            .. "connection order guaranteed within one fire. A script makes its own with `Signal.new`, and there "
+            .. "is no separate event object to parent into the tree. Handler errors are contained: each runs on its own "
             .. "coroutine, and an error stops neither the other handlers, nor the drain, nor the firing "
             .. "script.",
         Constructors = {
@@ -1249,8 +1249,7 @@ local Datatypes: { Schema.Datatype } = {
     {
         Name = "Connection",
         Module = "script",
-        Doc = "The handle a `Signal:Connect` or `:Once` returns -- never `RBXScriptConnection` (divergence "
-            .. "#4). Its only job is to end the connection it represents; it is not constructible on its own.",
+        Doc = "The handle a `Signal:Connect` or `:Once` returns. Its only job is to end the connection it represents; it is not constructible on its own.",
         Properties = {
             {
                 Name = "Connected",

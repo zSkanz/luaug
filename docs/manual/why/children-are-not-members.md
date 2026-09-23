@@ -77,4 +77,4 @@ and nothing enforces uniqueness, so a name is a label rather than an identifier
 
 - [The Instance tree](manual:concepts/instance-tree)
 - [Properties, attributes and tags](manual:concepts/properties)
-- [The migration guide](manual:roblox/migration)
+- [The migration guide](manual:migrating/migration)

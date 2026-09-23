@@ -178,6 +178,6 @@ Scripts are files in your own editor, with a real language server.
 
 ## Where to look next
 
-- [Every deliberate divergence](manual:roblox/divergences) — the full list
-- [What is not here](manual:roblox/not-here) — the honest gaps
+- [Every deliberate divergence](manual:migrating/divergences) — the full list
+- [What is not here](manual:migrating/not-here) — the honest gaps
 - [Your first world](manual:get-started/first-world)

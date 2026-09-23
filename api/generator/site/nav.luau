@@ -180,8 +180,8 @@ local Sections: { Section } = {
         },
     },
     {
-        Slug = "roblox",
-        Title = "Coming from Roblox",
+        Slug = "migrating",
+        Title = "Migrating a game",
         Summary = "What transfers, what is spelled differently, and what is deliberately absent.",
         Pages = {
             { Slug = "migration", Title = "The migration guide" },

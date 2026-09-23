@@ -94,4 +94,4 @@ better to know before the first line than after the hundredth.
 ## Where to look next
 
 - [What LuauG is](manual:get-started/what-is-luaug)
-- [Every deliberate divergence](manual:roblox/divergences)
+- [Every deliberate divergence](manual:migrating/divergences)

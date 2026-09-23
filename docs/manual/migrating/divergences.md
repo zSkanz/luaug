@@ -88,5 +88,5 @@ deliberately high bar.
 
 ## Where to look next
 
-- [The migration guide](manual:roblox/migration) — the same ground, with code
-- [What is not here](manual:roblox/not-here)
+- [The migration guide](manual:migrating/migration) — the same ground, with code
+- [What is not here](manual:migrating/not-here)

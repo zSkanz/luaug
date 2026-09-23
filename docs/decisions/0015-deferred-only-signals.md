@@ -19,4 +19,4 @@ There is **no Immediate mode** and the legacy globals
 ## Consequences
 One predictable semantics, parallel-phase-ready, and a clean story for
 determinism. Divergence from Roblox is documented loudly in
-`docs/coming-from-roblox.md`.
+`docs/migrating.md`.

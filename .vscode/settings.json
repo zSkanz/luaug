@@ -10,10 +10,10 @@
     "luau-lsp.platform.type": "standard",
 
     "$comment.platform": [
-        "CI passes --platform=standard. The extension's default is roblox, which makes it",
-        "download and load Roblox's API dump. That is both a source of divergence and",
-        "something ADR 0020 (clean room, rule R7) has us stay away from: this engine is",
-        "written from docs/api-design.md, never from probing Roblox."
+        "CI passes --platform=standard. The extension's default platform mode downloads and",
+        "loads a third-party API dump. That is both a source of divergence and something",
+        "ADR 0020 (clean room, rule R7) has us stay away from: this engine is written from",
+        "docs/api-design.md, never from probing another platform."
     ],
 
     "luau-lsp.sourcemap.enabled": false,
@@ -24,8 +24,8 @@
     "$comment.fflags": [
         "`luau-lsp analyze` enables every Luau FFlag unless told otherwise (--no-flags-enabled),",
         "and that is what turns the new type solver on -- which rule R2 requires. Syncing flag",
-        "values from Roblox's production endpoint instead would make the editor's solver depend",
-        "on what Roblox shipped this week, so it is off."
+        "values from a third-party production endpoint instead would make the editor's solver",
+        "depend on what somebody else shipped this week, so it is off."
     ],
 
     "luau-lsp.types.definitionFiles": [

@@ -51,7 +51,7 @@ decision.
       embedded in the artifact, all sizes in one resource, taskbar identity on
       Windows, and **verified by reading the resource back out of the built
       artifact** rather than by looking at it.
-- [ ] **Docs completion** — [`../coming-from-roblox.md`](../coming-from-roblox.md)
+- [ ] **Docs completion** — [`../migrating.md`](../migrating.md)
       written for real; API reference generated from the defs pipeline; README
       with screenshots.
 - [x] **License/NOTICE audit** of every vendored dependency —

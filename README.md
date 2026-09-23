@@ -82,7 +82,7 @@ minutes and asserts the memory curve flattens.
 decals, no terrain, no `SurfaceGui`, no rich text, no navmesh, no 2D workflow, no
 multiplayer, no mobile. Each has an owner in the roadmap's post-v1 phases rather
 than a shrug, and
-[`docs/coming-from-roblox.md`](docs/coming-from-roblox.md) §5 lists them with
+[`docs/migrating.md`](docs/migrating.md) §5 lists them with
 where they went. A `Sound` plays a generated tone rather than a file. A property
 the engine stores and does not act on is marked `Inert` in the inspector and the
 api-dump, and a gate stops a new one appearing quietly.
@@ -126,7 +126,7 @@ Everything in the default path is permissively licensed. Exact pinned commits li
 - [`docs/roadmap.md`](docs/roadmap.md) — milestones M0 through M8 with verification gates
 - [`docs/decisions/`](docs/decisions/) — architecture decision records (ADRs)
 - [`docs/research/`](docs/research/) — frozen research reports (Luau, Lute, ecosystem — August 2026)
-- [`docs/coming-from-roblox.md`](docs/coming-from-roblox.md) — the migration guide (habit-by-habit mapping)
+- [`docs/migrating.md`](docs/migrating.md) — the migration guide (habit-by-habit mapping)
 - [`docs/api/`](docs/api/) — the API reference, generated from the IDL
 - [`CHANGELOG.md`](CHANGELOG.md) — what each release contains
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how contributions work

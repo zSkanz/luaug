@@ -132,7 +132,7 @@ the whole return on a fully typed API surface.
 
 Three different next steps, depending on what you are:
 
-- **Coming from Roblox?** [The migration guide](manual:roblox/migration) is the
+- **Coming from Roblox?** [The migration guide](manual:migrating/migration) is the
   short version of everything that is spelled differently.
 - **Want the model?** [The Instance tree](manual:concepts/instance-tree), then
   [Signals and connections](manual:concepts/signals), then

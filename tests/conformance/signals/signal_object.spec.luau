@@ -21,19 +21,16 @@ describe("Signal.new", function()
         expect(first).Never:ToBe(second)
     end)
 
-    -- Divergence #4: the type is named `Signal`, and the legacy spelling must
-    -- not survive anywhere in the observable surface.
-    it("reports its type as Signal, never as RBXScriptSignal", function()
+    -- The type is named `Signal`, and `typeof` says exactly that.
+    it("reports its type as Signal", function()
         local sig = Signal.new()
         expect(typeof(sig)):ToBe("Signal")
-        expect(typeof(sig)).Never:ToBe("RBXScriptSignal")
     end)
 
-    it("reports a connection's type as Connection, never as RBXScriptConnection", function()
+    it("reports a connection's type as Connection", function()
         local sig = Signal.new()
         local connection = sig:Connect(function() end)
         expect(typeof(connection)):ToBe("Connection")
-        expect(typeof(connection)).Never:ToBe("RBXScriptConnection")
         connection:Disconnect()
     end)
 
@@ -122,23 +119,5 @@ describe("Signal:Destroy", function()
         sig:Destroy()
         task.wait()
         expect(connection.Connected):ToBe(false)
-    end)
-end)
-
-describe("the instance classes Signal.new replaces", function()
-    -- Divergence #5: `Signal.new()` replaces BindableEvent/BindableFunction, so
-    -- neither class name may be creatable.
-    it("does not provide a BindableEvent class", function()
-        local instanceNew = Instance.new :: any
-        expect(function()
-            instanceNew("BindableEvent")
-        end):ToThrow()
-    end)
-
-    it("does not provide a BindableFunction class", function()
-        local instanceNew = Instance.new :: any
-        expect(function()
-            instanceNew("BindableFunction")
-        end):ToThrow()
     end)
 end)

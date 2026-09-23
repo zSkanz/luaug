@@ -1100,7 +1100,7 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
   Jolt physics, day/night cycle (sun animation + tuned tonemap), HUD, ambient
   audio, all hot-reloadable; performance pass to absolute targets;
   `luaug build` packaging (distributable player + content); docs completion:
-  `docs/coming-from-roblox.md` written for real, API reference generated from
+  `docs/migrating.md` written for real, API reference generated from
   the defs pipeline, README with screenshots/GIF; license/NOTICE audit of
   every vendored dep; CHANGELOG; tag `v1.0.0`, GitHub release with Windows
   binaries + source instructions.

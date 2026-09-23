@@ -10,7 +10,7 @@ engine has it.
 **This is the catalogue, not the design.**
 [`../api-design.md`](../api-design.md) is where the reasoning lives —
 why signals are deferred, why children are not members, what a `Content`
-URN is — and [`../coming-from-roblox.md`](../coming-from-roblox.md) is the
+URN is — and [`../migrating.md`](../migrating.md) is the
 guided tour.
 
 - [Datatypes](datatypes.md) — `CFrame`, `Color3`, `UDim2`, `Signal`, and the rest

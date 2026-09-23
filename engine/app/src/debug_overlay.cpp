@@ -6290,7 +6290,7 @@ terrainPanelDone:;
         }
 
         // **F frames the selection**, which is the one camera shortcut every
-        // editor in this shape shares -- Studio, Unity, Unreal and Blender all
+        // editor in this shape shares -- Unity, Unreal, Godot and Blender all
         // put it here, so it is what somebody's hands already reach for.
         //
         // Nothing happens with nothing selected, and nothing happens for a

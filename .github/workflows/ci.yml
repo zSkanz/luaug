@@ -145,8 +145,9 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Keeps the documentation package itself verifiable: every relative link
-  # resolves, pinned versions are named consistently, no stray Roblox
-  # references outside the allowed files (rule R7 sweep).
+  # resolves, pinned versions are named consistently, and the R7 sweep finds
+  # no reference to the platform it keeps us clear of outside the allowed
+  # documentation.
   #
   # Runs on every event, including a milestone tag: it costs one charged minute
   # and it is the check a documentation-only push most needs.
@@ -154,8 +155,8 @@ jobs:
   # NOTE ON `--exclude-dir=third_party` BELOW: every step in this job checks
   # documentation *we* authored. Vendored upstream trees are governed by
   # ADR 0021 (pinned + never edited in place, R13), carry their own licenses,
-  # and legitimately contain both broken relative links and the word "Roblox"
-  # (Luau is a Roblox project). Linting them would be meaningless and a
+  # and legitimately contain both broken relative links and the name the R7
+  # sweep looks for (Luau's upstream). Linting them would be meaningless and a
   # permanent source of false failures.
   # ---------------------------------------------------------------------------
   docs-lint:

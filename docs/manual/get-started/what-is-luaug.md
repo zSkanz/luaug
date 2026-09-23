@@ -74,6 +74,6 @@ Each of those has a page saying what exists instead.
 
 - [Install and toolchain](manual:get-started/install)
 - [Your first world](manual:get-started/first-world)
-- [The migration guide](manual:roblox/migration), if you are arriving with
+- [The migration guide](manual:migrating/migration), if you are arriving with
   habits
 - [The API reference](site:reference)

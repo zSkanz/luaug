@@ -1594,7 +1594,7 @@ Audio · Animation · Assets and streaming · Guides · **Why it works this way*
 the decisions a person will trip over, each with the reasoning that settled it —
 and **Coming from Roblox**, which is the keystone and is three pages rather than
 one: the migration guide, every deliberate divergence (§2.5), and what is not
-here. [`coming-from-roblox.md`](coming-from-roblox.md) is still the repository's
+here. [`migrating.md`](migrating.md) is still the repository's
 own copy of that argument. The reference half is generated from the IDL and not
 from the api-dump: the dump carries no doc prose (§5, artifact 4) and could not
 produce a reference page if it wanted to.
