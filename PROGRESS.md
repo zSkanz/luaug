@@ -113,16 +113,20 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   boundary, a tile boundary and the bricked/height edge. Each ray hits the
   field, the collider and the drawn surface, and no hit is more than a
   quarter-voxel off the field. **The flagship has terrain (H2, H3)**: the
-  middle 512 m of `examples/10-open-world` is streamed `Terrain`, with a hill
-  and a tunnel, and its soak holds at 57 MiB and 3.24 ms p99. What is left of
-  F1: streaming while editing.
+  middle 512 m of `examples/10-open-world` is streamed `Terrain`, written as
+  one heightmap by `Terrain:WriteHeights`, with a hill and a tunnel, and its
+  soak holds at 56 MiB and 3.10 ms p99. What is left of F1 is editing a world
+  larger than memory, which ADR 0075 puts further off: the editor holds the
+  whole field.
 
   **V1, `VoxelService`, is built** -- a block world with a registry, place and
   break, a DDA raycast, a greedy mesher with corner occlusion, colliders near
   movers, and `examples/14-voxels`. It is not `Terrain` and shares nothing with
   it but a word; [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md)
-  says why. What it does not have yet: an editor tool that places a block,
-  transparent blocks, and chunks streamed from disk.
+  says why. Since then it has gained an editor tool, see-through blocks, cells
+  streamed from disk and fluids (below). What it does not have yet: a block
+  type's images and opacity set from the editor's panel, and fluids that react
+  with each other.
 
   **Water is a fluid since 2026-09-23**: `SetBlockFluid` makes a type pour,
   spread and drain on the simulation clock, deterministically, and never
@@ -157,11 +161,16 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   **N1's three named gaps closed on 2026-09-23** (ADR 0076): a replica
   predicts its own character from `Player.Character` and is corrected by the
   authority rather than overwritten, draws everyone else between snapshots, and
-  is sent only what is near its character.
+  is sent only what is near its character. Losing interest is streaming out
+  since the same day (protocol 6): a copy a script holds becomes a husk and
+  fires `InstanceStreamedOut`, and building it found D160 -- the chunk
+  streamer's half of that contract had never been wired.
 
-  **The next action, as a sentence:** in the order the owner agreed on
-  2026-09-23 -- terrain streaming, F3 and N1's gaps are done, so the editor's
-  smaller items next. Android waits.
+  **The next action, as a sentence:** the editor's smaller items -- heightmap
+  import, `VoxelSize` and the height range, a block type's image and opacity
+  in the panel -- wait on `engine/app/src/debug_overlay.cpp`, which holds the
+  owner's uncommitted work; everything that does not touch it goes first.
+  Android waits.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is
@@ -201,16 +210,10 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   existed only here and went with them; `milestone/e2` and `milestone/e3` were
   created and pushed the same day; five further commits landed the untracked
   tree and the mission file behind all of it.
-- **Three milestone tags are still missing -- `e5`, `e7` and `e8` -- and that is
-  deliberate.** All three are BUILT and awaiting review, and a tag for a
-  milestone still awaiting review would be a durable record of something that
-  has not happened; they wait on the campaign's sign-off pass
-  (`docs/finish-line.md` S1.7). **What each is waiting for is not the same
-  thing.** E7: nothing but the sign-off -- every row of its Gate Record is
-  green, the pictures included. E5: two rows, both of them a person at a window.
-  E8: two rows -- a photograph of the debugger stopped, which the eight headless
-  cases cannot stand in for, and a `localgate` row its brief marks *(filled
-  below)* and then does not fill.
+- **Every milestone is tagged**, `milestone/m0` through `milestone/e9`. The
+  last three, `e5`, `e7` and `e8`, waited on a sign-off pass
+  (`docs/finish-line.md` S1.7) and were signed and tagged on 2026-09-23 on the
+  owner's delegation.
 - **The full gate is green and it is nine stages now** (S1.5, 2026-08-27): the
   seven that run by default, plus `asan`, `winprofiles` and `lavapipe` on
   request. 57 tests on Windows, 56 on Linux, 1,168 conformance cases on each
