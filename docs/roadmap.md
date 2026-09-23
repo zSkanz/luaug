@@ -1278,7 +1278,10 @@ and the ecosystem work.
      cells (Part E, ADR 0075), with the world waiting for its ground on first
      load and a changed cell never evicted. Still open, and honestly so:
      streaming while editing -- the editor holds the whole field, as it holds
-     the whole scene -- and `MeshUsage::Dynamic`'s ring-buffer hazard (A4).
+     the whole scene. `MeshUsage::Dynamic`'s ring-buffer hazard (A4) is moot
+     while nothing uses the mode: the terrain went to a GPU atlas (ADR 0071)
+     and meshes nothing per stroke. The first caller of `Dynamic` measures it
+     before relying on it.
    - **`SurfaceGui` and billboards** — the UI tree rendered in world space: a
      screen on a wall, a name over a head, a health bar that follows a body. The
      tree, the layout and the `ui2d` pass all exist since M6; what does not is
@@ -1289,7 +1292,9 @@ and the ecosystem work.
      them. **Built 2026-09-23** as `SurfaceGui` and `BillboardGui`: each tree is
      laid out against its own canvas, mapped into the world by one affine
      placement, and drawn in the HDR pass after the particles, depth-tested
-     unless `AlwaysOnTop`. Not clickable yet.
+     unless `AlwaysOnTop`. Their buttons are pressed like the screen's since
+     the same day: the pointer's ray finds them, and what stands in front of
+     them takes the click.
    - **Rich text** — colour, weight and size varying inside one label. The glyph
      cache is already keyed by **face, size and codepoint** (M6, from the human's
      own font decision), so a label carrying three sizes and two weights already
