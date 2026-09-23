@@ -5421,3 +5421,39 @@ TEST_CASE("a scene keeps what is in the two storages, and a scene with none is u
     CHECK(rig.world.childCount(replicated) == 0);
     CHECK(rig.world.childCount(server) == 0);
 }
+
+TEST_CASE("each brush stroke is its own undo step (D168)")
+{
+    // **The owner's report**: one ctrl+Z undid every change made to the
+    // terrain. A stroke opened an undo gesture and never closed it, so every
+    // later stroke joined it. Two strokes are two steps, and undoing one leaves
+    // the other.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Add);
+    rig.editor.setBrushRadius(3.0f);
+
+    const auto stroke = [&](double x) {
+        const core::Vec2 pixel = rig.pixelOf(core::DVec3{x, 0.0, 0.0});
+        rig.frame(pixel, true, true);
+        rig.frame(pixel, false, false);
+    };
+    const auto top = [&](double x) { return asset::heightAt(rig.field().field, x, 0.0).value_or(0.0f); };
+
+    stroke(-10.0);
+    const float first = top(-10.0);
+    stroke(10.0);
+    const float second = top(10.0);
+    REQUIRE(first > 1.0f);
+    REQUIRE(second > 1.0f);
+
+    // One ctrl+Z: the second stroke goes, the first stays.
+    REQUIRE(rig.editor.history().undo(rig.world));
+    CHECK(top(10.0) < 0.5f);
+    CHECK(top(-10.0) == first);
+
+    // And the second ctrl+Z takes the first.
+    REQUIRE(rig.editor.history().undo(rig.world));
+    CHECK(top(-10.0) < 0.5f);
+}

@@ -2981,13 +2981,23 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     scene::TerrainComponent* terrain = terrainId.valid() ? world.terrains().find(terrainId) : nullptr;
     m_hasTerrain = terrain != nullptr;
 
-    if (m_tool == Tool::Select) {
+    // **A stroke ends its undo gesture when it ends** (D168). The gesture is
+    // what makes a stroke's hundred stamps one undo step; left open, the next
+    // stroke's `beginGesture` returned the same one, and every stroke of the
+    // session coalesced into a single step that one ctrl+Z took back whole.
+    const auto endStroke = [&] {
+        if (m_stroke.has_value() && inspector.gesture() == m_stroke->gesture)
+            inspector.endGesture();
         m_stroke.reset();
+    };
+
+    if (m_tool == Tool::Select) {
+        endStroke();
         return false;
     }
 
     if (terrain == nullptr) {
-        m_stroke.reset();
+        endStroke();
         // **A tool with nothing to act on does not eat the click.** Somebody who
         // left the brush selected and clicked a part meant to select the part,
         // and a world with no terrain in it cannot have meant anything else.
@@ -3048,7 +3058,7 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         // nobody can count by looking, and it is the cheapest evidence that the
         // brush did what the drag asked rather than one stamp or a thousand.
         m_lastStrokeStamps = m_stroke->stamps;
-        m_stroke.reset();
+        endStroke();
         // The release belongs to the brush: without this the same click that
         // finished a stroke falls through and selects whatever is under it.
         m_pending.reset();

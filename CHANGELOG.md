@@ -160,6 +160,9 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Fixed
 
+- **One ctrl+Z undoes one brush stroke** (D168). Every stroke of a session had
+  joined one undo step, so a single ctrl+Z took back all of the terrain's
+  edits.
 - **A long sound streams instead of being decoded whole** (D129). Past ten
   seconds a file's encoded bytes are kept and each voice decodes just ahead of
   the speakers: three minutes of music costs the file's size, not about 70 MB.
