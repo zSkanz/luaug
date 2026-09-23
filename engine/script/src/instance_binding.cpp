@@ -65,22 +65,9 @@ using scene::World;
 {
     const std::string_view name{member == nullptr ? "" : member};
 
-    // **When the name is a CHILD, say so and say what to type instead**
-    // (decision 10, `api-design.md` divergence #26). Dot access to children is
-    // refused deliberately: allowing `script.Nested` needs a string indexer on
-    // `Instance`, and an indexer does not merely type the child access -- it
-    // makes every unknown key on every instance resolve to `Instance?` instead
-    // of erroring, so `part.Positon = ...` stops being a type error and becomes
-    // a silent nil write. The price is typo detection across the whole
-    // language, in a repository where R2 makes every file strict.
-    //
-    // What was reported twice was not "give me the indexer", it was "this fails
-    // and tells me nothing". So it tells them.
-    //
-    // **`FindFirstChild` and not `WaitForChild`**, which is not a stylistic
-    // preference: scripts start when play starts and the tree is already built,
-    // so recommending the yielding one would teach exactly the load-order habit
-    // this divergence exists to kill.
+    // **When the name is a CHILD, say so**: reading one reaches it (ADR 0078),
+    // so the only way here with a child's name is ASSIGNING to it, and a child
+    // is replaced by parenting another instance, not by assignment.
     //
     // `lookup` and never `intern`: the name comes from a script, and interning
     // it would let a loop of misspellings grow the atom table without bound.
@@ -163,6 +150,18 @@ int instanceIndex(lua_State* L)
         // and disconnects in another depends on.
         pushInstanceEvent(L, id, event->slot);
         return 1;
+    }
+
+    // **Then a child by that name** (ADR 0078, reversing 0061 on the owner's
+    // word): `workspace.Baseplate` reaches the first child called Baseplate.
+    // A member always wins over a child of the same name, so a part named
+    // `Name` never hides the property. `lookup`, never `intern`: the name comes
+    // from a script, and a loop of misspellings must not grow the atom table.
+    if (const core::NameAtom childName = w.atoms().lookup(key); childName.valid()) {
+        if (const core::InstanceId child = w.findFirstChild(id, childName); child.valid()) {
+            pushInstance(L, child);
+            return 1;
+        }
     }
 
     raiseUnknownInstanceMember(L, id, key);

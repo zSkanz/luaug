@@ -599,18 +599,14 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                                                                       : classOfSubject(classes, atoms, request.subject);
         if (id != scene::InvalidClass)
             collectMembers(classes, atoms, id, request, out);
-        // **No children here, and that is decision 10** (`api-design.md`
-        // divergence #26). This used to offer them after a dot, which is the
-        // one place a completion must not: dot access to a child is REFUSED by
-        // this engine, deliberately, so the list was teaching a line the
-        // runtime raises on and the analyser rejects. A completion that
-        // proposes something the language will not accept is worse than an
-        // empty one -- somebody accepts it, runs it, and learns that the editor
-        // and the engine disagree.
-        //
-        // Children are offered where they can be typed: inside `WaitForChild("`
-        // and `FindFirstChild("`, which `CompletionQuoted::Child` answers
-        // above.
+        // **And its children, after its members** (ADR 0078): `workspace.`
+        // offers what is in the workspace, because a dot reaches a child. The
+        // members come first in the same list, which is also the order the
+        // runtime resolves a name in -- a child called `Name` never hides the
+        // property.
+        // After a colon only methods: a child is not callable.
+        if (at.valid() && !request.method)
+            collectChildren(tree, atoms, at, request, out);
         //
         // A subject nothing recognises offers nothing rather than offering the
         // whole world: a list that is always the same is a list people learn to
@@ -669,7 +665,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     sortCompletions(out);
 }
 
-// --- Dot access to a live child, at edit time (decision 10) ------------------
+// --- Assigning to a live child's name, at edit time (ADR 0078) ---------------
 
 void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegistry& classes,
                         const core::AtomTable& atoms, const CompletionWorld& tree, std::vector<Diagnostic>& out)
@@ -699,6 +695,15 @@ void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegist
             if (end == column + 1)
                 continue;
             const std::string member(text.substr(column + 1, end - column - 1));
+
+            // **Only an assignment is a finding.** Reading a child with a dot
+            // works (ADR 0078); writing to its name does not, because a child
+            // is replaced by parenting another instance.
+            core::u32 after = end;
+            while (after < text.size() && (text[after] == ' ' || text[after] == '	'))
+                ++after;
+            if (after >= text.size() || text[after] != '=' || (after + 1 < text.size() && text[after + 1] == '='))
+                continue;
 
             // What the completion would answer at the caret just after the dot,
             // which is the resolved subject of this access.
@@ -734,8 +739,9 @@ void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegist
             out.push_back(Diagnostic{
                 .at = Position{line, column + 1},
                 .length = static_cast<core::u32>(member.size()),
-                .message =
-                    "`" + member + "` is a child, not a member -- reach it with FindFirstChild(\"" + member + "\")",
+                .message = "`" + member +
+                           "` is a child: a dot reads it, and it is replaced by parenting another instance, not by "
+                           "assignment",
                 .severity = Severity::Warning,
             });
         }

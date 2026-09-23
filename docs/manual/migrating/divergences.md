@@ -24,7 +24,6 @@ once, at migration.
 |---|---|---|
 | `Instance.new(class, parent)` | **Single argument** | The parent-then-mutate performance wart, removed. |
 | `ModuleScript` + `require(instance)` | **Plain files, required by string** | Real modules the analyzer can follow; no wait-then-require. |
-| Dot access to children | **`FindFirstChild` / `WaitForChild`** | Untypeable under a fully strict surface, and it is the habit that made waiting load-bearing. |
 | A destroyed instance stays readable | **Handles stop resolving** after the drain in which `Destroying` fired | The slot is reclaimed; use-after-destroy is a keyed error rather than a silent read. |
 | Deprecated camelCase aliases (`:connect`) | **Never existed** | One spelling. |
 | Optional typing | **Fully strict, fully typed** | Non-negotiable quality bar. |

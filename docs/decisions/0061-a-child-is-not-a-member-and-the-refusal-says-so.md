@@ -1,6 +1,6 @@
 # 0061 — A child is not a member, and the refusal says so in three places
 
-- Status: accepted
+- Status: superseded by [0078](0078-a-dot-reaches-a-child-and-the-scene-is-typed.md), 2026-09-23
 - Date: 2026-08-27
 - Confirms: `api-design.md` divergence #26 (dot-access to children)
 - Relates to: [0018](0018-strict-luau-new-solver.md) (strict Luau, new solver)

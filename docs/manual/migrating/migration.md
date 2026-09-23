@@ -46,13 +46,12 @@ local Greeting = require("@shared/greeting")
 No `require(instance)`, no instance to find first, no wait-then-require dance.
 Real files the analyzer can follow.
 
-### Children are not members
+### Children, by a dot, typed
 
-`workspace.Baseplate` raises. Use `FindFirstChild` or `WaitForChild`.
-
-The reason is the typing story: an index that could resolve to a child is
-untypeable under a fully strict surface. See
-[Children are not members](manual:why/children-are-not-members).
+`workspace.Baseplate` works, as you expect, and a member of the same name wins
+over the child. What your scene declares is typed from the scene itself, so
+`workspace.Player.Walker` is typed in strict mode. See
+[Reaching a child](manual:why/reaching-children).
 
 ### Units are metres
 

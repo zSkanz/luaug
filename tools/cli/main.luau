@@ -12,6 +12,7 @@
 	documented command line exist.
 ]]
 
+local fs = require("@std/fs")
 local process = require("@std/process")
 
 local build = require("./commands/build")
@@ -159,6 +160,17 @@ local function main(): number
         if parsed.flags.definitions ~= nil then
             for entry in string.gmatch(parsed.flags.definitions, "[^,]+") do
                 table.insert(definitions, entry)
+            end
+        else
+            -- A project's own: the engine's classes, then its scene's tree,
+            -- in that order, because the tree's `declare workspace` replaces
+            -- the plain one (ADR 0078).
+            local types = projectlib.joined(firstPositional(parsed, "."), ".luaug", "types")
+            for _, name in { "engine.d.luau", "scene.d.luau" } do
+                local file = projectlib.joined(types, name)
+                if fs.exists(file) then
+                    table.insert(definitions, file)
+                end
             end
         end
         return check.run({

@@ -40,6 +40,13 @@ does not is engine work and belongs in the git history rather than in this file.
   surface, and each hit must lie within a quarter-voxel of the field.
   `asset::sampleField` exposes the field's trilinear sampler, and
   `render::meshCaveColumn` exposes the cave mesh as it is drawn.
+- **A dot reaches a child, and the scene is typed** (ADR 0078, superseding
+  0061): `workspace.Player.Walker` reaches the child after the members, and
+  `.luaug/types/scene.d.luau` declares the scene's tree so the analyzer types
+  the path and still catches a typo. The editor writes it on open and on every
+  save; `luaug setup` and `luaug-host --write-types` write it; `luaug check`
+  and the starter's VS Code settings load it. Completion offers children after
+  a dot.
 - **`RemoteEvent`** (N2, ADR 0077): a game's own messages between machines.
   `FireServer`, `FireClient` and `FireAllClients`, received as
   `ServerReceived(player, ...)` and `ClientReceived(...)`. The authority names

@@ -147,6 +147,12 @@ struct EngineOptions
     // Headless and one frame. It is a capture, not a run.
     std::filesystem::path saveScenePath;
 
+    // **Write the scene's tree as types and exit** (ADR 0078): the project's
+    // `.luaug/types/scene.d.luau`, from its scene as the editor holds it --
+    // whole, with no script run and nothing partitioned away. What `luaug setup`
+    // and `luaug check` run so a project that never opened the editor is typed.
+    bool writeTypesOnly = false;
+
     // **Partition the project's scene and exit** (ADR 0053).
     //
     // The same work a run does on the way to its first frame, done on its own

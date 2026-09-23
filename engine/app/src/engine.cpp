@@ -28,6 +28,7 @@
 #include "luaug/app/preview_renderer.h"
 #include "luaug/app/reference_grid.h"
 #include "luaug/app/reload.h"
+#include "luaug/app/scene_definitions.h"
 #include "luaug/app/screenshot.h"
 #include "luaug/app/skeleton_overlay.h"
 #include "luaug/app/soak.h"
@@ -921,7 +922,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // host, beside whatever a generator already built.
         .partitionScene =
             [&streaming, &fields, &options, contentRoot](scene::World& registries, const std::filesystem::path& scene) {
-                if (!options.editor) {
+                if (!options.editor && !options.writeTypesOnly) {
                     // Not in the editor, and that is a decision rather than an
                     // omission: the editor holds the whole world because holding it
                     // is what editing it means. Streaming while editing is a scene
@@ -958,7 +959,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // of running this binary starts scripts at boot exactly as it always
         // did, and that asymmetry is the whole decision: a tool shows the world
         // it was given, and behaviour begins when somebody presses play.
-        .startScripts = !options.editor,
+        .startScripts = !options.editor && !options.writeTypesOnly,
         .networkTopology = static_cast<scene::NetworkTopology>(options.network.topology),
     };
 
@@ -995,6 +996,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // the whole point of putting it there. This just declines to run a frame.
     if (options.partitionOnly)
         return std::nullopt;
+
+    // **The scene's tree as types, and nothing else** (ADR 0078).
+    if (options.writeTypesOnly) {
+        if (!isProject || !writeSceneDefinitions(host->world(), options.scriptPath))
+            return core::makeError(LUAUG_TR("engine.cli.err.types_unwritable"));
+        const core::I18nArg args[] = {{"path", (options.scriptPath / ".luaug" / "types" / "scene.d.luau").string()}};
+        core::log(core::LogLevel::Info, LUAUG_TR("engine.cli.info.types_written"), args);
+        return std::nullopt;
+    }
 
     // **The posture's one door** (ADR 0070, clause 2): argument parsing chose a
     // topology, and this is the only line in the engine that can turn that into
@@ -1035,6 +1045,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // to that one rather than refusing for want of an open scene.
     if (options.editor && host->bootSceneApplied())
         editor.adoptOpenScene(sceneRelative);
+    // **The project's tree as types, from the moment it opens** (ADR 0078), so
+    // a script editor pointed at this project types `workspace.Player` before
+    // anybody has saved. Every Save rewrites it.
+    if (options.editor && isProject)
+        (void)writeSceneDefinitions(host->world(), options.scriptPath);
 
     // `game`, which is where the tree the explorer walks starts. Re-pointed
     // after every reload, because a reload destroys this world and builds

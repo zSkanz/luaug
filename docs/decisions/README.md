@@ -117,3 +117,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0076](0076-replicas-predict-their-own-and-draw-the-rest-between-snapshots.md) | Replicas predict their own character, draw everyone else between snapshots, and are sent only what is near their character |
 | [0075](0075-terrain-and-block-worlds-stream-in-cells.md) | Terrain and block worlds stream from disk in 64 m cells of their own; an edited cell is never evicted, and the world waits for its ground once |
 | [0077](0077-game-messages-cross-the-wire-through-a-remote-event.md) | Game messages cross the wire through a replicated `RemoteEvent`; the sender is named by the connection, values travel encoded by the script module, and messages ride the Control channel behind the spawns they name |
+| [0078](0078-a-dot-reaches-a-child-and-the-scene-is-typed.md) | A dot reaches a child after the members, and the scene's tree is typed from the scene itself (supersedes 0061) |

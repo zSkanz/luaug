@@ -58,12 +58,13 @@ them.
 optional timeout. Renaming an existing child *into* the awaited name satisfies a
 waiter exactly as parenting a new child does.
 
-## Children are not members
+## Reaching a child with a dot
 
-`workspace.Baseplate` does not reach a child called `Baseplate`. It raises
-`scene.err.unknown_member`, because members and children live in separate
-namespaces. This is one of the deliberate divergences and it has a page of its
-own: [Children are not members](manual:why/children-are-not-members).
+`workspace.Baseplate` reaches the first child called `Baseplate`, once no
+member of `Workspace` has that name: a member always wins. The children your
+scene declares are typed, from the scene itself, so `workspace.Player.Walker`
+is a `CharacterBody` to the analyzer. See
+[Reaching a child](manual:why/reaching-children).
 
 Siblings may also share a name. `FindFirstChild` returns the first in document
 order and nothing enforces uniqueness, so a name is a label rather than a key —

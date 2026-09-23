@@ -291,6 +291,13 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.saveScenePath = std::filesystem::path(arg.substr(13));
             continue;
         }
+        if (arg == "--write-types") {
+            // A build step like `--partition`: headless, and gone after one
+            // write.
+            options.writeTypesOnly = true;
+            options.headless = true;
+            continue;
+        }
         if (arg == "--partition") {
             // Partition the project's scene into the cache and stop. Headless
             // and windowless for the same reason `--save-scene` is: it is a
@@ -455,7 +462,7 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
     // `--launcher` is the third: it has its own loop, no world and no frame
     // budget, and it ends when somebody chooses a project or closes the window.
     if (!options.replayRoot.empty() || !options.benchRoot.empty() || !options.twoWorldsRoot.empty() ||
-        !options.replicaGateProject.empty() || options.partitionOnly || options.launcher)
+        !options.replicaGateProject.empty() || options.partitionOnly || options.writeTypesOnly || options.launcher)
         return kExitOk;
 
     // A conformance run needs a ceiling for the same reason, and a generous one:

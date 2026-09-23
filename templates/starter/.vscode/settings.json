@@ -23,7 +23,13 @@
         "so the editor's solver does not change under you between sessions."
     ],
 
-    "luau-lsp.types.definitionFiles": [".luaug/types/engine.d.luau"],
+    "luau-lsp.types.definitionFiles": [".luaug/types/engine.d.luau", ".luaug/types/scene.d.luau"],
+
+    "$comment.scene": [
+        "scene.d.luau is the scene's own tree as types, so workspace.Player.Walker is typed:",
+        "the editor rewrites it on every save, and `luaug setup` writes it. It comes second,",
+        "because its declaration of workspace replaces the plain one."
+    ],
 
     "$comment.docs": [
         "Hover documentation travels inside the definitions file as `---` comments, generated",

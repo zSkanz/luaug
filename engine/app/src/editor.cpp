@@ -1,5 +1,6 @@
 #include <luaug/app/brush_overlay.h>
 #include <luaug/app/editor.h>
+#include <luaug/app/scene_definitions.h>
 #include <luaug/core/json.h>
 #include <luaug/core/json_writer.h>
 #include <luaug/platform/file.h>
@@ -214,6 +215,12 @@ bool Editor::save(scene::World& world, const std::filesystem::path& path)
     // confirmation all land here, and a flag cleared at three call sites is a
     // flag one of them will forget.
     m_sceneDirty = false;
+
+    // The tree as types, beside the scene it came from (ADR 0078): the project
+    // is the folder `content/` is in. A failure here is not the save's, which
+    // has already succeeded.
+    if (!m_content.root().empty())
+        (void)writeSceneDefinitions(world, m_content.root().parent_path());
 
     std::string message = "saved " + std::to_string(report.instances) + " instance(s) to " + path.string();
     // Counted rather than swallowed. A reference that pointed outside the scene

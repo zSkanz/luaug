@@ -300,23 +300,17 @@ TEST_CASE("a local holding an instance is NOT resolved, and that is the decision
     CHECK(list.empty());
 }
 
-TEST_CASE("a dot offers members and never children, which is decision 10")
+TEST_CASE("a dot offers members and children, because a dot reaches both (ADR 0078)")
 {
     Reflection fixture;
     Tree tree(fixture);
 
-    // **This used to offer `Baseplate` here, and that was the inconsistency**
-    // (`api-design.md` divergence #26). Dot access to a child is REFUSED by this
-    // engine -- deliberately, because the string indexer it would need turns
-    // every misspelled property into a silent nil write -- so a list that
-    // proposed one was teaching a line the runtime raises on. A completion the
-    // language will not accept is worse than an empty one: somebody accepts it,
-    // runs it, and learns that the editor and the engine disagree.
     const std::vector<Completion> rows = at(fixture, tree, "local c = Workspace.");
-    CHECK(find(rows, "Baseplate") == nullptr);
-
-    // The class's own members are what a dot is for, and they are all still
-    // here -- including the accessor the runtime's own diagnostic recommends.
+    const Completion* child = find(rows, "Baseplate");
+    REQUIRE(child != nullptr);
+    CHECK(child->kind == CompletionKind::Instance);
+    CHECK(child->detail == "Part");
+    // The class's own members are still all here.
     CHECK(has(rows, "Name"));
     CHECK(has(rows, "FindFirstChild"));
 }
@@ -346,9 +340,8 @@ TEST_CASE("the whole chain is walked, not just the name before the dot")
     Tree tree(fixture);
 
     // `Baseplate` on its own names nothing -- the same name under two parents
-    // is two instances -- which is why the request carries the chain. The chain
-    // is still WALKED through children even though a dot does not OFFER them:
-    // resolving `game.Workspace.Baseplate.` to a `Part` is what puts `Size` in
+    // is two instances -- which is why the request carries the chain.
+    // Resolving `game.Workspace.Baseplate.` to a `Part` is what puts `Size` in
     // the list, and it is the same walk `FindFirstChild("` uses.
     CHECK(has(at(fixture, tree, "game.Workspace.Baseplate."), "Size"));
 
@@ -723,19 +716,24 @@ namespace {
 
 } // namespace
 
-TEST_CASE("reaching a child with a dot is underlined, and told what to type")
+TEST_CASE("reading a child with a dot is not underlined, because it works (ADR 0078)")
 {
     Reflection fixture;
     Tree tree(fixture);
 
-    const std::vector<Diagnostic> out = lintOf(fixture, tree, "local x = workspace.Baseplate");
+    CHECK(lintOf(fixture, tree, "local x = workspace.Baseplate").empty());
+    CHECK(lintOf(fixture, tree, "if workspace.Baseplate == nil then end").empty());
+}
+
+TEST_CASE("assigning to a child's name is underlined, and told why")
+{
+    Reflection fixture;
+    Tree tree(fixture);
+
+    const std::vector<Diagnostic> out = lintOf(fixture, tree, "workspace.Baseplate = nil");
     REQUIRE(out.size() == 1);
     CHECK(mentions(out, "Baseplate"));
-    // Named rather than implied, and `FindFirstChild` rather than
-    // `WaitForChild`: scripts start when play starts and the tree is already
-    // built, so recommending the yielding one would teach exactly the
-    // load-order habit this divergence exists to kill.
-    CHECK(mentions(out, "FindFirstChild"));
+    CHECK(mentions(out, "parenting"));
     CHECK(out.front().severity == Severity::Warning);
 }
 
@@ -779,7 +777,7 @@ TEST_CASE("a path through a local is followed, because that is how people write 
     Reflection fixture;
     Tree tree(fixture);
 
-    const std::string source = "local W = game:GetService(\"Workspace\")\nlocal b = W.Baseplate";
+    const std::string source = "local W = game:GetService(\"Workspace\")\nW.Baseplate = nil";
     CHECK(mentions(lintOf(fixture, tree, source), "Baseplate"));
 }
 
@@ -788,7 +786,5 @@ TEST_CASE("a name inside quotes is where a child belongs and is not underlined")
     Reflection fixture;
     Tree tree(fixture);
 
-    // Which is the whole point of the message: this is the line it asks for,
-    // and it must not then complain about it.
     CHECK(lintOf(fixture, tree, "local b = workspace:FindFirstChild(\"Baseplate\")").empty());
 }

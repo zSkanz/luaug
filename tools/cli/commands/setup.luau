@@ -36,6 +36,7 @@
 ]]
 
 local fs = require("@std/fs")
+local process = require("@std/process")
 
 local catalog = require("../catalog")
 local projectlib = require("../project")
@@ -97,6 +98,18 @@ local function writeTypes(options: Options): { string }
     if fs.exists(standard) then
         copyTree(standard, projectlib.joined(types, "std"))
         table.insert(wrote, "std/")
+    end
+
+    -- **The project's own tree, as types** (ADR 0078): what `workspace` holds
+    -- in its scene, so `workspace.Player.Walker` is typed. The engine writes it,
+    -- because the engine is what reads a scene; with no engine to ask, the
+    -- editor writes it the first time it opens the project.
+    local engine = projectlib.findEngine()
+    if engine ~= nil then
+        local result = process.run({ engine, options.target, "--write-types" }, { stdio = "none" })
+        if result.ok then
+            table.insert(wrote, "scene.d.luau")
+        end
     end
 
     return wrote

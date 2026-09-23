@@ -177,7 +177,7 @@ local Sections: { Section } = {
             { Slug = "deferred-signals", Title = "Signals are deferred-only" },
             { Slug = "fixed-tick", Title = "The tick is fixed" },
             { Slug = "vector", Title = "Vector3 is the Luau vector" },
-            { Slug = "children-are-not-members", Title = "Children are not members" },
+            { Slug = "reaching-children", Title = "Reaching a child" },
             { Slug = "world-is-data", Title = "The world is data, scripts are behaviour" },
             { Slug = "casing", Title = "Objects are PascalCase, namespaces are camelCase" },
             { Slug = "graphics-settings", Title = "Graphics settings belong to the player" },
