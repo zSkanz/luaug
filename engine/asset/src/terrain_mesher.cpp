@@ -57,6 +57,78 @@ struct Corner
     return std::clamp(-a / delta, 0.0f, 1.0f);
 }
 
+// **How much of the sky a cave vertex sees**, from 0 (buried) to 1 (open).
+//
+// A heightfield estimate, and deliberately so: the field's top surface --
+// `heightAt`, which over a cave is the roof's top and over a shaft is the floor
+// it falls to -- sampled on a fixed disc around the point, and each sample
+// counts as blocking by how far the ground there stands above the point. Deep
+// in a tunnel every sample is roof, at its mouth the plain outside is not, and
+// under a shaft the shaft is not: the light fades in over a few metres from
+// each opening, which is what a cave looks like.
+//
+// Rays through the volume would see around corners this cannot, at a hundred
+// times the cost, on a path that runs every time a brush touches a cave --
+// the engines that do light caves properly bake it or trace it on the GPU,
+// and until this one does either, the sky is the light that must not get in.
+// A fixed pattern, so the same field meshes to the same bytes.
+[[nodiscard]] float skyVisibility(const TerrainField& field, core::Vec3 position, core::Vec3 normal) noexcept
+{
+    struct Tap
+    {
+        float x;
+        float z;
+    };
+    // The point itself, six at 2.5 m and eight at 5 m.
+    static constexpr std::array<Tap, 15> Taps{{
+        {0.0f, 0.0f},
+        {2.5f, 0.0f},
+        {1.25f, 2.165f},
+        {-1.25f, 2.165f},
+        {-2.5f, 0.0f},
+        {-1.25f, -2.165f},
+        {1.25f, -2.165f},
+        {4.619f, 1.913f},
+        {1.913f, 4.619f},
+        {-1.913f, 4.619f},
+        {-4.619f, 1.913f},
+        {-4.619f, -1.913f},
+        {-1.913f, -4.619f},
+        {1.913f, -4.619f},
+        {4.619f, -1.913f},
+    }};
+    // Ground this far above the point blocks fully; less, partly. The start
+    // is a little above zero so a vertex ON the top surface is not shadowed
+    // by the ground it is part of.
+    constexpr float Clear = 0.5f;
+    constexpr float Solid = 3.0f;
+    // **Measured from a point lifted off the surface along its normal**, which
+    // is where the light arriving at it comes from. On the mountain's outside
+    // that point is in the open air; in a tunnel it is in the tunnel, under the
+    // roof -- whichever wall, floor or ceiling the vertex is on. Measured from
+    // the vertex itself, a steep outside face disagreed with the height of its
+    // own column by most of a metre and drew a staircase of shadow.
+    constexpr float Lift = 1.5f;
+    const Vec3 from{position.x + normal.x * Lift, position.y + normal.y * Lift, position.z + normal.z * Lift};
+    // **A point with no ground over it sees the sky, full stop** -- the same
+    // answer the height-map ground beside it gets, which has no term for this
+    // at all. Counting the uphill taps of a steep slope as a roof is truer in
+    // a sense, and it drew every cave column's patch of the mountain's outside
+    // darker than the ground around it.
+    const std::optional<float> own = heightAt(field, static_cast<double>(from.x), static_cast<double>(from.z));
+    if (!own.has_value() || *own <= from.y)
+        return 1.0f;
+    float blocked = 0.0f;
+    for (const Tap& tap : Taps) {
+        const std::optional<float> top =
+            heightAt(field, static_cast<double>(from.x + tap.x), static_cast<double>(from.z + tap.z));
+        if (!top.has_value())
+            continue;
+        blocked += std::clamp((*top - from.y - Clear) / (Solid - Clear), 0.0f, 1.0f);
+    }
+    return 1.0f - blocked / static_cast<float>(Taps.size());
+}
+
 } // namespace
 
 TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
@@ -386,7 +458,8 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
                 // cave shader blend materials across a triangle instead of
                 // changing colour at its edge.
                 vertex.tangent[0] = static_cast<float>(material);
-                vertex.tangent[1] = 0.0f;
+                // And the sky it sees, in the y, for the same reason.
+                vertex.tangent[1] = skyVisibility(field, position, normal);
                 vertex.tangent[2] = 0.0f;
                 vertex.tangent[3] = 1.0f;
                 cellVertex[cellIndex(cellX, cellY, cellZ)] = static_cast<u32>(out.mesh.vertices.size());

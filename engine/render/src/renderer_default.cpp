@@ -2345,6 +2345,23 @@ void DefaultRenderer::drawTerrain(rhi::ICmdList& cmd, const RenderWorld& world, 
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
             }
+            else {
+                // **The depth passes open caves too** (`terrain_depth.hlsl`), so
+                // they read the same tables the forward pass does, and the
+                // field block that says where in the atlas a tile lives.
+                GpuTerrainParams field;
+                for (u32 channel = 0; channel < 4; ++channel) {
+                    field.atlas[channel] = terrain.atlas[channel];
+                    field.atlasSize[channel] = terrain.atlasSize[channel];
+                }
+                field.nodeRelative[3] = terrain.voxelSize;
+                cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&field, sizeof(field)));
+                const std::array<rhi::TextureBinding, 2> textures{
+                    rhi::TextureBinding{terrain.tileTable, pointSampler_},
+                    rhi::TextureBinding{terrain.materials, pointSampler_},
+                };
+                cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
+            }
             bound = draw.terrain;
         }
 

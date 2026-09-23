@@ -92,16 +92,23 @@ constexpr core::u8 CaveFlag = 0x80;
     return false;
 }
 
-// Level 0's morph start, less a column's diagonal: inside it every vertex of
-// the grid is one lattice step apart and unmorphed, so a hole punched at a
-// column's lattice points is exactly the column.
+// **How far from the viewer a cave column is meshed**: to the end of level
+// 2's band, a quarter of a kilometre at a metre's voxel.
+//
+// It was level 0's morph start less a column, about eighteen metres, when the
+// height map opened caves per VERTEX: only there was every vertex one lattice
+// step apart, so only there did a hole punched at a column's lattice points
+// match the column. The ground opens per PIXEL now (`terrainCaveAt`), exactly
+// at every level, and eighteen metres was a mountain whose tunnel showed the
+// sky through it from anywhere you could see the mouth.
+//
+// Past this the column is closed ground: its top surface, drawn by the height
+// map, which from a quarter of a kilometre is what a cave looks like.
 [[nodiscard]] double caveRange(const TerrainLodSettings& lod, float voxel) noexcept
 {
     TerrainLodSource source;
     source.voxelSize = voxel;
-    const double start = terrainLevelRange(source, lod, 0) * lod.morphStart;
-    const double column = static_cast<double>(asset::BrickEdge) * static_cast<double>(voxel) * 1.5;
-    return std::max(start - column, 0.0);
+    return terrainLevelRange(source, lod, 2);
 }
 
 // What one cave column's mesh reads: the tiles and bricks within a column of
@@ -219,6 +226,14 @@ struct CaveRims
     region.cellsY = static_cast<u32>(top - bottom);
     region.stride = 1;
     region.snapSides = rims.snapSides;
+    // **Skirts, now that caves are drawn past the finest level.** The ground
+    // around a column is drawn coarser with distance, and a coarse surface is
+    // a chord of the true one -- on a dome it runs up to a few metres inside
+    // it. At the column's edge that is a step with nothing under it, and a
+    // grazing ray went through it to the sky. Four metres covers level 2's
+    // worst chord on anything a brush makes; hung against the normal, a skirt
+    // is always inside rock, so on the sides it is not needed it is not seen.
+    region.skirt = 4.0f * voxel;
     return true;
 }
 

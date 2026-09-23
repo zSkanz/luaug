@@ -65,6 +65,8 @@ struct TerrainInterpolants
     float2 Lattice : TEXCOORD1;
     float Hole : TEXCOORD2;
     float ViewDepth : TEXCOORD3;
+    // The height in field space, for the surface detail.
+    float Height : TEXCOORD4;
     float4 Position : SV_Position;
 };
 
@@ -75,10 +77,14 @@ TerrainInterpolants VertexMain(VertexInput input)
 
     TerrainInterpolants output;
     output.ShadingPosition = vertex.Position;
-    output.Position = mul(ViewProjection, float4(vertex.Position, 1.0f));
+    // `precise` for the reason `terrainVertex` gives: `terrain_depth.hlsl`
+    // computes the same position, and this one is tested against it.
+    precise const float4 clipPosition = mul(ViewProjection, float4(vertex.Position, 1.0f));
+    output.Position = clipPosition;
     output.ViewDepth = output.Position.w;
     output.Lattice = vertex.Lattice;
     output.Hole = vertex.Hole;
+    output.Height = vertex.Height;
     return output;
 }
 
@@ -114,9 +120,11 @@ float3 latticeNormal(int2 lattice, float here, float step)
 
 float4 FragmentMain(TerrainInterpolants input) : SV_Target0
 {
-    // Any triangle with a hole corner is gone: the ground opens for a cave,
-    // and ends where the field ends.
+    // Any triangle with a hole corner is gone, where the field ends; and the
+    // ground opens for a cave, pixel by pixel.
     clip(0.001f - input.Hole);
+    if (terrainCaveAt(TileTable, TileTableSampler, Materials, MaterialsSampler, Field, input.Lattice))
+        discard;
 
     const float step = Field.NodeRelative.w;
     const float2 cell = floor(input.Lattice);
@@ -153,7 +161,7 @@ float4 FragmentMain(TerrainInterpolants input) : SV_Target0
     // Colour variation, rock on steep ground and grain: the shared look
     // (`luaug_terrain_surface.hlsli`), so a cave mesh beside this matches it.
     const uint dominant = f.x < 0.5f ? (f.y < 0.5f ? m00 : m01) : (f.y < 0.5f ? m10 : m11);
-    const float2 ground = input.Lattice * step;
+    const float3 ground = float3(input.Lattice.x * step, input.Height, input.Lattice.y * step);
     const TerrainDetail surfaceDetail = terrainDetail(
         albedo, ground, normal, dominant == LUAUG_TERRAIN_ROCK || dominant == LUAUG_TERRAIN_BASALT,
         Palette[LUAUG_TERRAIN_ROCK].rgb);

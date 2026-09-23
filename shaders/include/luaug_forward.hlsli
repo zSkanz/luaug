@@ -257,8 +257,12 @@ float3x3 tangentFrame(float3 normal, float4 tangent)
 // Split out so a shader that builds its surface some other way -- terrain,
 // whose normal and colour come from textures the vertex never carried -- is
 // lit by the same code rather than by a copy that will drift from it.
-// `pixel` is `SV_Position.xy`.
-float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, float viewDepth, float2 pixel)
+// `pixel` is `SV_Position.xy`. `sky` is how much of the sky the point sees, 0
+// to 1: it scales the environment and the ambient exactly as the occlusion
+// pass does, and for the same reason touches neither the sun (which has a
+// shadow map) nor a lamp. Only a surface that knows it is underground -- a
+// cave -- passes anything but one.
+float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, float viewDepth, float2 pixel, float sky)
 {
     const float3 sunDirection = normalize(SunDirectionBrightness.xyz);
     const float sunNol = saturate(dot(normal, sunDirection));
@@ -291,7 +295,7 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     // ambient-occlusion pass ends up looking like dirt.
     const float2 screenUv = pixel * ViewportParams.zw;
     const float rawOcclusion = OcclusionTexture.SampleLevel(OcclusionSampler, screenUv, 0.0f);
-    const float occlusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z);
+    const float occlusion = lerp(1.0f, rawOcclusion, EnvironmentParams.z) * sky;
 
     color += evaluateEnvironment(surface, EnvironmentMap, EnvironmentSampler, BrdfLut, BrdfSampler, IrradianceSh,
                                  EnvironmentParams.x, EnvironmentParams.y, occlusion);
@@ -305,6 +309,11 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     // as metal that cannot be made dark.
     color += Ambient.rgb * surface.DiffuseColor * occlusion;
     return color;
+}
+
+float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, float viewDepth, float2 pixel)
+{
+    return lightSurface(surface, shadingPosition, normal, viewDepth, pixel, 1.0f);
 }
 
 #if defined(LUAUG_UNIFORMS_MATERIAL)

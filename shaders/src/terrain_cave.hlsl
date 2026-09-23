@@ -6,7 +6,8 @@
 // opening: with a cave drawn by the ordinary mesh shader, that edge was a
 // square of flat palette colour set into varied grass, and a material boundary
 // inside the cave was a staircase of whole triangles. Here the material comes
-// per VERTEX -- the mesher writes its id into the tangent's x -- and is turned
+// per VERTEX -- the mesher writes its id into the tangent's x, and how much
+// sky the vertex sees into its y -- and is turned
 // into a palette colour in the vertex stage, so it blends across a triangle;
 // and the variation, the rock and the grain are the ground's own
 // (`luaug_terrain_surface.hlsli`), taken at the same field coordinates.
@@ -50,10 +51,12 @@ struct CaveInterpolants
     float3 Normal : TEXCOORD1;
     float3 Albedo : TEXCOORD2;
     // Field space: the coordinate the ground's noise is pinned to.
-    float2 Ground : TEXCOORD3;
+    float3 Ground : TEXCOORD3;
     float ViewDepth : TEXCOORD4;
     // 1 where the vertex is rock already, so the slope rule leaves it alone.
     float Rock : TEXCOORD5;
+    // How much of the sky the vertex sees (`skyVisibility` in the mesher).
+    float Sky : TEXCOORD6;
     float4 Position : SV_Position;
 };
 
@@ -70,7 +73,9 @@ CaveInterpolants VertexMain(VertexInput input)
     output.Rock = (material == LUAUG_TERRAIN_ROCK || material == LUAUG_TERRAIN_BASALT) ? 1.0f : 0.0f;
     // The mesher works in the field's own space, so the untransformed
     // position IS the field coordinate.
-    output.Ground = input.Position.xz;
+    output.Ground = input.Position.xyz;
+    // The mesher's sky visibility rides in the tangent's y.
+    output.Sky = saturate(input.Tangent.y);
     return output;
 }
 
@@ -81,7 +86,7 @@ float4 FragmentMain(CaveInterpolants input) : SV_Target0
         terrainDetail(input.Albedo, input.Ground, normal, input.Rock > 0.5f, Palette[LUAUG_TERRAIN_ROCK].rgb);
 
     // The four material slots, read as the ground reads them.
-    const float2 uv = input.Ground * 0.25f;
+    const float2 uv = input.Ground.xz * 0.25f;
     const float3 albedo = surfaceDetail.Albedo * BaseColorTexture.Sample(BaseColorSampler, uv).rgb;
     const float roughness = 0.92f * MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, uv).g;
     float3 detail = NormalTexture.Sample(NormalSampler, uv).xyz * 2.0f - 1.0f;
@@ -90,7 +95,8 @@ float4 FragmentMain(CaveInterpolants input) : SV_Target0
     const float3 shadingNormal = normalize(mul(normalize(detail), frame));
 
     Surface surface = makeSurface(input.ShadingPosition, shadingNormal, albedo, 0.0f, roughness);
-    float3 color = lightSurface(surface, input.ShadingPosition, shadingNormal, input.ViewDepth, input.Position.xy);
+    float3 color =
+        lightSurface(surface, input.ShadingPosition, shadingNormal, input.ViewDepth, input.Position.xy, input.Sky);
     color += EmissiveTexture.Sample(EmissiveSampler, uv).rgb;
     color = applyFog(color, FogColor.rgb, FogRange, length(input.ShadingPosition));
     return float4(color, 1.0f);

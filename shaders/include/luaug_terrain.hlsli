@@ -20,8 +20,10 @@
 //
 // **A material byte is the id in its low seven bits and, in its high bit, the
 // cave flag**: this column carries voxel bricks, and the renderer has a mesh of
-// them resident. A triangle touching a flagged vertex is discarded, which opens
-// the ground exactly where the cave mesh fills it in.
+// them resident. The ground is opened there PER PIXEL (`terrainCaveAt`), which
+// opens it exactly where the cave mesh fills it in at every level of detail --
+// a per-vertex test only lines up with the columns at the finest level, which
+// is what kept caves from being drawn more than a stone's throw away.
 
 #ifndef LUAUG_TERRAIN_HLSLI
 #define LUAUG_TERRAIN_HLSLI
@@ -98,14 +100,36 @@ uint terrainMaterialByte(Texture2D<float> tileTable, SamplerState tileSampler, T
     return uint(terrainFetch(materials, materialSampler, texel, params.AtlasSize.zw) * 255.0f + 0.5f);
 }
 
+// **Whether a cave opens the ground at this lattice position**, for the
+// fragment stages. Exactly the triangles the finest level's grid would lose to
+// a flagged corner -- the grid splits each cell along the diagonal from (1, 0)
+// to (0, 1), so the position picks one of the two and its three corners are
+// asked -- which is the footprint every cave mesh was built to cover.
+bool terrainCaveAt(Texture2D<float> tileTable, SamplerState tileSampler, Texture2D<float> materials,
+                   SamplerState materialSampler, TerrainParams params, float2 lattice)
+{
+    const float2 cellCorner = floor(lattice);
+    const int2 cell = int2(cellCorner);
+    const float2 f = lattice - cellCorner;
+    // The corner the fragment's triangle has and the other one lacks.
+    const int2 own = (f.x + f.y < 1.0f) ? cell : cell + int2(1, 1);
+    const uint a = terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, own);
+    const uint b = terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, cell + int2(1, 0));
+    const uint c = terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, cell + int2(0, 1));
+    return ((a | b | c) & 0x80u) != 0u;
+}
+
 struct TerrainVertex
 {
     // Relative to the viewer, in metres.
     float3 Position;
     // The lattice coordinate the vertex ended at, for the fragment stage.
     float2 Lattice;
-    // 1 where the vertex is inside a cave opening or over no ground; any
-    // triangle touching one is discarded.
+    // Its height in the field's own space, metres: with `Lattice`, the
+    // position the surface detail is pinned to.
+    float Height;
+    // 1 where the vertex is over no ground; any triangle touching one is
+    // discarded. Caves are not holes here: they open per pixel.
     float Hole;
 };
 
@@ -129,10 +153,10 @@ TerrainVertex terrainVertex(Texture2D<float> tileTable, SamplerState tileSampler
     const uint fineMaterial = terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, fine);
     const uint coarseMaterial =
         terrainMaterialByte(tileTable, tileSampler, materials, materialSampler, params, coarse);
-    const bool fineGround = finePresent && (fineMaterial & 0x80u) == 0u && (fineMaterial & 0x7Fu) != 0u;
-    const bool coarseGround = coarsePresent && (coarseMaterial & 0x80u) == 0u && (coarseMaterial & 0x7Fu) != 0u;
+    const bool fineGround = finePresent && (fineMaterial & 0x7Fu) != 0u;
+    const bool coarseGround = coarsePresent && (coarseMaterial & 0x7Fu) != 0u;
     // **Heights are only taken from ground.** A lattice point with none -- no
-    // tile, a column dug to nothing, a cave's mouth -- holds a height that means
+    // tile, or a column dug to nothing -- holds a height that means
     // nothing: zero, or the world's floor. A vertex just past the edge of the
     // ground stops being a hole once it has slid more than halfway onto an even
     // neighbour that is ground; had it kept its own height it would hang a sheer
@@ -144,22 +168,31 @@ TerrainVertex terrainVertex(Texture2D<float> tileTable, SamplerState tileSampler
     if (!coarseGround)
         coarseHeight = fineHeight;
 
+    // **Everything from here to the position is `precise`.** Two shaders run
+    // this function -- the colour pass and the depth prepass it is tested
+    // against -- and the compiler is otherwise free to fuse and reorder it
+    // differently in each, because what else each shader does differs. A
+    // position a rounding behind the prepass's fails `LessOrEqual`, and the
+    // ground showed the sky through in specks wherever it did.
+    //
     // Where the vertex would be unmorphed, for the distance the morph is
     // measured by.
-    const float3 unmorphed =
+    precise const float3 unmorphed =
         float3(params.NodeRelative.x + grid.x * step * voxel, params.NodeRelative.y + fineHeight,
                params.NodeRelative.z + grid.y * step * voxel);
-    const float morph = saturate((length(unmorphed) - params.Morph.x) * params.Morph.z);
+    precise const float morph = saturate((length(unmorphed) - params.Morph.x) * params.Morph.z);
 
     // Odd vertices slide onto their even neighbour; at `morph == 1` the grid
     // is the next level's, with degenerate triangles where the odd rows were.
-    const float2 morphed = grid - odd * morph;
-    const float height = lerp(fineHeight, coarseHeight, morph);
+    precise const float2 morphed = grid - odd * morph;
+    precise const float height = lerp(fineHeight, coarseHeight, morph);
 
     TerrainVertex vertex;
-    vertex.Position = float3(params.NodeRelative.x + morphed.x * step * voxel, params.NodeRelative.y + height,
+    precise const float3 position = float3(params.NodeRelative.x + morphed.x * step * voxel, params.NodeRelative.y + height,
                              params.NodeRelative.z + morphed.y * step * voxel);
+    vertex.Position = position;
     vertex.Lattice = float2(corner) + morphed * step;
+    vertex.Height = height;
 
     // Material zero is a column with no ground in it (D153): dug out to
     // nothing, or never filled in a tile that holds other ground.
