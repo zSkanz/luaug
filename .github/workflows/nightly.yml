@@ -91,7 +91,13 @@ jobs:
             libthai-dev libfribidi-dev \
             libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
             libdbus-1-dev libibus-1.0-dev libudev-dev \
-            libwayland-dev wayland-protocols libdecor-0-dev
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            mesa-vulkan-drivers xvfb
+      # **lavapipe and a virtual display**, as the tier-2 container has. The
+      # gate asserts that nothing skips, because this tier is supposed to have
+      # a device. Without the ICD the eight device and display tests answered
+      # `LUAUG_TEST_SKIP` and failed the run -- and they are exactly the tests
+      # worth running under a sanitizer, since they drive the renderer.
 
       - name: Install the Luau toolchain (rokit)
         shell: bash
