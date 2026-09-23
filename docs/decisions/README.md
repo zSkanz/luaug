@@ -111,7 +111,7 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0069](0069-replication-reads-state-and-diffs-it.md) | Replication reads state and diffs it, against a declared wire schema; the change queue cannot serve |
 | [0070](0070-a-port-is-opened-by-a-posture-and-never-by-a-script.md) | A listening socket is opened by a command-line posture and by nothing else; ADR 0035 narrowed |
 | [0071](0071-terrain-ground-is-drawn-from-a-height-atlas.md) | Terrain ground is drawn from a height atlas by a CDLOD grid on the GPU; only caves are meshes; the RHI gains `uploadTextureRegion` |
-| [0072](0072-particles-are-a-picture-simulated-on-the-frame.md) | Particles are a picture simulated on the frame, one instanced premultiplied draw; not soft, the RHI stays frozen; decals will be clustered |
+| [0072](0072-particles-are-a-picture-simulated-on-the-frame.md) | Particles are a picture simulated on the frame, one instanced premultiplied draw; soft by closing the pass, the RHI stays frozen; decals multiply in a pass of their own |
 | [0073](0073-colour-textures-reach-the-gpu-as-srgb.md) | Colour textures reach the GPU as sRGB, compiled or loose; the RHI gains sRGB BC formats |
 | [0074](0074-jolt-runs-cross-platform-deterministic.md) | Jolt runs cross-platform deterministic at no measurable cost; the engine's transcendentals are what stands between it and level C |
 | [0076](0076-replicas-predict-their-own-and-draw-the-rest-between-snapshots.md) | Replicas predict their own character, draw everyone else between snapshots, and are sent only what is near their character |

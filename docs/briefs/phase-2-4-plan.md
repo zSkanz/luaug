@@ -835,9 +835,10 @@ the error rather than re-simulating the unanswered intents. Decals and
 `ParticleEmitter` streams and bursts along its parent's up, simulated on the
 frame in `render::ParticleSystem`, drawn as one premultiplied instanced draw
 that blends and adds in one pipeline, replicated as its settings and a burst
-total. Not soft; the RHI stays frozen for it. Decals are still to build, and
-the ADR records that they will be clustered, applied in the forward shader.
-The plan below is what was written before; the ADR supersedes its choice.
+total. Decals and soft particles followed the same day, with the RHI still
+frozen: each closes the forward pass and reads the opaque depth as a texture
+(ADR 0072, decisions 4 and 5 as revised). The plan below is what was written
+before; the ADR supersedes its choice.
 
 **Blocked on one human decision and nothing else: ADR 0071, unfreezing exactly
 one thing in the RHI.** `DepthStencilAttachment` gains a read-only flag, or

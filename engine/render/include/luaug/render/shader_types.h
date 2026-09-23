@@ -486,9 +486,12 @@ struct GpuParticleLighting
     f32 sunLight[4]{};
     f32 fogColor[4]{};
     f32 fogRange[4]{};
+    // Near plane, far plane, and one over the target's width and height: what
+    // the shader needs to read the scene's depth and make it linear.
+    f32 depth[4]{};
 };
 
-static_assert(sizeof(GpuParticleLighting) == 64, "GpuParticleLighting is a cbuffer layout");
+static_assert(sizeof(GpuParticleLighting) == 80, "GpuParticleLighting is a cbuffer layout");
 
 // How many block types the block shader has colours for; ids past it wrap.
 inline constexpr u32 kVoxelPaletteSize = 256;

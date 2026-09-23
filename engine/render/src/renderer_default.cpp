@@ -2148,11 +2148,9 @@ bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
         .vertexBuffers = buffers,
         .vertexAttributes = attributes,
         .rasterizer = {.cullMode = rhi::CullMode::None},
-        // Tested, never written: hidden by what is in front, and never hiding
-        // the particles behind.
-        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        // No depth attachment: the shader reads the scene's depth, tests
+        // against it and fades near it (soft particles), and never writes it.
         .colorTargets = hdrTarget,
-        .depthStencilFormat = kDepthFormat,
         .debugName = "particle",
     });
     particleBuffer_ = device.createBuffer({
@@ -3300,14 +3298,48 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             lighting.fogRange[0] = frame.fogRange[0];
             lighting.fogRange[1] = frame.fogRange[1];
             lighting.fogRange[2] = frame.fogRange[2];
+            lighting.depth[0] = world.camera.nearPlane;
+            lighting.depth[1] = world.camera.farPlane;
+            lighting.depth[2] = 1.0f / static_cast<f32>(renderWidth_);
+            lighting.depth[3] = 1.0f / static_cast<f32>(renderHeight_);
 
+            // **Soft particles read the depth the forward pass has attached**,
+            // so it is closed around them and reopened after, as it is for the
+            // decals -- only on a frame that has particles.
+            cmd.endRenderPass();
+            const std::array<rhi::ColorAttachment, 1> particleTarget{rhi::ColorAttachment{
+                .texture = hdr_,
+                .loadOp = rhi::LoadOp::Load,
+                .storeOp = rhi::StoreOp::Store,
+            }};
+            cmd.beginRenderPass({.colorAttachments = particleTarget, .debugName = "particles"});
+            cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+            cmd.setScissor(
+                {.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
             cmd.setPipeline(particlePipeline_);
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&particleUniforms, sizeof(particleUniforms)));
             cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&lighting, sizeof(lighting)));
+            const std::array<rhi::TextureBinding, 1> sceneDepth{rhi::TextureBinding{depth_, pointSampler_}};
+            cmd.bindTextures(rhi::ShaderStage::Fragment, 0, sceneDepth);
             const std::array<rhi::BufferHandle, 1> particleBuffers{particleBuffer_};
             cmd.bindVertexBuffers(0, particleBuffers);
             cmd.draw(6, particleCount_, 0, 0);
             stats_.drawCalls += 1;
+            cmd.endRenderPass();
+
+            const std::array<rhi::ColorAttachment, 1> resumeTarget{rhi::ColorAttachment{
+                .texture = hdr_,
+                .loadOp = rhi::LoadOp::Load,
+                .storeOp = rhi::StoreOp::Store,
+            }};
+            cmd.beginRenderPass({
+                .colorAttachments = resumeTarget,
+                .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Load, .storeOp = rhi::StoreOp::Store},
+                .debugName = "forward-after-particles",
+            });
+            cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+            cmd.setScissor(
+                {.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
         }
 
         // **World UI after the particles** (F3): the trees arrive back to

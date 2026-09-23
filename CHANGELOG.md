@@ -33,6 +33,8 @@ does not is engine work and belongs in the git history rather than in this file.
 - **Digging into a wall carves it**: the editor's dig aimed at steep ground, or
   with the box, takes volume out and bores forward at a steady speed while held.
 - `examples/17-cave`: a tunnel into a mountain, dark inside and lit by its lamps.
+- **Soft particles**: smoke and fire fade where they meet a surface instead of
+  showing a hard line along it.
 
 ### Fixed
 

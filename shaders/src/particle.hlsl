@@ -10,11 +10,14 @@
 // at 1 the alpha is zero and the colour simply adds -- fire and sparks -- and
 // between is both, with no second pipeline and no sort between the two kinds.
 //
-// Depth-TESTED against the scene and never written, so a particle is hidden by
-// what stands in front of it and does not hide the particles behind it. It is
-// not SOFT: a puff that crosses the ground shows a hard line there, because
-// fading it needs the scene's depth read in a pass that is also testing
-// against it -- the one RHI change F2 recorded rather than took.
+// **Soft, and tested against the scene by hand.** The pass has no depth
+// attachment: it reads the depth the opaque surfaces wrote as a texture, which
+// a pass with it attached cannot (decals are drawn the same way). A fragment
+// behind the scene is dropped, which is the depth test; one in front of it
+// fades out over the last stretch before the surface it would cross, which is
+// what stops a puff of smoke drawing a hard line where it meets the ground.
+// The stretch is the particle's own half-size, up to a metre: a spark stays
+// crisp and a cloud fades over the cloud's depth.
 
 cbuffer GpuParticleUniforms : register(b0, space1)
 {
@@ -34,7 +37,13 @@ cbuffer GpuParticleLighting : register(b0, space3)
     float4 ParticleFogColor;
     // x: fog start, z: 1 / (end - start), zero when fog is off.
     float4 ParticleFogRange;
+    // x near plane, y far plane, zw one over the target's size in pixels.
+    float4 ParticleDepth;
 };
+
+// The opaque scene's depth, as the prepass and the forward pass left it.
+Texture2D SceneDepth : register(t0, space2);
+SamplerState SceneDepthSampler : register(s0, space2);
 
 struct VertexInput
 {
@@ -54,6 +63,9 @@ struct Interpolants
     float2 Corner : TEXCOORD1;
     float2 Params : TEXCOORD2;
     float Distance : TEXCOORD3;
+    // Its distance along the view axis and its half-size, for the fade.
+    float ViewDepth : TEXCOORD4;
+    float HalfSize : TEXCOORD5;
 };
 
 Interpolants VertexMain(VertexInput input)
@@ -72,6 +84,8 @@ Interpolants VertexMain(VertexInput input)
     output.Corner = corner;
     output.Params = input.Params.xy;
     output.Distance = length(input.PositionSize.xyz);
+    output.ViewDepth = output.Position.w;
+    output.HalfSize = halfSize;
     return output;
 }
 
@@ -92,7 +106,14 @@ float4 FragmentMain(Interpolants input) : SV_Target0
         coverage = 1.0f - smoothstep(1.0f - edge, 1.0f, radius);
     }
 
-    const float alpha = input.Color.a * coverage;
+    // The scene's depth at this pixel, linear, against the particle's own.
+    const float near = ParticleDepth.x;
+    const float far = ParticleDepth.y;
+    const float device = SceneDepth.SampleLevel(SceneDepthSampler, input.Position.xy * ParticleDepth.zw, 0.0f).r;
+    const float scene = (near * far) / max(far - device * (far - near), 1e-6f);
+    const float soft = saturate((scene - input.ViewDepth) / clamp(input.HalfSize, 1e-3f, 1.0f));
+
+    const float alpha = input.Color.a * coverage * soft;
     if (alpha <= 0.002f)
         discard;
 

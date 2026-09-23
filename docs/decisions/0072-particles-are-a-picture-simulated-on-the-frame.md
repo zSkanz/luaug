@@ -39,11 +39,17 @@ blends, an emitting one adds, and one halfway is both -- without a second
 pipeline or a sort between the kinds. Particles are sorted back to front among
 themselves and drawn after every surface, transparent ones included.
 
-**4. Not soft, and the RHI stays frozen.** Particles are depth-tested and never
-depth-written, and a particle crossing a surface shows a hard edge there. The
-read-only depth attachment stays unmade: soft particles are the one thing F2
-gives up for it, and the decal half of the same need is answered differently
-(below), so the change would buy one visual refinement for a frozen interface.
+**4. Soft, and the RHI stays frozen** -- revised on 2026-09-23, when decision 5
+showed the way. First written as "not soft": a particle crossing a surface
+showed a hard edge there, because fading it needs the scene's depth read in a
+pass that also tests against it. The answer decals found answers this too. On
+a frame with particles the forward pass closes before them, and the particle
+pass has no depth attachment. It reads the depth the opaque surfaces wrote as
+a texture. The shader drops a fragment behind the scene, which is the depth
+test by hand. It fades one in front of the scene over the particle's own
+half-size, capped at a metre, so a spark stays crisp and a cloud fades over
+its own depth. The read-only depth attachment is still unmade, and nothing
+waits on it now.
 
 **5. Decals multiply, in a pass of their own between the opaque surfaces and
 the transparent ones** -- revised on 2026-09-23 when they were built, from the
@@ -75,5 +81,6 @@ brightening -- a white pixel is no change -- and that is stated in `Decal`'s doc
 walks instances would walk them, for data nothing reads.
 
 **Unfreezing the RHI for a read-only depth attachment now.** Deferred rather than
-refused: it buys soft particles, and it becomes worth it the day a second caller
--- water foam, a screen-space effect -- needs the same thing.
+refused. Soft particles no longer need it, since they close the pass instead,
+at the cost of one pass break on a frame that has particles. It becomes worth
+it the day a caller needs depth read and tested in the same draw.
