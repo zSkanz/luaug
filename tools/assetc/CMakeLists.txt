@@ -43,11 +43,19 @@ target_link_libraries(assetc PRIVATE luaug::warnings luaug_assetc_lib luaug::pla
 
 # The catalog beside the binary, for the same reason `luaug-host` gets one: an
 # engine error this tool relays should read as prose rather than as a bare key.
-add_custom_command(TARGET assetc POST_BUILD
+#
+# **A target that runs every build, not a post-build step.** A post-build step
+# runs when the binary relinks, and a change to the catalog alone relinks
+# nothing -- so the staged copy went stale, and the packager then laid this
+# stale copy over the host's fresh one: a message added in the same commit
+# printed as `[i18n:missing]` from the packaged build. `copy_if_different` makes
+# running it every time cost a comparison.
+add_custom_target(assetc_catalog ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/i18n/en.json"
-        "$<TARGET_FILE_DIR:assetc>/content/i18n/en.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/content/i18n/en.json"
     COMMENT "Staging the engine message catalog for assetc")
+add_dependencies(assetc assetc_catalog)
 
 if(LUAUG_BUILD_TESTS)
     add_executable(luaug_assetc_tests

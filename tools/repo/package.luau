@@ -310,7 +310,11 @@ local function run(): number
         if copyFile(from, joined(target, executableName(tool)), tool) then
             local content = joined(buildRoot, editorPreset, "tools", tool, "content")
             if fs.exists(content) then
-                copyTree(content, joined(target, "content"))
+                -- **Never the catalog.** The host's is already there and is the
+                -- one every binary in the folder reads; a tool's staged copy
+                -- laid over it once shipped a stale catalog, and a message
+                -- added in that same commit printed as `[i18n:missing]`.
+                copyTree(content, joined(target, "content"), { i18n = true })
             end
         end
     end

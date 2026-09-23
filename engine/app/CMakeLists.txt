@@ -150,10 +150,20 @@ endif()
 # The catalog ships beside the binary as content, because the host resolves it
 # relative to its own location rather than the source tree -- the same shape a
 # packaged build uses (architecture.md §8).
-add_custom_command(TARGET luaug_host POST_BUILD
+#
+# **The catalog is staged by a target that runs every build**, not by this
+# post-build step: a post-build step runs only when the host relinks, and a
+# change to `en.json` alone relinks nothing -- which left a message added in the
+# same commit printing as `[i18n:missing]`. `copy_if_different` makes it a
+# comparison when nothing changed.
+add_custom_target(luaug_host_catalog ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/i18n/en.json"
-        "$<TARGET_FILE_DIR:luaug_host>/content/i18n/en.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/content/i18n/en.json"
+    COMMENT "Staging the engine message catalog")
+add_dependencies(luaug_host luaug_host_catalog)
+
+add_custom_command(TARGET luaug_host POST_BUILD
     # `@luaug/…` ships as content for the same reason: a project reads the same
     # file its editor type-checks against, rather than a copy compiled into the
     # binary that nothing can inspect.
