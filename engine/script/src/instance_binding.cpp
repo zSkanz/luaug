@@ -5,6 +5,7 @@
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
+#include "luaug/script/remote.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 
@@ -152,6 +153,11 @@ int instanceIndex(lua_State* L)
         return 1;
     }
 
+    // A callback is a member too (ADR 0079), and a script reads back the
+    // function it assigned.
+    if (remoteCallbackGet(L, id, key))
+        return 1;
+
     // **Then a child by that name** (ADR 0078, reversing 0061 on the owner's
     // word): `workspace.Baseplate` reaches the first child called Baseplate.
     // A member always wins over a child of the same name, so a part named
@@ -181,8 +187,11 @@ int instanceNewIndex(lua_State* L)
     const ClassId classId = w.classOf(id);
 
     const scene::PropertyDesc* property = w.classes().findProperty(classId, name);
-    if (property == nullptr)
+    if (property == nullptr) {
+        if (remoteCallbackSet(L, id, key, 3))
+            return 0;
         raiseUnknownInstanceMember(L, id, key);
+    }
     if (property->readOnly || property->set == nullptr)
         raisePropertyError(L, LUAUG_TR("scene.err.read_only_property"), id, *property);
 

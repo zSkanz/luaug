@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 7;
+inline constexpr u32 ProtocolVersion = 8;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -156,6 +156,7 @@ inline constexpr ClassDesc Classes[] = {
     {"ParticleEmitter", ParticleEmitterFields, -1, false},
     {"Folder", {}, -1, false},
     {"RemoteEvent", {}, -1, false},
+    {"RemoteFunction", {}, -1, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.

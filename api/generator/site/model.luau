@@ -253,6 +253,9 @@ local function build(definition: Schema.Definition): Model
         for _, event in orEmpty(class.Events) do
             declare(`{class.Name}.{event.Name}`, "member", `{page}#{event.Name}`, class.Name, event.Doc)
         end
+        for _, callback in orEmpty(class.Callbacks) do
+            declare(`{class.Name}.{callback.Name}`, "member", `{page}#{callback.Name}`, class.Name, callback.Doc)
+        end
     end
 
     for _, datatype in datatypes do

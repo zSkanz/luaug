@@ -174,6 +174,32 @@ local function emitEvents(lines: { string }, events: { Schema.Event })
     end
 end
 
+local function emitCallbacks(lines: { string }, callbacks: { Schema.Callback })
+    if #callbacks == 0 then
+        return
+    end
+    table.insert(lines, "## Callbacks")
+    table.insert(lines, "")
+    table.insert(lines, "A function a script **assigns** and the engine calls: one at a time, and")
+    table.insert(lines, "assigning nil removes it.")
+    table.insert(lines, "")
+    for _, callback in
+        sortedCopy(callbacks, function(c)
+            return c.Name
+        end)
+    do
+        local parts: { string } = {}
+        for _, parameter in callback.Parameters do
+            table.insert(parts, `{parameter.Name}: {parameter.Type}`)
+        end
+        local returns = if #callback.Returns == 0 then "()" else table.concat(callback.Returns, ", ")
+        table.insert(lines, `### \`{callback.Name} = function({table.concat(parts, ", ")}): {returns}\``)
+        table.insert(lines, "")
+        table.insert(lines, callback.Doc)
+        table.insert(lines, "")
+    end
+end
+
 local Written = 0
 
 local function write(name: string, lines: { string })
@@ -227,6 +253,7 @@ local function classPage(class: Schema.Class)
     emitProperties(lines, orEmpty(class.Properties), "Properties")
     emitMethods(lines, orEmpty(class.Methods), "Methods")
     emitEvents(lines, orEmpty(class.Events))
+    emitCallbacks(lines, orEmpty(class.Callbacks))
 
     write(anchorFor(class.Name), lines)
 end

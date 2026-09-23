@@ -340,4 +340,14 @@ bool enqueueTaskCallback(lua_State* L, int threadRef, u32 argBase, u32 argCount)
 // is reported. Returns true when the thread is finished with.
 bool resumeScheduled(lua_State* L, lua_State* co, int argCount);
 
+// The same, raising the error on top of `co`'s stack where the coroutine is
+// parked, so a caller waiting on something that failed sees it fail at its
+// own call. The error is reported only if the coroutine does not catch it.
+bool resumeScheduledWithError(lua_State* L, lua_State* co);
+
+// A new coroutine's first resume, answering the raw status: `LUA_OK` finished
+// with its results on `co`'s stack, `LUA_YIELD` or `LUA_BREAK` parked, and
+// anything else an error, already reported the way a handler's is.
+int startScheduled(lua_State* L, lua_State* co, int argCount);
+
 } // namespace luaug::script

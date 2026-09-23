@@ -23,6 +23,10 @@
 	`RemoteEvent` the authority made carries "I honked" to it, the authority
 	makes that player's racer hop -- which every window sees, because it is
 	the world -- and tells every machine who it was.
+
+	**H asks a question and waits for the answer** (ADR 0079): a
+	`RemoteFunction` returns how many times this player has honked, which only
+	the authority counts.
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -60,6 +64,13 @@ local space = Instance.new("InputBinding")
 space.KeyCode = Enum.KeyCode.Space
 space.Parent = honkAction
 honkAction.Parent = controls
+local standingAction = Instance.new("InputAction")
+standingAction.Name = "Standing"
+standingAction.Type = Enum.InputActionType.Bool
+local keyH = Instance.new("InputBinding")
+keyH.KeyCode = Enum.KeyCode.H
+keyH.Parent = standingAction
+standingAction.Parent = controls
 controls.Parent = Workspace
 
 local camera = Instance.new("Camera")
@@ -101,6 +112,21 @@ honkAction.Pressed:Connect(function()
 end)
 honk.ClientReceived:Connect(function(who: string)
     print(`multiplayer: {who} honked`)
+end)
+
+-- A question, where a honk is a statement: the handler below answers it on
+-- the authority, and this machine's script waits for that answer.
+local standing: RemoteFunction
+if NetworkService.Authority then
+    standing = Instance.new("RemoteFunction")
+    standing.Name = "Standing"
+    standing.Parent = Workspace
+else
+    standing = Workspace:WaitForChild("Standing") :: RemoteFunction
+end
+standingAction.Pressed:Connect(function()
+    local count = standing:InvokeServerAsync()
+    print(`multiplayer: you have honked {count} time(s)`)
 end)
 
 if not NetworkService.Authority then
@@ -171,13 +197,18 @@ end
 -- A honk makes the honker's racer hop: the SENDER is who the connection says
 -- it is, never anything the message claims.
 local hops: { [BasePart]: number } = {}
+local honks: { [Player]: number } = {}
 honk.ServerReceived:Connect(function(player: Player)
     local racer = racers[player]
     if racer then
         hops[racer] = RunService.SimTime
     end
+    honks[player] = (honks[player] or 0) + 1
     honk:FireAllClients(player.Name)
 end)
+standing.OnServerInvoke = function(player: Player): number
+    return honks[player] or 0
+end
 NetworkService.PlayerAdded:Connect(addRacer)
 NetworkService.PlayerRemoving:Connect(function(player: Player)
     local racer = racers[player]
@@ -185,6 +216,7 @@ NetworkService.PlayerRemoving:Connect(function(player: Player)
         racer:Destroy()
         racers[player] = nil
     end
+    honks[player] = nil
 end)
 
 RunService.Heartbeat:Connect(function(dt: number)

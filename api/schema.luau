@@ -195,6 +195,20 @@ export type Event = {
     Doc: string,
 }
 
+--- **A function the ENGINE calls, which a script assigns**: `OnServerInvoke`.
+---
+--- Not an event, because an event has any number of listeners and answers
+--- nothing, and the whole point of one of these is the answer: exactly one
+--- function, whose return values go somewhere. Assigning replaces the one that
+--- was there, and assigning nil removes it. Named `On*` for that reason -- it
+--- is what happens ON a call, and it reads as the assignment it is.
+export type Callback = {
+    Name: string,
+    Parameters: { Parameter },
+    Returns: { TypeName },
+    Doc: string,
+}
+
 export type Class = {
     Name: string,
     --- Absent only for `Instance` itself, the root of the hierarchy.
@@ -224,6 +238,7 @@ export type Class = {
     Properties: { Property }?,
     Methods: { Method }?,
     Events: { Event }?,
+    Callbacks: { Callback }?,
     Doc: string,
 }
 
@@ -503,6 +518,16 @@ local function checkEvent(errors: { string }, owner: string, event: Event)
     end
 end
 
+local function checkCallback(errors: { string }, owner: string, callback: Callback)
+    local where = `{owner}.{callback.Name}`
+    if not isPascalCase(callback.Name) or not startsWithAny(callback.Name, { "On" }) then
+        table.insert(errors, `{where}: callbacks are PascalCase and begin with On`)
+    end
+    if callback.Doc == "" then
+        table.insert(errors, `{where}: every member carries doc text (§5)`)
+    end
+end
+
 --- `x or {}` produces a `{T} | {}` union that the new solver will not iterate,
 --- so every optional list is bound to a typed local first. It reads as
 --- ceremony and is the difference between compiling and not.
@@ -543,6 +568,10 @@ function Schema.validate(definition: Definition): { string }
         local properties: { Property } = class.Properties or {}
         local methods: { Method } = class.Methods or {}
         local events: { Event } = class.Events or {}
+        local callbacks: { Callback } = class.Callbacks or {}
+        for _, callback in callbacks do
+            checkCallback(errors, class.Name, callback)
+        end
         for _, property in properties do
             checkProperty(errors, class.Name, property)
         end

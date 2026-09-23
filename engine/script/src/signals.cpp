@@ -691,6 +691,25 @@ bool resumeScheduled(lua_State* L, lua_State* co, int argCount)
     return resumeHandler(L, co, argCount);
 }
 
+bool resumeScheduledWithError(lua_State* L, lua_State* co)
+{
+    const int status = lua_resumeerror(co, nullptr);
+    if (status == LUA_OK)
+        return true;
+    if (status == LUA_YIELD || status == LUA_BREAK)
+        return false;
+    reportHandlerError(L, co, status);
+    return true;
+}
+
+int startScheduled(lua_State* L, lua_State* co, int argCount)
+{
+    const int status = lua_resume(co, nullptr, argCount);
+    if (status != LUA_OK && status != LUA_YIELD && status != LUA_BREAK)
+        reportHandlerError(L, co, status);
+    return status;
+}
+
 void registerSignals(lua_State* L)
 {
     VmContext& ctx = context(L);

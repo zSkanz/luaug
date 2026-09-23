@@ -1920,6 +1920,43 @@
       ]
     },
     {
+      "Name": "RemoteFunction",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "InvokeServerAsync",
+          "Parameters": [
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["...any"],
+          "Yields": true,
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [],
+      "Callbacks": [
+        {
+          "Name": "OnServerInvoke",
+          "Parameters": [
+            {
+              "Name": "player",
+              "Type": "Player"
+            },
+            {
+              "Name": "arguments",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["...any"]
+        }
+      ]
+    },
+    {
       "Name": "RunService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],

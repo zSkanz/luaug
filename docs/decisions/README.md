@@ -118,3 +118,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0075](0075-terrain-and-block-worlds-stream-in-cells.md) | Terrain and block worlds stream from disk in 64 m cells of their own; an edited cell is never evicted, and the world waits for its ground once |
 | [0077](0077-game-messages-cross-the-wire-through-a-remote-event.md) | Game messages cross the wire through a replicated `RemoteEvent`; the sender is named by the connection, values travel encoded by the script module, and messages ride the Control channel behind the spawns they name |
 | [0078](0078-a-dot-reaches-a-child-and-the-scene-is-typed.md) | A dot reaches a child after the members, and the scene's tree is typed from the scene itself (supersedes 0061) |
+| [0079](0079-a-client-asks-through-a-remote-function.md) | A client asks the authority through a `RemoteFunction` and waits for the answer; the server never waits on a client |

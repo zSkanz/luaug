@@ -143,6 +143,12 @@ struct RemoteMessage
     core::InstanceId player;
     std::vector<u8> payload;
     std::vector<core::InstanceId> refs;
+    // `RemoteFunction` (ADR 0079): the caller's number for this question, zero
+    // for a `RemoteEvent` message. With `reply`, this is the answer to it, and
+    // with `failed` the answer is the error the handler raised, as one string.
+    u32 call = 0;
+    bool reply = false;
+    bool failed = false;
     // How many sends it has waited through for its event to reach the network:
     // an event created since the authority last captured has no network id
     // yet, and a replica not yet welcomed has nobody to send to.

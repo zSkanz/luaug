@@ -156,6 +156,31 @@ public:
 
     std::vector<ChildWaiter> childWaiters;
 
+    // `RemoteFunction` (ADR 0079). Each handler by its instance, as a
+    // registry ref; the callers parked in `InvokeServerAsync` by call number;
+    // and the handlers that yielded, until they finish and their answer goes.
+    struct InvokeHandler
+    {
+        core::InstanceId remote;
+        int functionRef = -1;
+    };
+    std::vector<InvokeHandler> invokeHandlers;
+    struct InvokeWaiter
+    {
+        core::u32 call = 0;
+        int threadRef = -1;
+    };
+    std::vector<InvokeWaiter> invokeWaiters;
+    struct InvokeRunning
+    {
+        int threadRef = -1;
+        core::InstanceId remote;
+        core::InstanceId player;
+        core::u32 call = 0;
+    };
+    std::vector<InvokeRunning> invokeRunning;
+    core::u32 nextInvoke = 1;
+
     // `StreamingService.LoadAreaAsync` (M7), the same shape as a child waiter
     // and for the same reason: the caller is parked on a condition the world
     // will satisfy later, and the host is what notices. What a teleport calls

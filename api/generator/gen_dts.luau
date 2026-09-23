@@ -184,12 +184,22 @@ local function emitMembers(
     properties: { Schema.Property }?,
     methods: { Schema.Method }?,
     events: { Schema.Event }?,
-    singletonNames: { string }?
+    singletonNames: { string }?,
+    callbacks: { Schema.Callback }?
 )
     for _, property in orEmpty(properties) do
         local access = if property.ReadOnly then "read " else ""
         emitDoc(lines, "    ", property.Doc)
         table.insert(lines, `    {access}{property.Name}: {translateType(property.Type)}`)
+    end
+    -- A callback is a writable field holding a function, or nil for none: a
+    -- script assigns it and the engine calls it.
+    for _, callback in orEmpty(callbacks) do
+        emitDoc(lines, "    ", callback.Doc)
+        table.insert(
+            lines,
+            `    {callback.Name}: (({parameterList(callback.Parameters)}) -> {returnList(callback.Returns)})?`
+        )
     end
     for _, event in orEmpty(events) do
         local parts: { string } = {}
@@ -356,7 +366,7 @@ for _, class in Classes do
         then `declare extern type {class.Name} extends {class.Extends} with`
         else `declare extern type {class.Name} with`
     table.insert(Lines, header)
-    emitMembers(Lines, class.Properties, class.Methods, class.Events, ServiceNames)
+    emitMembers(Lines, class.Properties, class.Methods, class.Events, ServiceNames, class.Callbacks)
     table.insert(Lines, "end")
     table.insert(Lines, "")
 end

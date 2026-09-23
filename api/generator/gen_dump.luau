@@ -327,6 +327,19 @@ local function methodNode(method: Schema.Method): Node
     return objectNode(fields)
 end
 
+local function callbackKey(callback: Schema.Callback): string
+    return callback.Name
+end
+
+local function callbackNode(callback: Schema.Callback): Node
+    MemberCount += 1
+    return objectNode({
+        field("Name", stringNode(callback.Name)),
+        field("Parameters", parametersNode(callback.Parameters)),
+        field("Returns", returnsNode(callback.Returns)),
+    })
+end
+
 local function eventKey(event: Schema.Event): string
     return event.Name
 end
@@ -397,6 +410,11 @@ local function classNode(class: Schema.Class): Node
     table.insert(fields, field("Properties", memberArray(class.Properties, propertyKey, propertyNode)))
     table.insert(fields, field("Methods", memberArray(class.Methods, methodKey, methodNode)))
     table.insert(fields, field("Events", memberArray(class.Events, eventKey, eventNode)))
+    -- Only where a class has one, so the many that do not keep the shape they
+    -- had before callbacks existed.
+    if class.Callbacks ~= nil and #class.Callbacks > 0 then
+        table.insert(fields, field("Callbacks", memberArray(class.Callbacks, callbackKey, callbackNode)))
+    end
     return objectNode(fields)
 end
 

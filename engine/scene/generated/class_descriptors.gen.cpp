@@ -1596,6 +1596,25 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     remoteEventDesc.events = remoteEventEvents;
     classes.registerClass(remoteEventDesc);
 
+    // --- RemoteFunction ---
+    static std::array<MethodDesc, 1> remoteFunctionMethods;
+    remoteFunctionMethods = {{
+        MethodDesc{
+            .name = atoms.intern("InvokeServerAsync"),
+            .yields = true,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Asks the authority, yields until it answers, and returns what its `OnServerInvoke` returned. When the handler raised an error, or the server has no handler, this raises too. On an authority with a player of its own -- solo or hosting -- the handler is called there, as that player, at the start of the next tick; a dedicated server has no player to ask as, and refuses.",
+        },
+    }};
+    ClassDescriptor remoteFunctionDesc;
+    remoteFunctionDesc.name = atoms.intern("RemoteFunction");
+    remoteFunctionDesc.super = instanceClass;
+    remoteFunctionDesc.flags = ClassFlags::None;
+    remoteFunctionDesc.defaultName = atoms.intern("RemoteFunction");
+    remoteFunctionDesc.doc = "A question a client asks the server and waits for the answer to (ADR 0079): \"what is in my inventory?\", \"may I open this door?\". Create it on the authority under `Workspace` and give it an `OnServerInvoke`; a client calls `InvokeServerAsync`, which yields until the server's answer arrives and returns it.\012\012What travels is what a `RemoteEvent` carries, both ways, under the same limits. **The client says what it wants; the server decides**: the player who asked is the handler's first argument, taken from the connection.\012\012**Only a client asks.** There is no way for the server to call a client and wait: a client that never answered would hold the server's script forever, and a `RemoteEvent` to that client says the same thing without waiting.";
+    remoteFunctionDesc.methods = remoteFunctionMethods;
+    classes.registerClass(remoteFunctionDesc);
+
     // --- Player ---
     static std::array<PropertyDesc, 2> playerProperties;
     playerProperties = {{

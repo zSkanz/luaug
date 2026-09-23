@@ -468,6 +468,12 @@ local Classes: { Schema.Class } = {
             .. "of its own; a message is not state.",
         Fields = NoFields,
     },
+    {
+        Name = "RemoteFunction",
+        Doc = "Replicated for the reason `RemoteEvent` is (ADR 0079): a question and its answer both "
+            .. "name it. Its handler is a function on the authority and never travels.",
+        Fields = NoFields,
+    },
 }
 
 --- Recorded by name, because a class nobody decided about and a class
@@ -751,9 +757,11 @@ local Messages: { Schema.Message } = {
         Id = 9,
         Channel = "Control",
         Direction = "ToAuthority",
-        Doc = "`RemoteEvent:FireServer` (protocol 7): the event's network id, the network ids of the "
-            .. "instances the arguments name, and the arguments as the script module encoded them. "
-            .. "The sender is the connection's player, never anything the message says.",
+        Doc = "`RemoteEvent:FireServer` (protocol 7): the event's network id, a call number and a "
+            .. "flags byte (protocol 8), the network ids of the instances the arguments name, and the "
+            .. "arguments as the script module encoded them. A call number that is not zero is "
+            .. "`RemoteFunction:InvokeServerAsync` asking, and names a `RemoteFunction`; zero names a "
+            .. "`RemoteEvent`. The sender is the connection's player, never anything the message says.",
     },
     {
         Name = "RemoteToReplica",
@@ -762,7 +770,9 @@ local Messages: { Schema.Message } = {
         Direction = "ToReplica",
         Doc = "`RemoteEvent:FireClient` and `FireAllClients`, laid out as `RemoteToAuthority` is. On "
             .. "the Control channel, after the spawns of the same send, so an event created and fired "
-            .. "in one tick is never named before it exists.",
+            .. "in one tick is never named before it exists. With the reply flag set it is a "
+            .. "`RemoteFunction`'s answer to the call number it carries, and with the failed flag the "
+            .. "answer is the error the handler raised.",
     },
 }
 

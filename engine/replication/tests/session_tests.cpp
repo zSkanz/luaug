@@ -910,3 +910,71 @@ TEST_CASE("an event created and fired in one tick is never named before the repl
     REQUIRE(received.size() == 1);
     CHECK(received[0].remote == match.copyOf(remote));
 }
+
+TEST_CASE("a question reaches the authority with its number, and its answer reaches only the asker")
+{
+    PlayedMatch match;
+    const core::InstanceId function =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("RemoteFunction")));
+    const core::InstanceId event =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("RemoteEvent")));
+    REQUIRE_FALSE(match.server.world.setParent(function, match.server.workspace).has_value());
+    REQUIRE_FALSE(match.server.world.setParent(event, match.server.workspace).has_value());
+    match.run(3);
+    const core::InstanceId functionHere = match.copyOf(function);
+    const core::InstanceId eventHere = match.copyOf(event);
+    REQUIRE(functionHere.valid());
+    REQUIRE(eventHere.valid());
+
+    // What `InvokeServerAsync` queues on a replica.
+    scene::RemoteMessage question;
+    question.remote = functionHere;
+    question.toServer = true;
+    question.call = 41;
+    question.payload = {1, 3};
+    match.client.world.engineState().remoteOutbox.push_back(question);
+    match.run(2);
+    std::vector<scene::RemoteMessage>& arrived = match.server.world.engineState().remoteInbox;
+    REQUIRE(arrived.size() == 1);
+    CHECK(arrived[0].remote == function);
+    CHECK(arrived[0].call == 41u);
+    CHECK_FALSE(arrived[0].reply);
+    CHECK(arrived[0].player == match.remote());
+    arrived.clear();
+
+    // The authority's answer, to that player, carrying the number back.
+    scene::RemoteMessage answer;
+    answer.remote = function;
+    answer.call = 41;
+    answer.reply = true;
+    answer.failed = true;
+    answer.userId = match.server.world.players().find(match.remote())->userId;
+    answer.payload = {1, 0};
+    match.server.world.engineState().remoteOutbox.push_back(answer);
+    match.run(2);
+    std::vector<scene::RemoteMessage>& received = match.client.world.engineState().remoteInbox;
+    REQUIRE(received.size() == 1);
+    CHECK(received[0].remote == functionHere);
+    CHECK(received[0].call == 41u);
+    CHECK(received[0].reply);
+    CHECK(received[0].failed);
+    received.clear();
+
+    // **Each kind of message names its own kind of instance.** A question
+    // aimed at an event, and a plain message aimed at a function, are both
+    // dropped -- and so is a client pretending to answer.
+    const core::u64 droppedBefore = match.authority->stats().messagesDropped;
+    scene::RemoteMessage wrongKind = question;
+    wrongKind.remote = eventHere;
+    match.client.world.engineState().remoteOutbox.push_back(wrongKind);
+    scene::RemoteMessage plain = question;
+    plain.call = 0;
+    match.client.world.engineState().remoteOutbox.push_back(plain);
+    scene::RemoteMessage forged = question;
+    forged.reply = true;
+    match.client.world.engineState().remoteOutbox.push_back(forged);
+    match.run(2);
+    CHECK(match.server.world.engineState().remoteInbox.empty());
+    CHECK(match.authority->stats().messagesDropped == droppedBefore + 3);
+    CHECK(match.replica->checksumFailures() == 0);
+}

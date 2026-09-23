@@ -193,13 +193,22 @@ void sendBytes(net::ITransport& transport, net::PeerId peer, const std::vector<u
         stats.bytesSent += bytes.size();
 }
 
+// The flags byte after a message's call number (protocol 8).
+constexpr u8 RemoteReplyFlag = 0x1;
+constexpr u8 RemoteFailedFlag = 0x2;
+
 // **A `RemoteEvent` message on the wire** (ADR 0077): the event's network id,
-// the network ids of the instances its arguments name, then the payload exactly
-// as the script module wrote it. Nothing here parses the payload.
-void writeRemote(Writer& out, MessageType type, u32 remote, std::span<const u32> refs, std::span<const u8> payload)
+// the call number and flags a `RemoteFunction` uses (ADR 0079), the network ids
+// of the instances its arguments name, then the payload exactly as the script
+// module wrote it. Nothing here parses the payload.
+void writeRemote(Writer& out, MessageType type, u32 remote, const scene::RemoteMessage& message,
+                 std::span<const u32> refs)
 {
+    const std::span<const u8> payload = message.payload;
     out.u8v(static_cast<u8>(type));
     out.u32v(remote);
+    out.u32v(message.call);
+    out.u8v(static_cast<u8>((message.reply ? RemoteReplyFlag : 0) | (message.failed ? RemoteFailedFlag : 0)));
     out.u16v(static_cast<u16>(refs.size()));
     for (const u32 ref : refs)
         out.u32v(ref);
@@ -210,6 +219,8 @@ void writeRemote(Writer& out, MessageType type, u32 remote, std::span<const u32>
 struct RemoteOnWire
 {
     u32 remote = 0;
+    u32 call = 0;
+    u8 flags = 0;
     std::vector<u32> refs;
     std::span<const u8> payload;
 };
@@ -219,6 +230,8 @@ struct RemoteOnWire
 [[nodiscard]] bool readRemote(Reader& in, RemoteOnWire& out)
 {
     out.remote = in.u32v();
+    out.call = in.u32v();
+    out.flags = in.u8v();
     const u16 count = in.u16v();
     for (u16 at = 0; at < count && in.ok(); ++at)
         out.refs.push_back(in.u32v());
@@ -230,12 +243,17 @@ struct RemoteOnWire
     return true;
 }
 
-[[nodiscard]] bool isRemoteEvent(const scene::World& world, InstanceId id)
+// Whether `id` is what a message with this call number may name: a
+// `RemoteEvent` for a plain message, a `RemoteFunction` for a question or an
+// answer. A peer is not trusted to have picked the right one.
+[[nodiscard]] bool isRemoteTarget(const scene::World& world, InstanceId id, u32 call)
 {
     if (!world.alive(id))
         return false;
     const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
-    return descriptor != nullptr && world.atoms().text(descriptor->name) == "RemoteEvent";
+    if (descriptor == nullptr)
+        return false;
+    return world.atoms().text(descriptor->name) == (call != 0 ? "RemoteFunction" : "RemoteEvent");
 }
 
 } // namespace
@@ -337,7 +355,7 @@ void AuthoritySession::sendMessages(scene::World& world)
         for (const InstanceId ref : message.refs)
             refs.push_back(netIdOf(ref).value);
         Writer out;
-        writeRemote(out, MessageType::RemoteToReplica, remote.value, refs, message.payload);
+        writeRemote(out, MessageType::RemoteToReplica, remote.value, message, refs);
         for (Peer& peer : m_peers) {
             if (!peer.welcomed || (message.userId != 0 && peer.userId != message.userId))
                 continue;
@@ -453,13 +471,16 @@ void AuthoritySession::receive(scene::World& world, InstanceId root)
                     break;
                 }
                 const InstanceId remote = instanceOfNet(world, wire.remote);
-                if (!isRemoteEvent(world, remote)) {
+                // A client asks and never answers: a reply from one is not a
+                // thing, and neither is a failure.
+                if (!isRemoteTarget(world, remote, wire.call) || wire.flags != 0) {
                     m_stats.messagesDropped += 1;
                     break;
                 }
                 scene::RemoteMessage message;
                 message.remote = remote;
                 message.toServer = true;
+                message.call = wire.call;
                 message.player = peer->player;
                 message.payload.assign(wire.payload.begin(), wire.payload.end());
                 for (const u32 ref : wire.refs)
@@ -933,12 +954,19 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
                 break;
             }
             const auto local = m_locals.find(wire.remote);
-            if (local == m_locals.end() || !isRemoteEvent(world, local->second)) {
+            const bool reply = (wire.flags & RemoteReplyFlag) != 0;
+            // The authority answers and never asks: a call number here is an
+            // answer or nothing.
+            if (local == m_locals.end() || !isRemoteTarget(world, local->second, wire.call) ||
+                reply != (wire.call != 0)) {
                 m_stats.messagesDropped += 1;
                 break;
             }
             scene::RemoteMessage message;
             message.remote = local->second;
+            message.call = wire.call;
+            message.reply = reply;
+            message.failed = (wire.flags & RemoteFailedFlag) != 0;
             message.payload.assign(wire.payload.begin(), wire.payload.end());
             // An instance this machine was never sent arrives as nil.
             for (const u32 ref : wire.refs) {
@@ -993,7 +1021,7 @@ void ReplicaSession::sendMessages(scene::World& world)
         for (const InstanceId ref : message.refs)
             refs.push_back(netIdOf(ref));
         Writer out;
-        writeRemote(out, MessageType::RemoteToAuthority, remote, refs, message.payload);
+        writeRemote(out, MessageType::RemoteToAuthority, remote, message, refs);
         sendBytes(m_transport, m_authority, out.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
         m_stats.messagesSent += 1;
     }

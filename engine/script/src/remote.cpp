@@ -1,9 +1,11 @@
 #include "luaug/script/remote.h"
 
+#include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/scene/players.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/binding.h"
+#include "luaug/script/services.h"
 #include "luaug/script/signals.h"
 
 #include <lua.h>
@@ -13,6 +15,7 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -331,10 +334,253 @@ int remoteFireAllClients(lua_State* L)
     return 0;
 }
 
+// --- RemoteFunction (ADR 0079) -------------------------------------------------
+
+constexpr std::string_view InvokeCallback = "OnServerInvoke";
+// An error's text travels whole up to here; past it, the start says enough.
+constexpr usize MaxInvokeErrorText = 4096;
+
+[[nodiscard]] ServiceState& invokeState(lua_State* L) noexcept
+{
+    return *context(L).services;
+}
+
+[[nodiscard]] bool isRemoteFunction(const World& w, core::InstanceId id) noexcept
+{
+    if (!w.alive(id))
+        return false;
+    const scene::ClassDescriptor* descriptor = w.classes().find(w.classOf(id));
+    return descriptor != nullptr && w.atoms().text(descriptor->name) == "RemoteFunction";
+}
+
+int remoteInvokeServer(lua_State* L)
+{
+    const core::InstanceId remote = checkInstance(L, 1);
+    World& w = world(L);
+    ServiceState& state = invokeState(L);
+    scene::RemoteMessage message;
+    message.remote = remote;
+    message.toServer = true;
+    encodeRemoteArguments(L, 2, lua_gettop(L) - 1, message.payload, message.refs);
+    // Zero means "not a question" on the wire, so the counter skips it when
+    // it wraps.
+    const u32 call = state.nextInvoke++;
+    if (state.nextInvoke == 0)
+        state.nextInvoke = 1;
+    message.call = call;
+    if (onReplica(w)) {
+        w.engineState().remoteOutbox.push_back(std::move(message));
+    }
+    else {
+        // **The authority asks itself**, as its own player, at the start of the
+        // next tick -- the moment a replica's question would be answered too.
+        const core::InstanceId local = scene::localPlayerOf(w);
+        if (!local.valid())
+            raise(L, LUAUG_TR("net.err.remote_no_player"));
+        message.player = local;
+        w.engineState().remoteInbox.push_back(std::move(message));
+    }
+    lua_pushthread(L);
+    const int threadRef = lua_ref(L, -1);
+    lua_pop(L, 1);
+    state.invokeWaiters.push_back(ServiceState::InvokeWaiter{call, threadRef});
+    return lua_yield(L, 0);
+}
+
+// The answer's values, encoded under protection: a handler that returns a
+// function is the handler's mistake, and it is answered as a failure rather
+// than raised into the tick.
+int protectedEncode(lua_State* L)
+{
+    auto* answer = static_cast<scene::RemoteMessage*>(lua_tolightuserdata(L, 1));
+    encodeRemoteArguments(L, 2, lua_gettop(L) - 1, answer->payload, answer->refs);
+    return 0;
+}
+
+void failAnswer(lua_State* L, scene::RemoteMessage& answer, std::string text)
+{
+    if (text.size() > MaxInvokeErrorText)
+        text.resize(MaxInvokeErrorText);
+    answer.failed = true;
+    lua_pushlstring(L, text.data(), text.size());
+    encodeRemoteArguments(L, lua_gettop(L), 1, answer.payload, answer.refs);
+    lua_pop(L, 1);
+}
+
+// Resumes the caller parked on `answer.call`, with the answer or its error.
+void deliverAnswer(lua_State* L, const scene::RemoteMessage& answer)
+{
+    std::vector<ServiceState::InvokeWaiter>& waiters = invokeState(L).invokeWaiters;
+    const auto found = std::find_if(waiters.begin(), waiters.end(),
+                                    [&](const ServiceState::InvokeWaiter& w) { return w.call == answer.call; });
+    if (found == waiters.end())
+        return;
+    const int threadRef = found->threadRef;
+    waiters.erase(found);
+
+    lua_getref(L, threadRef);
+    lua_State* co = lua_tothread(L, -1);
+    if (co == nullptr) {
+        lua_pop(L, 1);
+        (void)lua_unref(L, threadRef);
+        return;
+    }
+    const int decoded = decodeRemoteArguments(co, answer.payload, answer.refs);
+    bool finished = false;
+    if (answer.failed) {
+        if (decoded != 1) {
+            // A failure is one string; anything else is a payload somebody
+            // mangled, and the caller still has to learn it failed.
+            if (decoded > 0)
+                lua_pop(co, decoded);
+            lua_pushstring(co, "RemoteFunction: the answer could not be read");
+        }
+        finished = resumeScheduledWithError(L, co);
+    }
+    else {
+        finished = resumeScheduled(L, co, std::max(decoded, 0));
+    }
+    lua_pop(L, 1);
+    if (finished)
+        (void)lua_unref(L, threadRef);
+}
+
+// Sends an answer to whoever asked: straight to the waiting caller when the
+// player is this machine's own, over the network otherwise.
+void sendAnswer(lua_State* L, scene::RemoteMessage& answer, core::InstanceId player)
+{
+    World& w = world(L);
+    const scene::PlayerComponent* who = w.players().find(player);
+    if (who == nullptr)
+        return; // they left while the handler ran
+    if (who->local) {
+        deliverAnswer(L, answer);
+        return;
+    }
+    if (networked(w)) {
+        answer.userId = who->userId;
+        w.engineState().remoteOutbox.push_back(std::move(answer));
+    }
+}
+
+[[nodiscard]] std::string remoteName(const World& w, core::InstanceId remote)
+{
+    return w.alive(remote) ? std::string(w.atoms().text(w.name(remote))) : std::string("RemoteFunction");
+}
+
+void failInvoke(lua_State* L, scene::RemoteMessage& answer, core::InstanceId remote, std::string_view text)
+{
+    answer.payload.clear();
+    answer.refs.clear();
+    const std::string name = remoteName(world(L), remote);
+    const core::I18nArg args[] = {{"name", std::string_view{name}}, {"message", text}};
+    failAnswer(L, answer, core::formatKeyPrefixed(LUAUG_TR("net.err.remote_invoke_failed"), args));
+}
+
+// A handler's thread has stopped for good: `status` is `LUA_OK` with its
+// results on `co`'s stack, or the error it raised on top.
+void finishInvoke(lua_State* L, lua_State* co, int status, core::InstanceId remote, core::InstanceId player, u32 call)
+{
+    scene::RemoteMessage answer;
+    answer.remote = remote;
+    answer.call = call;
+    answer.reply = true;
+    if (status == LUA_OK) {
+        const int count = lua_gettop(co);
+        lua_pushcfunction(L, protectedEncode, "OnServerInvoke");
+        lua_pushlightuserdata(L, &answer);
+        lua_xmove(co, L, count);
+        if (lua_pcall(L, count + 1, 0, 0) != LUA_OK) {
+            const char* message = lua_tostring(L, -1);
+            const std::string text = message != nullptr ? message : "";
+            lua_pop(L, 1);
+            failInvoke(L, answer, remote, text);
+        }
+    }
+    else {
+        const char* message = lua_tostring(co, -1);
+        const std::string text = message != nullptr ? message : "";
+        failInvoke(L, answer, remote, text);
+    }
+    sendAnswer(L, answer, player);
+}
+
+// A question arrived at the authority: its handler runs in a thread of its
+// own, and answers now or -- having yielded -- when it finishes.
+void startInvoke(lua_State* L, const scene::RemoteMessage& message)
+{
+    World& w = world(L);
+    ServiceState& state = invokeState(L);
+    const auto handler = std::find_if(state.invokeHandlers.begin(), state.invokeHandlers.end(),
+                                      [&](const ServiceState::InvokeHandler& h) { return h.remote == message.remote; });
+    if (handler == state.invokeHandlers.end() || !isRemoteFunction(w, message.remote)) {
+        scene::RemoteMessage answer;
+        answer.remote = message.remote;
+        answer.call = message.call;
+        answer.reply = true;
+        const std::string name = remoteName(w, message.remote);
+        const core::I18nArg args[] = {{"name", std::string_view{name}}};
+        failAnswer(L, answer, core::formatKeyPrefixed(LUAUG_TR("net.err.remote_no_handler"), args));
+        sendAnswer(L, answer, message.player);
+        return;
+    }
+
+    lua_State* co = lua_newthread(L);
+    const int threadRef = lua_ref(L, -1);
+    lua_pop(L, 1);
+    lua_getref(L, handler->functionRef);
+    lua_xmove(L, co, 1);
+    pushInstance(co, message.player);
+    const int decoded = decodeRemoteArguments(co, message.payload, message.refs);
+    if (decoded < 0) {
+        // Mangled on the way: dropped, as an event's would be.
+        (void)lua_unref(L, threadRef);
+        return;
+    }
+    const int status = startScheduled(L, co, 1 + decoded);
+    if (status == LUA_YIELD || status == LUA_BREAK) {
+        state.invokeRunning.push_back(
+            ServiceState::InvokeRunning{threadRef, message.remote, message.player, message.call});
+        return;
+    }
+    finishInvoke(L, co, status, message.remote, message.player, message.call);
+    (void)lua_unref(L, threadRef);
+}
+
+// The handlers that yielded and have since finished, in the order they
+// started: their answers go now.
+void finishRunningInvokes(lua_State* L)
+{
+    ServiceState& state = invokeState(L);
+    std::vector<ServiceState::InvokeRunning> done;
+    for (usize index = 0; index < state.invokeRunning.size();) {
+        const ServiceState::InvokeRunning& entry = state.invokeRunning[index];
+        lua_getref(L, entry.threadRef);
+        lua_State* co = lua_tothread(L, -1);
+        lua_pop(L, 1);
+        const int status = co != nullptr ? lua_status(co) : LUA_ERRRUN;
+        if (status == LUA_YIELD || status == LUA_BREAK) {
+            ++index;
+            continue;
+        }
+        done.push_back(entry);
+        state.invokeRunning.erase(state.invokeRunning.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+    for (const ServiceState::InvokeRunning& entry : done) {
+        lua_getref(L, entry.threadRef);
+        lua_State* co = lua_tothread(L, -1);
+        if (co != nullptr)
+            finishInvoke(L, co, lua_status(co), entry.remote, entry.player, entry.call);
+        lua_pop(L, 1);
+        (void)lua_unref(L, entry.threadRef);
+    }
+}
+
 constexpr InstanceMethodBinding RemoteMethods[] = {
     {"RemoteEvent", "FireServer", remoteFireServer},
     {"RemoteEvent", "FireClient", remoteFireClient},
     {"RemoteEvent", "FireAllClients", remoteFireAllClients},
+    {"RemoteFunction", "InvokeServerAsync", remoteInvokeServer},
 };
 
 } // namespace
@@ -379,6 +625,8 @@ int decodeRemoteArguments(lua_State* L, std::span<const u8> payload, std::span<c
 void fireRemoteMessages(lua_State* L)
 {
     World& w = world(L);
+    if (!invokeState(L).invokeRunning.empty())
+        finishRunningInvokes(L);
     std::vector<scene::RemoteMessage> inbox;
     inbox.swap(w.engineState().remoteInbox);
     if (inbox.empty())
@@ -386,8 +634,18 @@ void fireRemoteMessages(lua_State* L)
     const core::NameAtom serverEvent = w.atoms().intern("ServerReceived");
     const core::NameAtom clientEvent = w.atoms().intern("ClientReceived");
     for (const scene::RemoteMessage& message : inbox) {
+        // An answer is for a caller, and finds it by number whatever became
+        // of the instance it named.
+        if (message.reply) {
+            deliverAnswer(L, message);
+            continue;
+        }
         if (!w.alive(message.remote))
             continue;
+        if (message.call != 0) {
+            startInvoke(L, message);
+            continue;
+        }
         const scene::EventDesc* event =
             w.classes().findEvent(w.classOf(message.remote), message.toServer ? serverEvent : clientEvent);
         if (event == nullptr)
@@ -406,6 +664,46 @@ void fireRemoteMessages(lua_State* L)
         fireInstanceEvent(L, message.remote, event->slot, top + 1, count + decoded);
         lua_settop(L, top);
     }
+}
+
+bool remoteCallbackGet(lua_State* L, core::InstanceId id, std::string_view key)
+{
+    if (key != InvokeCallback || !isRemoteFunction(world(L), id))
+        return false;
+    const std::vector<ServiceState::InvokeHandler>& handlers = invokeState(L).invokeHandlers;
+    const auto found = std::find_if(handlers.begin(), handlers.end(),
+                                    [&](const ServiceState::InvokeHandler& h) { return h.remote == id; });
+    if (found != handlers.end())
+        lua_getref(L, found->functionRef);
+    else
+        lua_pushnil(L);
+    return true;
+}
+
+bool remoteCallbackSet(lua_State* L, core::InstanceId id, std::string_view key, int valueIndex)
+{
+    World& w = world(L);
+    if (key != InvokeCallback || !isRemoteFunction(w, id))
+        return false;
+    if (!lua_isnil(L, valueIndex) && !lua_isfunction(L, valueIndex))
+        raise(L, LUAUG_TR("net.err.remote_handler"));
+    std::vector<ServiceState::InvokeHandler>& handlers = invokeState(L).invokeHandlers;
+    // The one it replaces goes, and so does any whose instance has: the list
+    // is walked per question, and a destroyed function keeps nothing alive.
+    for (usize index = 0; index < handlers.size();) {
+        if (handlers[index].remote == id || !w.alive(handlers[index].remote)) {
+            (void)lua_unref(L, handlers[index].functionRef);
+            handlers.erase(handlers.begin() + static_cast<std::ptrdiff_t>(index));
+            continue;
+        }
+        ++index;
+    }
+    if (lua_isfunction(L, valueIndex)) {
+        lua_pushvalue(L, valueIndex);
+        handlers.push_back(ServiceState::InvokeHandler{id, lua_ref(L, -1)});
+        lua_pop(L, 1);
+    }
+    return true;
 }
 
 std::span<const InstanceMethodBinding> remoteMethodBindings() noexcept

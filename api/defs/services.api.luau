@@ -425,6 +425,45 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Event },
     },
     {
+        Name = "RemoteFunction",
+        Extends = "Instance",
+        Module = "scene",
+        Doc = 'A question a client asks the server and waits for the answer to (ADR 0079): "what is in my '
+            .. 'inventory?", "may I open this door?". Create it on the authority under `Workspace` and give '
+            .. "it an `OnServerInvoke`; a client calls `InvokeServerAsync`, which yields until the server's "
+            .. "answer arrives and returns it.\n\n"
+            .. "What travels is what a `RemoteEvent` carries, both ways, under the same limits. **The client "
+            .. "says what it wants; the server decides**: the player who asked is the handler's first "
+            .. "argument, taken from the connection.\n\n"
+            .. "**Only a client asks.** There is no way for the server to call a client and wait: a client "
+            .. "that never answered would hold the server's script forever, and a `RemoteEvent` to that "
+            .. "client says the same thing without waiting.",
+        Methods = {
+            {
+                Name = "InvokeServerAsync",
+                Parameters = { { Name = "arguments", Type = "...any" } },
+                Returns = { "...any" },
+                Yields = true,
+                ThreadSafety = "Unsafe",
+                Doc = "Asks the authority, yields until it answers, and returns what its `OnServerInvoke` "
+                    .. "returned. When the handler raised an error, or the server has no handler, this raises "
+                    .. "too. On an authority with a player of its own -- solo or hosting -- the handler is "
+                    .. "called there, as that player, at the start of the next tick; a dedicated server has "
+                    .. "no player to ask as, and refuses.",
+            },
+        } :: { Schema.Method },
+        Callbacks = {
+            {
+                Name = "OnServerInvoke",
+                Parameters = { { Name = "player", Type = "Player" }, { Name = "arguments", Type = "...any" } },
+                Returns = { "...any" },
+                Doc = "Answers `InvokeServerAsync` on the authority, with the player who asked first, and "
+                    .. "returns the answer. It runs in a thread of its own and may yield. Set it once, from "
+                    .. "the server's script: a replica's is never called.",
+            },
+        } :: { Schema.Callback },
+    },
+    {
         Name = "Player",
         Extends = "Instance",
         Module = "scene",

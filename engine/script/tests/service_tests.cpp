@@ -1,6 +1,9 @@
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/world.h"
+#include "luaug/script/remote.h"
 #include "luaug/script/services.h"
+
+#include <lua.h>
 
 #include <algorithm>
 #include <doctest/doctest.h>
@@ -709,4 +712,70 @@ TEST_CASE("RemoteEvent on a dedicated server: nobody to send as, and every messa
 
     CHECK(fixture.raises(R"(workspace:FindFirstChild("Round"):FireServer())", "net.err.remote_no_player"));
     CHECK(fixture.raises(R"(workspace:FindFirstChild("Round"):FireClient(workspace))", "net.err.remote_not_player"));
+}
+
+TEST_CASE("RemoteFunction on a replica: the question goes out numbered, and the answer resumes the caller")
+{
+    Fixture fixture;
+    fixture.world->engineState().networkTopology = scene::NetworkTopology::Replica;
+    CHECK(fixture.failure(R"(
+        local remote = Instance.new("RemoteFunction")
+        remote.Name = "Shop"
+        remote.Parent = workspace
+        task.spawn(function()
+            workspace:SetAttribute("Price", remote:InvokeServerAsync("sword"))
+        end)
+        task.spawn(function()
+            local ok, message = pcall(function()
+                return remote:InvokeServerAsync("shield")
+            end)
+            workspace:SetAttribute("Refused", if ok then "no" else tostring(message))
+        end)
+    )") == "");
+    std::vector<scene::RemoteMessage>& outbox = fixture.world->engineState().remoteOutbox;
+    REQUIRE(outbox.size() == 2);
+    CHECK(outbox[0].toServer);
+    CHECK(outbox[0].call != 0u);
+    CHECK(outbox[1].call != outbox[0].call);
+    const core::InstanceId remote = outbox[0].remote;
+
+    // What the session delivers when the authority answers: the price for the
+    // first, and a failure -- one string -- for the second.
+    lua_State* L = fixture.runtime->state();
+    scene::RemoteMessage price;
+    price.remote = remote;
+    price.call = outbox[0].call;
+    price.reply = true;
+    lua_pushnumber(L, 150);
+    luaug::script::encodeRemoteArguments(L, lua_gettop(L), 1, price.payload, price.refs);
+    lua_pop(L, 1);
+    scene::RemoteMessage refusal;
+    refusal.remote = remote;
+    refusal.call = outbox[1].call;
+    refusal.reply = true;
+    refusal.failed = true;
+    lua_pushstring(L, "sold out");
+    luaug::script::encodeRemoteArguments(L, lua_gettop(L), 1, refusal.payload, refusal.refs);
+    lua_pop(L, 1);
+    outbox.clear();
+    fixture.world->engineState().remoteInbox = {price, refusal};
+    luaug::script::fireRemoteMessages(L);
+
+    CHECK(fixture.failure(R"(
+        assert(workspace:GetAttribute("Price") == 150, "the answer arrived")
+        local refused = workspace:GetAttribute("Refused") :: string
+        assert(string.find(refused, "sold out", 1, true) ~= nil, "the failure raised at the caller")
+    )") == "");
+}
+
+TEST_CASE("RemoteFunction on a dedicated server: nobody to ask as")
+{
+    Fixture fixture;
+    fixture.world->engineState().networkTopology = scene::NetworkTopology::Dedicated;
+    CHECK(fixture.raises(R"(
+        local remote = Instance.new("RemoteFunction")
+        remote:InvokeServerAsync()
+    )",
+                         "net.err.remote_no_player"));
+    CHECK(fixture.world->engineState().remoteOutbox.empty());
 }

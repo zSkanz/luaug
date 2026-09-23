@@ -75,6 +75,7 @@ guided tour.
 | [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction from its parent's position. |
 | [`Ragdoll`](ragdoll.md) | [`Instance`](instance.md) | Makes a character's pose come from the simulation instead of from a clip. |
 | [`RemoteEvent`](remoteevent.md) | [`Instance`](instance.md) | A message a game sends between machines (ADR 0077): "I bought the sword" from a client to the server, "the round starts" from the server to everyone. |
+| [`RemoteFunction`](remotefunction.md) | [`Instance`](instance.md) | A question a client asks the server and waits for the answer to (ADR 0079): "what is in my inventory?", "may I open this door?". |
 | [`ScreenGui`](screengui.md) | [`Instance`](instance.md) | The root of one screen-space UI tree, parented to `UIService` (§2.2). |
 | [`Script`](script.md) | [`BaseScript`](basescript.md) | Luau that RUNS. |
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |

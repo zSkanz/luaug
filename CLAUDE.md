@@ -171,7 +171,7 @@ and visual fidelity is a v1 target (ADR 0038).
 
 `docs/architecture.md` (native core) · `docs/api-design.md` (Luau API/DX) ·
 `docs/roadmap.md` (M0 through M8, plus M4.5 and M7.5, with gates) ·
-`docs/decisions/` (ADRs 0001–0077) ·
+`docs/decisions/` (ADRs 0001–0079) ·
 `docs/research/` (frozen reports + UNCONFIRMED registry) · `PROGRESS.md`
 (ledger) · `docs/briefs/` (per-milestone kickoffs).
 

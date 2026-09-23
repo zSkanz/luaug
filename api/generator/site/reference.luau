@@ -337,6 +337,13 @@ local function renderClassPage(
     for _, event in events do
         table.insert(eventNames, event.Name)
     end
+    local callbacks = model.sortedCopy(model.orEmpty(class.Callbacks), function(c: Schema.Callback)
+        return c.Name
+    end)
+    local callbackNames: { string } = {}
+    for _, callback in callbacks do
+        table.insert(callbackNames, callback.Name)
+    end
 
     table.insert(
         out,
@@ -344,6 +351,7 @@ local function renderClassPage(
             { Kind = "Properties", Names = propertyNames },
             { Kind = "Methods", Names = methodNames },
             { Kind = "Events", Names = eventNames },
+            { Kind = "Callbacks", Names = callbackNames },
         })
     )
 
@@ -404,6 +412,27 @@ local function renderClassPage(
                 .. badge("Signal", "signal")
                 .. "</div>"
             table.insert(out, memberSection(context, headings, class.Name, event.Name, signatureHtml, facts, event.Doc))
+        end
+    end
+
+    if #callbacks > 0 then
+        heading(headings, 2, "Callbacks", "callbacks")
+        table.insert(out, '<h2 id="callbacks">Callbacks<a class="anchor" href="#callbacks">#</a></h2>')
+        for _, callback in callbacks do
+            local parts: { string } = {}
+            for _, parameter in callback.Parameters do
+                table.insert(parts, `{parameter.Name}: {parameter.Type}`)
+            end
+            local returns = if #callback.Returns == 0 then "()" else table.concat(callback.Returns, ", ")
+            local signatureHtml = `{markdown.escape(class.Name)}.{markdown.escape(callback.Name)} = {renderType(
+                context,
+                `function({table.concat(parts, ", ")}): {returns}`
+            )}`
+            local facts = '<div class="badges">' .. badge("assigned", "callback") .. "</div>"
+            table.insert(
+                out,
+                memberSection(context, headings, class.Name, callback.Name, signatureHtml, facts, callback.Doc)
+            )
         end
     end
 

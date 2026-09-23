@@ -32,7 +32,7 @@ end
 A replica builds nothing it expects the authority to send. Everything under
 `Workspace` that replicates arrives from the authority: parts, models,
 folders, their names, colours and motion, the `Lighting` service's time of day
-and fog, decals, particle emitters and `RemoteEvent`s. `Terrain` does not
+and fog, decals, particle emitters, `RemoteEvent`s and `RemoteFunction`s. `Terrain` does not
 replicate. A world's ground arrives with the world, from its scene.
 
 ## Players
@@ -106,12 +106,43 @@ refused at the call that tried to send it. Messages are reliable and arrive in
 order, at the start of the receiver's next tick. An authority takes at most
 256 from one player a tick.
 
+## Questions: `RemoteFunction`
+
+Some things a client needs to ASK: "how many coins do I have?", "may I open
+this door?". A `RemoteFunction` carries the question to the authority and
+brings the answer back, and the caller waits for it:
+
+```luau
+-- On the authority: one handler, with the player who asked first.
+standing.OnServerInvoke = function(player: Player): number
+    return honks[player] or 0
+end
+
+-- On any machine: yields until the answer arrives.
+local count = standing:InvokeServerAsync()
+```
+
+- The answer is whatever the handler returns, carried like a message's values.
+- The handler runs in a thread of its own and may wait.
+- If the handler raises an error, `InvokeServerAsync` raises it at the caller.
+  It also raises when the authority has no handler.
+- Solo and hosting, the authority asks itself, as its own player, at the start
+  of the next tick.
+
+**Only a client asks.** The authority cannot call a client and wait: a client
+that never answered would hold the server's script forever. Tell a client
+something with a `RemoteEvent`.
+
 ## What is not here
 
-A call that waits for an answer, unreliable messages, a replicated container
-other than `Workspace`, rollback, and lag compensation for hits. `examples/15-multiplayer`
-is the whole of it in one file: racers driven by intent, predicted by their own
-machine, and a horn that is a `RemoteEvent`.
+- unreliable messages;
+- a replicated container other than `Workspace`;
+- rollback;
+- lag compensation for hits.
+
+`examples/15-multiplayer` is the whole of it in one file: racers driven by
+intent and predicted by their own machine, a horn that is a `RemoteEvent`, and
+H asking a `RemoteFunction` how often you have honked.
 
 ## Where to look next
 

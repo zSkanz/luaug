@@ -14,6 +14,7 @@
 #include "luaug/script/instance_binding.h"
 
 #include <span>
+#include <string_view>
 #include <vector>
 
 struct lua_State;
@@ -45,8 +46,16 @@ void encodeRemoteArguments(lua_State* L, int first, int count, std::vector<core:
 // the input events.
 void fireRemoteMessages(lua_State* L);
 
-// `FireServer`, `FireClient` and `FireAllClients`, for the service binding
-// table.
+// **`RemoteFunction.OnServerInvoke`** (ADR 0079), the one callback: a member
+// a script assigns a function to. Answers false when `key` is not a callback of
+// `id`'s class, so the caller goes on to its other lookups. `Get` pushes the
+// function or nil; `Set` stores the value at `valueIndex`, refusing anything
+// that is neither a function nor nil.
+[[nodiscard]] bool remoteCallbackGet(lua_State* L, core::InstanceId id, std::string_view key);
+[[nodiscard]] bool remoteCallbackSet(lua_State* L, core::InstanceId id, std::string_view key, int valueIndex);
+
+// `FireServer`, `FireClient`, `FireAllClients` and `InvokeServerAsync`, for
+// the service binding table.
 [[nodiscard]] std::span<const InstanceMethodBinding> remoteMethodBindings() noexcept;
 
 } // namespace luaug::script

@@ -500,6 +500,9 @@ local function auditProse()
         for _, event in model.orEmpty(class.Events) do
             inspect(`{class.Name}.{event.Name}`, event.Doc)
         end
+        for _, callback in model.orEmpty(class.Callbacks) do
+            inspect(`{class.Name}.{callback.Name}`, callback.Doc)
+        end
     end
 
     for _, datatype in Model.Datatypes do

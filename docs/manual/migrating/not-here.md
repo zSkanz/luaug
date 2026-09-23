@@ -13,7 +13,6 @@ where it is not, it says that too.
 | Data stores | **Not planned.** Persistence is a backend you write. |
 | Marketplace, monetization, analytics | **Not planned.** |
 | Matchmaking and hosted servers | **Not planned.** A match is hosted by a player's machine (`--host`) or a server you run (`--serve`); finding one is your backend's job. |
-| A call that waits for an answer from the other machine | **Not present.** A `RemoteEvent` carries messages both ways; a reply is a second message. |
 
 Replication and a game's own messages are here: see
 [Multiplayer](manual:guides/multiplayer). Anything that outlives a match is one

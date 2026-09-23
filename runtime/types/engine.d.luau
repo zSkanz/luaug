@@ -1711,6 +1711,18 @@ declare extern type RemoteEvent extends Instance with
     function FireAllClients(self, ...: any): ()
 end
 
+declare extern type RemoteFunction extends Instance with
+    --- Answers `InvokeServerAsync` on the authority, with the player who asked first, and returns the
+    --- answer. It runs in a thread of its own and may yield. Set it once, from the server's script: a
+    --- replica's is never called.
+    OnServerInvoke: ((player: Player, ...any) -> ...any)?
+    --- Asks the authority, yields until it answers, and returns what its `OnServerInvoke` returned.
+    --- When the handler raised an error, or the server has no handler, this raises too. On an authority
+    --- with a player of its own -- solo or hosting -- the handler is called there, as that player, at
+    --- the start of the next tick; a dedicated server has no player to ask as, and refuses.
+    function InvokeServerAsync(self, ...: any): ...any
+end
+
 declare extern type Player extends Instance with
     --- The authority's number for this player: 1 for whoever sits at a solo or hosting machine, 2 and
     --- up for replicas in the order they joined. Never reused within a session, and not an account: a
@@ -2542,7 +2554,8 @@ declare Instance: {
         & (("AudioGroup") -> AudioGroup)
         & (("Sound") -> Sound)
         & (("AnimationPlayer") -> AnimationPlayer)
-        & (("RemoteEvent") -> RemoteEvent),
+        & (("RemoteEvent") -> RemoteEvent)
+        & (("RemoteFunction") -> RemoteFunction),
     stamp: (name: string, linked: boolean?) -> Instance,
 }
 
