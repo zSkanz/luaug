@@ -242,6 +242,7 @@ luaug_add_module_tests(app
         tests/soak_tests.cpp
         tests/streaming_host_tests.cpp
         tests/field_streamer_tests.cpp
+        tests/terrain_seam_tests.cpp
         tests/world_ui_tests.cpp
         tests/two_worlds_tests.cpp
         tests/project_config_tests.cpp

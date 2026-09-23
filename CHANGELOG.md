@@ -34,6 +34,12 @@ does not is engine work and belongs in the git history rather than in this file.
 - `examples/17-cave`: a tunnel into a mountain, dark inside and lit by its lamps.
 - **Soft particles**: smoke and fire fade where they meet a surface instead of
   showing a hard line along it.
+- **The terrain seam gate** (F1, H1): a tunnel crossing a streaming-cell
+  boundary, a tile boundary and the edge between bricked and height-encoded
+  ground. Every downward ray must hit the field, the collider and the drawn
+  surface, and each hit must lie within a quarter-voxel of the field.
+  `asset::sampleField` exposes the field's trilinear sampler, and
+  `render::meshCaveColumn` exposes the cave mesh as it is drawn.
 - **A replica keeps what a script holds.** An instance that leaves a replica's
   interest becomes a husk, reparented to nil, and fires
   `StreamingService.InstanceStreamedOut`, exactly as an evicted chunk's does.

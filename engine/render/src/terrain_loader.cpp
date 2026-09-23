@@ -250,6 +250,16 @@ struct CaveRims
 
 } // namespace
 
+asset::TerrainMesh meshCaveColumn(const asset::TerrainField& field, asset::TileKey column)
+{
+    const std::vector<asset::BrickKey> bricks = field.brickKeys();
+    const std::vector<asset::TileKey> columns = brickColumnsOf(bricks);
+    asset::MeshRegion region;
+    if (!caveRegion(field, column, caveRimsOf(column, columns), bricks, region))
+        return {};
+    return asset::meshField(field, region);
+}
+
 std::string terrainCaveUrn(core::InstanceId terrain, asset::TileKey column)
 {
     return "terrain://" + std::to_string(terrain.index) + "/cave/" + std::to_string(column.x) + "," +

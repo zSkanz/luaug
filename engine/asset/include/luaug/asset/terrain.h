@@ -449,6 +449,13 @@ core::u32 compact(TerrainField& field);
 
 // --- Raycasting the field directly -------------------------------------------
 
+// The field at any point, trilinear between the eight lattice samples around it:
+// what `raycastField` marches, and what the mesher interpolates along an edge.
+// The distance is in metres, negative in the ground, and saturates far from
+// the surface -- so near a surface it says how far off a point is, which is
+// how a collider or a drawn mesh is held against the field (F1's seam gate).
+[[nodiscard]] FieldSample sampleField(const TerrainField& field, core::DVec3 at);
+
 // Where a ray met the ground.
 struct TerrainHit
 {

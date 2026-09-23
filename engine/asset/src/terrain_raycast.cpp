@@ -27,6 +27,61 @@ constexpr double StepFraction = 0.5;
 
 } // namespace
 
+FieldSample sampleField(const TerrainField& field, DVec3 at)
+{
+    const double voxel = static_cast<double>(field.settings().voxelSize);
+    // A field with no lattice has no surface anywhere: air.
+    if (!(voxel > 0.0))
+        return FieldSample{1.0f, 0};
+    // **Trilinear between the eight surrounding samples, never snapped to the
+    // nearest one.**
+    //
+    // Snapping was the first version and it is wrong in a way that looks almost
+    // right: it makes the field a STEP function with steps one voxel wide, so a
+    // bisection converges on the step's edge rather than on the surface, and
+    // every hit lands half a voxel out. On a flat field at y = 4 with a
+    // half-metre voxel, it reported 4.25.
+    //
+    // Interpolating also makes this agree with the MESHER, which places a vertex
+    // by linear interpolation along an edge for the same reason -- so a hit sits
+    // on the triangle that was drawn there, and a decal placed at one is flush
+    // with the ground rather than sunk into it.
+    const double gridX = at.x / voxel;
+    const double gridY = at.y / voxel;
+    const double gridZ = at.z / voxel;
+    const double baseX = std::floor(gridX);
+    const double baseY = std::floor(gridY);
+    const double baseZ = std::floor(gridZ);
+    const auto lowX = static_cast<core::i32>(baseX);
+    const auto lowY = static_cast<core::i32>(baseY);
+    const auto lowZ = static_cast<core::i32>(baseZ);
+    const auto tx = static_cast<float>(gridX - baseX);
+    const auto ty = static_cast<float>(gridY - baseY);
+    const auto tz = static_cast<float>(gridZ - baseZ);
+
+    const auto blend = [](float a, float b, float t) { return a + (b - a) * t; };
+
+    float corner[8];
+    core::u8 materials[8];
+    for (int at8 = 0; at8 < 8; ++at8) {
+        const FieldSample got = field.sample(lowX + (at8 & 1), lowY + ((at8 >> 1) & 1), lowZ + ((at8 >> 2) & 1));
+        corner[at8] = got.distance;
+        materials[at8] = got.material;
+    }
+
+    const float x00 = blend(corner[0], corner[1], tx);
+    const float x10 = blend(corner[2], corner[3], tx);
+    const float x01 = blend(corner[4], corner[5], tx);
+    const float x11 = blend(corner[6], corner[7], tx);
+    const float y0 = blend(x00, x10, ty);
+    const float y1 = blend(x01, x11, ty);
+
+    // The material of the NEAREST corner rather than a blend: a material is
+    // an identity, and the average of "rock" and "sand" is neither.
+    const int nearest = (tx >= 0.5f ? 1 : 0) | (ty >= 0.5f ? 2 : 0) | (tz >= 0.5f ? 4 : 0);
+    return FieldSample{blend(y0, y1, tz), materials[nearest]};
+}
+
 std::optional<TerrainHit> raycastField(const TerrainField& field, DVec3 origin, Vec3 direction, double maxDistance)
 {
     // **Every promotion is explicit**, which is R9's f32/f64 split showing up as
@@ -48,58 +103,10 @@ std::optional<TerrainHit> raycastField(const TerrainField& field, DVec3 origin, 
         return std::nullopt;
     }
 
-    // **Trilinear between the eight surrounding samples, never snapped to the
-    // nearest one.**
-    //
-    // Snapping was the first version and it is wrong in a way that looks almost
-    // right: it makes the field a STEP function with steps one voxel wide, so a
-    // bisection converges on the step's edge rather than on the surface, and
-    // every hit lands half a voxel out. On a flat field at y = 4 with a
-    // half-metre voxel, it reported 4.25.
-    //
-    // Interpolating also makes this agree with the MESHER, which places a vertex
-    // by linear interpolation along an edge for the same reason -- so a hit sits
-    // on the triangle that was drawn there, and a decal placed at one is flush
-    // with the ground rather than sunk into it.
-    const auto sampleAt = [&](const DVec3& at) {
-        const double gridX = at.x / voxel;
-        const double gridY = at.y / voxel;
-        const double gridZ = at.z / voxel;
-        const double baseX = std::floor(gridX);
-        const double baseY = std::floor(gridY);
-        const double baseZ = std::floor(gridZ);
-        const auto lowX = static_cast<core::i32>(baseX);
-        const auto lowY = static_cast<core::i32>(baseY);
-        const auto lowZ = static_cast<core::i32>(baseZ);
-        const auto tx = static_cast<float>(gridX - baseX);
-        const auto ty = static_cast<float>(gridY - baseY);
-        const auto tz = static_cast<float>(gridZ - baseZ);
-
-        const auto blend = [](float a, float b, float t) { return a + (b - a) * t; };
-
-        float corner[8];
-        core::u8 materials[8];
-        for (int at8 = 0; at8 < 8; ++at8) {
-            const FieldSample got = field.sample(lowX + (at8 & 1), lowY + ((at8 >> 1) & 1), lowZ + ((at8 >> 2) & 1));
-            corner[at8] = got.distance;
-            materials[at8] = got.material;
-        }
-
-        const float x00 = blend(corner[0], corner[1], tx);
-        const float x10 = blend(corner[2], corner[3], tx);
-        const float x01 = blend(corner[4], corner[5], tx);
-        const float x11 = blend(corner[6], corner[7], tx);
-        const float y0 = blend(x00, x10, ty);
-        const float y1 = blend(x01, x11, ty);
-
-        // The material of the NEAREST corner rather than a blend: a material is
-        // an identity, and the average of "rock" and "sand" is neither.
-        const int nearest = (tx >= 0.5f ? 1 : 0) | (ty >= 0.5f ? 2 : 0) | (tz >= 0.5f ? 4 : 0);
-        return FieldSample{blend(y0, y1, tz), materials[nearest]};
-    };
-
+    // The field's own sampler (`sampleField`), along the ray.
     const auto distanceAt = [&](double along) {
-        return sampleAt(DVec3{origin.x + step.x * along, origin.y + step.y * along, origin.z + step.z * along});
+        return sampleField(field,
+                           DVec3{origin.x + step.x * along, origin.y + step.y * along, origin.z + step.z * along});
     };
 
     const double marchStep = voxel * StepFraction;

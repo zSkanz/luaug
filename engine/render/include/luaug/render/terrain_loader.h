@@ -26,6 +26,7 @@
 // around it, which at that distance is what it looks like.
 
 #include "luaug/asset/terrain.h"
+#include "luaug/asset/terrain_mesher.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/render_world.h"
 #include "luaug/render/terrain_lod.h"
@@ -40,6 +41,12 @@ namespace luaug::render {
 // The URN one bricked column's cave mesh is filed under, so `extract` and this
 // agree about one name. `terrain://<instance>/cave/<x>,<z>`, in brick keys.
 [[nodiscard]] std::string terrainCaveUrn(core::InstanceId terrain, asset::TileKey column);
+
+// The mesh one bricked column's cave is drawn with: the region `sync` meshes,
+// with the same rims, snapped sides and skirt, on the CPU. It is here so a test
+// can hold the surface that is DRAWN against the field and the collider (F1's
+// seam gate). Empty when the column has nothing to draw.
+[[nodiscard]] asset::TerrainMesh meshCaveColumn(const asset::TerrainField& field, asset::TileKey column);
 
 class TerrainLoader
 {

@@ -291,6 +291,21 @@ green and committable.
 
 ### Part H — Gates
 
+**H1 built 2026-09-23.** `engine/app/tests/terrain_seam_tests.cpp` puts a
+tunnel with a pit under rolling ground. It crosses the 64 m cell boundary, a
+tile boundary and the bricked/height edge. The test cuts the field into
+streaming cells, round-trips each through its file, and stitches them back.
+It then casts 3,808 rays into the result, from the sky and from inside the
+tunnel. Every one hits the field (`asset::sampleField` / `raycastField`), the
+Jolt collider and the surface as drawn (the atlas lattice with its cave
+holes, plus `render::meshCaveColumn`). No hit is more than a quarter-voxel from
+the field's surface; the worst measured is 0.053 m. Error is measured as
+distance to the surface, not difference in height. A vertical ray grazing the
+pit's wall showed why: a hit height there moved 7 m for a millimetre sideways.
+The determinism trace (`tests/determinism/terrain`) had already landed with
+the brush, and `tests/conformance/world/terrain.spec.luau` carries the
+script-side sculpt and sampling specs.
+
 | # | Step | Files | Green because | Goldens |
 |---|---|---|---|---|
 | **H1** | **The seam-continuity gate — the thing that converts "is the hybrid a defect factory" from an argument into a measurement.** A fixture world with a cave crossing both a cell boundary and a brick/height boundary; one downward ray per column; assert every ray hits, that the physics hit height matches the sampler within the stated quantization bound, and that the rasterised render mesh matches the same. Plus conformance specs and a determinism trace. | `tests/conformance/terrain/{sculpt,sampling,streaming}.spec.luau` (new), `tests/determinism/terrain/{init.luau,scenario.json,trace.windows.txt,trace.linux.txt}` (new), `engine/app/tests/terrain_seam_tests.cpp` (new) | New tests. | **new traces recorded on both tiers** |
