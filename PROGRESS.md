@@ -114,12 +114,12 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   gives every player a racer, and `replica_seam` requires a replica booted in
   the same process to draw its authority's world.
   [`docs/briefs/phase-2-4-plan.md`](docs/briefs/phase-2-4-plan.md) lists what is
-  not built: other players' list on a replica, client prediction, the husk
-  despawn, interest management and service properties.
+  not built: client prediction, the husk despawn, interest management and
+  service properties.
 
-  **The next action, as a sentence:** close N1's named gaps -- prediction and
-  the player list first, because they are what a person playing notices -- then
-  F2 (particles and decals).
+  **The next action, as a sentence:** close N1's named gaps -- prediction first,
+  because it is what a person playing notices -- then F2 (particles and
+  decals).
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is

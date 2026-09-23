@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 1;
+inline constexpr u32 ProtocolVersion = 2;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -142,6 +142,7 @@ enum class MessageType : u8
     Snapshot = 5,
     Ack = 6,
     Intent = 7,
+    Players = 8,
 };
 
 // Which direction a message may travel. A server that accepted a
@@ -169,6 +170,7 @@ inline constexpr MessageDesc Messages[] = {
     {"Snapshot", MessageType::Snapshot, 1, Direction::ToReplica},
     {"Ack", MessageType::Ack, 0, Direction::ToAuthority},
     {"Intent", MessageType::Intent, 2, Direction::ToAuthority},
+    {"Players", MessageType::Players, 0, Direction::ToReplica},
 };
 
 } // namespace luaug::replication::generated

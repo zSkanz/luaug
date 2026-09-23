@@ -408,14 +408,38 @@ void AuthoritySession::send(const scene::World& world, InstanceId root, u64 tick
     m_tick = tick;
     capture(world, root, tick);
     const WorldState& current = *m_history.back();
+
+    // Everybody taking part, in join order -- the children of `NetworkService`,
+    // which is where every path that makes a player puts it.
+    std::vector<u32> roster;
+    const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
+    for (InstanceId child = network.valid() ? world.firstChild(network) : InstanceId{}; child.valid();
+         child = world.nextSibling(child)) {
+        const scene::PlayerComponent* player = world.players().find(child);
+        if (player != nullptr && !world.destroyed(child))
+            roster.push_back(player->userId);
+    }
+
     for (Peer& peer : m_peers) {
         if (peer.welcomed)
-            sendTo(peer, current);
+            sendTo(peer, current, roster);
     }
 }
 
-void AuthoritySession::sendTo(Peer& peer, const WorldState& current)
+void AuthoritySession::sendTo(Peer& peer, const WorldState& current, const std::vector<u32>& roster)
 {
+    // --- Who is playing, whole, when it changed for this peer.
+    if (!peer.rosterSent || peer.roster != roster) {
+        Writer players;
+        players.u8v(static_cast<u8>(MessageType::Players));
+        players.u32v(static_cast<u32>(roster.size()));
+        for (const u32 userId : roster)
+            players.u32v(userId);
+        sendBytes(m_transport, peer.id, players.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
+        peer.roster = roster;
+        peer.rosterSent = true;
+    }
+
     // --- Spawns and despawns, reliable, before the snapshot that needs them.
     std::vector<u32> now;
     now.reserve(current.entities.size());
@@ -576,6 +600,9 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
         case MessageType::Snapshot:
             onSnapshot(world, root, event.payload);
             break;
+        case MessageType::Players:
+            onPlayers(world, root, event.payload);
+            break;
         default:
             break;
         }
@@ -606,6 +633,40 @@ void ReplicaSession::sendIntent(const scene::World& world, u64 tick)
         intent.u8v(one.pressed ? 1 : 0);
     }
     sendBytes(m_transport, m_authority, intent.bytes, net::Delivery::UnreliableSequenced, IntentChannel, m_stats);
+}
+
+void ReplicaSession::onPlayers(scene::World& world, InstanceId root, std::span<const u8> bytes)
+{
+    Reader reader(bytes);
+    (void)reader.u8v();
+    const u32 count = reader.u32v();
+    std::vector<u32> roster;
+    for (u32 at = 0; at < count && reader.ok(); ++at)
+        roster.push_back(reader.u32v());
+    if (!reader.ok() || !reader.done())
+        return;
+    const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
+    if (!network.valid())
+        return;
+
+    // The others, as ordinary `Player`s nobody at this machine drives: gone
+    // first, then new, so a script's `PlayerRemoving` sees the list shrink
+    // before `PlayerAdded` sees it grow.
+    std::vector<InstanceId> leaving;
+    for (InstanceId child = world.firstChild(network); child.valid(); child = world.nextSibling(child)) {
+        const scene::PlayerComponent* player = world.players().find(child);
+        if (player == nullptr || player->local || world.destroyed(child))
+            continue;
+        if (std::find(roster.begin(), roster.end(), player->userId) == roster.end())
+            leaving.push_back(child);
+    }
+    for (const InstanceId gone : leaving)
+        scene::removePlayer(world, network, gone);
+    for (const u32 userId : roster) {
+        if (userId == m_playerId || scene::playerByUserId(world, userId).valid())
+            continue;
+        (void)scene::createPlayer(world, network, userId, false);
+    }
 }
 
 void ReplicaSession::onSpawn(scene::World& world, std::span<const u8> bytes)

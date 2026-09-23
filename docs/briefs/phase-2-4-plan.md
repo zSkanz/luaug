@@ -776,6 +776,9 @@ and it cannot detect simulation divergence.
 
 ## N1 built (2026-09-22 and 23)
 
+**Protocol 2 added `Players`**: the roster, whole, whenever it changes, so a
+replica's `GetPlayers()` lists everybody and not only itself.
+
 Parts B through F, in compile order, each commit gated on all tiers.
 
 **The core is a snapshot-and-baseline protocol**, the one every shipped action
@@ -814,8 +817,8 @@ within half a percent of the frame -- and to have changed from its own first,
 empty frame, which refuses the vacuous pass. Break-verified: with component
 fields not applied it fails by 892,781 of 921,600 pixels.
 
-**Not built, and named so it is not mistaken for done:** a replica does not
-see the list of other players; there is no client prediction, so a replica's own
+**Not built, and named so it is not mistaken for done:** there is no client
+prediction, so a replica's own
 character moves a round trip after the key; despawn destroys rather than using
 the streaming husk contract (decision 6); interest management is the whole
 workspace; and no service's properties replicate (`Lighting.ClockTime` is the

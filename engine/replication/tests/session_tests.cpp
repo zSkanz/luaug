@@ -357,6 +357,14 @@ TEST_CASE("a joined replica is a player on the authority, and what it does arriv
     CHECK(client.world.players().find(me)->userId == 2);
     CHECK(scene::localPlayerOf(server.world) == host);
 
+    // **And the replica knows who else is playing**: the host's player is on
+    // it too, as a player nobody at that machine drives.
+    const core::InstanceId hostSeen = scene::playerByUserId(client.world, 1);
+    REQUIRE(hostSeen.valid());
+    CHECK_FALSE(client.world.players().find(hostSeen)->local);
+    CHECK(client.world.parentOf(hostSeen) == client.network);
+    CHECK(scene::localPlayerOf(client.world) == me);
+
     // The replica's player jumps and walks; the authority's copy of that player
     // reads it, by action NAME, in its own atoms.
     client.world.players().find(me)->intents = {

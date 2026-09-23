@@ -34,7 +34,7 @@ takes an address and an optional port (`--join=192.168.0.10:7777`).
 
 ## What it does not show yet
 
-A replica does not see the list of other players, and there is no prediction:
+There is no prediction:
 a replica's own racer moves when the authority's snapshot says so, a round trip
 after the key.
 

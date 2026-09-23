@@ -116,11 +116,15 @@ private:
         u32 userId = 0;
         core::InstanceId player;
         u64 intentTick = 0;
+        // The roster this peer was last sent, so it is sent again only when it
+        // changes.
+        std::vector<u32> roster;
+        bool rosterSent = false;
     };
 
     // The subtree as it stands, and the class name each new id is spawned as.
     void capture(const scene::World& world, core::InstanceId root, u64 tick);
-    void sendTo(Peer& peer, const WorldState& current);
+    void sendTo(Peer& peer, const WorldState& current, const std::vector<u32>& roster);
     [[nodiscard]] const WorldState* historyAt(u64 tick) const noexcept;
     [[nodiscard]] Peer* peerFor(net::PeerId id) noexcept;
 
@@ -180,6 +184,7 @@ private:
     void onSnapshot(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void onSpawn(scene::World& world, std::span<const u8> bytes);
     void onDespawn(scene::World& world, std::span<const u8> bytes);
+    void onPlayers(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
     [[nodiscard]] const WorldState* stateAt(u64 tick) const noexcept;
 

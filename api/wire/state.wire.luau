@@ -445,6 +445,15 @@ local Messages: { Schema.Message } = {
         Doc = "One tick of a client's input, as actions rather than as results. The client says what "
             .. "it did; a client that could assert what happened is a client that always hits.",
     },
+    {
+        Name = "Players",
+        Id = 8,
+        Channel = "Control",
+        Direction = "ToReplica",
+        Doc = "Who is taking part: every player's number, sent whole whenever the list changes and "
+            .. "once on welcome. Whole rather than as joins and leaves, because a roster is a few "
+            .. "numbers and a list a replica can only ever replace cannot drift from the authority's.",
+    },
 }
 
 local Definition: Schema.Definition = {
