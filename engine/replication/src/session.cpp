@@ -6,6 +6,7 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iterator>
 #include <string>
@@ -16,6 +17,8 @@
 namespace luaug::replication {
 namespace {
 
+using core::f64;
+using core::i32;
 using core::InstanceId;
 using generated::MessageType;
 
@@ -334,6 +337,10 @@ void AuthoritySession::capture(const scene::World& world, InstanceId root, u64 t
     const usize parentField = commonIndex("Parent");
 
     std::map<u64, u32> seen;
+    // The walk itself, for interest: which instance each entity is and where
+    // its parent is in this list, in pre-order.
+    m_order.clear();
+    std::map<u64, i32> orderOf;
     // Pre-order, children in sibling order: a parent is always captured before
     // its children, so a new child's parent already has an id.
     std::vector<InstanceId> stack;
@@ -367,6 +374,9 @@ void AuthoritySession::capture(const scene::World& world, InstanceId root, u64 t
         setNetId(fields[parentField], NetId{parentId});
 
         state->entities.push_back(EntityState{NetId{netId}, schemaIndexOf(desc), std::move(fields)});
+        const auto parentOrder = orderOf.find(packed(parent));
+        orderOf[key] = static_cast<i32>(m_order.size());
+        m_order.push_back(Captured{netId, id, parentOrder != orderOf.end() ? parentOrder->second : -1});
 
         std::vector<InstanceId> children;
         for (InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child))
@@ -410,31 +420,133 @@ void AuthoritySession::send(const scene::World& world, InstanceId root, u64 tick
     const WorldState& current = *m_history.back();
 
     // Everybody taking part, in join order -- the children of `NetworkService`,
-    // which is where every path that makes a player puts it.
+    // which is where every path that makes a player puts it -- each as its user
+    // id and its character's NetId, zero for none. The pair is what lets a
+    // replica know which part is its own (`Player.Character`).
     std::vector<u32> roster;
     const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
     for (InstanceId child = network.valid() ? world.firstChild(network) : InstanceId{}; child.valid();
          child = world.nextSibling(child)) {
         const scene::PlayerComponent* player = world.players().find(child);
-        if (player != nullptr && !world.destroyed(child))
-            roster.push_back(player->userId);
+        if (player == nullptr || world.destroyed(child))
+            continue;
+        roster.push_back(player->userId);
+        roster.push_back(player->character.valid() ? netIdOf(player->character).value : 0u);
     }
 
     for (Peer& peer : m_peers) {
-        if (peer.welcomed)
-            sendTo(peer, current, roster);
+        if (!peer.welcomed)
+            continue;
+        const std::vector<u32> relevant = interestOf(world, peer);
+        sendTo(peer, current, roster, relevant);
     }
 }
 
-void AuthoritySession::sendTo(Peer& peer, const WorldState& current, const std::vector<u32>& roster)
+std::vector<u32> AuthoritySession::interestOf(const scene::World& world, const Peer& peer) const
 {
+    std::vector<u32> relevant;
+    relevant.reserve(m_order.size());
+
+    // **Measured from the peer's character** (`Player.Character`). A player
+    // with none has nothing to measure from and is sent everything, which is
+    // what every session did before interest existed.
+    const scene::PlayerComponent* player = peer.player.valid() ? world.players().find(peer.player) : nullptr;
+    const scene::PartComponent* body = player != nullptr && player->character.valid() && world.alive(player->character)
+                                           ? world.parts().find(player->character)
+                                           : nullptr;
+    if (body == nullptr) {
+        for (const Captured& entry : m_order)
+            relevant.push_back(entry.netId);
+        std::sort(relevant.begin(), relevant.end());
+        return relevant;
+    }
+
+    // The streaming radius, with the streaming manager's hysteresis: in at the
+    // load radius, out only past a quarter more, so a part on the boundary does
+    // not spawn and despawn on alternate ticks.
+    const f64 radius = world.engineState().streamingLoadRadius;
+    const f64 keep = radius * 1.25;
+    const core::DVec3 focus = body->cframe.position;
+
+    const usize count = m_order.size();
+    std::vector<u8> inRange(count, 0);
+    std::vector<u8> positioned(count, 0);
+    std::vector<u8> marked(count, 0);
+    for (usize at = 0; at < count; ++at) {
+        const scene::PartComponent* part = world.parts().find(m_order[at].id);
+        if (part == nullptr)
+            continue;
+        positioned[at] = 1;
+        const core::DVec3 delta = part->cframe.position - focus;
+        const f64 distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+        const f64 reach = std::binary_search(peer.known.begin(), peer.known.end(), m_order[at].netId) ? keep : radius;
+        inRange[at] = distance <= reach * reach ? 1 : 0;
+    }
+
+    // Down: a part in range brings everything under it -- what is attached to
+    // a part goes with it, whatever its own position says. Pre-order, so a
+    // parent is decided before its children.
+    std::vector<u8> positionedAbove(count, 0);
+    for (usize at = 0; at < count; ++at) {
+        const i32 parent = m_order[at].parent;
+        if (parent >= 0) {
+            const auto up = static_cast<usize>(parent);
+            positionedAbove[at] = positioned[up] || positionedAbove[up] ? 1 : 0;
+            marked[at] = marked[up] && (positioned[up] || positionedAbove[up]) ? 1 : 0;
+        }
+        if (inRange[at])
+            marked[at] = 1;
+    }
+
+    // Up: the ancestors of anything sent, so it has somewhere to be parented;
+    // and a container with no part anywhere in or above it, which costs nothing
+    // and has no position to be far from. Reverse pre-order visits children
+    // before their parent.
+    std::vector<u8> positionedBelow(count, 0);
+    for (usize at = count; at-- > 0;) {
+        const i32 parent = m_order[at].parent;
+        if (!marked[at] && !positioned[at] && !positionedBelow[at] && !positionedAbove[at])
+            marked[at] = 1;
+        if (parent >= 0) {
+            const auto up = static_cast<usize>(parent);
+            if (marked[at] && (positioned[at] || positionedBelow[at] || positionedAbove[at] || inRange[at]))
+                marked[up] = 1;
+            if (positioned[at] || positionedBelow[at])
+                positionedBelow[up] = 1;
+        }
+    }
+
+    for (usize at = 0; at < count; ++at) {
+        if (marked[at])
+            relevant.push_back(m_order[at].netId);
+    }
+    std::sort(relevant.begin(), relevant.end());
+    return relevant;
+}
+
+void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const std::vector<u32>& roster,
+                              const std::vector<u32>& relevant)
+{
+    // **This peer's world is what is in its interest.** Everything below --
+    // spawns, despawns, the diff and the checksum -- is over this, so a replica
+    // reconstructs and verifies exactly the subset it was sent (ADR 0069
+    // decision 8: its hash is a subset by design).
+    WorldState filtered;
+    filtered.tick = everything.tick;
+    filtered.entities.reserve(relevant.size());
+    for (const EntityState& entity : everything.entities) {
+        if (std::binary_search(relevant.begin(), relevant.end(), entity.id.value))
+            filtered.entities.push_back(entity);
+    }
+    const WorldState& current = filtered;
+
     // --- Who is playing, whole, when it changed for this peer.
     if (!peer.rosterSent || peer.roster != roster) {
         Writer players;
         players.u8v(static_cast<u8>(MessageType::Players));
-        players.u32v(static_cast<u32>(roster.size()));
-        for (const u32 userId : roster)
-            players.u32v(userId);
+        players.u32v(static_cast<u32>(roster.size() / 2));
+        for (const u32 value : roster)
+            players.u32v(value);
         sendBytes(m_transport, peer.id, players.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
         peer.roster = roster;
         peer.rosterSent = true;
@@ -472,9 +584,21 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& current, const std::
         m_stats.spawned += static_cast<u32>(entering.size());
     }
     peer.known = std::move(now);
+    // What this peer holds at this tick, for the baseline a later snapshot is
+    // diffed against: the global state then, cut to what this peer had then.
+    peer.interest.push_back(PeerInterest{current.tick, peer.known});
+    while (peer.interest.size() > StateHistory)
+        peer.interest.pop_front();
 
     // --- The snapshot, against what this peer last proved it holds.
     const WorldState* baseline = peer.acked != 0 ? historyAt(peer.acked) : nullptr;
+    const std::vector<u32>* heldThen = nullptr;
+    for (const PeerInterest& held : peer.interest) {
+        if (held.tick == peer.acked)
+            heldThen = &held.ids;
+    }
+    if (heldThen == nullptr)
+        baseline = nullptr;
 
     struct Record
     {
@@ -486,7 +610,13 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& current, const std::
     std::set<u32> atoms;
     const usize nameField = commonIndex("Name");
     for (const EntityState& entity : current.entities) {
-        const EntityState* before = baseline != nullptr ? findEntity(*baseline, entity.id.value) : nullptr;
+        // Diffed only against what this peer HAD at the baseline -- and whole
+        // when it is entering now, whatever the baseline says: the replica
+        // scrubbed it from every stored state when it left.
+        const bool held =
+            baseline != nullptr && std::binary_search(heldThen->begin(), heldThen->end(), entity.id.value);
+        const bool entered = std::binary_search(entering.begin(), entering.end(), entity.id.value);
+        const EntityState* before = held && !entered ? findEntity(*baseline, entity.id.value) : nullptr;
         Record record{&entity, before == nullptr || before->schema != entity.schema, {}};
         for (usize at = 0; at < entity.fields.size(); ++at) {
             if (record.full || !(before->fields[at] == entity.fields[at]))
@@ -504,6 +634,9 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& current, const std::
     snapshot.u64v(current.tick);
     snapshot.u64v(baseline != nullptr ? baseline->tick : 0);
     snapshot.u64v(checksumOf(current));
+    // The last of this peer's intents the authority applied, for its
+    // prediction to reconcile against (ADR 0076).
+    snapshot.u64v(peer.intentTick);
     // The names this message's fields mention, by the authority's atom. The
     // replica interns each once and keeps the mapping, so a name costs its
     // bytes on the wire when it changes rather than every tick.
@@ -607,12 +740,94 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
             break;
         }
     }
+    resolveCharacters(world, root);
+    m_serverClock += 1;
+    interpolate(world);
+}
+
+void ReplicaSession::interpolate(scene::World& world)
+{
+    // **Everyone else, drawn a few ticks in the past, between two snapshots**
+    // -- Valve's entity interpolation. A snapshot every other tick applied as it
+    // arrived stepped every remote part at thirty hertz; drawn `delay` ticks
+    // behind the server's clock, there are nearly always two samples around the
+    // moment being drawn, and the motion between them is a line.
+    if (m_interpolationDelay == 0)
+        return;
+    const u64 target = m_serverClock > m_interpolationDelay ? m_serverClock - m_interpolationDelay : 0;
+    for (auto& [netId, samples] : m_samples) {
+        // Its own character is predicted, never drawn from the past.
+        if (samples.empty() || netId == m_owned)
+            continue;
+        const auto local = m_locals.find(netId);
+        scene::PartComponent* part =
+            local != m_locals.end() && world.alive(local->second) ? world.parts().find(local->second) : nullptr;
+        if (part == nullptr)
+            continue;
+        // Past the newest sample, the newest: extrapolating a part the authority
+        // has stopped talking about would put it where it is not.
+        const Sample* before = &samples.front();
+        const Sample* after = nullptr;
+        for (const Sample& sample : samples) {
+            if (sample.tick <= target)
+                before = &sample;
+            else if (after == nullptr)
+                after = &sample;
+        }
+        if (after == nullptr || target <= before->tick || after->tick <= before->tick) {
+            part->cframe = target < samples.front().tick ? samples.front().cframe : before->cframe;
+            continue;
+        }
+        const f64 alpha = static_cast<f64>(target - before->tick) / static_cast<f64>(after->tick - before->tick);
+        part->cframe = core::lerp(before->cframe, after->cframe, alpha);
+    }
+}
+
+void ReplicaSession::resolveCharacters(scene::World& world, InstanceId root)
+{
+    // Every player's `Character`, on this machine: the NetId the roster named,
+    // through this machine's own copy of it -- which may arrive a message after
+    // the roster that names it, so this runs after every receive.
+    const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
+    for (InstanceId child = network.valid() ? world.firstChild(network) : InstanceId{}; child.valid();
+         child = world.nextSibling(child)) {
+        scene::PlayerComponent* player = world.players().find(child);
+        if (player == nullptr)
+            continue;
+        const auto named = m_characters.find(player->userId);
+        const auto local = named != m_characters.end() ? m_locals.find(named->second) : m_locals.end();
+        player->character = local != m_locals.end() && world.alive(local->second) ? local->second : InstanceId{};
+        if (player->local) {
+            m_owned = named != m_characters.end() && local != m_locals.end() ? named->second : 0u;
+            // What was buffered for it before this machine knew it was its
+            // own: the newest of it is where it starts being predicted from.
+            if (const auto buffered = m_owned != 0 ? m_samples.find(m_owned) : m_samples.end();
+                buffered != m_samples.end()) {
+                if (scene::PartComponent* part = world.parts().find(local->second);
+                    part != nullptr && !buffered->second.empty())
+                    part->cframe = buffered->second.back().cframe;
+                m_samples.erase(buffered);
+            }
+        }
+    }
 }
 
 void ReplicaSession::sendIntent(const scene::World& world, u64 tick)
 {
     if (!m_welcomed)
         return;
+    // What this replica predicted for its own character at this tick, for the
+    // snapshot that answers this intent to be compared against.
+    if (m_owned != 0) {
+        const auto local = m_locals.find(m_owned);
+        const scene::PartComponent* part =
+            local != m_locals.end() && world.alive(local->second) ? world.parts().find(local->second) : nullptr;
+        if (part != nullptr) {
+            m_predicted.push_back(Sample{tick, part->cframe});
+            while (m_predicted.size() > PredictionHistory)
+                m_predicted.pop_front();
+        }
+    }
     const InstanceId local = scene::localPlayerOf(world);
     const scene::PlayerComponent* player = local.valid() ? world.players().find(local) : nullptr;
     if (player == nullptr)
@@ -641,10 +856,16 @@ void ReplicaSession::onPlayers(scene::World& world, InstanceId root, std::span<c
     (void)reader.u8v();
     const u32 count = reader.u32v();
     std::vector<u32> roster;
-    for (u32 at = 0; at < count && reader.ok(); ++at)
-        roster.push_back(reader.u32v());
+    std::map<u32, u32> characters;
+    for (u32 at = 0; at < count && reader.ok(); ++at) {
+        const u32 userId = reader.u32v();
+        const u32 character = reader.u32v();
+        roster.push_back(userId);
+        characters[userId] = character;
+    }
     if (!reader.ok() || !reader.done())
         return;
+    m_characters = std::move(characters);
     const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
     if (!network.valid())
         return;
@@ -677,8 +898,10 @@ void ReplicaSession::onSpawn(scene::World& world, std::span<const u8> bytes)
     for (u32 at = 0; at < count && reader.ok(); ++at) {
         const u32 id = reader.u32v();
         const std::string_view className = reader.text();
-        if (!reader.ok() || m_locals.contains(id) || m_departed.contains(id))
+        if (!reader.ok() || m_locals.contains(id))
             continue;
+        // An id that left this replica's interest and has come back into it.
+        m_departed.erase(id);
         // **By name, not by the authority's class number**: the two ends build
         // their registries from the same generated tables, but a name is the
         // fact the protocol version vouches for and a number is not.
@@ -701,6 +924,7 @@ void ReplicaSession::onDespawn(scene::World& world, std::span<const u8> bytes)
         if (!reader.ok())
             break;
         m_departed.insert(id);
+        m_samples.erase(id);
         if (const auto found = m_locals.find(id); found != m_locals.end()) {
             if (world.alive(found->second))
                 (void)world.destroy(found->second);
@@ -726,6 +950,7 @@ void ReplicaSession::onSnapshot(scene::World& world, InstanceId root, std::span<
     const u64 tick = reader.u64v();
     const u64 baseTick = reader.u64v();
     const u64 checksum = reader.u64v();
+    const u64 intentTick = reader.u64v();
     // Older than what the world already shows: a reordered straggler, and
     // applying it would move the world backwards.
     if (!reader.ok() || tick <= m_applied)
@@ -802,12 +1027,75 @@ void ReplicaSession::onSnapshot(scene::World& world, InstanceId root, std::span<
         m_states.pop_front();
     m_applied = tick;
     m_stats.snapshotsReceived += 1;
+    // The server's clock, as far as this replica can tell: the newest tick it
+    // has heard of, advanced one a tick between snapshots (`receive`). Pulled
+    // forward by a snapshot from further ahead, and snapped when it has drifted
+    // more than a handful of ticks behind.
+    if (tick > m_serverClock || m_serverClock - tick > 8)
+        m_serverClock = tick;
+    m_ackedIntent = intentTick;
     applyToWorld(world, root, *state);
 
     Writer ack;
     ack.u8v(static_cast<u8>(MessageType::Ack));
     ack.u64v(tick);
     sendBytes(m_transport, m_authority, ack.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
+}
+
+void ReplicaSession::reconcile(scene::World& world, InstanceId character, const core::CFrameD& authority)
+{
+    scene::PartComponent* part = world.parts().find(character);
+    if (part == nullptr)
+        return;
+    // What this replica predicted at the intent the authority last applied. No
+    // such prediction -- the authority has applied none of this replica's
+    // intents yet, or it answered one this replica no longer remembers -- is
+    // nothing to reconcile against, so the authority is simply right.
+    const Sample* predicted = nullptr;
+    for (const Sample& sample : m_predicted) {
+        if (sample.tick == m_ackedIntent)
+            predicted = &sample;
+    }
+    if (m_ackedIntent == 0 || predicted == nullptr) {
+        part->cframe = authority;
+        m_predicted.clear();
+        return;
+    }
+
+    // **The error at that moment, carried forward to now.** Re-simulating the
+    // intents since would need the physics state then, which the physics
+    // backend does not keep; shifting by the error is the correction the error
+    // implies wherever the ground does not change underfoot, and the next
+    // snapshot corrects what it could not.
+    const core::DVec3 error = authority.position - predicted->cframe.position;
+    const f64 distance = std::sqrt(error.x * error.x + error.y * error.y + error.z * error.z);
+    // The turn the authority disagrees by, the same way.
+    const core::Mat3 turn = authority.rotation * core::transpose(predicted->cframe.rotation);
+    bool turned = false;
+    for (int column = 0; column < 3 && !turned; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            const core::f32 identity = column == row ? 1.0f : 0.0f;
+            if (std::abs(turn.m[column][row] - identity) > 1e-3f) {
+                turned = true;
+                break;
+            }
+        }
+    }
+    // A centimetre is inside what floats and the two ends' frame timing make of
+    // the same motion; correcting it every snapshot would be a visible shimmer.
+    if (distance < 0.01 && !turned)
+        return;
+    m_stats.corrections += 1;
+    const auto correct = [&](core::CFrameD& frame) {
+        frame.position = frame.position + error;
+        if (turned)
+            frame.rotation = turn * frame.rotation;
+    };
+    correct(part->cframe);
+    for (Sample& sample : m_predicted) {
+        if (sample.tick > m_ackedIntent)
+            correct(sample.cframe);
+    }
 }
 
 void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const WorldState& state)
@@ -841,6 +1129,27 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
                 }
                 if (!(world.parentOf(local->second) == parent))
                     (void)world.setParent(local->second, parent);
+                continue;
+            }
+            const generated::FieldDesc* field = fieldAt(desc, at);
+            const bool cframe = field != nullptr && field->name == "CFrame" && field->pool == "parts";
+            if (entity.id.value == m_owned && m_owned != 0) {
+                // **This machine's own character is predicted** (ADR 0076): the
+                // local scripts already moved it, so the authority's value
+                // corrects it rather than replacing it. Its motion state is the
+                // local simulation's for the same reason.
+                if (cframe)
+                    reconcile(world, local->second, asCFrame(value));
+                if (field != nullptr && field->pool == "characterBodies")
+                    continue;
+                if (cframe)
+                    continue;
+            }
+            else if (cframe && m_interpolationDelay > 0) {
+                std::deque<Sample>& samples = m_samples[entity.id.value];
+                samples.push_back(Sample{state.tick, asCFrame(value)});
+                while (samples.size() > InterpolationSamples)
+                    samples.pop_front();
                 continue;
             }
             (void)applyField(world, local->second, desc, FieldDelta{wireIdAt(desc, at), value});

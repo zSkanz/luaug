@@ -1765,6 +1765,10 @@
       "Tags": ["NotCreatable"],
       "Properties": [
         {
+          "Name": "Character",
+          "Type": "BasePart?"
+        },
+        {
           "Name": "UserId",
           "Type": "number",
           "ReadOnly": true,

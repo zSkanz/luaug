@@ -90,6 +90,8 @@ struct Match
         REQUIRE_FALSE(clientTransport->connect("memory", Port, toServer).has_value());
         authority.emplace(*serverTransport);
         replica.emplace(*clientTransport, toServer);
+        // The transport's own semantics: each snapshot applied as it arrives.
+        replica->setInterpolationDelay(0);
     }
 
     // One tick, in the order the frame runs it: what arrived, the tick, what
@@ -412,6 +414,8 @@ TEST_CASE("a character's transform replicates, because a CharacterBody carries B
 
     AuthoritySession authority(*serverTransport);
     ReplicaSession replica(*clientTransport, toServer);
+    // The transport's own semantics: each snapshot applied as it arrives.
+    replica.setInterpolationDelay(0);
     for (core::u64 tick = 1; tick <= 6; ++tick) {
         server.world.parts().find(body)->cframe.position = core::DVec3{static_cast<double>(tick), 2.0, -3.0};
         authority.receive(server.world, server.workspace);
@@ -425,4 +429,241 @@ TEST_CASE("a character's transform replicates, because a CharacterBody carries B
     CHECK(client.world.parts().find(hero)->cframe.position.x == doctest::Approx(6.0));
     CHECK(client.world.parts().find(hero)->cframe.position.z == doctest::Approx(-3.0));
     CHECK(replica.checksumFailures() == 0);
+}
+
+// --- Characters, interest and prediction (N1, ADR 0076) -------------------
+
+namespace {
+
+// Two real worlds over the memory transport, each with the players a host and
+// a replica have at boot, stepped in the frame's order on both ends.
+struct PlayedMatch
+{
+    std::shared_ptr<net::MemoryNetwork> network = net::createMemoryNetwork();
+    std::unique_ptr<net::ITransport> serverTransport;
+    std::unique_ptr<net::ITransport> clientTransport = net::createMemoryTransport(network);
+    RealSide server;
+    RealSide client;
+    core::InstanceId host;
+    core::InstanceId me;
+    std::optional<AuthoritySession> authority;
+    std::optional<ReplicaSession> replica;
+    core::u64 tick = 0;
+
+    explicit PlayedMatch(const net::LossConfig* loss = nullptr)
+    {
+        seedCatalog();
+        serverTransport = loss != nullptr ? net::createLossyTransport(net::createMemoryTransport(network), *loss)
+                                          : net::createMemoryTransport(network);
+        REQUIRE_FALSE(
+            serverTransport->open(net::TransportConfig{.port = Port, .maxPeers = 4, .channels = 4}).has_value());
+        REQUIRE_FALSE(clientTransport->open(net::TransportConfig{.port = 0, .maxPeers = 1, .channels = 4}).has_value());
+        net::PeerId toServer;
+        REQUIRE_FALSE(clientTransport->connect("memory", Port, toServer).has_value());
+        host = scene::createPlayer(server.world, server.network, 1, true);
+        me = scene::createPlayer(client.world, client.network, 0, true);
+        authority.emplace(*serverTransport);
+        replica.emplace(*clientTransport, toServer);
+        run(3);
+    }
+
+    // A part under the authority's workspace, at `at`.
+    core::InstanceId part(std::string_view name, core::DVec3 at)
+    {
+        const core::InstanceId id = server.world.create(server.classes.findId(server.atoms.intern("Part")));
+        REQUIRE(id.valid());
+        server.world.setName(id, server.atoms.intern(name));
+        server.world.parts().find(id)->cframe.position = at;
+        REQUIRE_FALSE(server.world.setParent(id, server.workspace).has_value());
+        return id;
+    }
+
+    // The authority's player for this replica.
+    [[nodiscard]] core::InstanceId remote() { return scene::playerByUserId(server.world, 2); }
+
+    // The replica's copy of an authority instance, or nothing.
+    [[nodiscard]] core::InstanceId copyOf(core::InstanceId id) { return replica->localOf(authority->netIdOf(id)); }
+
+    void step()
+    {
+        tick += 1;
+        authority->receive(server.world, server.workspace);
+        authority->send(server.world, server.workspace, tick);
+        replica->receive(client.world, client.workspace);
+        replica->sendIntent(client.world, tick);
+    }
+
+    void run(int ticks)
+    {
+        for (int at = 0; at < ticks; ++at)
+            step();
+    }
+};
+
+} // namespace
+
+TEST_CASE("each machine's Player.Character is its own copy of the part the authority named")
+{
+    PlayedMatch match;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId hostRacer = match.part("HostRacer", core::DVec3{5.0, 1.0, 0.0});
+    REQUIRE(match.remote().valid());
+    match.server.world.players().find(match.remote())->character = racer;
+    match.server.world.players().find(match.host)->character = hostRacer;
+    match.run(3);
+
+    const core::InstanceId mine = match.copyOf(racer);
+    REQUIRE(mine.valid());
+    CHECK(match.client.world.players().find(match.me)->character == mine);
+    const core::InstanceId hostSeen = scene::playerByUserId(match.client.world, 1);
+    REQUIRE(hostSeen.valid());
+    CHECK(match.client.world.players().find(hostSeen)->character == match.copyOf(hostRacer));
+
+    // And a character taken away is taken away everywhere.
+    match.server.world.players().find(match.remote())->character = {};
+    match.run(2);
+    CHECK_FALSE(match.client.world.players().find(match.me)->character.valid());
+}
+
+TEST_CASE("a replica is sent what is near its character, and nothing far from it")
+{
+    PlayedMatch match;
+    match.server.world.engineState().streamingLoadRadius = 100.0;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId near = match.part("Near", core::DVec3{40.0, 1.0, 0.0});
+    const core::InstanceId far = match.part("Far", core::DVec3{500.0, 1.0, 0.0});
+    // A model straddling the boundary: its near part comes, its far part does
+    // not, and the model comes because something in it did.
+    const core::InstanceId model =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("Model")));
+    REQUIRE_FALSE(match.server.world.setParent(model, match.server.workspace).has_value());
+    const core::InstanceId inside = match.part("Inside", core::DVec3{10.0, 1.0, 10.0});
+    const core::InstanceId outside = match.part("Outside", core::DVec3{900.0, 1.0, 10.0});
+    REQUIRE_FALSE(match.server.world.setParent(inside, model).has_value());
+    REQUIRE_FALSE(match.server.world.setParent(outside, model).has_value());
+    // And whatever is attached to a near part comes with it, wherever it is.
+    const core::InstanceId attached = match.part("Attached", core::DVec3{700.0, 1.0, 0.0});
+    REQUIRE_FALSE(match.server.world.setParent(attached, near).has_value());
+
+    match.server.world.players().find(match.remote())->character = racer;
+    match.run(4);
+
+    CHECK(match.copyOf(racer).valid());
+    CHECK(match.copyOf(near).valid());
+    CHECK(match.copyOf(model).valid());
+    CHECK(match.copyOf(inside).valid());
+    CHECK(match.copyOf(attached).valid());
+    CHECK_FALSE(match.copyOf(far).valid());
+    CHECK_FALSE(match.copyOf(outside).valid());
+
+    // The far part walks in and arrives; walks just past the radius and stays,
+    // inside the hysteresis; and leaves past it.
+    match.server.world.parts().find(far)->cframe.position = core::DVec3{90.0, 1.0, 0.0};
+    match.run(3);
+    CHECK(match.copyOf(far).valid());
+    match.server.world.parts().find(far)->cframe.position = core::DVec3{115.0, 1.0, 0.0};
+    match.run(3);
+    CHECK(match.copyOf(far).valid());
+    match.server.world.parts().find(far)->cframe.position = core::DVec3{200.0, 1.0, 0.0};
+    match.run(3);
+    CHECK_FALSE(match.copyOf(far).valid());
+    // And back again: a second spawn of the same id, whole.
+    match.server.world.parts().find(far)->cframe.position = core::DVec3{20.0, 1.0, 0.0};
+    match.run(3);
+    REQUIRE(match.copyOf(far).valid());
+    match.run(8);
+    CHECK(match.client.world.parts().find(match.copyOf(far))->cframe.position.x == doctest::Approx(20.0));
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a replica moves its own character at once, and the snapshots only correct it")
+{
+    PlayedMatch match;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    match.server.world.players().find(match.remote())->character = racer;
+    match.run(3);
+    const core::InstanceId mine = match.copyOf(racer);
+    REQUIRE(mine.valid());
+
+    // The game, on both ends: while "Move" is held, the character goes half a
+    // metre along x a tick. The authority runs it from the intent it received;
+    // the replica runs it from its own input, at once -- which is prediction.
+    const core::NameAtom move = match.client.atoms.intern("Move");
+    match.client.world.players().find(match.me)->intents = {scene::PlayerIntent{move, 0, core::Vec3{}, true}};
+    const auto serverGame = [&] {
+        const scene::PlayerComponent* player = match.server.world.players().find(match.remote());
+        for (const scene::PlayerIntent& intent : player->intents) {
+            if (match.server.atoms.text(intent.action) == "Move" && intent.pressed)
+                match.server.world.parts().find(racer)->cframe.position.x += 0.5;
+        }
+    };
+    const auto clientGame = [&] { match.client.world.parts().find(mine)->cframe.position.x += 0.5; };
+
+    // A round trip of several ticks: the replica reads the network every
+    // fourth tick, so an answer is always a few ticks stale when it lands.
+    for (int frame = 1; frame <= 60; ++frame) {
+        match.tick += 1;
+        match.authority->receive(match.server.world, match.server.workspace);
+        serverGame();
+        match.authority->send(match.server.world, match.server.workspace, match.tick);
+        if (frame % 4 == 0)
+            match.replica->receive(match.client.world, match.client.workspace);
+        clientGame();
+        match.replica->sendIntent(match.client.world, match.tick);
+    }
+
+    const double server = match.server.world.parts().find(racer)->cframe.position.x;
+    const double client = match.client.world.parts().find(mine)->cframe.position.x;
+    // **Ahead of the authority, not behind it**: the replica shows the moves it
+    // has made and the authority has not answered yet.
+    CHECK(client > server);
+    CHECK(client - server < 5.0);
+    // And the two agree about every move both have seen, so nothing was
+    // corrected.
+    CHECK(match.replica->stats().corrections == 0);
+
+    // The authority disagrees -- a teleport the replica could not predict --
+    // and the replica is corrected by exactly that much.
+    match.server.world.parts().find(racer)->cframe.position.z = 30.0;
+    for (int frame = 1; frame <= 12; ++frame) {
+        match.tick += 1;
+        match.authority->receive(match.server.world, match.server.workspace);
+        match.authority->send(match.server.world, match.server.workspace, match.tick);
+        match.replica->receive(match.client.world, match.client.workspace);
+        match.replica->sendIntent(match.client.world, match.tick);
+    }
+    CHECK(match.client.world.parts().find(mine)->cframe.position.z == doctest::Approx(30.0));
+    CHECK(match.replica->stats().corrections >= 1);
+}
+
+TEST_CASE("another player's part is drawn between snapshots rather than stepping at their rate")
+{
+    PlayedMatch match;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId other = match.part("Other", core::DVec3{0.0, 1.0, 5.0});
+    match.server.world.players().find(match.remote())->character = racer;
+    match.run(3);
+    const core::InstanceId seen = match.copyOf(other);
+    REQUIRE(seen.valid());
+
+    // It moves a metre a tick, and the authority snapshots every other tick,
+    // as the default rate does.
+    std::vector<double> positions;
+    for (int frame = 1; frame <= 40; ++frame) {
+        match.tick += 1;
+        match.authority->receive(match.server.world, match.server.workspace);
+        match.server.world.parts().find(other)->cframe.position.x += 1.0;
+        if (match.tick % 2 == 0)
+            match.authority->send(match.server.world, match.server.workspace, match.tick);
+        match.replica->receive(match.client.world, match.client.workspace);
+        positions.push_back(match.client.world.parts().find(seen)->cframe.position.x);
+    }
+    // Once the buffer is full, every tick moves it a metre: no stall on the
+    // tick with no snapshot, and no two-metre jump on the tick with one.
+    for (std::size_t at = 20; at < positions.size(); ++at)
+        CHECK(positions[at] - positions[at - 1] == doctest::Approx(1.0));
+    // And it is drawn a few ticks behind the authority, not ahead of it.
+    const double server = match.server.world.parts().find(other)->cframe.position.x;
+    CHECK(positions.back() < server);
+    CHECK(server - positions.back() <= 6.0);
 }

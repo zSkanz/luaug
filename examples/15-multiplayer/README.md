@@ -32,11 +32,16 @@ takes an address and an optional port (`--join=192.168.0.10:7777`).
   the player at this machine and a remote one the same way, which is why the
   same loop drives one racer solo and one per window when hosting.
 
-## What it does not show yet
+- **A replica's own racer moves at once.** The authority names each player's
+  racer as their `Player.Character`; the replica drives its own from its own
+  keys the moment they are pressed, as the authority will when the intent
+  arrives, and the authority's snapshots correct it rather than overwrite it
+  (ADR 0076). Everyone else's racer, the crates and the spinner are drawn a few
+  ticks behind, between two snapshots, so they glide instead of stepping.
+- **Each replica is sent what is near its racer**, out to
+  `StreamingService.LoadRadius`, and nothing else.
 
-There is no prediction:
-a replica's own racer moves when the authority's snapshot says so, a round trip
-after the key.
+## What it does not show yet
 
 The transport is ENet, which is **unencrypted and unauthenticated**: a LAN or an
 otherwise trusted link.

@@ -59,8 +59,28 @@ Lighting.ClockTime = 14
 
 print(`multiplayer: running as {NetworkService.Topology.Name}, authority = {NetworkService.Authority}`)
 
+-- **The replica predicts its own racer** (ADR 0076). The authority says which
+-- part is whose through `Player.Character`; the replica moves its own at once
+-- from its own keys, exactly as the authority will move it when the intent
+-- arrives, and the authority's snapshots correct it rather than overwrite it.
+-- Everything else a replica shows is what it is sent, drawn between snapshots.
+local RacerSpeed = 8
+
+local function drive(player: Player, racer: BasePart, dt: number)
+    local intent = player:GetIntent("Move")
+    if typeof(intent) == "Vector2" then
+        racer.Position += vector.create(intent.X, 0, -intent.Y) * RacerSpeed * dt
+    end
+end
+
 if not NetworkService.Authority then
-    -- The replica's whole job: show what it is sent.
+    RunService.Heartbeat:Connect(function(dt: number)
+        local me = NetworkService.LocalPlayer
+        local racer = me and me.Character
+        if me and racer then
+            drive(me, racer, dt)
+        end
+    end)
     return
 end
 
@@ -98,7 +118,6 @@ spinner.Parent = Workspace
 -- **One racer per player**, made when they join and gone when they leave.
 -- Solo that is one racer, driven by this machine's keys; hosting it is one
 -- per window, each driven by what that window's player pressed.
-local RacerSpeed = 8
 local racers: { [Player]: BasePart } = {}
 
 local function addRacer(player: Player)
@@ -110,6 +129,9 @@ local function addRacer(player: Player)
     racer.Position = vector.create((player.UserId - 1) * 3, 0.6, 4)
     racer.Parent = Workspace
     racers[player] = racer
+    -- What makes it theirs: their replica predicts it, and is sent what is
+    -- near it.
+    player.Character = racer
 end
 
 for _, player in NetworkService:GetPlayers() do
@@ -132,10 +154,6 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- for the ones across the network. The authority decides where that puts
     -- them; the replicas see where it put them.
     for player, racer in racers do
-        local intent = player:GetIntent("Move")
-        if typeof(intent) == "Vector2" then
-            local step = vector.create(intent.X, 0, -intent.Y) * RacerSpeed * dt
-            racer.Position += step
-        end
+        drive(player, racer, dt)
     end
 end)

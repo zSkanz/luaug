@@ -92,6 +92,10 @@ struct Config
     // millisecond interval, so it is a function of the simulation rather than of
     // the wall clock (R10).
     u32 ticksPerSnapshot = 2;
+    // A replica: how many ticks behind the server's clock other players' parts
+    // are drawn, so there is a snapshot on each side of the moment shown
+    // (ADR 0076). Zero applies each snapshot as it arrives.
+    u32 interpolationDelayTicks = 4;
 };
 
 // What a script can see, and every field is a `HostFact`: it describes the
@@ -118,6 +122,9 @@ struct Stats
     u64 bytesSent = 0;
     u64 bytesReceived = 0;
     // Instances that entered and left interest this tick, summed over peers.
+    // A replica's own character, corrected by the authority because the
+    // prediction had drifted more than a centimetre (ADR 0076).
+    u64 corrections = 0;
     u32 spawned = 0;
     u32 despawned = 0;
 };

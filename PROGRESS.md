@@ -142,9 +142,14 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   not built: client prediction, the husk despawn, interest management and
   service properties.
 
+  **N1's three named gaps closed on 2026-09-23** (ADR 0076): a replica
+  predicts its own character from `Player.Character` and is corrected by the
+  authority rather than overwritten, draws everyone else between snapshots, and
+  is sent only what is near its character.
+
   **The next action, as a sentence:** in the order the owner agreed on
-  2026-09-23 -- terrain streaming and F3 are done, so N1's prediction and
-  interest management, then the editor's smaller items. Android waits.
+  2026-09-23 -- terrain streaming, F3 and N1's gaps are done, so the editor's
+  smaller items next. Android waits.
 - **The campaign in [`docs/finish-line.md`](docs/finish-line.md) closed first**,
   and it is the reason the tree is in a state worth building on. **Eighty-seven
   of its eighty-eight rows are done.** The one that is not is S1.7, and it is

@@ -252,6 +252,9 @@ private:
         u16 group = 0;
         core::CFrameD written;
         bool seen = false;
+        // On a replica, a character somebody else plays: it follows the
+        // authority's snapshots and is not simulated here (ADR 0076).
+        bool follower = false;
     };
 
     void syncCollisionGroups();

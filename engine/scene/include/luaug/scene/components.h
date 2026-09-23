@@ -614,6 +614,8 @@ struct PlayerComponent
     bool local = false;
     // This tick's intents, in the order the sending machine's actions are.
     std::vector<PlayerIntent> intents;
+    // `Player.Character`: the part that is them, on this machine.
+    core::InstanceId character;
 };
 
 // The block world `VoxelService` owns. **Not the terrain** -- see

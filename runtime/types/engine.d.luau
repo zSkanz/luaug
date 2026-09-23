@@ -1687,6 +1687,15 @@ declare extern type Player extends Instance with
     --- up for replicas in the order they joined. Never reused within a session, and not an account: a
     --- reconnect is a new number.
     read UserId: number
+    --- The part that is this player in the world -- a `CharacterBody`, a racer, whatever the game moves
+    --- for them. **The authority's game sets it**, and every replica learns it: each machine's `Player`
+    --- for someone points at that machine's copy of their part. It is what the engine knows about
+    --- ownership, and it decides three things. A replica PREDICTS its own player's character -- the
+    --- local scripts move it at once, and the authority's snapshots correct it rather than overwrite it
+    --- -- and draws everyone else's between snapshots. And the authority sends each replica only what
+    --- is near that replica's character, out to `StreamingService.LoadRadius`; a player with no
+    --- character is sent everything.
+    Character: BasePart?
     --- What this player's input action of that name reads this tick, in the currency
     --- `InputAction:GetState` uses: a boolean, a number, a `Vector2` or a `vector`. For the player at
     --- this machine it is this machine's own action; for a remote one it is what their machine sent. An

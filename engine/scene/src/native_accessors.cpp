@@ -292,6 +292,26 @@ void detachPlayerComponents(World& world, core::InstanceId id)
     world.players().remove(id);
 }
 
+Value getPlayerCharacter(const World& world, core::InstanceId id)
+{
+    const PlayerComponent* player = world.players().find(id);
+    return player == nullptr ? Value{} : Value{player->character};
+}
+
+bool setPlayerCharacter(World& world, core::InstanceId id, const Value& value)
+{
+    PlayerComponent* player = world.players().find(id);
+    const auto* character = std::get_if<core::InstanceId>(&value);
+    if (player == nullptr || character == nullptr)
+        return false;
+    // A part or nothing: a character is somewhere in the world, and a folder is
+    // nowhere a snapshot can correct or an interest radius can measure from.
+    if (character->valid() && world.parts().find(*character) == nullptr)
+        return false;
+    player->character = *character;
+    return true;
+}
+
 Value getPlayerUserId(const World& world, core::InstanceId id)
 {
     const PlayerComponent* player = world.players().find(id);

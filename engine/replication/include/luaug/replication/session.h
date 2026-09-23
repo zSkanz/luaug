@@ -57,6 +57,13 @@ inline constexpr NetId RootNetId{1};
 // for two seconds, which is a peer about to time out anyway.
 inline constexpr usize StateHistory = 64;
 
+// Prediction and interpolation (ADR 0076). Two snapshot intervals of delay at
+// the default rate -- the smallest that nearly always has a sample on each
+// side of the moment drawn -- and enough history for a two-second round trip.
+inline constexpr u32 DefaultInterpolationDelay = 4;
+inline constexpr usize InterpolationSamples = 6;
+inline constexpr usize PredictionHistory = 128;
+
 // One instance as the wire sees it: its network id, which of the schema's
 // classes describes it, and its fields in schema order. Values are in the
 // AUTHORITY'S terms -- its name atoms, its network ids -- on both ends.
@@ -102,6 +109,13 @@ public:
     [[nodiscard]] NetId netIdOf(core::InstanceId id) const noexcept;
 
 private:
+    // What one peer held at one tick: the ids its snapshot then carried.
+    struct PeerInterest
+    {
+        u64 tick = 0;
+        std::vector<u32> ids;
+    };
+
     struct Peer
     {
         net::PeerId id;
@@ -120,11 +134,25 @@ private:
         // changes.
         std::vector<u32> roster;
         bool rosterSent = false;
+        // What it held at each of the last `StateHistory` sends.
+        std::deque<PeerInterest> interest;
+    };
+
+    // One captured instance, in the walk's pre-order: its id, which instance
+    // it is, and where its parent is in the walk (-1 for the root's children).
+    struct Captured
+    {
+        u32 netId = 0;
+        core::InstanceId id;
+        core::i32 parent = -1;
     };
 
     // The subtree as it stands, and the class name each new id is spawned as.
     void capture(const scene::World& world, core::InstanceId root, u64 tick);
-    void sendTo(Peer& peer, const WorldState& current, const std::vector<u32>& roster);
+    void sendTo(Peer& peer, const WorldState& everything, const std::vector<u32>& roster,
+                const std::vector<u32>& relevant);
+    // The ids this peer should hold now, sorted (ADR 0076).
+    [[nodiscard]] std::vector<u32> interestOf(const scene::World& world, const Peer& peer) const;
     [[nodiscard]] const WorldState* historyAt(u64 tick) const noexcept;
     [[nodiscard]] Peer* peerFor(net::PeerId id) noexcept;
 
@@ -144,6 +172,8 @@ private:
     std::deque<std::shared_ptr<const WorldState>> m_history;
     // The world's atom table, for the strings a message carries. Captured by
     // `send`, which is the only caller that can need it.
+    // The last capture's walk, in pre-order.
+    std::vector<Captured> m_order;
     const scene::World* m_world = nullptr;
     u64 m_tick = 0;
     Stats m_stats;
@@ -186,6 +216,9 @@ private:
     void onDespawn(scene::World& world, std::span<const u8> bytes);
     void onPlayers(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
+    void resolveCharacters(scene::World& world, core::InstanceId root);
+    void reconcile(scene::World& world, core::InstanceId character, const core::CFrameD& authority);
+    void interpolate(scene::World& world);
     [[nodiscard]] const WorldState* stateAt(u64 tick) const noexcept;
 
     net::ITransport& m_transport;
@@ -207,6 +240,32 @@ private:
     std::deque<std::shared_ptr<const WorldState>> m_states;
     u64 m_checksumFailures = 0;
     Stats m_stats;
+    // Every player's character by user id, as the last roster named it.
+    std::map<u32, u32> m_characters;
+    // The NetId of this machine's own player's character, or zero.
+    u32 m_owned = 0;
+
+    // One remembered transform at one tick.
+    struct Sample
+    {
+        u64 tick = 0;
+        core::CFrameD cframe;
+    };
+    // Prediction (ADR 0076): the own character after each local tick, by the
+    // intent tick that produced it, and the last intent the authority applied.
+    std::deque<Sample> m_predicted;
+    u64 m_ackedIntent = 0;
+    // Interpolation: every remote part's last few snapshot transforms, by
+    // server tick, and the server clock they are drawn against.
+    std::map<u32, std::deque<Sample>> m_samples;
+    u64 m_serverClock = 0;
+    u32 m_interpolationDelay = DefaultInterpolationDelay;
+
+public:
+    // How many ticks behind the server's clock remote parts are drawn. Zero
+    // applies each snapshot as it arrives, which is what a test comparing two
+    // worlds pixel for pixel wants.
+    void setInterpolationDelay(u32 ticks) noexcept { m_interpolationDelay = ticks; }
 };
 
 } // namespace luaug::replication

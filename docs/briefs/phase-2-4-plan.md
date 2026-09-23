@@ -817,12 +817,15 @@ within half a percent of the frame -- and to have changed from its own first,
 empty frame, which refuses the vacuous pass. Break-verified: with component
 fields not applied it fails by 892,781 of 921,600 pixels.
 
-**Not built, and named so it is not mistaken for done:** there is no client
-prediction, so a replica's own
-character moves a round trip after the key; despawn destroys rather than using
-the streaming husk contract (decision 6); interest management is the whole
-workspace; and no service's properties replicate (`Lighting.ClockTime` is the
-real example).
+**Built since, on 2026-09-23** (ADR 0076): client prediction of a replica's own
+character from `Player.Character`, corrected by the authority rather than
+overwritten; interpolation of everything else between snapshots; and interest
+management measured from each peer's character on the streaming radius.
+
+**Not built, and named so it is not mistaken for done:** despawn destroys rather
+than using the streaming husk contract (decision 6); prediction corrects by the
+error rather than re-simulating the unanswered intents; and no service's
+properties replicate (`Lighting.ClockTime` is the real example).
 
 ---
 

@@ -2,6 +2,7 @@
 
 #include "luaug/asset/terrain_mesher.h"
 #include "luaug/asset/voxel_mesher.h"
+#include "luaug/scene/players.h"
 #include "luaug/scene/world.h"
 
 #include <algorithm>
@@ -487,6 +488,23 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
     if (!(part.cframe == record.written)) {
         m_backend.setCharacterTransform(m_world, record.handle, part.cframe);
         record.written = part.cframe;
+    }
+
+    // **On a replica, only its own player's character is simulated** (ADR
+    // 0076). Every other one is where the authority's snapshots put it: moving
+    // it here as well was two answers to one question, and the snapshot and
+    // the local gravity fought over it every tick. The own character is
+    // simulated -- that is the prediction -- and the snapshots correct it.
+    record.follower = false;
+    if (m_scene.engineState().networkTopology == NetworkTopology::Replica) {
+        const core::InstanceId local = localPlayerOf(m_scene);
+        const PlayerComponent* player = local.valid() ? m_scene.players().find(local) : nullptr;
+        if (player == nullptr || !(player->character == id)) {
+            record.follower = true;
+            character.moveDirection = core::Vec3{};
+            character.jumpRequested = false;
+            return;
+        }
     }
 
     // The movement model is the caller's and the sweeping is the backend's.
@@ -1641,7 +1659,7 @@ void PhysicsSync::writeCharacters()
         const core::InstanceId id = unpackInstance(entry.first);
         CharacterBodyComponent* character = m_scene.characterBodies().find(id);
         PartComponent* part = m_scene.parts().find(id);
-        if (character == nullptr || part == nullptr)
+        if (character == nullptr || part == nullptr || entry.second.follower)
             continue;
 
         const physics::CharacterState state = m_backend.characterState(m_world, entry.second.handle);

@@ -1546,7 +1546,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(networkServiceDesc);
 
     // --- Player ---
-    static std::array<PropertyDesc, 1> playerProperties;
+    static std::array<PropertyDesc, 2> playerProperties;
     playerProperties = {{
         PropertyDesc{
             .name = atoms.intern("UserId"),
@@ -1558,6 +1558,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getPlayerUserId,
             .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Character"),
+            .type = ValueType::Instance,
+            .instanceClass = atoms.intern("BasePart"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The part that is this player in the world -- a `CharacterBody`, a racer, whatever the game moves for them. **The authority's game sets it**, and every replica learns it: each machine's `Player` for someone points at that machine's copy of their part.\012\012It is what the engine knows about ownership, and it decides three things. A replica PREDICTS its own player's character -- the local scripts move it at once, and the authority's snapshots correct it rather than overwrite it -- and draws everyone else's between snapshots. And the authority sends each replica only what is near that replica's character, out to `StreamingService.LoadRadius`; a player with no character is sent everything.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getPlayerCharacter,
+            .set = native::setPlayerCharacter,
         },
     }};
     static std::array<MethodDesc, 1> playerMethods;

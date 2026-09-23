@@ -15,6 +15,7 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
+| `Character` | `BasePart?` | — | read/write | The part that is this player in the world -- a `CharacterBody`, a racer, whatever the game moves for them. **The authority's game sets it**, and every replica learns it: each machine's `Player` for someone points at that machine's copy of their part.<br><br>It is what the engine knows about ownership, and it decides three things. A replica PREDICTS its own player's character -- the local scripts move it at once, and the authority's snapshots correct it rather than overwrite it -- and draws everyone else's between snapshots. And the authority sends each replica only what is near that replica's character, out to `StreamingService.LoadRadius`; a player with no character is sent everything. |
 | `UserId` | `number` | — | read-only | The authority's number for this player: 1 for whoever sits at a solo or hosting machine, 2 and up for replicas in the order they joined. Never reused within a session, and not an account: a reconnect is a new number. |
 
 ## Methods

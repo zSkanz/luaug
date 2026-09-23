@@ -278,6 +278,8 @@ Value getNetworkServiceLocalPlayer(const World& world, core::InstanceId id);
 
 // Player
 Value getPlayerUserId(const World& world, core::InstanceId id);
+Value getPlayerCharacter(const World& world, core::InstanceId id);
+bool setPlayerCharacter(World& world, core::InstanceId id, const Value& value);
 void attachPlayerComponents(World& world, core::InstanceId id);
 void detachPlayerComponents(World& world, core::InstanceId id);
 

@@ -438,6 +438,9 @@ std::optional<core::EngineError> runReplicaGate(const ReplicaGateOptions& option
     joinConfig.topology = replication::Topology::Replica;
     joinConfig.port = Port;
     joinConfig.address = "memory";
+    // Pixel for pixel against the host, so each snapshot is shown as it
+    // arrives rather than a few ticks behind it.
+    joinConfig.interpolationDelayTicks = 0;
     auto joinNet = replication::createReplicationOver(net::createMemoryTransport(network), joinConfig, netError);
     if (joinNet == nullptr)
         return netError;
