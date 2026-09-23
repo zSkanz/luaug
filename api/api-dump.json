@@ -2808,6 +2808,25 @@
           "ThreadSafety": "Unsafe"
         },
         {
+          "Name": "SetBlockOpacity",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "number"
+            },
+            {
+              "Name": "opacity",
+              "Type": "Enum.BlockOpacity"
+            },
+            {
+              "Name": "transparency",
+              "Type": "number?"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
           "Name": "SetBlockTextures",
           "Parameters": [
             {
@@ -4730,6 +4749,23 @@
         },
         {
           "Name": "Y",
+          "Value": 2
+        }
+      ]
+    },
+    {
+      "Name": "BlockOpacity",
+      "Items": [
+        {
+          "Name": "Cutout",
+          "Value": 1
+        },
+        {
+          "Name": "Opaque",
+          "Value": 0
+        },
+        {
+          "Name": "Translucent",
           "Value": 2
         }
       ]

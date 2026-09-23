@@ -1120,6 +1120,26 @@ int voxelSetBlockTextures(lua_State* L)
     return 0;
 }
 
+int voxelSetBlockOpacity(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    const asset::BlockId id = checkBlockId(L, 2, voxels);
+    if (id == asset::AirBlock) {
+        const core::I18nArg args[] = {{"id", static_cast<core::i64>(id)},
+                                      {"count", static_cast<core::i64>(voxels.types.size())}};
+        raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
+    }
+    const scene::EnumValue opacity = checkEnumItem(L, 3);
+    if (opacity.enumId != scene::generated::BlockOpacityEnumId)
+        luaL_argerror(L, 3, "Enum.BlockOpacity");
+    const double transparency = luaL_optnumber(L, 4, 0.5);
+    scene::VoxelBlockType& type = voxels.types[id - 1u];
+    type.opacity = opacity.value;
+    type.transparency = static_cast<f32>(std::clamp(std::isfinite(transparency) ? transparency : 0.5, 0.0, 1.0));
+    voxels.revision += 1;
+    return 0;
+}
+
 int voxelRegisterBlock(lua_State* L)
 {
     scene::VoxelComponent& voxels = voxelsOf(L);
@@ -1149,7 +1169,7 @@ int voxelRegisterBlock(lua_State* L)
                                       {"count", static_cast<core::i64>(voxels.types.size())}};
         raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
     }
-    voxels.types.push_back(scene::VoxelBlockType{name, color, side, bottom, {}, {}, {}});
+    voxels.types.push_back(scene::VoxelBlockType{name, color, side, bottom, {}, {}, {}, 0, 0.5f});
     voxels.revision += 1;
     lua_pushinteger(L, static_cast<int>(voxels.types.size()));
     return 1;
@@ -1323,6 +1343,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"VoxelService", "RegisterBlock", voxelRegisterBlock},
     {"VoxelService", "GetBlockId", voxelGetBlockId},
     {"VoxelService", "SetBlockTextures", voxelSetBlockTextures},
+    {"VoxelService", "SetBlockOpacity", voxelSetBlockOpacity},
     {"VoxelService", "SetBlock", voxelSetBlock},
     {"VoxelService", "GetBlock", voxelGetBlock},
     {"VoxelService", "FillBlocks", voxelFillBlocks},

@@ -27,6 +27,16 @@ Which axes a `UIObject` sizes to fit its contents on, overriding that half of `S
 | `Y` | 2 |  |
 | `XY` | 3 |  |
 
+## Enum.BlockOpacity
+
+How much of what is behind a block shows through it (V1).
+
+| Item | Value | Description |
+|---|---|---|
+| `Opaque` | 0 | Nothing. A face against it is hidden, and it shades the corners it touches. |
+| `Cutout` | 1 | Holes where its image is transparent: leaves, a fence, a grate. Each pixel is there or not, and the faces between two cutout blocks are drawn, which is what makes a tree full. |
+| `Translucent` | 2 | Blended over what is behind it: glass, water, ice. No face between two blocks of the same type, so a lake is one surface. |
+
 ## Enum.CharacterState
 
 Whether a `CharacterBody` is standing on something (§2.2). Two items and not three: ground too steep to walk on reads as `Airborne`, because the question a script asks this property is whether it may jump.

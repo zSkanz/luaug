@@ -795,7 +795,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.voxelColors.reserve(voxels.types.size());
         out.voxelTextures.clear();
         for (const scene::VoxelBlockType& type : voxels.types) {
-            out.voxelColors.push_back(RenderWorld::VoxelColors{type.color, type.side, type.bottom});
+            out.voxelColors.push_back(RenderWorld::VoxelColors{type.color, type.side, type.bottom,
+                                                               type.opacity == 2 ? 1.0f - type.transparency : 1.0f});
             const auto handle = [materials](core::NameAtom urn) {
                 return materials != nullptr && urn.valid() ? materials->find(urn) : rhi::TextureHandle{};
             };
@@ -806,36 +807,47 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         u32 materialSlot = 0xFFFFFFFFu;
         const Mat4 transform = core::toRenderMatrix(core::CFrameD{}, origin);
         for (const asset::VoxelChunkKey key : voxels.grid.chunkKeys()) {
-            const core::NameAtom urn = world.atoms().lookup(voxelChunkUrn(key));
-            if (!urn.valid())
-                continue;
-            const MeshLibrary::Entry* entry = meshes.find(urn);
-            if (entry == nullptr || !entry->mesh.valid())
-                continue;
-            if (materialSlot == 0xFFFFFFFFu) {
-                materialSlot = static_cast<u32>(out.materials.size());
-                out.materials.push_back(RenderMaterial{});
+            // The opaque faces; the cutout ones, which the depth prepass must not
+            // see -- it would write a leaf's holes as solid -- and the translucent
+            // ones, as a blended draw that sorts with every other transparent
+            // surface, back to front.
+            for (int kind = 0; kind < 3; ++kind) {
+                const bool cutout = kind == 1;
+                const bool translucent = kind == 2;
+                const core::NameAtom urn = world.atoms().lookup(translucent ? voxelTranslucentUrn(key)
+                                                                : cutout    ? voxelCutoutUrn(key)
+                                                                            : voxelChunkUrn(key));
+                if (!urn.valid())
+                    continue;
+                const MeshLibrary::Entry* entry = meshes.find(urn);
+                if (entry == nullptr || !entry->mesh.valid())
+                    continue;
+                if (materialSlot == 0xFFFFFFFFu) {
+                    materialSlot = static_cast<u32>(out.materials.size());
+                    out.materials.push_back(RenderMaterial{});
+                }
+                const AABB worldBounds = core::transformed(transform, entry->bounds);
+                const Vec3 centre = core::center(worldBounds);
+                out.draws.push_back(DrawItem{
+                    .sortKey = drawSortKey(translucent ? kTransparentPass : kOpaquePass, kStaticPipeline, materialSlot,
+                                           drawGeometryKey(entry->mesh.index, 0), core::length(centre)),
+                    .transform = transform,
+                    .mesh = entry->mesh,
+                    .section = 0,
+                    .material = materialSlot,
+                    .alpha = 1.0f,
+                    .transparent = translucent,
+                    .boundsCenter = centre,
+                    .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
+                    .inCameraFrustum = core::intersects(out.camera.frustum, worldBounds),
+                    .firstBone = 0,
+                    .boneCount = 0,
+                    .outlined = false,
+                    .terrainCave = false,
+                    .voxelBlock = true,
+                    .cutout = cutout,
+                });
             }
-            const AABB worldBounds = core::transformed(transform, entry->bounds);
-            const Vec3 centre = core::center(worldBounds);
-            out.draws.push_back(DrawItem{
-                .sortKey = drawSortKey(kOpaquePass, kStaticPipeline, materialSlot,
-                                       drawGeometryKey(entry->mesh.index, 0), core::length(centre)),
-                .transform = transform,
-                .mesh = entry->mesh,
-                .section = 0,
-                .material = materialSlot,
-                .alpha = 1.0f,
-                .transparent = false,
-                .boundsCenter = centre,
-                .boundsRadius = 0.5f * core::length(core::size(worldBounds)),
-                .inCameraFrustum = core::intersects(out.camera.frustum, worldBounds),
-                .firstBone = 0,
-                .boneCount = 0,
-                .outlined = false,
-                .terrainCave = false,
-                .voxelBlock = true,
-            });
         }
     });
 

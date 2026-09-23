@@ -1265,6 +1265,20 @@ local Classes: { Schema.Class } = {
                     .. "The side image stands upright on every side and is never mirrored.",
             },
             {
+                Name = "SetBlockOpacity",
+                Parameters = {
+                    { Name = "id", Type = "number" },
+                    { Name = "opacity", Type = "Enum.BlockOpacity" },
+                    { Name = "transparency", Type = "number?" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Says how much of what is behind a block type shows through it. `Cutout` blocks have holes "
+                    .. "where their image is transparent; `Translucent` ones blend, and `transparency` (0 to 1, "
+                    .. "default 0.5) is how much they let through where their image does not say. See-through "
+                    .. "blocks still collide -- glass is a wall -- and do not shade the corners around them.",
+            },
+            {
                 Name = "GetBlockId",
                 Parameters = {
                     { Name = "name", Type = "string" },

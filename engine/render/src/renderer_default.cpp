@@ -575,6 +575,8 @@ private:
     // The block world's forward pipeline, made the first frame a block is
     // drawn, and the palette it reads, filled each frame from the registry.
     rhi::PipelineHandle voxelPipeline_{};
+    // The same shader, blended and not writing depth, for glass and water.
+    rhi::PipelineHandle voxelBlendPipeline_{};
     bool voxelTried_ = false;
     GpuVoxelPalette voxelPalette_{};
     // The block atlas (V1): one tile per distinct block image, filled by
@@ -1429,7 +1431,7 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     for (rhi::PipelineHandle* pipeline :
          {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_, &voxelPipeline_,
-          &particlePipeline_, &voxelTilePipeline_}) {
+          &particlePipeline_, &voxelTilePipeline_, &voxelBlendPipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1719,6 +1721,8 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         const bool visible = batch != nullptr ? batch->anyVisible : draw.inCameraFrustum;
         if (selection != Selection::Shadow && !visible)
             continue;
+        if (selection == Selection::Prepass && draw.cutout)
+            continue;
         if ((selection == Selection::Opaque || selection == Selection::Prepass) && draw.transparent)
             continue;
         // A transparent selected part still gets an outline: what is selected
@@ -1759,13 +1763,15 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // depth pass it is an ordinary static mesh.
         const bool caveDraw =
             selection == Selection::Opaque && batch == nullptr && draw.terrainCave && terrainCavePipeline_.valid();
-        const bool voxelDraw =
-            selection == Selection::Opaque && batch == nullptr && draw.voxelBlock && voxelPipeline_.valid();
-        const rhi::PipelineHandle wanted = batch != nullptr ? instancedPipeline
-                                           : skinnedDraw    ? skinnedPipeline
-                                           : caveDraw       ? terrainCavePipeline_
-                                           : voxelDraw      ? voxelPipeline_
-                                                            : staticPipeline;
+        const bool voxelDraw = (selection == Selection::Opaque || selection == Selection::Transparent) &&
+                               batch == nullptr && draw.voxelBlock && voxelPipeline_.valid() &&
+                               voxelBlendPipeline_.valid();
+        const rhi::PipelineHandle wanted =
+            batch != nullptr ? instancedPipeline
+            : skinnedDraw    ? skinnedPipeline
+            : caveDraw       ? terrainCavePipeline_
+            : voxelDraw      ? (selection == Selection::Transparent ? voxelBlendPipeline_ : voxelPipeline_)
+                             : staticPipeline;
         if (!(wanted == currentPipeline)) {
             cmd.setPipeline(wanted);
             currentPipeline = wanted;
@@ -2058,6 +2064,24 @@ bool DefaultRenderer::ensureVoxel(rhi::IDevice& device)
         .colorTargets = hdrTarget,
         .depthStencilFormat = kDepthFormat,
         .debugName = "voxel",
+    });
+    // **Both sides, blended, depth tested and not written**: from under water
+    // the surface is seen from below, and a pane of glass is a pane from either
+    // side.
+    const std::array<rhi::ColorTargetDesc, 1> blendTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true},
+    }};
+    voxelBlendPipeline_ = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = blendTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "voxel-blend",
     });
     return voxelPipeline_.valid();
 }
@@ -2466,7 +2490,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             voxelPalette_.tiles[id][0] = tileOf(images.top);
             voxelPalette_.tiles[id][1] = tileOf(images.side);
             voxelPalette_.tiles[id][2] = tileOf(images.bottom);
-            voxelPalette_.tiles[id][3] = 0.0f;
+            voxelPalette_.tiles[id][3] = id < world.voxelColors.size() ? world.voxelColors[id].alpha : 1.0f;
         }
         voxelPalette_.params[0] = world.voxelBlockSize;
         (void)ensureVoxel(device);

@@ -563,6 +563,11 @@ struct VoxelBlockType
     core::NameAtom texture;
     core::NameAtom sideTexture;
     core::NameAtom bottomTexture;
+    // `Enum.BlockOpacity`: 0 Opaque, 1 Cutout, 2 Translucent.
+    i32 opacity = 0;
+    // How much a translucent block lets through, 0 to 1, where it has no image
+    // alpha of its own to say.
+    f32 transparency = 0.5f;
 };
 
 // One thing a player did this tick: an input action's name and its value (N1).

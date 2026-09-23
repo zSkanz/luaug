@@ -26,6 +26,11 @@ namespace luaug::render {
 
 // `voxel://<x>,<y>,<z>`, in chunk keys.
 [[nodiscard]] std::string voxelChunkUrn(asset::VoxelChunkKey key);
+// The same chunk's translucent faces -- glass, water -- which are a second mesh
+// because they are a second draw.
+[[nodiscard]] std::string voxelTranslucentUrn(asset::VoxelChunkKey key);
+// And its cutout faces -- leaves -- which the depth prepass must not draw.
+[[nodiscard]] std::string voxelCutoutUrn(asset::VoxelChunkKey key);
 
 class VoxelLoader
 {
@@ -55,7 +60,11 @@ private:
     {
         asset::VoxelChunkKey key;
         core::NameAtom urn;
+        core::NameAtom translucentUrn;
+        core::NameAtom cutoutUrn;
         MeshHandle mesh;
+        MeshHandle translucent;
+        MeshHandle cutout;
         core::u64 content = 0;
         float blockSize = 1.0f;
         bool seen = false;

@@ -65,6 +65,7 @@ inline constexpr scene::EnumId AutomaticSizeEnumId = 22;
 inline constexpr scene::EnumId ScaleTypeEnumId = 23;
 inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
 inline constexpr scene::EnumId ParticleShapeEnumId = 25;
+inline constexpr scene::EnumId BlockOpacityEnumId = 26;
 
 } // namespace generated
 

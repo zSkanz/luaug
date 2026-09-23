@@ -35,6 +35,17 @@ voxels:SetBlockTextures(
 )
 local Leaves = voxels:RegisterBlock("Leaves", White)
 voxels:SetBlockTextures(Leaves, "asset://textures/leaves.png")
+-- **Leaves have holes** where their image is transparent, and the leaves
+-- behind them show through, which is what makes a tree look full.
+voxels:SetBlockOpacity(Leaves, Enum.BlockOpacity.Cutout)
+-- **Glass and water blend.** Glass takes its see-through from its image; the
+-- water has no image, so its transparency is the number given here, and two
+-- water blocks side by side have no face between them -- a pond is one surface.
+local Glass = voxels:RegisterBlock("Glass", White)
+voxels:SetBlockTextures(Glass, "asset://textures/glass.png")
+voxels:SetBlockOpacity(Glass, Enum.BlockOpacity.Translucent, 0)
+local Water = voxels:RegisterBlock("Water", Color3.new(0.1, 0.3, 0.6))
+voxels:SetBlockOpacity(Water, Enum.BlockOpacity.Translucent, 0.45)
 
 --- The ground's height at a column: two gentle waves, so there are hills.
 local function heightAt(x: number, z: number): number
@@ -56,6 +67,22 @@ local function tree(x: number, z: number)
     voxels:FillBlocks(vector.create(x - 2, base + 3, z - 2), vector.create(x + 2, base + 5, z + 2), Leaves)
     voxels:FillBlocks(vector.create(x, base, z), vector.create(x, base + 4, z), Wood)
 end
+-- A pond, dug into the hills and filled to one level.
+for x = 4, 13 do
+    for z = 4, 12 do
+        local h = heightAt(x, z)
+        local level = 5
+        if h >= level then
+            voxels:FillBlocks(vector.create(x, level, z), vector.create(x, h, z), 0)
+        end
+        voxels:FillBlocks(vector.create(x, math.min(h, level - 1), z), vector.create(x, level - 1, z), Water)
+    end
+end
+
+-- A glass window in a stone wall.
+voxels:FillBlocks(vector.create(-14, 9, 8), vector.create(-8, 14, 8), Stone)
+voxels:FillBlocks(vector.create(-13, 10, 8), vector.create(-9, 13, 8), Glass)
+
 tree(-6, -4)
 tree(-12, 6)
 tree(10, -14)

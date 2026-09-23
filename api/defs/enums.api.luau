@@ -767,6 +767,29 @@ local Definition: Schema.Definition = {
                 },
             } :: { Schema.EnumItem },
         },
+        {
+            Name = "BlockOpacity",
+            Doc = "How much of what is behind a block shows through it (V1).",
+            Items = {
+                {
+                    Name = "Opaque",
+                    Value = 0,
+                    Doc = "Nothing. A face against it is hidden, and it shades the corners it touches.",
+                },
+                {
+                    Name = "Cutout",
+                    Value = 1,
+                    Doc = "Holes where its image is transparent: leaves, a fence, a grate. Each pixel is there or "
+                        .. "not, and the faces between two cutout blocks are drawn, which is what makes a tree full.",
+                },
+                {
+                    Name = "Translucent",
+                    Value = 2,
+                    Doc = "Blended over what is behind it: glass, water, ice. No face between two blocks of the "
+                        .. "same type, so a lake is one surface.",
+                },
+            } :: { Schema.EnumItem },
+        },
     },
 }
 

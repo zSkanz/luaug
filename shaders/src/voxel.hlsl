@@ -23,7 +23,7 @@ cbuffer GpuVoxelPalette : register(b1, space1)
     float4 VoxelSide[256];
     float4 VoxelBottom[256];
     // The atlas tile each face's image is in: x top, y sides, z bottom, and -1
-    // for a face with no image.
+    // for a face with no image. w: the alpha a translucent type draws at.
     float4 VoxelTiles[256];
     // x: block size in metres; y: tiles per atlas row; z: one tile's size in
     // atlas UV; w: half a texel of a tile, in the tile's own UV, for the inset.
@@ -58,6 +58,9 @@ struct VoxelInterpolants
     // fragment stage that touches it is a pipeline D3D12 refuses. The same at
     // every corner of a face, so it interpolates to itself.
     float4 TileRect : TEXCOORD8;
+    // x: 1 on a cutout face, whose image alpha is a hole test; y: the type's
+    // alpha, for a translucent face.
+    float2 See : TEXCOORD9;
     float4 Position : SV_Position;
 };
 
@@ -80,6 +83,7 @@ VoxelInterpolants VertexMain(VertexInput input)
     const float tile = input.Normal.y > 0.5f ? VoxelTiles[slot].x
                        : input.Normal.y < -0.5f ? VoxelTiles[slot].z
                                                 : VoxelTiles[slot].y;
+    output.See = float2(input.Tangent.z, VoxelTiles[slot].w);
     if (tile >= 0.0f) {
         const float row = floor(tile / VoxelParams.y);
         output.TileRect = float4(float2(tile - row * VoxelParams.y, row) * VoxelParams.z, VoxelParams.z, VoxelParams.w);
@@ -113,6 +117,7 @@ float4 FragmentMain(VoxelInterpolants input) : SV_Target0
 
     float3 albedo = input.Albedo;
     const bool imaged = input.TileRect.z > 0.0f;
+    float imageAlpha = 1.0f;
     if (imaged) {
         // **The image's own coordinates, from the grid and the face**, rather
         // than from the mesher's quad: a merged quad's UV runs along whichever
@@ -130,7 +135,13 @@ float4 FragmentMain(VoxelInterpolants input) : SV_Target0
         // Inset by half a texel, so the tile next door never bleeds in.
         faceUv = clamp(faceUv, input.TileRect.w, 1.0f - input.TileRect.w);
         const float2 atlasUv = input.TileRect.xy + faceUv * input.TileRect.z;
-        albedo *= BaseColorTexture.SampleLevel(BaseColorSampler, atlasUv, 0.0f).rgb;
+        const float4 image = BaseColorTexture.SampleLevel(BaseColorSampler, atlasUv, 0.0f);
+        albedo *= image.rgb;
+        // **A cutout pixel is there or it is not**: a leaf's hole is a hole, not
+        // a blend, which is what lets cutout faces draw with the opaque ones.
+        if (input.See.x > 0.5f && image.a < 0.5f)
+            discard;
+        imageAlpha = image.a;
     }
     // The procedural variation is for colour-only blocks: an image already has
     // its own, and a tint laid over it reads as dirt on the texture.
@@ -152,5 +163,8 @@ float4 FragmentMain(VoxelInterpolants input) : SV_Target0
     float3 color = lightSurface(surface, input.ShadingPosition, shadingNormal, input.ViewDepth, input.Position.xy);
     color += EmissiveTexture.Sample(EmissiveSampler, uv).rgb;
     color = applyFog(color, FogColor.rgb, FogRange, length(input.ShadingPosition));
-    return float4(color, 1.0f);
+    // What a blended draw uses; the opaque pipeline does not blend and ignores
+    // it. A translucent face with an image uses the image's alpha, one without
+    // uses its type's.
+    return float4(color, imaged ? imageAlpha * input.See.y : input.See.y);
 }

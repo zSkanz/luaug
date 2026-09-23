@@ -254,6 +254,10 @@ struct DrawItem
     // its colour per vertex from the registry and its shading from the
     // per-corner occlusion the mesher baked.
     bool voxelBlock = false;
+    // Faces with holes from their image's alpha -- a block world's leaves.
+    // Kept out of the depth prepass, which has no image to test and would
+    // write the holes as solid.
+    bool cutout = false;
 };
 
 // One terrain the GPU draws from its height atlas (ADR 0071). Filled by
@@ -320,6 +324,9 @@ struct RenderWorld
         Color3 top;
         Color3 side;
         Color3 bottom;
+        // What a translucent block's pixels are drawn at where its image does
+        // not say: 1 minus its transparency. 1 for everything else.
+        f32 alpha = 1.0f;
     };
     std::vector<VoxelColors> voxelColors;
     // The same types' images, as uploaded textures -- invalid where a type has

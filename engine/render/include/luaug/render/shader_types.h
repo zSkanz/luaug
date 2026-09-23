@@ -462,7 +462,8 @@ struct GpuVoxelPalette
     f32 top[kVoxelPaletteSize][4]{};
     f32 side[kVoxelPaletteSize][4]{};
     f32 bottom[kVoxelPaletteSize][4]{};
-    // The atlas tile of each face's image -- top, sides, bottom -- or -1.
+    // The atlas tile of each face's image -- top, sides, bottom -- or -1; and in
+    // the fourth, the alpha a translucent type draws at.
     f32 tiles[kVoxelPaletteSize][4]{};
     // x: block size in metres; y: tiles per atlas row; z: a tile in atlas UV;
     // w: half a texel in a tile's own UV.

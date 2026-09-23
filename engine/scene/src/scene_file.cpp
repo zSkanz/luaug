@@ -1024,6 +1024,10 @@ void writeVoxels(JsonWriter& writer, const World& world)
             writer.field("sideTexture", world.atoms().text(type.sideTexture));
         if (type.bottomTexture.valid())
             writer.field("bottomTexture", world.atoms().text(type.bottomTexture));
+        if (type.opacity != 0) {
+            writer.field("opacity", static_cast<f64>(type.opacity));
+            writer.field("transparency", static_cast<f64>(type.transparency));
+        }
         writer.endObject();
     }
     writer.endArray();
@@ -1081,9 +1085,12 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
                            ? world.atoms().intern(value.asString())
                            : core::NameAtom{};
             };
+            const auto opacity = static_cast<core::i32>(std::clamp(type["opacity"].asNumber(0.0), 0.0, 2.0));
+            const auto transparency = static_cast<f32>(std::clamp(type["transparency"].asNumber(0.5), 0.0, 1.0));
             voxels->types.push_back(VoxelBlockType{world.atoms().intern(type["name"].asString()), top, side,
                                                    colour(type["bottom"], side), image(type["texture"]),
-                                                   image(type["sideTexture"]), image(type["bottomTexture"])});
+                                                   image(type["sideTexture"]), image(type["bottomTexture"]), opacity,
+                                                   transparency});
         }
     }
     if (const JsonValue chunks = node["chunks"]; chunks.type() == core::JsonType::Array) {

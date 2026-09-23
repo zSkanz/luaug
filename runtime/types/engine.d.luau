@@ -102,6 +102,9 @@ end
 declare extern type EnumParticleShape extends EnumItem with
 end
 
+declare extern type EnumBlockOpacity extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -1959,6 +1962,11 @@ declare extern type VoxelService extends Instance with
     --- block by block, sampled without smoothing: a sixteen-pixel image stays sixteen crisp pixels
     --- however close the camera is. The side image stands upright on every side and is never mirrored.
     function SetBlockTextures(self, id: number, texture: string, sideTexture: string?, bottomTexture: string?): ()
+    --- Says how much of what is behind a block type shows through it. `Cutout` blocks have holes where
+    --- their image is transparent; `Translucent` ones blend, and `transparency` (0 to 1, default 0.5)
+    --- is how much they let through where their image does not say. See-through blocks still collide --
+    --- glass is a wall -- and do not shade the corners around them.
+    function SetBlockOpacity(self, id: number, opacity: EnumBlockOpacity, transparency: number?): ()
     --- The id a block type was registered with, or nil for a name nobody registered.
     function GetBlockId(self, name: string): number?
     --- Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are
@@ -2255,6 +2263,12 @@ declare Enum: {
         Disc: EnumParticleShape,
         Square: EnumParticleShape,
         GetEnumItems: (self: any) -> { EnumParticleShape },
+    },
+    BlockOpacity: {
+        Opaque: EnumBlockOpacity,
+        Cutout: EnumBlockOpacity,
+        Translucent: EnumBlockOpacity,
+        GetEnumItems: (self: any) -> { EnumBlockOpacity },
     },
 }
 

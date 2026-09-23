@@ -26,13 +26,24 @@
 
 namespace luaug::asset {
 
+// How much of what is behind a block shows through it.
+enum class BlockOpacity : core::u8
+{
+    // Nothing: a face against it is hidden, and it darkens the corners it
+    // touches.
+    Opaque = 0,
+    // Holes, from the image's alpha: leaves, a fence, a grate. Drawn with the
+    // opaque blocks, a pixel either there or not.
+    Cutout = 1,
+    // Blended: glass, water, ice. Drawn afterwards, over what is behind it.
+    Translucent = 2,
+};
+
 // What the mesher needs to know about a block type. Indexed by `BlockId`; an id
 // past the end is treated as a plain opaque block.
 struct BlockLook
 {
-    // Air is not solid. Everything else is, for now: a transparent block
-    // (glass, water) is a later addition and will need its own pass.
-    bool solid = true;
+    BlockOpacity opacity = BlockOpacity::Opaque;
 };
 
 struct VoxelMesh
@@ -44,10 +55,20 @@ struct VoxelMesh
     // **What rides in the tangent**: x is the block id (the shader turns it into
     // a colour), y the corner's ambient occlusion from 0 (fully occluded) to 1.
     // The UV is the face's position in blocks along its two axes, for a texture
-    // that tiles once per block.
+    // that tiles once per block. z is 1 on a cutout block's face, whose image
+    // alpha the shader tests.
+    //
+    // Opaque faces.
     Mesh mesh;
+    // Cutout faces -- a third mesh because the depth prepass must not draw
+    // them: it has no image to test, and would write a leaf's holes as solid.
+    Mesh cutout;
+    // Translucent faces, for the blended pass -- a second mesh because it is a
+    // second draw, after every opaque surface and without writing depth.
+    Mesh translucent;
 
-    // The same surface for the collider. Positions only; one index list.
+    // Every face for the collider, translucent ones included: glass is a wall.
+    // Positions only; one index list.
     std::vector<core::Vec3> colliderPoints;
     std::vector<core::u32> colliderIndices;
 };

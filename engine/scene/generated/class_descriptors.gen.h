@@ -63,6 +63,7 @@ inline constexpr EnumId AutomaticSizeEnumId = 22;
 inline constexpr EnumId ScaleTypeEnumId = 23;
 inline constexpr EnumId NetworkTopologyEnumId = 24;
 inline constexpr EnumId ParticleShapeEnumId = 25;
+inline constexpr EnumId BlockOpacityEnumId = 26;
 
 } // namespace generated
 

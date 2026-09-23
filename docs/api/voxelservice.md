@@ -60,6 +60,10 @@ Registers a block type and returns its id. Ids are handed out in registration or
 
 Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are rounded down. Returns whether anything changed.
 
+### `SetBlockOpacity(id: number, opacity: Enum.BlockOpacity, transparency: number?)`
+
+Says how much of what is behind a block type shows through it. `Cutout` blocks have holes where their image is transparent; `Translucent` ones blend, and `transparency` (0 to 1, default 0.5) is how much they let through where their image does not say. See-through blocks still collide -- glass is a wall -- and do not shade the corners around them.
+
 ### `SetBlockTextures(id: number, texture: string, sideTexture: string?, bottomTexture: string?)`
 
 Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top, its four sides and its underside; the sides default to the top and the underside to the sides, exactly as the colours do. The block's colours TINT its images, so a type registered white shows them as drawn. An empty string removes an image.

@@ -347,6 +347,8 @@ u64 World::worldHash() const
                 // number is a fact about this process's table.
                 for (const core::NameAtom image : {type.texture, type.sideTexture, type.bottomTexture})
                     hasher.text(m_atoms.text(image));
+                hasher.pod(static_cast<core::u64>(static_cast<core::u32>(type.opacity)));
+                hasher.number(static_cast<f64>(type.transparency));
             }
             for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
                 hasher.pod(key.x);

@@ -2071,7 +2071,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 10> voxelServiceMethods;
+    static std::array<MethodDesc, 11> voxelServiceMethods;
     voxelServiceMethods = {{
         MethodDesc{
             .name = atoms.intern("RegisterBlock"),
@@ -2084,6 +2084,12 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top, its four sides and its underside; the sides default to the top and the underside to the sides, exactly as the colours do. The block's colours TINT its images, so a type registered white shows them as drawn. An empty string removes an image.\012\012Every image fills one block face and repeats block by block, sampled without smoothing: a sixteen-pixel image stays sixteen crisp pixels however close the camera is. The side image stands upright on every side and is never mirrored.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetBlockOpacity"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Says how much of what is behind a block type shows through it. `Cutout` blocks have holes where their image is transparent; `Translucent` ones blend, and `transparency` (0 to 1, default 0.5) is how much they let through where their image does not say. See-through blocks still collide -- glass is a wall -- and do not shade the corners around them.",
         },
         MethodDesc{
             .name = atoms.intern("GetBlockId"),
@@ -3392,6 +3398,31 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     particleShapeDesc.docKey = {};
     particleShapeDesc.items = particleShapeItems;
     enums.registerEnum(particleShapeDesc);
+
+    // --- BlockOpacity ---
+    static std::array<EnumItemDesc, 3> blockOpacityItems;
+    blockOpacityItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Opaque"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Cutout"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Translucent"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor blockOpacityDesc;
+    blockOpacityDesc.name = atoms.intern("BlockOpacity");
+    blockOpacityDesc.docKey = {};
+    blockOpacityDesc.items = blockOpacityItems;
+    enums.registerEnum(blockOpacityDesc);
 }
 
 } // namespace luaug::scene::generated

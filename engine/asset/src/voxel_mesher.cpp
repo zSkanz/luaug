@@ -59,13 +59,28 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
         }
     }
 
-    const auto solidId = [&looks](BlockId id) noexcept {
+    const auto opacityOf = [&looks](BlockId id) noexcept {
+        return id < looks.size() ? looks[id].opacity : BlockOpacity::Opaque;
+    };
+    // Only an opaque block hides a face or darkens a corner: light passes
+    // through glass and between leaves.
+    const auto opaqueId = [&](BlockId id) noexcept { return id != AirBlock && opacityOf(id) == BlockOpacity::Opaque; };
+    const auto solidAt = [&](const std::array<i32, 3>& at) noexcept {
+        return opaqueId(padded[paddedIndex(at[0], at[1], at[2])]);
+    };
+    // Whether a face of `id` against `front` shows. Against air or anything
+    // opaque the answer is the obvious one; against a see-through block it
+    // shows unless the two are the same see-through kind -- water against water
+    // and glass against glass have no face between them -- except for cutout,
+    // where the leaves behind leaves are exactly what makes a tree look full.
+    const auto faceShows = [&](BlockId id, BlockId front) noexcept {
         if (id == AirBlock)
             return false;
-        return id >= looks.size() || looks[id].solid;
-    };
-    const auto solidAt = [&](const std::array<i32, 3>& at) noexcept {
-        return solidId(padded[paddedIndex(at[0], at[1], at[2])]);
+        if (front == AirBlock)
+            return true;
+        if (opacityOf(front) == BlockOpacity::Opaque)
+            return false;
+        return front != id || opacityOf(id) == BlockOpacity::Cutout;
     };
 
     std::array<Face, VoxelChunkVolume / VoxelChunkEdge> mask{};
@@ -88,7 +103,7 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
                         Face& face = mask[static_cast<usize>(j * Edge + i)];
                         face = Face{};
                         const BlockId id = padded[paddedIndex(block[0], block[1], block[2])];
-                        if (!solidId(id) || solidAt(front))
+                        if (!faceShows(id, padded[paddedIndex(front[0], front[1], front[2])]))
                             continue;
                         face.present = true;
                         face.id = id;
@@ -150,7 +165,12 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
                         }};
                         const std::array<float, 3> base{static_cast<float>(baseX), static_cast<float>(baseY),
                                                         static_cast<float>(baseZ)};
-                        const auto first = static_cast<u32>(out.mesh.vertices.size());
+                        const BlockOpacity opacity = opacityOf(face.id);
+                        Mesh& target = opacity == BlockOpacity::Translucent ? out.translucent
+                                       : opacity == BlockOpacity::Cutout    ? out.cutout
+                                                                            : out.mesh;
+                        const auto first = static_cast<u32>(target.vertices.size());
+                        const auto colliderFirst = static_cast<u32>(out.colliderPoints.size());
                         for (usize corner = 0; corner < 4; ++corner) {
                             std::array<float, 3> at{};
                             at[static_cast<usize>(axis)] = plane;
@@ -164,11 +184,11 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
                             vertex.normal = Vec3{normal[0], normal[1], normal[2]};
                             vertex.tangent[0] = static_cast<float>(face.id);
                             vertex.tangent[1] = static_cast<float>(face.ao[corner]) / 3.0f;
-                            vertex.tangent[2] = 0.0f;
+                            vertex.tangent[2] = opacity == BlockOpacity::Cutout ? 1.0f : 0.0f;
                             vertex.tangent[3] = 1.0f;
                             vertex.uv[0] = spans[corner][0];
                             vertex.uv[1] = spans[corner][1];
-                            out.mesh.vertices.push_back(vertex);
+                            target.vertices.push_back(vertex);
                             out.colliderPoints.push_back(vertex.position);
                         }
 
@@ -186,8 +206,8 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
                             std::swap(triangles[4], triangles[5]);
                         }
                         for (const u32 index : triangles) {
-                            out.mesh.indices.push_back(first + index);
-                            out.colliderIndices.push_back(first + index);
+                            target.indices.push_back(first + index);
+                            out.colliderIndices.push_back(colliderFirst + index);
                         }
                         i += width;
                     }
@@ -196,20 +216,22 @@ VoxelMesh meshVoxelChunk(const VoxelGrid& grid, VoxelChunkKey key, std::span<con
         }
     }
 
-    if (!out.mesh.vertices.empty()) {
-        Vec3 low = out.mesh.vertices.front().position;
+    for (Mesh* mesh : {&out.mesh, &out.cutout, &out.translucent}) {
+        if (mesh->vertices.empty())
+            continue;
+        Vec3 low = mesh->vertices.front().position;
         Vec3 high = low;
-        for (const Vertex& vertex : out.mesh.vertices) {
+        for (const Vertex& vertex : mesh->vertices) {
             low = Vec3{std::min(low.x, vertex.position.x), std::min(low.y, vertex.position.y),
                        std::min(low.z, vertex.position.z)};
             high = Vec3{std::max(high.x, vertex.position.x), std::max(high.y, vertex.position.y),
                         std::max(high.z, vertex.position.z)};
         }
-        out.mesh.bounds = core::AABB{low, high};
+        mesh->bounds = core::AABB{low, high};
         Submesh section;
         section.firstIndex = 0;
-        section.indexCount = static_cast<u32>(out.mesh.indices.size());
-        out.mesh.submeshes.push_back(section);
+        section.indexCount = static_cast<u32>(mesh->indices.size());
+        mesh->submeshes.push_back(section);
     }
     return out;
 }

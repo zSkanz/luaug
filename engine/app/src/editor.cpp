@@ -3192,7 +3192,7 @@ asset::BlockId Editor::addBlockType(scene::World& world, Inspector& inspector, s
     // Recorded before the write, so look the component up again: the record
     // does not move pools, but nothing here should depend on that.
     voxels = voxelsIn(world);
-    voxels->types.push_back(scene::VoxelBlockType{atom, top, side, bottom, {}, {}, {}});
+    voxels->types.push_back(scene::VoxelBlockType{atom, top, side, bottom, {}, {}, {}, 0, 0.5f});
     voxels->revision += 1;
     const auto id = static_cast<asset::BlockId>(voxels->types.size());
     setBlockType(id);

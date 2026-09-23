@@ -53,6 +53,16 @@ std::string voxelChunkUrn(asset::VoxelChunkKey key)
     return "voxel://" + std::to_string(key.x) + "," + std::to_string(key.y) + "," + std::to_string(key.z);
 }
 
+std::string voxelTranslucentUrn(asset::VoxelChunkKey key)
+{
+    return voxelChunkUrn(key) + "#translucent";
+}
+
+std::string voxelCutoutUrn(asset::VoxelChunkKey key)
+{
+    return voxelChunkUrn(key) + "#cutout";
+}
+
 u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world, core::AtomTable& atoms,
                       MeshCache& cache, MeshLibrary& library)
 {
@@ -65,6 +75,19 @@ u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Wor
         if (voxels == nullptr)
             voxels = &found;
     });
+
+    // What shows through what, by id, and a digest of it that every chunk's
+    // content key carries: making a block type see-through changes the faces of
+    // every chunk that holds one, and nothing about their blocks.
+    std::vector<asset::BlockLook> looks;
+    u64 looksDigest = 0x6C6F6F6Bull;
+    if (voxels != nullptr) {
+        looks.assign(voxels->types.size() + 1, asset::BlockLook{});
+        for (usize at = 0; at < voxels->types.size(); ++at) {
+            looks[at + 1].opacity = static_cast<asset::BlockOpacity>(std::clamp(voxels->types[at].opacity, 0, 2));
+            looksDigest = combine(looksDigest, static_cast<u64>(voxels->types[at].opacity) + 1u);
+        }
+    }
 
     struct Want
     {
@@ -96,7 +119,7 @@ u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Wor
                 std::lower_bound(m_resident.begin(), m_resident.end(), key,
                                  [](const Resident& entry, asset::VoxelChunkKey probe) { return entry.key < probe; });
             const bool exists = at != m_resident.end() && at->key == key;
-            const u64 content = contentOf(voxels->grid, key, size);
+            const u64 content = combine(contentOf(voxels->grid, key, size), looksDigest);
             if (exists) {
                 at->seen = true;
                 if (at->content == content)
@@ -115,14 +138,14 @@ u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Wor
     if (wants.size() > ChunksPerSync)
         wants.resize(ChunksPerSync);
 
-    // Every chunk the mesher treats as solid; the registry decides colours, and
-    // colour is the shader's business, not the mesher's.
+    // The registry decides what shows through what; colours and images are
+    // the shader's business, not the mesher's.
     if (voxels != nullptr) {
         const float size = voxels->blockSize;
         jobs::parallelFor("voxel.mesh", jobs::Domain::Render, 0, wants.size(), 1,
-                          [&wants, voxels, size](usize begin, usize end, u32) noexcept {
+                          [&wants, &looks, voxels, size](usize begin, usize end, u32) noexcept {
                               for (usize at = begin; at < end; ++at)
-                                  wants[at].meshed = asset::meshVoxelChunk(voxels->grid, wants[at].key, {}, size);
+                                  wants[at].meshed = asset::meshVoxelChunk(voxels->grid, wants[at].key, looks, size);
                           });
     }
 
@@ -132,35 +155,51 @@ u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Wor
                                    [](const Resident& entry, asset::VoxelChunkKey probe) { return entry.key < probe; });
         const bool exists = at != m_resident.end() && at->key == want.key;
 
-        MeshHandle handle;
-        if (!want.meshed.mesh.indices.empty()) {
-            core::EngineError uploadError;
-            handle = cache.create(device, cmd, want.meshed.mesh, MeshUsage::Static, &uploadError);
-            if (!handle.valid())
-                core::logText(core::LogLevel::Warn, uploadError.message);
-        }
-        if (handle.valid()) {
-            MeshLibrary::Entry entry;
-            entry.mesh = handle;
-            entry.bounds = want.meshed.mesh.bounds;
-            entry.sectionCount = 1;
-            entry.sectionMaterial.assign(1, 0u);
-            entry.materials.push_back(RenderMaterial{});
-            library.set(urn, std::move(entry));
-        }
-        else {
-            library.remove(urn);
-        }
+        const core::NameAtom translucentUrn = atoms.intern(voxelTranslucentUrn(want.key));
+        const core::NameAtom cutoutUrn = atoms.intern(voxelCutoutUrn(want.key));
+        // One mesh into the library under one name, or its name out of it.
+        const auto upload = [&](const asset::Mesh& mesh, core::NameAtom name) {
+            MeshHandle handle;
+            if (!mesh.indices.empty()) {
+                core::EngineError uploadError;
+                handle = cache.create(device, cmd, mesh, MeshUsage::Static, &uploadError);
+                if (!handle.valid())
+                    core::logText(core::LogLevel::Warn, uploadError.message);
+            }
+            if (handle.valid()) {
+                MeshLibrary::Entry entry;
+                entry.mesh = handle;
+                entry.bounds = mesh.bounds;
+                entry.sectionCount = 1;
+                entry.sectionMaterial.assign(1, 0u);
+                entry.materials.push_back(RenderMaterial{});
+                library.set(name, std::move(entry));
+            }
+            else {
+                library.remove(name);
+            }
+            return handle;
+        };
+        const MeshHandle handle = upload(want.meshed.mesh, urn);
+        const MeshHandle translucent = upload(want.meshed.translucent, translucentUrn);
+        const MeshHandle cutout = upload(want.meshed.cutout, cutoutUrn);
 
         if (exists) {
             if (at->mesh.valid())
                 cache.release(device, at->mesh);
+            if (at->translucent.valid())
+                cache.release(device, at->translucent);
+            if (at->cutout.valid())
+                cache.release(device, at->cutout);
             at->mesh = handle;
+            at->translucent = translucent;
+            at->cutout = cutout;
             at->content = want.content;
             at->seen = true;
         }
         else {
-            m_resident.insert(at, Resident{want.key, urn, handle, want.content, voxels->blockSize, true});
+            m_resident.insert(at, Resident{want.key, urn, translucentUrn, cutoutUrn, handle, translucent, cutout,
+                                           want.content, voxels->blockSize, true});
         }
         m_lastRebuilds += 1;
     }
@@ -172,7 +211,13 @@ u32 VoxelLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Wor
             continue;
         if (resident.mesh.valid())
             cache.release(device, resident.mesh);
+        if (resident.translucent.valid())
+            cache.release(device, resident.translucent);
+        if (resident.cutout.valid())
+            cache.release(device, resident.cutout);
         library.remove(resident.urn);
+        library.remove(resident.translucentUrn);
+        library.remove(resident.cutoutUrn);
         m_resident.erase(m_resident.begin() + static_cast<std::ptrdiff_t>(at - 1));
     }
     return m_lastRebuilds;
@@ -183,7 +228,13 @@ void VoxelLoader::destroy(rhi::IDevice& device, MeshCache& cache, MeshLibrary& l
     for (Resident& resident : m_resident) {
         if (resident.mesh.valid())
             cache.release(device, resident.mesh);
+        if (resident.translucent.valid())
+            cache.release(device, resident.translucent);
+        if (resident.cutout.valid())
+            cache.release(device, resident.cutout);
         library.remove(resident.urn);
+        library.remove(resident.translucentUrn);
+        library.remove(resident.cutoutUrn);
     }
     m_resident.clear();
 }
