@@ -793,8 +793,15 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.voxelColors.clear();
         out.voxelBlockSize = voxels.blockSize;
         out.voxelColors.reserve(voxels.types.size());
-        for (const scene::VoxelBlockType& type : voxels.types)
+        out.voxelTextures.clear();
+        for (const scene::VoxelBlockType& type : voxels.types) {
             out.voxelColors.push_back(RenderWorld::VoxelColors{type.color, type.side, type.bottom});
+            const auto handle = [materials](core::NameAtom urn) {
+                return materials != nullptr && urn.valid() ? materials->find(urn) : rhi::TextureHandle{};
+            };
+            out.voxelTextures.push_back(
+                RenderWorld::VoxelTextures{handle(type.texture), handle(type.sideTexture), handle(type.bottomTexture)});
+        }
 
         u32 materialSlot = 0xFFFFFFFFu;
         const Mat4 transform = core::toRenderMatrix(core::CFrameD{}, origin);

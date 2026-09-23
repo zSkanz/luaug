@@ -462,10 +462,13 @@ struct GpuVoxelPalette
     f32 top[kVoxelPaletteSize][4]{};
     f32 side[kVoxelPaletteSize][4]{};
     f32 bottom[kVoxelPaletteSize][4]{};
-    // x: block size in metres.
+    // The atlas tile of each face's image -- top, sides, bottom -- or -1.
+    f32 tiles[kVoxelPaletteSize][4]{};
+    // x: block size in metres; y: tiles per atlas row; z: a tile in atlas UV;
+    // w: half a texel in a tile's own UV.
     f32 params[4]{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static_assert(sizeof(GpuVoxelPalette) == 3 * 256 * 16 + 16, "GpuVoxelPalette is a cbuffer layout");
+static_assert(sizeof(GpuVoxelPalette) == 4 * 256 * 16 + 16, "GpuVoxelPalette is a cbuffer layout");
 
 } // namespace luaug::render

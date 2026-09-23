@@ -256,6 +256,9 @@ private:
     struct PendingTexture
     {
         core::NameAtom urn;
+        // Whether the image is a COLOUR -- a base colour, an emission, a block
+        // face -- and so stored sRGB, as the compiler stores those.
+        bool srgb = false;
         platform::IoRequest read;
         jobs::JobHandle decode;
         std::unique_ptr<TextureWork> work;

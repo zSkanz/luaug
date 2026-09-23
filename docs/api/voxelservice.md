@@ -60,6 +60,12 @@ Registers a block type and returns its id. Ids are handed out in registration or
 
 Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are rounded down. Returns whether anything changed.
 
+### `SetBlockTextures(id: number, texture: string, sideTexture: string?, bottomTexture: string?)`
+
+Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top, its four sides and its underside; the sides default to the top and the underside to the sides, exactly as the colours do. The block's colours TINT its images, so a type registered white shows them as drawn. An empty string removes an image.
+
+Every image fills one block face and repeats block by block, sampled without smoothing: a sixteen-pixel image stays sixteen crisp pixels however close the camera is. The side image stands upright on every side and is never mirrored.
+
 ### `WorldToBlock(position: vector): vector`
 
 The block coordinate a world position falls in.

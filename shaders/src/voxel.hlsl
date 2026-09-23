@@ -22,7 +22,11 @@ cbuffer GpuVoxelPalette : register(b1, space1)
     float4 VoxelTop[256];
     float4 VoxelSide[256];
     float4 VoxelBottom[256];
-    // x: block size in metres.
+    // The atlas tile each face's image is in: x top, y sides, z bottom, and -1
+    // for a face with no image.
+    float4 VoxelTiles[256];
+    // x: block size in metres; y: tiles per atlas row; z: one tile's size in
+    // atlas UV; w: half a texel of a tile, in the tile's own UV, for the inset.
     float4 VoxelParams;
 };
 
@@ -45,6 +49,15 @@ struct VoxelInterpolants
     float2 FaceUv : TEXCOORD4;
     float Occlusion : TEXCOORD5;
     float ViewDepth : TEXCOORD6;
+    // Where on the grid this is, in blocks, for the image's coordinates.
+    float3 Grid : TEXCOORD7;
+    // The face's image as a rectangle of the atlas, worked out here from the
+    // palette: xy the tile's corner in atlas UV, z its size (zero when the face
+    // has no image), w half a texel of inset. **Passed rather than read in the
+    // fragment stage**, because the palette is a vertex-stage block and a
+    // fragment stage that touches it is a pipeline D3D12 refuses. The same at
+    // every corner of a face, so it interpolates to itself.
+    float4 TileRect : TEXCOORD8;
     float4 Position : SV_Position;
 };
 
@@ -64,11 +77,22 @@ VoxelInterpolants VertexMain(VertexInput input)
     output.Albedo = input.Normal.y > 0.5f ? VoxelTop[slot].rgb
                     : input.Normal.y < -0.5f ? VoxelBottom[slot].rgb
                                              : VoxelSide[slot].rgb;
+    const float tile = input.Normal.y > 0.5f ? VoxelTiles[slot].x
+                       : input.Normal.y < -0.5f ? VoxelTiles[slot].z
+                                                : VoxelTiles[slot].y;
+    if (tile >= 0.0f) {
+        const float row = floor(tile / VoxelParams.y);
+        output.TileRect = float4(float2(tile - row * VoxelParams.y, row) * VoxelParams.z, VoxelParams.z, VoxelParams.w);
+    }
+    else {
+        output.TileRect = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
     output.Occlusion = input.Tangent.y;
     const float size = max(VoxelParams.x, 1e-4f);
     // Half a block INTO the face, so every fragment of a face names the block
     // it belongs to rather than the one in front of it.
     output.Block = input.Position / size - input.Normal * 0.5f;
+    output.Grid = input.Position / size;
     output.FaceUv = input.Uv;
     return output;
 }
@@ -88,7 +112,30 @@ float4 FragmentMain(VoxelInterpolants input) : SV_Target0
     const float grainFade = saturate(1.0f - footprint);
 
     float3 albedo = input.Albedo;
-    albedo *= 1.0f + (perBlock - 0.5f) * 0.10f + (grain - 0.5f) * 0.10f * grainFade;
+    const bool imaged = input.TileRect.z > 0.0f;
+    if (imaged) {
+        // **The image's own coordinates, from the grid and the face**, rather
+        // than from the mesher's quad: a merged quad's UV runs along whichever
+        // axes its sweep used, so a side image would lie on its back on two
+        // sides and be mirrored on two. Here every side stands upright, seen
+        // from outside, and a top is laid out on the ground's own axes.
+        const float3 g = input.Grid;
+        float2 faceUv;
+        if (abs(normal.y) > 0.5f)
+            faceUv = float2(frac(g.x), normal.y > 0.0f ? frac(g.z) : 1.0f - frac(g.z));
+        else if (abs(normal.x) > 0.5f)
+            faceUv = float2(normal.x > 0.0f ? 1.0f - frac(g.z) : frac(g.z), 1.0f - frac(g.y));
+        else
+            faceUv = float2(normal.z > 0.0f ? frac(g.x) : 1.0f - frac(g.x), 1.0f - frac(g.y));
+        // Inset by half a texel, so the tile next door never bleeds in.
+        faceUv = clamp(faceUv, input.TileRect.w, 1.0f - input.TileRect.w);
+        const float2 atlasUv = input.TileRect.xy + faceUv * input.TileRect.z;
+        albedo *= BaseColorTexture.SampleLevel(BaseColorSampler, atlasUv, 0.0f).rgb;
+    }
+    // The procedural variation is for colour-only blocks: an image already has
+    // its own, and a tint laid over it reads as dirt on the texture.
+    if (!imaged)
+        albedo *= 1.0f + (perBlock - 0.5f) * 0.10f + (grain - 0.5f) * 0.10f * grainFade;
     // The corner occlusion: fully open is 1, a corner in a crease is dark. The
     // curve keeps a one-block step readable without making every crease black.
     albedo *= lerp(0.42f, 1.0f, input.Occlusion * input.Occlusion * (3.0f - 2.0f * input.Occlusion));
@@ -96,7 +143,6 @@ float4 FragmentMain(VoxelInterpolants input) : SV_Target0
     // The four material slots, read so the fragment layout matches every other
     // forward shader's -- bound to neutral stand-ins today.
     const float2 uv = input.FaceUv;
-    albedo *= BaseColorTexture.Sample(BaseColorSampler, uv).rgb;
     const float roughness = 0.9f * MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, uv).g;
     const float3 detail = NormalTexture.Sample(NormalSampler, uv).xyz * 2.0f - 1.0f;
     const float3x3 frame = tangentFrame(normal, float4(1.0f, 0.0f, 0.0f, 1.0f));

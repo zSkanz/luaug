@@ -2071,13 +2071,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 9> voxelServiceMethods;
+    static std::array<MethodDesc, 10> voxelServiceMethods;
     voxelServiceMethods = {{
         MethodDesc{
             .name = atoms.intern("RegisterBlock"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "Registers a block type and returns its id. Ids are handed out in registration order from 1, which makes them a pure function of the script that registered them -- the same script on every machine gets the same ids. Registering a name twice returns the id it already has and updates its colours.\012\012`color` is the block's top, and every face when it is the only colour given. `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a grass block is green on top and earth everywhere else.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetBlockTextures"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top, its four sides and its underside; the sides default to the top and the underside to the sides, exactly as the colours do. The block's colours TINT its images, so a type registered white shows them as drawn. An empty string removes an image.\012\012Every image fills one block face and repeats block by block, sampled without smoothing: a sixteen-pixel image stays sixteen crisp pixels however close the camera is. The side image stands upright on every side and is never mirrored.",
         },
         MethodDesc{
             .name = atoms.intern("GetBlockId"),

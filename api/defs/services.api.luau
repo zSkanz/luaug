@@ -1247,6 +1247,24 @@ local Classes: { Schema.Class } = {
                     .. "sides: a grass block is green on top and earth everywhere else.",
             },
             {
+                Name = "SetBlockTextures",
+                Parameters = {
+                    { Name = "id", Type = "number" },
+                    { Name = "texture", Type = "string" },
+                    { Name = "sideTexture", Type = "string?" },
+                    { Name = "bottomTexture", Type = "string?" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top, "
+                    .. "its four sides and its underside; the sides default to the top and the underside to the "
+                    .. "sides, exactly as the colours do. The block's colours TINT its images, so a type "
+                    .. "registered white shows them as drawn. An empty string removes an image.\n\n"
+                    .. "Every image fills one block face and repeats block by block, sampled without "
+                    .. "smoothing: a sixteen-pixel image stays sixteen crisp pixels however close the camera is. "
+                    .. "The side image stands upright on every side and is never mirrored.",
+            },
+            {
                 Name = "GetBlockId",
                 Parameters = {
                     { Name = "name", Type = "string" },

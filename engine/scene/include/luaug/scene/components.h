@@ -558,6 +558,11 @@ struct VoxelBlockType
     core::Color3 color{1.0f, 1.0f, 1.0f};
     core::Color3 side{1.0f, 1.0f, 1.0f};
     core::Color3 bottom{1.0f, 1.0f, 1.0f};
+    // Images, by content URN, for the same three faces; empty for none. The
+    // colours tint them, so a white block shows its image as drawn.
+    core::NameAtom texture;
+    core::NameAtom sideTexture;
+    core::NameAtom bottomTexture;
 };
 
 // One thing a player did this tick: an input action's name and its value (N1).

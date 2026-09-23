@@ -2808,6 +2808,29 @@
           "ThreadSafety": "Unsafe"
         },
         {
+          "Name": "SetBlockTextures",
+          "Parameters": [
+            {
+              "Name": "id",
+              "Type": "number"
+            },
+            {
+              "Name": "texture",
+              "Type": "string"
+            },
+            {
+              "Name": "sideTexture",
+              "Type": "string?"
+            },
+            {
+              "Name": "bottomTexture",
+              "Type": "string?"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
           "Name": "WorldToBlock",
           "Parameters": [
             {

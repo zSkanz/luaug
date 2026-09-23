@@ -86,6 +86,12 @@ enum class TextureFormat : u8
     Bc3RgbaUnorm,
     Bc5RgUnorm,
     Bc7RgbaUnorm,
+    // The same blocks, decoded from sRGB when sampled. **Added after the
+    // freeze** (ADR 0073): a colour the asset compiler encoded as sRGB was
+    // uploaded under the linear name, so every compiled base colour drew pale.
+    Bc1RgbaUnormSrgb,
+    Bc3RgbaUnormSrgb,
+    Bc7RgbaUnormSrgb,
 };
 
 [[nodiscard]] constexpr bool isDepthFormat(TextureFormat format) noexcept

@@ -53,6 +53,16 @@ constexpr f32 kContactRayMetres = 0.6f;
 // bound, so the next ordinary draw rebinds its own.
 constexpr u32 kCaveBinding = 0xFFFFFFFEu;
 constexpr u32 kVoxelBinding = 0xFFFFFFFDu;
+
+// The block atlas: sixty-four pixel tiles, sixteen to a row, 256 images. Enough
+// for any block game's palette, and a quarter of a 2048 atlas's memory. RGBA16F
+// because what is drawn into it is the image as the shader SAW it -- already
+// linear -- and eight bits of linear crushes the darks of an sRGB image.
+constexpr u32 kVoxelTileSize = 64;
+constexpr u32 kVoxelTilesPerRow = 16;
+constexpr u32 kVoxelAtlasSize = kVoxelTileSize * kVoxelTilesPerRow;
+constexpr u32 kVoxelAtlasTiles = kVoxelTilesPerRow * kVoxelTilesPerRow;
+constexpr rhi::TextureFormat kVoxelAtlasFormat = rhi::TextureFormat::Rgba16Float;
 constexpr f32 kContactThicknessMetres = 0.25f;
 constexpr f32 kContactFadeDistance = 60.0f;
 constexpr rhi::TextureFormat kLuminanceFormat = rhi::TextureFormat::R32Float;
@@ -567,6 +577,13 @@ private:
     rhi::PipelineHandle voxelPipeline_{};
     bool voxelTried_ = false;
     GpuVoxelPalette voxelPalette_{};
+    // The block atlas (V1): one tile per distinct block image, filled by
+    // drawing each image into its square the first frame it is loaded -- which
+    // is what lets it hold compiled images the CPU has no pixels for.
+    rhi::TextureHandle voxelAtlas_{};
+    rhi::PipelineHandle voxelTilePipeline_{};
+    // Which texture is in which tile, by handle, in the order they arrived.
+    std::vector<std::pair<u32, u32>> voxelTiles_;
     // Particles (F2): the pipeline, made the first frame one is drawn, and
     // the instance stream this frame uploads into.
     rhi::PipelineHandle particlePipeline_{};
@@ -1410,8 +1427,9 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(instanceBuffer_);
     instanceBuffer_ = {};
 
-    for (rhi::PipelineHandle* pipeline : {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_,
-                                          &terrainCavePipeline_, &voxelPipeline_, &particlePipeline_}) {
+    for (rhi::PipelineHandle* pipeline :
+         {&terrainPipeline_, &terrainPrepassPipeline_, &terrainShadowPipeline_, &terrainCavePipeline_, &voxelPipeline_,
+          &particlePipeline_, &voxelTilePipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1427,6 +1445,10 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     if (particleBuffer_.valid())
         device.destroy(particleBuffer_);
     particleBuffer_ = {};
+    if (voxelAtlas_.valid())
+        device.destroy(voxelAtlas_);
+    voxelAtlas_ = {};
+    voxelTiles_.clear();
     particleTried_ = false;
     terrainGridUploaded_ = false;
 
@@ -1770,7 +1792,10 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 if (boundMaterial != kVoxelBinding) {
                     cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(&voxelPalette_, sizeof(voxelPalette_)));
                     const std::array<rhi::TextureBinding, 13> textures{
-                        rhi::TextureBinding{whitePixel_, linearSampler_},
+                        // The block atlas in the base-colour slot, sampled
+                        // without smoothing; white until the first image.
+                        voxelAtlas_.valid() ? rhi::TextureBinding{voxelAtlas_, pointSampler_}
+                                            : rhi::TextureBinding{whitePixel_, pointSampler_},
                         rhi::TextureBinding{flatNormalPixel_, linearSampler_},
                         rhi::TextureBinding{whitePixel_, linearSampler_},
                         rhi::TextureBinding{blackPixel_, linearSampler_},
@@ -2006,6 +2031,23 @@ bool DefaultRenderer::ensureVoxel(rhi::IDevice& device)
         rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
     };
     const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{.format = kHdrFormat}};
+
+    // The atlas and the pipeline that fills it, beside the block pipeline that
+    // reads it: a block world with images needs all three and one without
+    // pays for the atlas's memory only when the first image arrives.
+    const rhi::ShaderHandle tileVertex = load("voxel_tile", rhi::ShaderStage::Vertex);
+    const rhi::ShaderHandle tileFragment = load("voxel_tile", rhi::ShaderStage::Fragment);
+    if (tileVertex.valid() && tileFragment.valid()) {
+        const std::array<rhi::ColorTargetDesc, 1> atlasTarget{rhi::ColorTargetDesc{.format = kVoxelAtlasFormat}};
+        voxelTilePipeline_ = device.createGraphicsPipeline({
+            .vertexShader = tileVertex,
+            .fragmentShader = tileFragment,
+            .rasterizer = {.cullMode = rhi::CullMode::None},
+            .colorTargets = atlasTarget,
+            .debugName = "voxel-tile",
+        });
+    }
+
     voxelPipeline_ = device.createGraphicsPipeline({
         .vertexShader = vertex,
         .fragmentShader = fragment,
@@ -2364,6 +2406,67 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             put(voxelPalette_.top[id], colors.top);
             put(voxelPalette_.side[id], colors.side);
             put(voxelPalette_.bottom[id], colors.bottom);
+        }
+        voxelPalette_.params[0] = world.voxelBlockSize;
+        voxelPalette_.params[1] = static_cast<f32>(kVoxelTilesPerRow);
+        voxelPalette_.params[2] = 1.0f / static_cast<f32>(kVoxelTilesPerRow);
+        voxelPalette_.params[3] = 0.5f / static_cast<f32>(kVoxelTileSize);
+        (void)ensureVoxel(device);
+
+        // **Each image into its tile, the first frame it is loaded**, and never
+        // again: a tile keeps its image for as long as the renderer lives.
+        const auto tileOf = [&](rhi::TextureHandle texture) -> f32 {
+            if (!texture.valid())
+                return -1.0f;
+            for (const auto& [handle, tile] : voxelTiles_) {
+                if (handle == texture.id)
+                    return static_cast<f32>(tile);
+            }
+            if (voxelTiles_.size() >= kVoxelAtlasTiles || !voxelTilePipeline_.valid())
+                return -1.0f;
+            if (!voxelAtlas_.valid()) {
+                voxelAtlas_ = device.createTexture({
+                    .format = kVoxelAtlasFormat,
+                    .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+                    .width = kVoxelAtlasSize,
+                    .height = kVoxelAtlasSize,
+                    .debugName = "voxel-atlas",
+                });
+                if (!voxelAtlas_.valid())
+                    return -1.0f;
+            }
+            const auto tile = static_cast<u32>(voxelTiles_.size());
+            const std::array<rhi::ColorAttachment, 1> atlasAttachment{rhi::ColorAttachment{
+                .texture = voxelAtlas_,
+                // The first image clears the atlas; every later one draws over
+                // its own square and leaves the rest as it was.
+                .loadOp = tile == 0 ? rhi::LoadOp::Clear : rhi::LoadOp::Load,
+                .storeOp = rhi::StoreOp::Store,
+            }};
+            cmd.beginRenderPass({.colorAttachments = atlasAttachment, .debugName = "voxel-tile"});
+            const auto column = static_cast<f32>(tile % kVoxelTilesPerRow);
+            const auto row = static_cast<f32>(tile / kVoxelTilesPerRow);
+            const auto size = static_cast<f32>(kVoxelTileSize);
+            cmd.setViewport({.x = column * size, .y = row * size, .width = size, .height = size});
+            cmd.setScissor({.x = static_cast<core::i32>(column * size),
+                            .y = static_cast<core::i32>(row * size),
+                            .width = static_cast<core::i32>(kVoxelTileSize),
+                            .height = static_cast<core::i32>(kVoxelTileSize)});
+            cmd.setPipeline(voxelTilePipeline_);
+            const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{texture, pointSampler_}};
+            cmd.bindTextures(rhi::ShaderStage::Fragment, 0, source);
+            cmd.draw(3, 1, 0, 0);
+            cmd.endRenderPass();
+            voxelTiles_.emplace_back(texture.id, tile);
+            return static_cast<f32>(tile);
+        };
+        for (u32 id = 0; id < kVoxelPaletteSize; ++id) {
+            const RenderWorld::VoxelTextures images =
+                id < world.voxelTextures.size() ? world.voxelTextures[id] : RenderWorld::VoxelTextures{};
+            voxelPalette_.tiles[id][0] = tileOf(images.top);
+            voxelPalette_.tiles[id][1] = tileOf(images.side);
+            voxelPalette_.tiles[id][2] = tileOf(images.bottom);
+            voxelPalette_.tiles[id][3] = 0.0f;
         }
         voxelPalette_.params[0] = world.voxelBlockSize;
         (void)ensureVoxel(device);

@@ -1016,6 +1016,14 @@ void writeVoxels(JsonWriter& writer, const World& world)
         colour("color", type.color);
         colour("side", type.side);
         colour("bottom", type.bottom);
+        // Written only when set, so a block world made before textures reads
+        // back byte for byte.
+        if (type.texture.valid())
+            writer.field("texture", world.atoms().text(type.texture));
+        if (type.sideTexture.valid())
+            writer.field("sideTexture", world.atoms().text(type.sideTexture));
+        if (type.bottomTexture.valid())
+            writer.field("bottomTexture", world.atoms().text(type.bottomTexture));
         writer.endObject();
     }
     writer.endArray();
@@ -1068,8 +1076,14 @@ void readVoxels(World& world, const JsonValue& root, SceneIoReport& out)
             };
             const core::Color3 top = colour(type["color"], core::Color3{1.0f, 1.0f, 1.0f});
             const core::Color3 side = colour(type["side"], top);
-            voxels->types.push_back(
-                VoxelBlockType{world.atoms().intern(type["name"].asString()), top, side, colour(type["bottom"], side)});
+            const auto image = [&world](const JsonValue& value) {
+                return value.type() == core::JsonType::String && !value.asString().empty()
+                           ? world.atoms().intern(value.asString())
+                           : core::NameAtom{};
+            };
+            voxels->types.push_back(VoxelBlockType{world.atoms().intern(type["name"].asString()), top, side,
+                                                   colour(type["bottom"], side), image(type["texture"]),
+                                                   image(type["sideTexture"]), image(type["bottomTexture"])});
         }
     }
     if (const JsonValue chunks = node["chunks"]; chunks.type() == core::JsonType::Array) {

@@ -322,6 +322,15 @@ struct RenderWorld
         Color3 bottom;
     };
     std::vector<VoxelColors> voxelColors;
+    // The same types' images, as uploaded textures -- invalid where a type has
+    // none or it has not loaded yet, which draws the colour alone.
+    struct VoxelTextures
+    {
+        rhi::TextureHandle top;
+        rhi::TextureHandle side;
+        rhi::TextureHandle bottom;
+    };
+    std::vector<VoxelTextures> voxelTextures;
     // This frame's particles (F2), camera-relative and back to front --
     // appended by `ParticleSystem::append` after the extract, because they are
     // simulated on the frame and are not in the world the extract reads.
@@ -350,6 +359,7 @@ struct RenderWorld
         bones.clear();
         terrains.clear();
         voxelColors.clear();
+        voxelTextures.clear();
         particles.clear();
         voxelBlockSize = 1.0f;
         candidateDraws = 0;

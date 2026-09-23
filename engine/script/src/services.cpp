@@ -1090,6 +1090,36 @@ asset::BlockId checkBlockId(lua_State* L, int index, const scene::VoxelComponent
     return static_cast<asset::BlockId>(id);
 }
 
+int voxelSetBlockTextures(lua_State* L)
+{
+    scene::VoxelComponent& voxels = voxelsOf(L);
+    const asset::BlockId id = checkBlockId(L, 2, voxels);
+    if (id == asset::AirBlock) {
+        const core::I18nArg args[] = {{"id", static_cast<core::i64>(id)},
+                                      {"count", static_cast<core::i64>(voxels.types.size())}};
+        raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
+    }
+    World& w = world(L);
+    const auto image = [&](int index, core::NameAtom fallback) {
+        if (lua_isnoneornil(L, index))
+            return fallback;
+        usize length = 0;
+        const char* text = luaL_checklstring(L, index, &length);
+        return length == 0 ? core::NameAtom{} : w.atoms().intern(std::string_view{text, length});
+    };
+    const core::NameAtom top = image(3, core::NameAtom{});
+    const core::NameAtom side = image(4, top);
+    const core::NameAtom bottom = image(5, side);
+    scene::VoxelBlockType& type = voxels.types[id - 1u];
+    if (!(type.texture == top) || !(type.sideTexture == side) || !(type.bottomTexture == bottom)) {
+        type.texture = top;
+        type.sideTexture = side;
+        type.bottomTexture = bottom;
+        voxels.revision += 1;
+    }
+    return 0;
+}
+
 int voxelRegisterBlock(lua_State* L)
 {
     scene::VoxelComponent& voxels = voxelsOf(L);
@@ -1119,7 +1149,7 @@ int voxelRegisterBlock(lua_State* L)
                                       {"count", static_cast<core::i64>(voxels.types.size())}};
         raise(L, LUAUG_TR("scene.err.voxel_unknown_block"), args);
     }
-    voxels.types.push_back(scene::VoxelBlockType{name, color, side, bottom});
+    voxels.types.push_back(scene::VoxelBlockType{name, color, side, bottom, {}, {}, {}});
     voxels.revision += 1;
     lua_pushinteger(L, static_cast<int>(voxels.types.size()));
     return 1;
@@ -1292,6 +1322,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
 
     {"VoxelService", "RegisterBlock", voxelRegisterBlock},
     {"VoxelService", "GetBlockId", voxelGetBlockId},
+    {"VoxelService", "SetBlockTextures", voxelSetBlockTextures},
     {"VoxelService", "SetBlock", voxelSetBlock},
     {"VoxelService", "GetBlock", voxelGetBlock},
     {"VoxelService", "FillBlocks", voxelFillBlocks},

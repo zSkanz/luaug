@@ -343,6 +343,10 @@ u64 World::worldHash() const
                     hasher.number(static_cast<f64>(face.g));
                     hasher.number(static_cast<f64>(face.b));
                 }
+                // By text, like every other name the hash reads: an atom's
+                // number is a fact about this process's table.
+                for (const core::NameAtom image : {type.texture, type.sideTexture, type.bottomTexture})
+                    hasher.text(m_atoms.text(image));
             }
             for (const asset::VoxelChunkKey key : voxels->grid.chunkKeys()) {
                 hasher.pod(key.x);

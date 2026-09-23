@@ -11,14 +11,30 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local voxels = game:GetService("VoxelService")
 
--- Colours are linear, like every colour in this engine. Grass is green on top
--- and earth on its sides; the rest are one colour all round.
-local Earth = Color3.new(0.20, 0.12, 0.06)
-local Grass = voxels:RegisterBlock("Grass", Color3.new(0.12, 0.30, 0.07), Earth)
-local Dirt = voxels:RegisterBlock("Dirt", Earth)
-local Stone = voxels:RegisterBlock("Stone", Color3.new(0.22, 0.22, 0.23))
-local Wood = voxels:RegisterBlock("Wood", Color3.new(0.25, 0.17, 0.09), Color3.new(0.15, 0.09, 0.04))
-local Leaves = voxels:RegisterBlock("Leaves", Color3.new(0.05, 0.18, 0.04))
+-- **Images for every face, and white so they show as drawn**: a block's
+-- colours tint its images. Grass has a top, sides with a fringe of green, and a
+-- dirt underside; a log shows rings on its ends and bark all round.
+local White = Color3.new(1, 1, 1)
+local Grass = voxels:RegisterBlock("Grass", White)
+voxels:SetBlockTextures(
+    Grass,
+    "asset://textures/grass_top.png",
+    "asset://textures/grass_side.png",
+    "asset://textures/dirt.png"
+)
+local Dirt = voxels:RegisterBlock("Dirt", White)
+voxels:SetBlockTextures(Dirt, "asset://textures/dirt.png")
+local Stone = voxels:RegisterBlock("Stone", White)
+voxels:SetBlockTextures(Stone, "asset://textures/stone.png")
+local Wood = voxels:RegisterBlock("Wood", White)
+voxels:SetBlockTextures(
+    Wood,
+    "asset://textures/log_top.png",
+    "asset://textures/log_side.png",
+    "asset://textures/log_top.png"
+)
+local Leaves = voxels:RegisterBlock("Leaves", White)
+voxels:SetBlockTextures(Leaves, "asset://textures/leaves.png")
 
 --- The ground's height at a column: two gentle waves, so there are hills.
 local function heightAt(x: number, z: number): number

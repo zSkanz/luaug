@@ -50,6 +50,12 @@ namespace luaug::rhi::sdlgpu {
         return SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM;
     case TextureFormat::Bc7RgbaUnorm:
         return SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM;
+    case TextureFormat::Bc1RgbaUnormSrgb:
+        return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB;
+    case TextureFormat::Bc3RgbaUnormSrgb:
+        return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB;
+    case TextureFormat::Bc7RgbaUnormSrgb:
+        return SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB;
     }
     return SDL_GPU_TEXTUREFORMAT_INVALID;
 }
@@ -373,6 +379,9 @@ namespace luaug::rhi::sdlgpu {
     case TextureFormat::Bc3RgbaUnorm:
     case TextureFormat::Bc5RgUnorm:
     case TextureFormat::Bc7RgbaUnorm:
+    case TextureFormat::Bc1RgbaUnormSrgb:
+    case TextureFormat::Bc3RgbaUnormSrgb:
+    case TextureFormat::Bc7RgbaUnormSrgb:
         return 0;
     }
     return 0;

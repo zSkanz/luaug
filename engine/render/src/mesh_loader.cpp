@@ -38,14 +38,20 @@ constexpr std::string_view kAssetScheme = "asset://";
     return root / std::filesystem::path(relative);
 }
 
+// **sRGB for a colour, linear for data**, which is what the asset compiler
+// decided for the compiled forms (E9): a base colour or an emission is authored
+// in sRGB and must reach the shader linear, and a normal or a metal/roughness
+// map is numbers that must not be touched. The loose path uploaded everything
+// as linear for eight milestones, so a colour map drew visibly paler before its
+// project was compiled than after.
 [[nodiscard]] rhi::TextureHandle uploadImage(rhi::IDevice& device, rhi::ICmdList& cmd, const asset::Image& image,
-                                             const char* debugName)
+                                             const char* debugName, bool srgb = false)
 {
     if (!image.valid())
         return {};
 
     const rhi::TextureHandle handle = device.createTexture({
-        .format = rhi::TextureFormat::Rgba8Unorm,
+        .format = srgb ? rhi::TextureFormat::Rgba8UnormSrgb : rhi::TextureFormat::Rgba8Unorm,
         .usage = rhi::TextureUsage::Sampled,
         .width = image.width,
         .height = image.height,
@@ -58,22 +64,27 @@ constexpr std::string_view kAssetScheme = "asset://";
     return handle;
 }
 
-[[nodiscard]] rhi::TextureFormat toRhi(asset::TextureFormat format) noexcept
+// **The transfer function the compiler wrote, honoured** (ADR 0073). It
+// ignored `srgb` for as long as the compiled path existed, so every colour the
+// compiler had correctly marked sRGB was sampled as if it were already linear
+// -- the pale, washed look every imported model had.
+[[nodiscard]] rhi::TextureFormat toRhi(asset::TextureFormat format, bool srgb) noexcept
 {
     switch (format) {
     case asset::TextureFormat::Bc1Rgb:
-        return rhi::TextureFormat::Bc1RgbaUnorm;
+        return srgb ? rhi::TextureFormat::Bc1RgbaUnormSrgb : rhi::TextureFormat::Bc1RgbaUnorm;
     case asset::TextureFormat::Bc3Rgba:
-        return rhi::TextureFormat::Bc3RgbaUnorm;
+        return srgb ? rhi::TextureFormat::Bc3RgbaUnormSrgb : rhi::TextureFormat::Bc3RgbaUnorm;
     case asset::TextureFormat::Bc5Rg:
+        // Two channels of data -- a normal map -- and never a colour.
         return rhi::TextureFormat::Bc5RgUnorm;
     case asset::TextureFormat::Bc7Rgba:
-        return rhi::TextureFormat::Bc7RgbaUnorm;
+        return srgb ? rhi::TextureFormat::Bc7RgbaUnormSrgb : rhi::TextureFormat::Bc7RgbaUnorm;
     case asset::TextureFormat::Rgba8:
     case asset::TextureFormat::Unknown:
         break;
     }
-    return rhi::TextureFormat::Rgba8Unorm;
+    return srgb ? rhi::TextureFormat::Rgba8UnormSrgb : rhi::TextureFormat::Rgba8Unorm;
 }
 
 // A transcoded texture, with every mip it carries. The block-compressed path is
@@ -86,7 +97,7 @@ constexpr std::string_view kAssetScheme = "asset://";
         return {};
 
     const rhi::TextureHandle handle = device.createTexture({
-        .format = toRhi(texture.format),
+        .format = toRhi(texture.format, texture.srgb),
         .usage = rhi::TextureUsage::Sampled,
         .width = texture.width,
         .height = texture.height,
@@ -317,7 +328,7 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             continue;
         }
 
-        const rhi::TextureHandle handle = uploadImage(device, cmd, pending.work->image, "material");
+        const rhi::TextureHandle handle = uploadImage(device, cmd, pending.work->image, "material", pending.srgb);
         if (!handle.valid()) {
             markFailed(pending.urn);
             drop();
@@ -351,7 +362,7 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
     // asks for. `StreamingHost::pump` orders its own pipeline the same way.
     core::u32 loaded = deferredTextures_ ? pumpTextures(device, cmd, world, library) : 0u;
 
-    const auto load = [&](core::NameAtom urn) {
+    const auto load = [&](core::NameAtom urn, bool srgb) {
         if (urn.id == 0 || library.find(urn).valid())
             return;
         if (std::binary_search(failed_.begin(), failed_.end(), urn,
@@ -418,6 +429,7 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
                 return;
             PendingTexture pending;
             pending.urn = urn;
+            pending.srgb = srgb;
             // `Normal`, above a thumbnail and below a chunk the camera is about
             // to reach: this is a surface somebody is looking at right now.
             pending.read = platform::readFileAsync(path, platform::IoPriority::Normal);
@@ -444,7 +456,7 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             return;
         }
 
-        const rhi::TextureHandle handle = uploadImage(device, cmd, image, "material");
+        const rhi::TextureHandle handle = uploadImage(device, cmd, image, "material", srgb);
         if (!handle.valid()) {
             markFailed();
             return;
@@ -456,10 +468,19 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
 
     world.materials().forEach([&](core::InstanceId id, const scene::MaterialComponent& material) {
         (void)id;
-        load(material.colorMap);
-        load(material.normalMap);
-        load(material.metallicRoughnessMap);
-        load(material.emissiveMap);
+        load(material.colorMap, true);
+        load(material.normalMap, false);
+        load(material.metallicRoughnessMap, false);
+        load(material.emissiveMap, true);
+    });
+    // A block world's images (V1), through the same door: compiled when the
+    // compiler has seen them, a loose file when it has not.
+    world.voxels().forEach([&](core::InstanceId, const scene::VoxelComponent& voxels) {
+        for (const scene::VoxelBlockType& type : voxels.types) {
+            load(type.texture, true);
+            load(type.sideTexture, true);
+            load(type.bottomTexture, true);
+        }
     });
 
     return loaded;

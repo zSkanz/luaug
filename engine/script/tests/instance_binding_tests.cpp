@@ -539,15 +539,15 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // which added `Terrain:FillBall`, `:FillBlock`, `:HeightAt`, `:Clear` and
     // `:Compact`; 78 with `Terrain:RaiseBall` when the ground moved to the GPU
     // (ADR 0071); 87 at V1, which added `VoxelService`'s nine; and 89 at N1, with
-    // `NetworkService:GetPlayers` and `Player:GetIntent`; and 90 at F2, with `ParticleEmitter:Emit`. This number is
-    // what makes a DECLARED-but-unbound method impossible to ship: the IDL would count it and the binding table would
-    // not, which is `Inert` for a method.
+    // `NetworkService:GetPlayers` and `Player:GetIntent`; and 91 at F2, with `ParticleEmitter:Emit` and
+    // `VoxelService:SetBlockTextures`. This number is what makes a DECLARED-but-unbound method impossible to ship: the
+    // IDL would count it and the binding table would not, which is `Inert` for a method.
     //
     // **It earned its keep at F1.** Five methods were declared in the IDL in one
     // commit and this failed on the next build, before anything could reach a
     // script and find a name that answered nothing.
-    CHECK(coverage.declared == 90);
-    CHECK(coverage.bound == 90);
+    CHECK(coverage.declared == 91);
+    CHECK(coverage.bound == 91);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

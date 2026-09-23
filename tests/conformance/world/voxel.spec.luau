@@ -81,4 +81,19 @@ describe("voxel service", function()
         local missed = voxels:Raycast(vector.create(0.5, 10, 0.5), vector.create(0, -5, 0))
         expect(missed):ToBe(nil)
     end)
+
+    it("gives a block type images, and refuses air or a type nobody registered", function()
+        -- Images are a look, not a fact about the world's shape: setting them
+        -- changes no block and fails nothing, even before a file is found.
+        voxels:SetBlockTextures(Stone, "asset://textures/stone.png")
+        voxels:SetBlockTextures(Dirt, "asset://textures/top.png", "asset://textures/side.png", "")
+        voxels:SetBlockTextures(Stone, "")
+        local anyVoxels = voxels :: any
+        expect(function()
+            anyVoxels:SetBlockTextures(0, "asset://textures/air.png")
+        end):ToThrow()
+        expect(function()
+            anyVoxels:SetBlockTextures(999, "asset://textures/nobody.png")
+        end):ToThrow()
+    end)
 end)

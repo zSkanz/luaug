@@ -1952,6 +1952,13 @@ declare extern type VoxelService extends Instance with
     --- `sideColor` is the four sides and `bottomColor` the underside, which defaults to the sides: a
     --- grass block is green on top and earth everywhere else.
     function RegisterBlock(self, name: string, color: Color3, sideColor: Color3?, bottomColor: Color3?): number
+    --- Gives a block type images, by content URN -- `asset://textures/grass_top.png` -- for its top,
+    --- its four sides and its underside; the sides default to the top and the underside to the sides,
+    --- exactly as the colours do. The block's colours TINT its images, so a type registered white shows
+    --- them as drawn. An empty string removes an image. Every image fills one block face and repeats
+    --- block by block, sampled without smoothing: a sixteen-pixel image stays sixteen crisp pixels
+    --- however close the camera is. The side image stands upright on every side and is never mirrored.
+    function SetBlockTextures(self, id: number, texture: string, sideTexture: string?, bottomTexture: string?): ()
     --- The id a block type was registered with, or nil for a name nobody registered.
     function GetBlockId(self, name: string): number?
     --- Places a block, or breaks one when `id` is 0. `block` is a block coordinate; its components are
