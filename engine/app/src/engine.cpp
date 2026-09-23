@@ -2094,8 +2094,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // selection change, which is what leaving the pick to run would make
             // it. `driveSculpt` returns false whenever it did not act, so
             // `Select` and a world with no terrain both cost one comparison.
-            const bool brushTook = editor.driveSculpt(
-                authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(), inspector);
+            const bool brushTook =
+                editor.driveSculpt(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
+                                   inspector, frame.renderDt);
             if (brushTook)
                 editor.touch();
             // The block tool, on the brush's terms and after it: at most one

@@ -2924,7 +2924,7 @@ namespace {
 
 } // namespace
 
-bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector)
+bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector, double dt)
 {
     // **The aim is cleared first, every frame.** It is what the ring is drawn
     // from, and a stale one would leave a brush hanging in the air over a tool
@@ -2955,8 +2955,12 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     // one while merely hovering -- so the ring follows the ground as it is, and
     // the stamps go where the stroke was aimed when it began. `Stroke::aimField`
     // says at length why.
+    //
+    // A carving stroke is the exception, and aims at the live field: it exists
+    // to burrow.
     const PickRay ray = rayThrough(m_pointer);
-    const asset::TerrainField& aimAt = m_stroke.has_value() ? m_stroke->aimField : terrain->field;
+    const bool frozen = m_stroke.has_value() && !m_stroke->carve;
+    const asset::TerrainField& aimAt = frozen ? m_stroke->aimField : terrain->field;
     // **Cast in the FIELD's space and answered in the world's.** A terrain can
     // be moved, and the field knows nothing about that -- the origin is applied
     // by its consumers rather than baked into every tile. So the ray goes in
@@ -3037,6 +3041,7 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         // hillside levels it to where the stroke began rather than chasing its
         // own result downhill.
         stroke.plane = static_cast<f32>(m_brushAim->position.y);
+        stroke.carve = carves(m_tool, m_brush, m_brushAim->normal);
         m_history.record(world, strokeLabel(m_tool, m_brush.op), stroke.gesture);
         m_stroke = stroke;
 
@@ -3057,6 +3062,11 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
     // step was shorter than one stamp, so the whole drag stamped once.
     const auto radius = static_cast<double>(m_brush.radius);
     const auto spacing = static_cast<double>(m_brush.spacing);
+    if (m_stroke->carve) {
+        carveStroke(*terrain, ray.direction, dt);
+        m_pending.reset();
+        return true;
+    }
     if (!strokeAdvanced(m_stroke->last, m_brushAim->position, radius, spacing)) {
         m_pending.reset();
         return true;
@@ -3083,6 +3093,25 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
 
 namespace {
 
+// **Steeper than this, a dig carves into the ground instead of lowering it.**
+// The normal's upward part: 0.7 is a slope of about 45 degrees. Lowering a
+// column is what digging a flat field means, and the only thing it can mean on
+// a height map -- but aimed at a cliff it digs a pit in the ground ABOVE the
+// cliff, and the wall the person pointed at does not move. A hole into a wall
+// is volume, so it is carved as volume.
+constexpr float CarveSteepness = 0.7f;
+
+// How fast a carving stroke held still bores into the ground, in metres per
+// second, from the weakest brush to the strongest. A speed rather than a stamp
+// count per frame, so the tunnel does not depend on the framerate -- and slow
+// enough to stop where the person meant to.
+constexpr double CarveSpeedMin = 1.5;
+constexpr double CarveSpeedMax = 8.0;
+
+// At most this many boring stamps in one frame, so a hitch of a second does
+// not bore a second's worth of tunnel in one go behind the person's back.
+constexpr int CarveStampsPerFrame = 4;
+
 // How far one stamp of the round brush raises the centre of its disc, in
 // metres. Scaled by the radius, so a big brush builds a hill as fast relative
 // to its size as a small one builds a bump; with the default spacing a point
@@ -3094,6 +3123,54 @@ namespace {
 }
 
 } // namespace
+
+bool Editor::carves(Tool tool, const Brush& brush, core::Vec3 normal) noexcept
+{
+    if (tool != Tool::Sculpt || brush.op != BrushOp::Subtract)
+        return false;
+    return brush.shape == BrushShape::Box || normal.y < CarveSteepness;
+}
+
+void Editor::carveStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt)
+{
+    // **Two motions, told apart by direction.** The live aim moves ALONG the
+    // ray when the stamp before it opened the wall up -- that is boring, and it
+    // is paced by the clock -- and ACROSS the ray when the pointer moved -- that
+    // is a drag, and it is stamped by distance like any other stroke, so a
+    // tunnel dragged sideways is a trench in the wall and not a row of dents.
+    const auto radius = static_cast<double>(m_brush.radius);
+    const auto spacing = static_cast<double>(m_brush.spacing);
+    const core::DVec3 aim = m_brushAim->position;
+    const core::DVec3 moved{aim.x - m_stroke->last.x, aim.y - m_stroke->last.y, aim.z - m_stroke->last.z};
+    const core::DVec3 along{static_cast<double>(rayDirection.x), static_cast<double>(rayDirection.y),
+                            static_cast<double>(rayDirection.z)};
+    const double depth = moved.x * along.x + moved.y * along.y + moved.z * along.z;
+    const core::DVec3 across{moved.x - along.x * depth, moved.y - along.y * depth, moved.z - along.z * depth};
+    const double lateral = std::sqrt(across.x * across.x + across.y * across.y + across.z * across.z);
+    if (lateral >= radius * spacing) {
+        const std::vector<core::DVec3> stamps = strokeStamps(m_stroke->last, aim, radius, spacing);
+        for (core::usize at = 1; at < stamps.size(); ++at) {
+            applyBrushAt(terrain, stamps[at]);
+            m_stroke->stamps += 1;
+        }
+        if (!stamps.empty())
+            m_stroke->last = stamps.back();
+        return;
+    }
+
+    // Held still: one ball every `radius / speed` seconds, each where the ray
+    // now meets the wall -- which the ball before it moved a radius deeper.
+    const double speed =
+        CarveSpeedMin + (CarveSpeedMax - CarveSpeedMin) * static_cast<double>(std::clamp(m_brush.strength, 0.0f, 1.0f));
+    const double interval = std::max(radius, 0.1) / speed;
+    m_stroke->carveClock = std::min(m_stroke->carveClock + std::max(dt, 0.0), interval * CarveStampsPerFrame);
+    while (m_stroke->carveClock >= interval) {
+        m_stroke->carveClock -= interval;
+        applyBrushAt(terrain, aim);
+        m_stroke->stamps += 1;
+        m_stroke->last = aim;
+    }
+}
 
 void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
 {
@@ -3127,8 +3204,12 @@ void Editor::applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt)
                 asset::raiseBall(terrain.field, at, radius, raiseAmount(m_brush), m_brush.material);
             break;
         case BrushOp::Subtract:
+            // A carving stroke with the round brush takes a ball OUT: the
+            // wall it was aimed at is what moves (`CarveSteepness`).
             if (box)
                 asset::fillBlock(terrain.field, at, extent, 0);
+            else if (m_stroke.has_value() && m_stroke->carve)
+                asset::fillBall(terrain.field, at, radius, 0);
             else
                 asset::raiseBall(terrain.field, at, radius, -raiseAmount(m_brush));
             break;

@@ -1821,7 +1821,11 @@ public:
     // `root` is the world root the viewport is DRAWING, for the same reason
     // `resolvePick` takes one: the terrain a click can reach is the terrain on
     // screen.
-    bool driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector);
+    //
+    // `dt` is the render clock's seconds since the last frame. Only a carving
+    // stroke reads it -- held still against a wall it bores at a speed, not at
+    // a framerate -- and zero leaves every other stroke exactly as it was.
+    bool driveSculpt(scene::World& world, core::InstanceId root, Inspector& inspector, double dt = 0.0);
 
     // --- The block world (V1, `VoxelService`) ------------------------------
     //
@@ -2218,6 +2222,15 @@ private:
         // you first clicked rather than to wherever the pointer happens to be,
         // which would chase its own result downhill.
         f32 plane = 0.0f;
+        // **A carving stroke: digging INTO the ground rather than lowering
+        // it.** Decided once, where the stroke began: a dig with the box, or
+        // with the round brush aimed at ground steeper than it is flat. It is
+        // the one stroke that aims at the LIVE field -- burrowing is what it is
+        // for -- and it bores on the clock rather than on the pointer, so a
+        // tunnel is as deep after a second at 30 Hz as at 144.
+        bool carve = false;
+        // Seconds banked toward the next boring stamp.
+        double carveClock = 0.0;
     };
 
     // How far a brush can reach, in metres. A ray fired at the horizon has to
@@ -2228,6 +2241,12 @@ private:
     // One stamp, in WORLD space. Converted to the field's own inside, because a
     // terrain can be moved and the field does not know it.
     void applyBrushAt(scene::TerrainComponent& terrain, core::DVec3 worldAt);
+    // Whether a stroke begun with this tool and brush, on ground with this
+    // normal, carves into it (`Stroke::carve`).
+    [[nodiscard]] static bool carves(Tool tool, const Brush& brush, core::Vec3 normal) noexcept;
+    // One frame of a carving stroke: a drag stamps by distance, a held pointer
+    // bores on the clock.
+    void carveStroke(scene::TerrainComponent& terrain, core::Vec3 rayDirection, double dt);
 
     // A block stroke: the grid it aims against, frozen for the reason
     // `Stroke::aimField` is, and the last cell it changed so a drag held over

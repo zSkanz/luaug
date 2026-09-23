@@ -4410,7 +4410,7 @@ struct BrushRig
 
     // One frame of the loop, in the order the frame runs it: the brush, then the
     // manipulator, then the pick.
-    bool frame(core::Vec2 pixel, bool pressed, bool down)
+    bool frame(core::Vec2 pixel, bool pressed, bool down, double dt = 0.0)
     {
         // The panel queues a pick for every press, because it cannot know
         // whether the brush or the manipulator wants it -- exactly as the real
@@ -4418,7 +4418,7 @@ struct BrushRig
         if (pressed)
             editor.requestPick(pixel);
         editor.setPointer(pixel, pressed, down);
-        const bool brushTook = editor.driveSculpt(world, workspace, inspector);
+        const bool brushTook = editor.driveSculpt(world, workspace, inspector, dt);
         const bool gizmoTook = !brushTook && editor.driveGizmo(world, inspector);
         if (!brushTook && !gizmoTook)
             editor.resolvePick(world, workspace, inspector);
@@ -4520,6 +4520,113 @@ TEST_CASE("digging moves the ground, and one stroke is one undo step")
     const std::optional<float> undone = asset::heightAt(rig.field().field, 0.0, 0.0);
     REQUIRE(undone.has_value());
     CHECK(static_cast<double>(*undone) == doctest::Approx(static_cast<double>(*before)));
+}
+
+TEST_CASE("a dig aimed at a wall bores into it, at a speed and not a framerate")
+{
+    // **The user's report: digging sideways went nowhere.** A dig is a height
+    // brush, and aimed at a cliff it lowered the ground ABOVE the cliff; and a
+    // stroke aims at the field as it was when it began, so even a carve could
+    // only ever dent the wall once. A dig aimed at steep ground now takes balls
+    // out of it, aimed at the live field, one every `radius / speed` seconds.
+    struct Bored
+    {
+        core::u32 stamps = 0;
+        double reach = 0.0;
+        float roof = 0.0f;
+    };
+
+    const auto bore = [](int hertz) {
+        BrushRig rig;
+        // A cliff: ground twenty metres high from x = 10 on, facing -x.
+        asset::fillBlock(rig.field().field, core::DVec3{20.0, -6.0, 0.0}, core::Vec3{20.0f, 52.0f, 64.0f}, 1);
+        const core::DVec3 eye{-10.0, 8.0, 0.0};
+        rig.editor.setViewport(rig.rect);
+        rig.editor.setCamera(
+            core::perspective(60.0f * 3.14159265f / 180.0f, rig.rect.width / rig.rect.height, 0.1f, 5000.0f),
+            core::lookAt(core::Vec3{}, core::Vec3{1.0f, 0.0f, 0.0f}, core::Vec3{0.0f, 1.0f, 0.0f}), eye);
+        rig.editor.setTool(Editor::Tool::Sculpt);
+        rig.editor.setBrushOp(Editor::BrushOp::Subtract);
+        rig.editor.setBrushRadius(2.0f);
+        rig.editor.setBrushStrength(1.0f);
+
+        // Pressed on the wall and held still for 1.1 seconds.
+        const core::Vec2 pixel = rig.pixelOf(core::DVec3{10.0, 8.0, 0.0});
+        const int frames = hertz * 11 / 10;
+        rig.frame(pixel, true, true, 0.0);
+        for (int at = 0; at < frames; ++at)
+            rig.frame(pixel, false, true, 1.0 / static_cast<double>(hertz));
+        rig.frame(pixel, false, false, 0.0);
+
+        Bored bored;
+        bored.stamps = rig.editor.lastStrokeStamps();
+        const std::optional<asset::TerrainHit> hit =
+            asset::raycastField(rig.field().field, eye, core::Vec3{1.0f, 0.0f, 0.0f}, 100.0);
+        bored.reach = hit.has_value() ? hit->position.x : 1000.0;
+        bored.roof = asset::heightAt(rig.field().field, 14.0, 0.0).value_or(0.0f);
+        return bored;
+    };
+
+    const Bored slow = bore(30);
+    const Bored fast = bore(144);
+
+    // The press, and four more at full strength -- eight metres a second
+    // through a two-metre ball is one every quarter second.
+    CHECK(slow.stamps == 5);
+    CHECK(fast.stamps == slow.stamps);
+    // **A tunnel**: the ray now meets rock well inside the cliff...
+    CHECK(slow.reach > 16.0);
+    CHECK(fast.reach == doctest::Approx(slow.reach));
+    // ...and the ground above it is where it was, which a height brush could
+    // not have left.
+    CHECK(static_cast<double>(slow.roof) == doctest::Approx(20.0).epsilon(0.02));
+}
+
+TEST_CASE("flat ground, dug down and then sideways, is a shaft and a tunnel")
+{
+    // **The flow the user tried**: create flat terrain, dig a hole down, then
+    // dig out sideways from the bottom of it.
+    BrushRig rig;
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Subtract);
+    rig.editor.setBrushRadius(2.0f);
+
+    // Down, with the box, held for two seconds: a carving stroke from the
+    // first stamp, boring into the ground it opens.
+    rig.editor.setBrushShape(Editor::BrushShape::Box);
+    rig.lookDown(30.0);
+    const core::Vec2 down = rig.pixelOf(core::DVec3{0.0, 0.0, 0.0});
+    rig.frame(down, true, true, 0.0);
+    for (int at = 0; at < 120; ++at)
+        rig.frame(down, false, true, 1.0 / 60.0);
+    rig.frame(down, false, false, 0.0);
+    const std::optional<float> floor = asset::heightAt(rig.field().field, 0.0, 0.0);
+    REQUIRE(floor.has_value());
+    CHECK(*floor < -6.0f);
+
+    // Sideways, with the round brush, from the bottom of the shaft at a wall.
+    rig.editor.setBrushShape(Editor::BrushShape::Sphere);
+    rig.editor.setBrushStrength(1.0f);
+    const core::DVec3 eye{0.0, static_cast<double>(*floor) + 2.0, 0.0};
+    rig.editor.setViewport(rig.rect);
+    rig.editor.setCamera(
+        core::perspective(60.0f * 3.14159265f / 180.0f, rig.rect.width / rig.rect.height, 0.1f, 5000.0f),
+        core::lookAt(core::Vec3{}, core::Vec3{1.0f, 0.0f, 0.0f}, core::Vec3{0.0f, 1.0f, 0.0f}), eye);
+    const core::Vec2 side = rig.pixelOf(core::DVec3{2.0, eye.y, 0.0});
+    rig.frame(side, true, true, 0.0);
+    for (int at = 0; at < 66; ++at)
+        rig.frame(side, false, true, 1.0 / 60.0);
+    rig.frame(side, false, false, 0.0);
+
+    // A tunnel: the ray from the shaft now runs well past the shaft's wall...
+    const std::optional<asset::TerrainHit> hit =
+        asset::raycastField(rig.field().field, eye, core::Vec3{1.0f, 0.0f, 0.0f}, 100.0);
+    REQUIRE(hit.has_value());
+    CHECK(hit->position.x > 7.0);
+    // ...under ground that is still where it was: rock over air over rock.
+    const std::optional<float> roof = asset::heightAt(rig.field().field, 6.0, 0.0);
+    REQUIRE(roof.has_value());
+    CHECK(static_cast<double>(*roof) == doctest::Approx(0.0).epsilon(0.05));
 }
 
 TEST_CASE("a stroke stamps by distance, not by frame count")
