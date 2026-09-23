@@ -461,7 +461,9 @@ jobs:
       # `editor_shell` open a window, and the four differentials render two
       # frames and compare them. Nothing said so, in the summary or anywhere
       # else, which is the whole complaint -- the local gate has failed on an
-      # unexpected skip since S7.3 and this half was owed.
+      # unexpected skip since S7.3 and this half was owed. `replica_seam` (N1)
+      # joined them: it renders a host and its replica side by side, and a
+      # runner with no device skips it for the reason `editor_seam` skips.
       #
       # The list is a CEILING and not a prediction: a runner that HAS a device
       # runs them and passes, and needs no edit here. What fails is anything
@@ -477,7 +479,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam replica_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
 
       - name: Configure, build and test (Linux)
         if: runner.os == 'Linux'
@@ -519,7 +521,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam replica_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
 
       # The M3 gate wants two things green "on both tiers" that ctest cannot
       # give: `luaug test`, which is the CLI's own path to the same suite, and
@@ -776,7 +778,7 @@ jobs:
             echo "no ctest log; the test step did not get that far"
             exit 0
           fi
-          scripts/gates/assert-no-skips.sh ctest.log             editor_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
+          scripts/gates/assert-no-skips.sh ctest.log             editor_seam replica_seam editor_shell rhi_sdlgpu chunk_grid_differential             graphics_settings_differential local_shadow_differential             example_ragdoll_builds triangle_sample
 
       - name: Summary
         if: always()
