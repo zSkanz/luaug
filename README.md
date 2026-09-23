@@ -7,10 +7,11 @@
 
 LuauG gives you the developer experience you already know — `Instance` trees, `game:GetService`, `task.spawn`, signals with `:Connect` — in an independent, professional engine: a modern C++ core embedding the Luau VM directly, a data-oriented ECS behind a familiar Instance facade, a swappable renderer and physics stack, deterministic fixed-tick simulation, and a code-first workflow (VS Code + CLI + sub-second hot reload). It targets complete 2D and 3D games, from small scenes to huge streamed open worlds, on desktop first, then mobile, with a console-ready architecture.
 
-> **STATUS: M8 built, awaiting human review.** Ten of the eleven milestones are
-> signed off; the last one is written up and waiting for somebody to play it.
-> A milestone is complete when the human says so and not when a gate goes green
-> (`MASTER_PROMPT.md` §6), and M4 is why that is spelled out. The engine boots a sandboxed Luau VM, opens a window, runs a
+> **STATUS: `v1.1.0` is released**, with the engine (`v1.0.0`) and the visual
+> editor on top of it. Every milestone is signed off and tagged. The phases
+> after it are being built in the open: sculpted terrain with caves, block
+> worlds with flowing water, particles and decals, UI in the world, and
+> multiplayer. The engine boots a sandboxed Luau VM, opens a window, runs a
 > deterministic fixed-tick simulation over an Instance tree on an ECS,
 > hot-reloads a saved script into a new world in under two milliseconds, renders
 > a world with cascaded shadows, clustered lights, image-based lighting and a
@@ -61,10 +62,13 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **M7** — asset pipeline, async IO, streaming, floating origin | signed off, `milestone/m7` |
 | ✅ | **M7.5** — cascaded shadows, clustered lights, image-based lighting, post | signed off, `milestone/m7.5` |
 | ✅ | **M8** — the flagship open-world demo, hardening, docs, v1.0 | released `v1.0.0` |
-| ✅ | **E1–E9** — the visual editor: explorer, properties, manipulators, content, stamps, launcher, script editor and debugger | built; `v1.1.0` prepared |
-| 🔨 | **F1** — sculpted terrain: a GPU height atlas, caves as surface nets, a brush in the editor | built through its brush; streaming open |
-| 🔨 | **V1** — `VoxelService`: a block world with a registry, a greedy mesher, colliders and an editor tool | built; streaming open |
-| 🔨 | **N1** — multiplayer: host, dedicated server and replica from one binary, players and intent | playable on a LAN; prediction open |
+| ✅ | **E1–E9** — the visual editor: explorer, properties, manipulators, content, stamps, launcher, script editor and debugger | released `v1.1.0` |
+| ✅ | **F1** — sculpted terrain: a GPU height atlas, caves as surface nets, a brush that digs into walls, streaming in cells | built; the flagship stands on it |
+| ✅ | **V1** — `VoxelService`: blocks with images, see-through blocks, flowing and reacting fluids, streaming, an editor tool | built |
+| ✅ | **F2** — `ParticleEmitter` and projected `Decal`s, soft particles | built |
+| ✅ | **F3** — `SurfaceGui`, `BillboardGui` and rich text: UI drawn and pressed in the world | built |
+| ✅ | **N1** — multiplayer: host, dedicated server and replica from one binary; prediction, interpolation, interest | playable on a LAN |
+| 🔨 | **N2** — a game's own messages: `RemoteEvent` | its first piece built |
 
 **What runs today.** `luaug new` scaffolds a project; `luaug dev` runs it with a
 watcher, so a saved file rebuilds the world without the window closing;
@@ -86,13 +90,12 @@ worlds and two VMs in one process, and a soak that walks the flagship for ten
 minutes and asserts the memory curve flattens.
 
 **What it does not have, stated plainly.** No navmesh, no 2D workflow, no
-mobile. Multiplayer
-runs on a LAN over an unencrypted transport, with no client prediction yet.
-Each has an owner in the roadmap's post-v1 phases rather than a shrug, and
-[`docs/migrating.md`](docs/migrating.md) §5 lists them with
-where they went. A `Sound` plays a generated tone rather than a file. A property
-the engine stores and does not act on is marked `Inert` in the inspector and the
-api-dump, and a gate stops a new one appearing quietly.
+mobile. Multiplayer runs over an unencrypted transport, with no matchmaking and
+no call that waits for an answer from the other machine. Each has an owner in
+the roadmap's post-v1 phases rather than a shrug, and the manual's
+*What is not here* page lists every gap with its state. A property the engine
+stores and does not act on is marked `Inert` in the inspector and the api-dump,
+and a gate stops a new one appearing quietly.
 
 ## Not affiliated with Roblox
 
