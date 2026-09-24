@@ -22,6 +22,7 @@ local check = require("./commands/check")
 local dev = require("./commands/dev")
 local edit = require("./commands/edit")
 local fmt = require("./commands/fmt")
+local migrate = require("./commands/migrate")
 local new = require("./commands/new")
 local projectlib = require("./project")
 local setup = require("./commands/setup")
@@ -227,6 +228,13 @@ local function main(): number
             return 1
         end
         return setup.run({ target = firstPositional(parsed, "."), root = root })
+    end
+
+    if parsed.command == "migrate" then
+        if not rejectUnknownFlags(parsed, {}) then
+            return 2
+        end
+        return migrate.run({ what = parsed.positional[1], path = parsed.positional[2] or "." })
     end
 
     if parsed.command == "new" then

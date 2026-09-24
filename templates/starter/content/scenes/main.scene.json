@@ -1,6 +1,6 @@
 {
  "format": "luaug-scene",
- "version": 1,
+ "version": 2,
  "root": {
   "class": "Workspace",
   "name": "Workspace",
@@ -56,11 +56,13 @@
         1.0,
         24.0
        ],
-       "Color": [
-        0.24,
-        0.3,
-        0.18
-       ],
+       "MaterialParameters": {
+        "Color": [
+         0.24,
+         0.3,
+         0.18
+        ]
+       },
        "Anchored": true
       }
      },
@@ -87,11 +89,13 @@
         2.0,
         2.0
        ],
-       "Color": [
-        0.4706,
-        0.7451,
-        1.0
-       ],
+       "MaterialParameters": {
+        "Color": [
+         0.4706,
+         0.7451,
+         1.0
+        ]
+       },
        "Anchored": true
       }
      }
