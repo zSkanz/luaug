@@ -80,6 +80,9 @@ private:
         core::u16 group = 0;
         // Anchored and moved by a script at least once: kinematic from then on.
         bool moving = false;
+        // On a replica, moved by the authority's snapshots: kinematic, driven
+        // where the wire put it, as the 3D mirror drives a replicated part.
+        bool replicated = false;
         [[nodiscard]] bool operator==(const Shape&) const noexcept = default;
     };
 

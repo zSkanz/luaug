@@ -258,6 +258,55 @@ using generated::Source;
         return false;
     }
 
+    // **The 2D layer's sprites** (ADR 0088). A `Vector2` travels as a `Vector3`
+    // with a zero z, so the codec needs no encoding of its own for it.
+    if (field.pool == "parts2d") {
+        const scene::Part2DComponent* sprite = world.parts2d().find(id);
+        if (sprite == nullptr) {
+            return false;
+        }
+        const auto flat = [](core::Vec2 value) { return core::Vec3{value.x, value.y, 0.0f}; };
+        if (field.name == "Position")
+            setVec3(out, flat(sprite->position));
+        else if (field.name == "Rotation")
+            setF32(out, sprite->rotation);
+        else if (field.name == "Size")
+            setVec3(out, flat(sprite->size));
+        else if (field.name == "Velocity")
+            setVec3(out, flat(sprite->velocity));
+        else if (field.name == "AngularVelocity")
+            setF32(out, sprite->angularVelocity);
+        else if (field.name == "Color")
+            setVec3(out, core::Vec3{sprite->color.r, sprite->color.g, sprite->color.b});
+        else if (field.name == "Transparency")
+            setF32(out, sprite->transparency);
+        else if (field.name == "Anchored")
+            setBool(out, sprite->anchored);
+        else if (field.name == "CanCollide")
+            setBool(out, sprite->canCollide);
+        else if (field.name == "Sensor")
+            setBool(out, sprite->sensor);
+        else if (field.name == "Shape")
+            setI32(out, sprite->shape);
+        else if (field.name == "ZIndex")
+            setI32(out, sprite->zIndex);
+        else if (field.name == "FlipX")
+            setBool(out, sprite->flipX);
+        else if (field.name == "FlipY")
+            setBool(out, sprite->flipY);
+        else if (field.name == "Image")
+            setU32(out, sprite->image.id);
+        else if (field.name == "ImageRectOffset")
+            setVec3(out, flat(sprite->imageRectOffset));
+        else if (field.name == "ImageRectSize")
+            setVec3(out, flat(sprite->imageRectSize));
+        else if (field.name == "Filter")
+            setI32(out, sprite->filter);
+        else
+            return false;
+        return true;
+    }
+
     return false;
 }
 
@@ -474,6 +523,58 @@ using generated::Source;
             return true;
         }
         return false;
+    }
+
+    if (field.pool == "parts2d") {
+        scene::Part2DComponent* sprite = world.parts2d().find(id);
+        if (sprite == nullptr) {
+            return false;
+        }
+        const auto plane = [](const FieldValue& cell) {
+            const core::Vec3 value = asVec3(cell);
+            return core::Vec2{value.x, value.y};
+        };
+        if (field.name == "Position")
+            sprite->position = plane(value);
+        else if (field.name == "Rotation")
+            sprite->rotation = asF32(value);
+        else if (field.name == "Size")
+            sprite->size = plane(value);
+        else if (field.name == "Velocity")
+            sprite->velocity = plane(value);
+        else if (field.name == "AngularVelocity")
+            sprite->angularVelocity = asF32(value);
+        else if (field.name == "Color") {
+            const core::Vec3 colour = asVec3(value);
+            sprite->color = core::Color3{colour.x, colour.y, colour.z};
+        }
+        else if (field.name == "Transparency")
+            sprite->transparency = asF32(value);
+        else if (field.name == "Anchored")
+            sprite->anchored = asBool(value);
+        else if (field.name == "CanCollide")
+            sprite->canCollide = asBool(value);
+        else if (field.name == "Sensor")
+            sprite->sensor = asBool(value);
+        else if (field.name == "Shape")
+            sprite->shape = asI32(value);
+        else if (field.name == "ZIndex")
+            sprite->zIndex = asI32(value);
+        else if (field.name == "FlipX")
+            sprite->flipX = asBool(value);
+        else if (field.name == "FlipY")
+            sprite->flipY = asBool(value);
+        else if (field.name == "Image")
+            sprite->image = core::NameAtom{asU32(value)};
+        else if (field.name == "ImageRectOffset")
+            sprite->imageRectOffset = plane(value);
+        else if (field.name == "ImageRectSize")
+            sprite->imageRectSize = plane(value);
+        else if (field.name == "Filter")
+            sprite->filter = asI32(value);
+        else
+            return false;
+        return true;
     }
 
     return false;

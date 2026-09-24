@@ -137,6 +137,11 @@ core::u32 asU32(const FieldValue& value) noexcept
     return load<core::u32>(value);
 }
 
+core::i32 asI32(const FieldValue& value) noexcept
+{
+    return load<core::i32>(value);
+}
+
 float asF32(const FieldValue& value) noexcept
 {
     return load<float>(value);

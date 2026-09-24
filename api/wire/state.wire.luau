@@ -410,6 +410,160 @@ local ParticleEmitterFields: { Schema.Field } = {
     },
 }
 
+--- A sprite and a body on the 2D plane (the 2D layer, ADR 0088). Every field is
+--- in its component, which the 2D mirror writes quietly as the 3D one writes a
+--- part's.
+local Part2DFields: { Schema.Field } = {
+    {
+        Name = "Position",
+        Id = 1,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Where it is, on the plane. **A `Vector2` travels as a `Vector3` with a zero z** (ADR 0088): "
+            .. "twelve bytes the codec already has, rather than an encoding of its own for four fewer.",
+    },
+    {
+        Name = "Rotation",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Degrees, as authored. A turned crate on the authority is a turned crate everywhere.",
+    },
+    {
+        Name = "Size",
+        Id = 3,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "The picture's size and the collider's, for the reason a `BasePart`'s travels.",
+    },
+    {
+        Name = "Velocity",
+        Id = 4,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Sent because a script on the replica reads it -- a run animation picks its frame from it -- "
+            .. "and because it is what a later version extrapolates with.",
+    },
+    {
+        Name = "AngularVelocity",
+        Id = 5,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "The same argument as `Velocity`.",
+    },
+    {
+        Name = "Color",
+        Id = 6,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Games say things with colour; the same argument as a `BasePart`'s.",
+    },
+    {
+        Name = "Transparency",
+        Id = 7,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "A blinking hurt sprite is a gameplay fact.",
+    },
+    {
+        Name = "Anchored",
+        Id = 8,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Decides whether the replica's body is kinematic-driven or ground.",
+    },
+    {
+        Name = "CanCollide",
+        Id = 9,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "A door that opened on the authority must be open on the replica.",
+    },
+    {
+        Name = "Sensor",
+        Id = 10,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Whether it pushes: a replica's own character must pass through a coin.",
+    },
+    {
+        Name = "Shape",
+        Id = 11,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "`Enum.Shape2D`, raw: what it is drawn and collides as.",
+    },
+    {
+        Name = "ZIndex",
+        Id = 12,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "Which sprite is in front; a game changes it to say something.",
+    },
+    {
+        Name = "FlipX",
+        Id = 13,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "**The facing of a sprite is animation state**, and a replica that did not receive "
+            .. "it would show every other player running backwards half the time.",
+    },
+    {
+        Name = "FlipY",
+        Id = 14,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "The same as `FlipX`.",
+    },
+    {
+        Name = "Image",
+        Id = 15,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "The picture, by URN, through the snapshot's string table as a `Decal`'s is.",
+    },
+    {
+        Name = "ImageRectOffset",
+        Id = 16,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "**The frame of a sprite sheet**: a walk cycle is this changing, so it is the other half "
+            .. "of a replicated sprite's animation. A `Vector2` as a `Vector3`, as `Position` is.",
+    },
+    {
+        Name = "ImageRectSize",
+        Id = 17,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "The frame's size, beside its offset.",
+    },
+    {
+        Name = "Filter",
+        Id = 18,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "parts2d",
+        Doc = "`Enum.TextureFilter`, raw: pixel art stays crisp on every screen.",
+    },
+}
+
 local Classes: { Schema.Class } = {
     {
         Name = "BasePart",
@@ -482,6 +636,13 @@ local Classes: { Schema.Class } = {
         Doc = "Replicated for the reason `RemoteEvent` is (ADR 0079): a question and its answer both "
             .. "name it. Its handler is a function on the authority and never travels.",
         Fields = NoFields,
+    },
+    {
+        Name = "Part2D",
+        Doc = "The 2D layer's moving half (ADR 0088, protocol 11): where a sprite is, how it is turned "
+            .. "and which frame of its sheet it shows. A replica drives it kinematically, as it drives a "
+            .. "`BasePart`.",
+        Fields = Part2DFields,
     },
 }
 
@@ -613,17 +774,11 @@ local Excluded: { Schema.Excluded } = {
     },
     { Name = "SurfaceGui", Reason = "World-space UI. The same as `BillboardGui`." },
     {
-        Name = "Part2D",
-        Reason = "**Not yet, and deliberately.** The 2D layer (phase 3) lands for one machine first: a "
-            .. "2D body's state is a position, an angle and two velocities on the plane, and carrying it "
-            .. "is a field set of its own and therefore a protocol bump (11), which "
-            .. "docs/briefs/p3-2d-kickoff.md schedules after the layer has an example that plays. A "
-            .. "replica meanwhile sees no 2D parts at all rather than stale ones.",
-    },
-    {
         Name = "Tilemap2D",
-        Reason = "The same as `Part2D`, and its bulk -- the painted cells -- is not a property, as a "
-            .. "`Terrain`'s is not: when it travels it arrives with the world, and an edit as a message.",
+        Reason = "Its bulk is its painted cells, which are not a property, as a `Terrain`'s field is not "
+            .. "(ADR 0069, decision 7; ADR 0088): a level arrives with the world -- from the scene, or from "
+            .. "a script that builds it the same way on both ends -- and a live edit would be a message of "
+            .. "its own, which no game has asked for yet.",
     },
     { Name = "Frame", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextLabel", Reason = "Screen-space UI. The same as `ScreenGui`." },

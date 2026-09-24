@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -17,6 +18,18 @@
 
 namespace luaug::replication {
 namespace {
+
+// **Where an instance is, for interest**: a part's position, or a sprite's on
+// the 2D plane (ADR 0088). Anything else has no place of its own and is sent
+// or not with what it hangs from.
+[[nodiscard]] std::optional<core::DVec3> placeOf(const scene::World& world, core::InstanceId id)
+{
+    if (const scene::PartComponent* part = world.parts().find(id); part != nullptr)
+        return part->cframe.position;
+    if (const scene::Part2DComponent* sprite = world.parts2d().find(id); sprite != nullptr)
+        return core::DVec3{static_cast<double>(sprite->position.x), static_cast<double>(sprite->position.y), 0.0};
+    return std::nullopt;
+}
 
 // **A token nobody can guess** (ADR 0085), from the operating system's
 // entropy. Not simulation state -- it never reaches the world or its hash --
@@ -704,10 +717,11 @@ std::vector<u32> AuthoritySession::interestOf(const scene::World& world, const P
     // with none has nothing to measure from and is sent everything, which is
     // what every session did before interest existed.
     const scene::PlayerComponent* player = peer.player.valid() ? world.players().find(peer.player) : nullptr;
-    const scene::PartComponent* body = player != nullptr && player->character.valid() && world.alive(player->character)
-                                           ? world.parts().find(player->character)
-                                           : nullptr;
-    if (body == nullptr) {
+    const std::optional<core::DVec3> body =
+        player != nullptr && player->character.valid() && world.alive(player->character)
+            ? placeOf(world, player->character)
+            : std::nullopt;
+    if (!body.has_value()) {
         for (const Captured& entry : m_order)
             relevant.push_back(entry.netId);
         std::sort(relevant.begin(), relevant.end());
@@ -719,18 +733,18 @@ std::vector<u32> AuthoritySession::interestOf(const scene::World& world, const P
     // not spawn and despawn on alternate ticks.
     const f64 radius = world.engineState().streamingLoadRadius;
     const f64 keep = radius * 1.25;
-    const core::DVec3 focus = body->cframe.position;
+    const core::DVec3 focus = *body;
 
     const usize count = m_order.size();
     std::vector<u8> inRange(count, 0);
     std::vector<u8> positioned(count, 0);
     std::vector<u8> marked(count, 0);
     for (usize at = 0; at < count; ++at) {
-        const scene::PartComponent* part = world.parts().find(m_order[at].id);
-        if (part == nullptr)
+        const std::optional<core::DVec3> place = placeOf(world, m_order[at].id);
+        if (!place.has_value())
             continue;
         positioned[at] = 1;
-        const core::DVec3 delta = part->cframe.position - focus;
+        const core::DVec3 delta = *place - focus;
         const f64 distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
         const f64 reach = std::binary_search(peer.known.begin(), peer.known.end(), m_order[at].netId) ? keep : radius;
         inRange[at] = distance <= reach * reach ? 1 : 0;

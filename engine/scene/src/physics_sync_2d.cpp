@@ -116,6 +116,9 @@ void PhysicsSync2D::applyScene(f32 fixedDt)
         shape.fixedRotation = part.fixedRotation;
         shape.gravityScale = part.gravityScale;
         shape.group = groupOf(part.collisionGroup);
+        shape.replicated = m_scene.engineState().networkTopology == NetworkTopology::Replica && !part.anchored;
+        // What the solver may not move: ground, and on a replica everything.
+        const bool driven = shape.anchored || shape.replicated;
 
         // Anchored ground is static until a script moves it, and kinematic
         // from then on, so what stands on a moving platform is carried.
@@ -128,12 +131,12 @@ void PhysicsSync2D::applyScene(f32 fixedDt)
                 m_backend.destroyBody(m_world, record.body);
             physics::Body2DDesc desc;
             desc.shape = shapeOf(part);
-            desc.motion = !shape.anchored ? physics::Motion2D::Dynamic
-                          : shape.moving  ? physics::Motion2D::Kinematic
-                                          : physics::Motion2D::Static;
+            desc.motion = !driven                            ? physics::Motion2D::Dynamic
+                          : shape.moving || shape.replicated ? physics::Motion2D::Kinematic
+                                                             : physics::Motion2D::Static;
             desc.position = part.position;
             desc.angle = part.rotation / DegreesPerRadian;
-            if (!shape.anchored) {
+            if (!driven) {
                 desc.linearVelocity = part.velocity;
                 desc.angularVelocity = part.angularVelocity / DegreesPerRadian;
             }
@@ -149,11 +152,11 @@ void PhysicsSync2D::applyScene(f32 fixedDt)
             record.body = m_backend.createBody(m_world, desc);
             record.shape = shape;
         }
-        else if (shape.anchored) {
+        else if (driven) {
             if (moved) {
                 m_backend.moveKinematic(m_world, record.body, part.position, part.rotation / DegreesPerRadian, fixedDt);
             }
-            else if (shape.moving) {
+            else if (shape.moving || shape.replicated) {
                 // Still this tick: a kinematic body keeps the velocity it was
                 // last given, and would drift off without being stopped.
                 m_backend.setVelocity(m_world, record.body, core::Vec2{0.0f, 0.0f}, 0.0f);
@@ -166,7 +169,7 @@ void PhysicsSync2D::applyScene(f32 fixedDt)
                 m_backend.setVelocity(m_world, record.body, part.velocity, part.angularVelocity / DegreesPerRadian);
         }
         if (part.pendingImpulse != core::Vec2{0.0f, 0.0f}) {
-            if (!shape.anchored)
+            if (!driven)
                 m_backend.applyImpulse(m_world, record.body, part.pendingImpulse);
             part.pendingImpulse = core::Vec2{0.0f, 0.0f};
         }
@@ -252,7 +255,7 @@ void PhysicsSync2D::writeBack()
     // script setting its position, and a signal per falling part per tick is
     // the cost nobody asked for.
     for (auto& [packed, record] : m_parts) {
-        if (record.shape.anchored || !record.body.valid())
+        if (record.shape.anchored || record.shape.replicated || !record.body.valid())
             continue;
         Part2DComponent* part = m_scene.parts2d().find(unpackInstance(packed));
         if (part == nullptr)

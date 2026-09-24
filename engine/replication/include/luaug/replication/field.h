@@ -55,6 +55,7 @@ void setNetId(FieldValue& out, NetId value) noexcept;
 
 [[nodiscard]] bool asBool(const FieldValue& value) noexcept;
 [[nodiscard]] core::u32 asU32(const FieldValue& value) noexcept;
+[[nodiscard]] core::i32 asI32(const FieldValue& value) noexcept;
 [[nodiscard]] float asF32(const FieldValue& value) noexcept;
 [[nodiscard]] core::Vec3 asVec3(const FieldValue& value) noexcept;
 [[nodiscard]] core::CFrameD asCFrame(const FieldValue& value) noexcept;

@@ -334,6 +334,27 @@ TEST_CASE("the plane's gravity is the workspace's x and y")
     CHECK(mirror.backend.gravity == core::Vec2{1.0f, -20.0f});
 }
 
+TEST_CASE("on a replica the authority moves a part: its body is kinematic and nothing is written back")
+{
+    Mirror mirror;
+    mirror.fixture.world.engineState().networkTopology = NetworkTopology::Replica;
+    const core::InstanceId id = mirror.part(core::Vec2{0.0f, 5.0f});
+    mirror.step();
+    REQUIRE(mirror.backend.alive() == 1);
+    CHECK(mirror.backend.bodies[0].desc.motion == physics::Motion2D::Kinematic);
+
+    // Whatever the solver holds, the component keeps what the wire said.
+    mirror.backend.bodies[0].state.position = core::Vec2{9.0f, 9.0f};
+    mirror.step();
+    CHECK((mirror.fixture.world.parts2d().find(id)->position == core::Vec2{0.0f, 5.0f}));
+
+    // And a snapshot moving it drives the body there.
+    mirror.fixture.world.parts2d().find(id)->position = core::Vec2{1.0f, 4.0f};
+    mirror.step();
+    CHECK((mirror.backend.bodies[0].state.position == core::Vec2{1.0f, 4.0f}));
+    CHECK(mirror.backend.bodies.size() == 1);
+}
+
 TEST_CASE("a world with nothing on the plane never steps it")
 {
     Mirror mirror;

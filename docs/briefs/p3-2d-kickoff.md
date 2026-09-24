@@ -99,7 +99,8 @@ ruled out in writing.
 - **2D-F** `examples/20-platformer`, conformance specs, documentation.
   *(Done 2026-09-24: the example, `world/layer2d.spec.luau`, and the manual's
   "2D games" page.)*
-- **2D-G** Replication: `Part2D` and tilemap edits on protocol 11.
+- **2D-G** Replication: `Part2D` on protocol 11 (ADR 0088). *(Done
+  2026-09-24.)*
 
 ## The survey this rests on (2026-09-23)
 

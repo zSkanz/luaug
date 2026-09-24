@@ -1291,3 +1291,51 @@ TEST_CASE("a replica joining clears the world's copy, ReplicatedStorage's copy a
     CHECK(side.world.alive(replicated));
     CHECK(side.world.alive(server));
 }
+
+TEST_CASE("a sprite on the authority is a sprite on the replica, frame and facing included")
+{
+    // The 2D layer on the wire (ADR 0088, protocol 11): a `Vector2` travels as
+    // a `Vector3` with a zero z, and the animation state -- the sheet's frame
+    // and which way it faces -- travels with the position.
+    PlayedMatch match;
+    const core::InstanceId hero =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("Part2D")));
+    REQUIRE(hero.valid());
+    scene::Part2DComponent* sprite = match.server.world.parts2d().find(hero);
+    REQUIRE(sprite != nullptr);
+    sprite->position = core::Vec2{3.5f, -2.25f};
+    sprite->rotation = 30.0f;
+    sprite->size = core::Vec2{0.8f, 0.95f};
+    sprite->image = match.server.atoms.intern("asset://sprites/hero.png");
+    sprite->imageRectOffset = core::Vec2{16.0f, 0.0f};
+    sprite->flipX = true;
+    sprite->zIndex = 5;
+    sprite->shape = 2;
+    REQUIRE_FALSE(match.server.world.setParent(hero, match.server.workspace).has_value());
+    match.run(4);
+
+    const core::InstanceId seen = match.copyOf(hero);
+    REQUIRE(seen.valid());
+    const scene::Part2DComponent* copy = match.client.world.parts2d().find(seen);
+    REQUIRE(copy != nullptr);
+    CHECK((copy->position == core::Vec2{3.5f, -2.25f}));
+    CHECK(static_cast<double>(copy->rotation) == doctest::Approx(30.0));
+    CHECK((copy->size == core::Vec2{0.8f, 0.95f}));
+    CHECK(match.client.atoms.text(copy->image) == "asset://sprites/hero.png");
+    CHECK((copy->imageRectOffset == core::Vec2{16.0f, 0.0f}));
+    CHECK(copy->flipX);
+    CHECK(copy->zIndex == 5);
+    CHECK(copy->shape == 2);
+
+    // A step of the walk cycle, turned round.
+    sprite = match.server.world.parts2d().find(hero);
+    sprite->position = core::Vec2{4.0f, -2.25f};
+    sprite->imageRectOffset = core::Vec2{0.0f, 0.0f};
+    sprite->flipX = false;
+    match.run(3);
+    copy = match.client.world.parts2d().find(seen);
+    CHECK((copy->position == core::Vec2{4.0f, -2.25f}));
+    CHECK((copy->imageRectOffset == core::Vec2{0.0f, 0.0f}));
+    CHECK_FALSE(copy->flipX);
+    CHECK(match.replica->checksumFailures() == 0);
+}

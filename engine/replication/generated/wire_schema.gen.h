@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 10;
+inline constexpr u32 ProtocolVersion = 11;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -149,6 +149,27 @@ inline constexpr FieldDesc ParticleEmitterFields[] = {
     {"Emitted", 17, Encoding::U32, Source::Component, "particleEmitters"},
 };
 
+inline constexpr FieldDesc Part2DFields[] = {
+    {"Position", 1, Encoding::Vector3, Source::Component, "parts2d"},
+    {"Rotation", 2, Encoding::F32, Source::Component, "parts2d"},
+    {"Size", 3, Encoding::Vector3, Source::Component, "parts2d"},
+    {"Velocity", 4, Encoding::Vector3, Source::Component, "parts2d"},
+    {"AngularVelocity", 5, Encoding::F32, Source::Component, "parts2d"},
+    {"Color", 6, Encoding::Color3, Source::Component, "parts2d"},
+    {"Transparency", 7, Encoding::F32, Source::Component, "parts2d"},
+    {"Anchored", 8, Encoding::Bool, Source::Component, "parts2d"},
+    {"CanCollide", 9, Encoding::Bool, Source::Component, "parts2d"},
+    {"Sensor", 10, Encoding::Bool, Source::Component, "parts2d"},
+    {"Shape", 11, Encoding::I32, Source::Component, "parts2d"},
+    {"ZIndex", 12, Encoding::I32, Source::Component, "parts2d"},
+    {"FlipX", 13, Encoding::Bool, Source::Component, "parts2d"},
+    {"FlipY", 14, Encoding::Bool, Source::Component, "parts2d"},
+    {"Image", 15, Encoding::NameAtom, Source::Component, "parts2d"},
+    {"ImageRectOffset", 16, Encoding::Vector3, Source::Component, "parts2d"},
+    {"ImageRectSize", 17, Encoding::Vector3, Source::Component, "parts2d"},
+    {"Filter", 18, Encoding::I32, Source::Component, "parts2d"},
+};
+
 // Every replicated class, in schema order.
 inline constexpr ClassDesc Classes[] = {
     {"BasePart", BasePartFields, -1, false, false},
@@ -161,6 +182,7 @@ inline constexpr ClassDesc Classes[] = {
     {"RemoteEvent", {}, -1, false, false},
     {"ReplicatedStorage", {}, -1, true, true},
     {"RemoteFunction", {}, -1, false, false},
+    {"Part2D", Part2DFields, -1, false, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.
