@@ -32,11 +32,13 @@
 #include "luaug/net/transport.h"
 #include "luaug/replication/extract.h"
 #include "luaug/replication/types.h"
+#include "luaug/scene/character_replay.h"
 
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -260,6 +262,12 @@ public:
     // welcome. Settable, so an identity can outlive the process that got it.
     [[nodiscard]] const PlayerToken& playerToken() const noexcept { return m_token; }
     void setPlayerToken(const PlayerToken& token) noexcept { m_token = token; }
+    // **How the own character is stepped again when the authority corrects
+    // it** (ADR 0076, as amended). Each tick's prediction keeps the command
+    // the physics step consumed; a correction puts the character where the
+    // authority said and replays the commands it has not answered yet. Unset,
+    // a correction shifts the prediction by the error, as before.
+    void setCharacterReplay(scene::ICharacterReplay* replay) noexcept { m_replay = replay; }
     // The newest state applied to the world. Zero before the first.
     [[nodiscard]] u64 appliedTick() const noexcept { return m_applied; }
     // This replica's player number, as the authority's welcome named it.
@@ -286,7 +294,7 @@ private:
     void onPlayers(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
     void resolveCharacters(scene::World& world, core::InstanceId root);
-    void reconcile(scene::World& world, core::InstanceId character, const core::CFrameD& authority);
+    void reconcile(scene::World& world, core::InstanceId character, const scene::CharacterReplayStart& authority);
     void interpolate(scene::World& world);
     [[nodiscard]] const WorldState* stateAt(u64 tick) const noexcept;
 
@@ -321,16 +329,21 @@ private:
     // The NetId of this machine's own player's character, or zero.
     u32 m_owned = 0;
 
-    // One remembered transform at one tick.
+    // One remembered transform at one tick, and for the own character the
+    // command that step consumed.
     struct Sample
     {
         u64 tick = 0;
         core::CFrameD cframe;
+        std::optional<scene::CharacterCommand> command;
     };
+    scene::ICharacterReplay* m_replay = nullptr;
     // Prediction (ADR 0076): the own character after each local tick, by the
     // intent tick that produced it, and the last intent the authority applied.
     std::deque<Sample> m_predicted;
     u64 m_ackedIntent = 0;
+    // The answer the own character was last compared against.
+    u64 m_reconciledAck = 0;
     // Interpolation: every remote part's last few snapshot transforms, by
     // server tick, and the server clock they are drawn against.
     std::map<u32, std::deque<Sample>> m_samples;

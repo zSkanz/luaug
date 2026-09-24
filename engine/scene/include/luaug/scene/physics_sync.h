@@ -27,9 +27,12 @@
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
 #include "luaug/physics/physics.h"
+#include "luaug/scene/character_replay.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/skeleton_host.h"
 
+#include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -38,11 +41,20 @@ namespace luaug::scene {
 
 class World;
 
-class PhysicsSync
+class PhysicsSync final : public ICharacterReplay
 {
 public:
     PhysicsSync(World& world, physics::IPhysics3D& backend);
-    ~PhysicsSync();
+    ~PhysicsSync() override;
+
+    // **A replica's own character, stepped again** (`ICharacterReplay`): the
+    // command each step consumed, and a replay of a run of them from where the
+    // authority said the character was. Through `stepController`, the one
+    // function the simulation's own step moves a character with, so a replay of
+    // the same commands from the same place is the same motion.
+    [[nodiscard]] std::optional<CharacterCommand> lastCommand(core::InstanceId character) const override;
+    [[nodiscard]] std::vector<core::CFrameD> replay(core::InstanceId character, const CharacterReplayStart& start,
+                                                    std::span<const CharacterCommand> commands) override;
 
     PhysicsSync(const PhysicsSync&) = delete;
     PhysicsSync& operator=(const PhysicsSync&) = delete;
@@ -255,7 +267,14 @@ private:
         // On a replica, a character somebody else plays: it follows the
         // authority's snapshots and is not simulated here (ADR 0076).
         bool follower = false;
+        // What the last step that moved it was told, for `lastCommand`.
+        std::optional<CharacterCommand> last;
     };
+
+    // One step of the movement model: gravity, a jump, the walk, and the sweep.
+    // Answers the vertical velocity the step leaves.
+    [[nodiscard]] f32 stepController(const CharacterRecord& record, const CharacterCommand& command,
+                                     f32 verticalVelocity, bool grounded);
 
     void syncCollisionGroups();
     void applyScene();

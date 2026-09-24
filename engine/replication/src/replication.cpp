@@ -43,6 +43,7 @@ public:
             m_replica->setInterpolationDelay(m_config.interpolationDelayTicks);
             if (m_probe)
                 m_replica->setReferenceProbe(m_probe);
+            m_replica->setCharacterReplay(m_characterReplay);
             return std::nullopt;
         }
         transport.port = m_config.port;
@@ -106,6 +107,13 @@ public:
         m_probe = std::move(probe);
         if (m_replica.has_value())
             m_replica->setReferenceProbe(m_probe);
+    }
+
+    void setCharacterReplay(scene::ICharacterReplay* replay) override
+    {
+        m_characterReplay = replay;
+        if (m_replica.has_value())
+            m_replica->setCharacterReplay(replay);
     }
 
     [[nodiscard]] std::vector<core::InstanceId> drainStreamedOut() override
@@ -177,6 +185,7 @@ private:
     std::optional<AuthoritySession> m_authority;
     std::optional<ReplicaSession> m_replica;
     std::function<bool(core::InstanceId)> m_probe;
+    scene::ICharacterReplay* m_characterReplay = nullptr;
     u64 m_tick = 0;
 };
 

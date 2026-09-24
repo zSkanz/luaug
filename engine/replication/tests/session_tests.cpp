@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <doctest/doctest.h>
+#include <span>
 #include <string>
 
 #include "../../scene/tests/scene_fixture.h"
@@ -820,6 +821,87 @@ TEST_CASE("a replica moves its own character at once, and the snapshots only cor
     }
     CHECK(match.client.world.parts().find(mine)->cframe.position.z == doctest::Approx(30.0));
     CHECK(match.replica->stats().corrections >= 1);
+}
+
+namespace {
+
+// A world with a wall at x = 5 the prediction does not know about: each
+// command walks half a metre along x, and the wall stops it.
+class WalledReplay final : public scene::ICharacterReplay
+{
+public:
+    [[nodiscard]] std::optional<scene::CharacterCommand> lastCommand(core::InstanceId) const override
+    {
+        scene::CharacterCommand command;
+        command.moveDirection = core::Vec3{1.0f, 0.0f, 0.0f};
+        command.dt = 1.0f / 60.0f;
+        return command;
+    }
+
+    [[nodiscard]] std::vector<core::CFrameD> replay(core::InstanceId, const scene::CharacterReplayStart& start,
+                                                    std::span<const scene::CharacterCommand> commands) override
+    {
+        starts.push_back(start.transform.position);
+        std::vector<core::CFrameD> frames;
+        core::CFrameD at = start.transform;
+        for (std::size_t step = 0; step < commands.size(); ++step) {
+            at.position.x = std::min(at.position.x + 0.5, 5.0);
+            frames.push_back(at);
+        }
+        return frames;
+    }
+
+    std::vector<core::DVec3> starts;
+};
+
+} // namespace
+
+TEST_CASE("a corrected character is stepped again from where the authority put it, not shifted by the error")
+{
+    // **What re-simulation buys over shifting** (ADR 0076, as amended): the
+    // replica predicts walking on through x = 5, where the authority's world
+    // has a wall. Shifted by the error at the answered tick, the prediction
+    // stays that far ahead -- inside the wall. Stepped again from the
+    // authority's position through the unanswered commands, it stops where
+    // the authority will stop it.
+    PlayedMatch match;
+    WalledReplay walls;
+    match.replica->setCharacterReplay(&walls);
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    match.server.world.players().find(match.remote())->character = racer;
+    match.run(3);
+    const core::InstanceId mine = match.copyOf(racer);
+    REQUIRE(mine.valid());
+
+    const core::NameAtom move = match.client.atoms.intern("Move");
+    match.client.world.players().find(match.me)->intents = {scene::PlayerIntent{move, 0, core::Vec3{}, true}};
+    for (int frame = 1; frame <= 40; ++frame) {
+        match.tick += 1;
+        match.authority->receive(match.server.world, match.server.workspace);
+        // The authority's world: the wall.
+        for (const scene::PlayerIntent& intent : match.server.world.players().find(match.remote())->intents) {
+            if (intent.pressed) {
+                double& x = match.server.world.parts().find(racer)->cframe.position.x;
+                x = std::min(x + 0.5, 5.0);
+            }
+        }
+        match.authority->send(match.server.world, match.server.workspace, match.tick);
+        if (frame % 4 == 0)
+            match.replica->receive(match.client.world, match.client.workspace);
+        // The replica's prediction: no wall.
+        match.client.world.parts().find(mine)->cframe.position.x += 0.5;
+        match.replica->sendIntent(match.client.world, match.tick);
+    }
+
+    CHECK(match.replica->stats().replays >= 1);
+    REQUIRE_FALSE(walls.starts.empty());
+    // Every replay started where the authority said, which is never past it.
+    for (const core::DVec3& start : walls.starts)
+        CHECK(start.x <= 5.0);
+    // The last correction left the character at the wall -- plus the one step
+    // predicted since -- not the metres past it the error would have carried
+    // it.
+    CHECK(match.client.world.parts().find(mine)->cframe.position.x <= 5.5 + 1e-9);
 }
 
 TEST_CASE("another player's part is drawn between snapshots rather than stepping at their rate")

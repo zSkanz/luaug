@@ -199,6 +199,85 @@ TEST_CASE("a part in a world nobody scripted still falls, because the mirror is 
     CHECK(part->cframe.position.y < 39.0);
 }
 
+TEST_CASE("a character stepped again from where it was, through the commands it was given, goes where it went")
+{
+    // **The replay a replica corrects its prediction with** (ADR 0076, as
+    // amended), against the real controller: a walk into a wall and a jump
+    // off the ground, recorded one command a tick, then played back from the
+    // first tick's position, vertical velocity and ground. Where it ends is
+    // where the simulation took it -- or a correction would put the player
+    // somewhere the authority never will.
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local function block(name: string, position: vector, size: vector)
+            local part = Instance.new("Part")
+            part.Name = name
+            part.Size = size
+            part.Position = position
+            part.Anchored = true
+            part.Parent = workspace
+        end
+        block("Ground", vector.create(0, -1, 0), vector.create(200, 2, 200))
+        block("Wall", vector.create(7, 5, 0), vector.create(2, 10, 20))
+        local walker = Instance.new("CharacterBody")
+        walker.Name = "Walker"
+        walker.Position = vector.create(0, 3, 0)
+        walker.Parent = workspace
+        local ticks = 0
+        game:GetService("RunService").Heartbeat:Connect(function()
+            ticks += 1
+            if ticks > 90 then
+                walker:Move(vector.create(1, 0, 0.25))
+            end
+            if ticks == 105 then
+                walker:Jump()
+            end
+        end)
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    // A second and a half to land and settle.
+    for (int tick = 0; tick < 91; ++tick)
+        host.tick();
+    const core::InstanceId walker =
+        host.world().findFirstChild(host.workspace(), host.world().atoms().lookup("Walker"));
+    REQUIRE(walker.valid());
+    scene::PhysicsSync* physics = host.physics();
+    REQUIRE(physics != nullptr);
+
+    scene::CharacterReplayStart start;
+    start.transform = host.world().parts().find(walker)->cframe;
+    start.verticalVelocity = host.world().characterBodies().find(walker)->verticalVelocity;
+    start.grounded = host.world().characterBodies().find(walker)->grounded;
+    CHECK(start.grounded);
+
+    std::vector<scene::CharacterCommand> commands;
+    std::vector<core::DVec3> walked;
+    for (int tick = 0; tick < 40; ++tick) {
+        host.tick();
+        const std::optional<scene::CharacterCommand> command = physics->lastCommand(walker);
+        REQUIRE(command.has_value());
+        commands.push_back(*command);
+        walked.push_back(host.world().parts().find(walker)->cframe.position);
+    }
+    // It walked, met the wall, and jumped.
+    CHECK(walked.back().x > 3.0);
+    CHECK(walked.back().x < 6.0);
+
+    const std::vector<core::CFrameD> replayed = physics->replay(walker, start, commands);
+    REQUIRE(replayed.size() == commands.size());
+    for (std::size_t at = 0; at < walked.size(); ++at) {
+        CAPTURE(at);
+        CHECK(replayed[at].position.x == doctest::Approx(walked[at].x).epsilon(1e-4));
+        CHECK(replayed[at].position.y == doctest::Approx(walked[at].y).epsilon(1e-4));
+        CHECK(replayed[at].position.z == doctest::Approx(walked[at].z).epsilon(1e-4));
+    }
+    // And it left the character there.
+    CHECK(host.world().parts().find(walker)->cframe.position.x == doctest::Approx(walked.back().x).epsilon(1e-4));
+}
+
 TEST_CASE("a BindToClose handler that yields is waited for")
 {
     Captured log;

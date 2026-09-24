@@ -25,8 +25,9 @@ class ITransport;
 }
 
 namespace luaug::scene {
+class ICharacterReplay;
 class World;
-}
+} // namespace luaug::scene
 
 namespace luaug::replication {
 
@@ -75,6 +76,10 @@ public:
     // husks are drained here for the host to fire `InstanceStreamedOut` for,
     // exactly as it does for an evicted chunk. An authority has none.
     virtual void setReferenceProbe(std::function<bool(core::InstanceId)> probe) = 0;
+
+    // How a replica steps its own character again when the authority corrects
+    // it (`ReplicaSession::setCharacterReplay`). Ignored by an authority.
+    virtual void setCharacterReplay(scene::ICharacterReplay* replay) = 0;
     [[nodiscard]] virtual std::vector<core::InstanceId> drainStreamedOut() = 0;
 
     // Closes every connection and stops listening. Idempotent.

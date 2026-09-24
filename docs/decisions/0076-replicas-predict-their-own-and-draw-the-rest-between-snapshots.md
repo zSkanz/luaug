@@ -42,12 +42,33 @@ own brief. Each is a thing a person playing notices:
      prediction by the difference, rotation included.
    - The own character's replicated transform and motion state are never
      overwritten. A snapshot corrects them.
-3. **Correction by the error, not by re-simulation.** Replaying the
-   unanswered intents would need the physics state as it was at that intent,
-   and the physics backend keeps none. Shifting by the error is what the error
-   implies wherever the ground does not change underfoot, and the next
-   snapshot corrects what it could not. ADR 0074 already said prediction needs
-   a close answer, not an identical one.
+3. ~~**Correction by the error, not by re-simulation.**~~ **Amended
+   2026-09-23 (the owner's mandate, S3): correction by re-simulation**, as
+   Unreal's character movement does it with its saved moves.
+   - The reason given against it was that replaying would need the physics
+     state at the answered intent, which the backend does not keep. For a
+     character controller it needs much less: where the character was, its
+     vertical velocity and whether it stood on ground. The authority sends all
+     three (`CFrame`, `VerticalVelocity`, `Grounded`).
+   - Each tick's prediction now keeps the command the physics step consumed:
+     direction, jump, walk and jump speed, and the step's length.
+   - A correction puts the character where the authority said and steps it
+     through the unanswered commands with the same function the simulation
+     steps it with (`PhysicsSync::stepController`), in the world as it now
+     is. A prediction that walked through a wall the authority's did not
+     comes out at the wall.
+   - The interface is `scene::ICharacterReplay`, implemented by `PhysicsSync`
+     and handed to the replication module by `app`, the shape `AnimationHost`
+     set. The rotation stays the scripts' and is corrected by the turn, as
+     before; a controller does not turn.
+   - Shifting by the error remains the fallback, where a tick of the history
+     has no command.
+   - **Two defects it found on the way:**
+     - D178: a controller put somewhere new kept its old contacts, so its
+       first step away from a wall was blocked.
+     - D179: the own character was compared only when the authority's
+       transform changed. An authority holding it still at a wall never
+       corrected a prediction walking through it.
 4. **Everyone else is drawn between two snapshots** (Valve's entity
    interpolation).
    - The replica keeps each remote part's last few snapshot transforms by

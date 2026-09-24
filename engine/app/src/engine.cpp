@@ -64,6 +64,7 @@
 #include "luaug/replication/extract.h"
 #include "luaug/replication/replication.h"
 #include "luaug/rhi/device.h"
+#include "luaug/scene/physics_sync.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/script/modules.h"
 #include "luaug/ui/ui.h"
@@ -95,6 +96,33 @@ using core::I18nArg;
 using core::LogLevel;
 
 constexpr f64 kNanosPerSecond = 1'000'000'000.0;
+
+// **A replica's character replay, through whichever world is live** (ADR 0076,
+// as amended): by the reference to `host` rather than to its physics mirror,
+// because a reload replaces the host and the mirror with it -- the same reason
+// the husk probe below holds the reference.
+class LiveCharacterReplay final : public scene::ICharacterReplay
+{
+public:
+    explicit LiveCharacterReplay(std::unique_ptr<WorldHost>& host) noexcept : m_host(host) {}
+
+    [[nodiscard]] std::optional<scene::CharacterCommand> lastCommand(core::InstanceId character) const override
+    {
+        const scene::PhysicsSync* physics = m_host != nullptr ? m_host->physics() : nullptr;
+        return physics != nullptr ? physics->lastCommand(character) : std::nullopt;
+    }
+
+    [[nodiscard]] std::vector<core::CFrameD> replay(core::InstanceId character,
+                                                    const scene::CharacterReplayStart& start,
+                                                    std::span<const scene::CharacterCommand> commands) override
+    {
+        scene::PhysicsSync* physics = m_host != nullptr ? m_host->physics() : nullptr;
+        return physics != nullptr ? physics->replay(character, start, commands) : std::vector<core::CFrameD>{};
+    }
+
+private:
+    std::unique_ptr<WorldHost>& m_host;
+};
 
 // The format the headless target is created with, named once so the pipeline
 // and the texture cannot disagree.
@@ -1044,8 +1072,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // `host` rather than the object, because a reload replaces the host.
     const auto held = [&host](core::InstanceId id) { return host != nullptr && host->instanceHeld(id); };
     streaming.setReferenceProbe(held);
-    if (network != nullptr)
+    LiveCharacterReplay characterReplay(host);
+    if (network != nullptr) {
         network->setReferenceProbe(held);
+        network->setCharacterReplay(&characterReplay);
+    }
 
     // The editor is told which scene the world holds, so its save writes back
     // to that one rather than refusing for want of an open scene.

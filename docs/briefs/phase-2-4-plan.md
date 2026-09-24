@@ -856,9 +856,8 @@ character from `Player.Character`, corrected by the authority rather than
 overwritten; interpolation of everything else between snapshots; and interest
 management measured from each peer's character on the streaming radius.
 
-**Not built, and named so it is not mistaken for done:** prediction corrects by
-the error rather than re-simulating the unanswered intents. Decals and
-`Lighting` replicate since protocol version 5.
+Prediction re-simulates the unanswered commands since 2026-09-23 (ADR 0076,
+as amended). Decals and `Lighting` replicate since protocol version 5.
 
 **Corrected 2026-09-23 (the owner's mandate, S3):** despawn DOES use the husk
 contract, for what decision 6 names -- an instance a replica stops being

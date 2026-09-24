@@ -1571,6 +1571,16 @@ public:
         }
         record->character->SetPosition(toLocal(transform.position));
         record->character->SetRotation(toJolt(transform.rotation));
+        // **The contacts of where it is now, not where it was.** A controller
+        // keeps the contacts of its last update, and the next update is
+        // resolved against them: a character put somewhere new still leaned on
+        // the wall it had been standing against, and its first step away from
+        // it was blocked. Found replaying a replica's prediction (ADR 0076),
+        // which puts a character back where the authority said every time it
+        // corrects one -- and a script teleporting a character hit it too.
+        record->character->RefreshContacts(m_system.GetDefaultBroadPhaseLayerFilter(record->layer),
+                                           m_system.GetDefaultLayerFilter(record->layer), JPH::BodyFilter{},
+                                           JPH::ShapeFilter{}, m_temp);
     }
 
     [[nodiscard]] CharacterState characterState(CharacterHandle handle) const

@@ -1182,7 +1182,8 @@ void ReplicaSession::sendIntent(const scene::World& world, u64 tick)
         const scene::PartComponent* part =
             local != m_locals.end() && world.alive(local->second) ? world.parts().find(local->second) : nullptr;
         if (part != nullptr) {
-            m_predicted.push_back(Sample{tick, part->cframe});
+            m_predicted.push_back(
+                Sample{tick, part->cframe, m_replay != nullptr ? m_replay->lastCommand(local->second) : std::nullopt});
             while (m_predicted.size() > PredictionHistory)
                 m_predicted.pop_front();
         }
@@ -1351,6 +1352,7 @@ void ReplicaSession::resetForRejoin(scene::World& world)
     m_predicted.clear();
     m_owned = 0;
     m_ackedIntent = 0;
+    m_reconciledAck = 0;
     m_applied = 0;
 }
 
@@ -1470,8 +1472,10 @@ void ReplicaSession::onSnapshot(scene::World& world, InstanceId root, std::span<
     sendBytes(m_transport, m_authority, ack.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
 }
 
-void ReplicaSession::reconcile(scene::World& world, InstanceId character, const core::CFrameD& authority)
+void ReplicaSession::reconcile(scene::World& world, InstanceId character,
+                               const scene::CharacterReplayStart& authoritative)
 {
+    const core::CFrameD& authority = authoritative.transform;
     scene::PartComponent* part = world.parts().find(character);
     if (part == nullptr)
         return;
@@ -1490,11 +1494,6 @@ void ReplicaSession::reconcile(scene::World& world, InstanceId character, const 
         return;
     }
 
-    // **The error at that moment, carried forward to now.** Re-simulating the
-    // intents since would need the physics state then, which the physics
-    // backend does not keep; shifting by the error is the correction the error
-    // implies wherever the ground does not change underfoot, and the next
-    // snapshot corrects what it could not.
     const core::DVec3 error = authority.position - predicted->cframe.position;
     const f64 distance = std::sqrt(error.x * error.x + error.y * error.y + error.z * error.z);
     // The turn the authority disagrees by, the same way.
@@ -1514,6 +1513,57 @@ void ReplicaSession::reconcile(scene::World& world, InstanceId character, const 
     if (distance < 0.01 && !turned)
         return;
     m_stats.corrections += 1;
+
+    // **Stepped again from where the authority put it** -- what every engine
+    // that predicts a character does. The commands this replica has not had
+    // answered yet are replayed through the same movement step the simulation
+    // uses, in the world as it now is, so a prediction that walked into a wall
+    // the authority's did not, or landed where the authority's was still
+    // falling, comes out where the authority will put it next rather than
+    // where the error at one tick implied.
+    //
+    // Only when every unanswered tick kept its command: a gap -- the character
+    // was not stepped here that tick -- is a history that cannot be replayed,
+    // and the error is what is left.
+    std::vector<scene::CharacterCommand> commands;
+    bool complete = m_replay != nullptr;
+    for (const Sample& sample : m_predicted) {
+        if (sample.tick <= m_ackedIntent)
+            continue;
+        if (!sample.command.has_value()) {
+            complete = false;
+            break;
+        }
+        commands.push_back(*sample.command);
+    }
+    if (complete) {
+        const std::vector<core::CFrameD> frames = m_replay->replay(character, authoritative, commands);
+        if (frames.size() == commands.size()) {
+            m_stats.replays += 1;
+            usize at = 0;
+            for (Sample& sample : m_predicted) {
+                if (sample.tick <= m_ackedIntent)
+                    continue;
+                sample.cframe.position = frames[at].position;
+                if (turned)
+                    sample.cframe.rotation = turn * sample.cframe.rotation;
+                ++at;
+            }
+            // The rotation is the scripts', which a controller does not turn:
+            // corrected by the turn at that moment, as before.
+            core::CFrameD now = part->cframe;
+            now.position = frames.empty() ? authority.position : frames.back().position;
+            if (turned)
+                now.rotation = turn * now.rotation;
+            part->cframe = now;
+            return;
+        }
+    }
+
+    // **The error at that moment, carried forward to now**, where there is no
+    // history to replay: the correction the error implies wherever the ground
+    // does not change underfoot, and the next snapshot corrects what it could
+    // not.
     const auto correct = [&](core::CFrameD& frame) {
         frame.position = frame.position + error;
         if (turned)
@@ -1554,11 +1604,20 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
         const generated::ClassDesc& desc = generated::Classes[entity.schema];
         const auto written = m_written.find(entity.id.value);
         FieldSet next = entity.fields;
+        // **The own character is checked against every answer, moved or not.**
+        // Only what changed is written, and an authority that stopped the
+        // character -- against a wall the prediction walked through -- sends
+        // the same transform tick after tick: compared only on a change, the
+        // prediction was never corrected and walked on through the wall.
+        const bool answered = entity.id.value == m_owned && m_owned != 0 && m_ackedIntent != m_reconciledAck;
 
         for (usize at = 0; at < entity.fields.size(); ++at) {
             const FieldValue& value = entity.fields[at];
-            if (written != m_written.end() && at < written->second.size() && written->second[at] == value)
-                continue;
+            if (written != m_written.end() && at < written->second.size() && written->second[at] == value) {
+                const generated::FieldDesc* same = answered ? fieldAt(desc, at) : nullptr;
+                if (same == nullptr || same->name != "CFrame" || same->pool != "parts")
+                    continue;
+            }
             // A service keeps its own name and its place under the data model.
             if (service && (at == nameField || at == parentField))
                 continue;
@@ -1597,8 +1656,23 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
                 // local scripts already moved it, so the authority's value
                 // corrects it rather than replacing it. Its motion state is the
                 // local simulation's for the same reason.
-                if (cframe)
-                    reconcile(world, local->second, asCFrame(value));
+                if (cframe) {
+                    // With the authority's motion state beside its transform:
+                    // what a replay starts from that a position does not say.
+                    scene::CharacterReplayStart start;
+                    start.transform = asCFrame(value);
+                    for (usize other = 0; other < entity.fields.size(); ++other) {
+                        const generated::FieldDesc* motion = fieldAt(desc, other);
+                        if (motion == nullptr || motion->pool != "characterBodies")
+                            continue;
+                        if (motion->name == "VerticalVelocity")
+                            start.verticalVelocity = asF32(entity.fields[other]);
+                        else if (motion->name == "Grounded")
+                            start.grounded = asBool(entity.fields[other]);
+                    }
+                    reconcile(world, local->second, start);
+                    m_reconciledAck = m_ackedIntent;
+                }
                 if (field != nullptr && field->pool == "characterBodies")
                     continue;
                 if (cframe)
@@ -1606,7 +1680,7 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
             }
             else if (cframe && m_interpolationDelay > 0) {
                 std::deque<Sample>& samples = m_samples[entity.id.value];
-                samples.push_back(Sample{state.tick, asCFrame(value)});
+                samples.push_back(Sample{state.tick, asCFrame(value), std::nullopt});
                 while (samples.size() > InterpolationSamples)
                     samples.pop_front();
                 continue;

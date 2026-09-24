@@ -507,6 +507,27 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
         }
     }
 
+    const physics::CharacterState state = m_backend.characterState(m_world, record.handle);
+    const bool grounded = state.ground == physics::CharacterGround::Grounded;
+
+    CharacterCommand command;
+    command.moveDirection = character.moveDirection;
+    command.jump = character.jumpRequested;
+    command.walkSpeed = character.walkSpeed;
+    command.jumpSpeed = character.jumpSpeed;
+    command.dt = fixedDt;
+    record.last = command;
+    character.verticalVelocity = stepController(record, command, character.verticalVelocity, grounded);
+    character.jumpRequested = false;
+
+    // Cleared once consumed: a character told nothing stops, which is what
+    // `Move`'s Doc promises.
+    character.moveDirection = core::Vec3{0.0f, 0.0f, 0.0f};
+}
+
+f32 PhysicsSync::stepController(const CharacterRecord& record, const CharacterCommand& command, f32 verticalVelocity,
+                                bool grounded)
+{
     // The movement model is the caller's and the sweeping is the backend's.
     // Gravity integrates here rather than in the solver because a character
     // controller is not a body the solver knows about.
@@ -514,14 +535,11 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
                                    ? m_scene.workspaces().find(m_workspace)->gravity
                                    : core::Vec3{0.0f, -9.81f, 0.0f};
 
-    const physics::CharacterState state = m_backend.characterState(m_world, record.handle);
-    const bool grounded = state.ground == physics::CharacterGround::Grounded;
+    if (grounded && verticalVelocity <= 0.0f)
+        verticalVelocity = 0.0f;
+    verticalVelocity += gravity.y * command.dt;
 
-    if (grounded && character.verticalVelocity <= 0.0f)
-        character.verticalVelocity = 0.0f;
-    character.verticalVelocity += gravity.y * fixedDt;
-
-    if (character.jumpRequested) {
+    if (command.jump) {
         // Applied WHEREVER the character is, grounded or not (human decision,
         // 2026-08-21). The recorded reasoning had argued *ignored* against
         // *queued* -- "a jump that fires the moment you land is a jump you did
@@ -538,20 +556,55 @@ void PhysicsSync::applyCharacter(core::InstanceId id, PartComponent& part, Rigid
         // What stays engine-side is the TICK. The velocity is set here, at the
         // next simulation step, and never inside the call -- or a replay
         // diverges (R10).
-        character.verticalVelocity = character.jumpSpeed;
-        character.jumpRequested = false;
+        verticalVelocity = command.jumpSpeed;
     }
 
     // Horizontal only -- vertical movement is gravity's and Jump's -- and
     // scaled rather than normalised, so a shorter direction walks slower.
-    const core::Vec3 horizontal{character.moveDirection.x * character.walkSpeed, 0.0f,
-                                character.moveDirection.z * character.walkSpeed};
-    const core::Vec3 velocity{horizontal.x, character.verticalVelocity, horizontal.z};
-    m_backend.moveCharacter(m_world, record.handle, velocity, fixedDt);
+    const core::Vec3 horizontal{command.moveDirection.x * command.walkSpeed, 0.0f,
+                                command.moveDirection.z * command.walkSpeed};
+    const core::Vec3 velocity{horizontal.x, verticalVelocity, horizontal.z};
+    m_backend.moveCharacter(m_world, record.handle, velocity, command.dt);
+    return verticalVelocity;
+}
 
-    // Cleared once consumed: a character told nothing stops, which is what
-    // `Move`'s Doc promises.
-    character.moveDirection = core::Vec3{0.0f, 0.0f, 0.0f};
+std::optional<CharacterCommand> PhysicsSync::lastCommand(core::InstanceId character) const
+{
+    const auto found = m_characters.find(packInstance(character));
+    if (found == m_characters.end() || found->second.follower)
+        return std::nullopt;
+    return found->second.last;
+}
+
+std::vector<core::CFrameD> PhysicsSync::replay(core::InstanceId character, const CharacterReplayStart& start,
+                                               std::span<const CharacterCommand> commands)
+{
+    std::vector<core::CFrameD> frames;
+    const auto found = m_characters.find(packInstance(character));
+    PartComponent* part = m_scene.parts().find(character);
+    CharacterBodyComponent* body = m_scene.characterBodies().find(character);
+    if (found == m_characters.end() || part == nullptr || body == nullptr)
+        return frames;
+    CharacterRecord& record = found->second;
+
+    // **The first step's ground is the authority's**: a controller put
+    // somewhere new still holds the contacts of where it was, and the
+    // authority said what it was standing on. Every later step's is the one
+    // the step before found, exactly as the simulation's own.
+    m_backend.setCharacterTransform(m_world, record.handle, start.transform);
+    f32 verticalVelocity = start.verticalVelocity;
+    bool grounded = start.grounded;
+    frames.reserve(commands.size());
+    for (const CharacterCommand& command : commands) {
+        verticalVelocity = stepController(record, command, verticalVelocity, grounded);
+        const physics::CharacterState state = m_backend.characterState(m_world, record.handle);
+        grounded = state.ground == physics::CharacterGround::Grounded;
+        frames.push_back(state.transform);
+    }
+    part->cframe = frames.empty() ? start.transform : frames.back();
+    record.written = part->cframe;
+    body->verticalVelocity = verticalVelocity;
+    return frames;
 }
 
 // --- Terrain colliders (ADR 0082) --------------------------------------------

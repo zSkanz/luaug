@@ -143,6 +143,9 @@ struct Stats
     // A replica's own character, corrected by the authority because the
     // prediction had drifted more than a centimetre (ADR 0076).
     u64 corrections = 0;
+    // Of those, the ones corrected by stepping the unanswered commands again
+    // from where the authority put the character, rather than by the error.
+    u64 replays = 0;
     u32 spawned = 0;
     u32 despawned = 0;
     // `RemoteEvent` messages (ADR 0077): sent, taken in, and refused -- a flood
