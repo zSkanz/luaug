@@ -299,6 +299,9 @@ struct EditorPanels
     // **The block world's dock (V1)**, on the same terms: off until the
     // toolbar's `blocks` or selecting `VoxelService` asks for it.
     bool blocks = false;
+    // **The Tiles tool's dock (the 2D layer)**, on the same terms: off until
+    // the toolbar or selecting a `Tilemap2D` asks for it.
+    bool tiles = false;
     // The stack, the variables and the transport (ADR 0057). On by default
     // because a debugger nobody can find is a debugger nobody uses, and it says
     // "running" when nothing is stopped rather than being empty.
@@ -1666,6 +1669,8 @@ public:
         Sculpt,
         Paint,
         Blocks,
+        // Paints and erases a `Tilemap2D`'s cells (the 2D layer).
+        Tiles,
     };
     [[nodiscard]] Tool tool() const noexcept { return m_tool; }
     // Refused mid-stroke, for the reason `setGizmoMode` is refused mid-drag:
@@ -1984,6 +1989,86 @@ public:
     // instead of building a staircase towards the camera.
     bool driveBlocks(scene::World& world, Inspector& inspector);
 
+    // --- The 2D layer (phase 3): the 2D view and the Tiles tool --------------
+    //
+    // **The 2D view is the same editor camera with an orthographic lens**,
+    // looking down -Z at the plane every `Part2D` and `Tilemap2D` lies on --
+    // not a second viewport. The right or middle drag pans instead of turning,
+    // WASD pans, and the wheel zooms about the pointer, which is what every 2D
+    // editor's hands expect. Leaving it puts the 3D camera back where it was.
+    [[nodiscard]] bool view2D() const noexcept { return m_view2D; }
+    void setView2D(bool on) noexcept;
+    // Half the view's height in metres: `Camera.OrthographicSize` for the
+    // editor's own lens.
+    [[nodiscard]] f32 orthographicSize() const noexcept { return m_orthographicSize; }
+    // `steps` of the wheel, positive towards the screen; the world point under
+    // `pointerInViewport` stays under it.
+    void zoom2D(f32 steps, core::Vec2 pointerInViewport) noexcept;
+
+    // What a click does with the Tiles tool.
+    enum class TileOp : core::u8
+    {
+        // The selected tile goes into the cell under the pointer.
+        Paint,
+        // The cell under the pointer is emptied.
+        Erase,
+    };
+    [[nodiscard]] TileOp tileOp() const noexcept { return m_tileOp; }
+    void setTileOp(TileOp op) noexcept
+    {
+        m_tileOp = op;
+        m_preferencesDirty = true;
+    }
+    // The tile painting lays down: the tileset's `n`-th, counted from 1 along
+    // its rows. Zero is `Erase`, so it is refused here as air is by the blocks.
+    [[nodiscard]] core::u16 tile() const noexcept { return m_tile; }
+    void setTile(core::u16 tile) noexcept
+    {
+        m_tile = tile == 0 ? core::u16{1} : tile;
+        m_preferencesDirty = true;
+    }
+
+    // **Which tilemap the tool paints**: the selected one, or one whose
+    // descendant is selected, or else the first under `root`'s workspace. The
+    // fallback is what lets somebody open a level and paint without first
+    // finding the tilemap in the tree.
+    [[nodiscard]] static core::InstanceId tilemapFor(const scene::World& world, const Inspector& inspector,
+                                                     core::InstanceId root) noexcept;
+
+    // Where the Tiles tool is aiming: the tilemap and the cell under the pointer.
+    struct TileAim
+    {
+        core::InstanceId tilemap;
+        std::array<core::i32, 2> cell{};
+    };
+    [[nodiscard]] std::optional<TileAim> tileAim() const noexcept { return m_tileAim; }
+    // How many cells the last finished stroke changed.
+    [[nodiscard]] core::u32 lastTileEdits() const noexcept { return m_lastTileEdits; }
+
+    // **The tool follows its panel**, as the terrain brush does: it takes the
+    // pointer only while the Tiles panel is open and on screen, so a viewport
+    // click with the panel closed is a selection and never a stray stroke.
+    void setTilesPanelShown(bool shown) noexcept { m_tilesPanelShown = shown; }
+    [[nodiscard]] bool tilesPanelShown() const noexcept { return m_tilesPanelShown; }
+
+    // Runs the Tiles tool for this frame, beside `driveBlocks` and on the same
+    // terms: true when the pointer belongs to it. A drag is one undo step and
+    // paints every cell the pointer crosses -- a line between two frames'
+    // cells, so a fast stroke leaves no gaps.
+    bool driveTiles(scene::World& world, core::InstanceId root, Inspector& inspector);
+
+    // The tileset the palette shows: the painted tilemap's image as the
+    // renderer loaded it, and its size and tile size in pixels. Handed over by
+    // the frame loop, which owns the texture library, and read by the shell.
+    struct TilesetPreview
+    {
+        rhi::TextureHandle texture;
+        core::Vec2 pixels{0.0f, 0.0f};
+        core::Vec2 tileSize{16.0f, 16.0f};
+    };
+    void setTilesetPreview(const TilesetPreview& preview) noexcept { m_tilesetPreview = preview; }
+    [[nodiscard]] const TilesetPreview& tilesetPreview() const noexcept { return m_tilesetPreview; }
+
     [[nodiscard]] GizmoMode gizmoMode() const noexcept { return m_gizmoMode; }
     // Refused mid-drag: changing what a drag means half way through it is not
     // something a person can have meant.
@@ -2229,6 +2314,9 @@ private:
         Camera,
         Attachment,
         Model,
+        // A sprite on the plane: a `Position` and a `Rotation` about Z rather
+        // than a `CFrame` (the 2D layer).
+        Part2D,
     };
 
     // Puts one dragged instance at a world `CFrame` by whatever route its kind
@@ -2337,6 +2425,29 @@ private:
     core::u32 m_lastBlockEdits = 0;
     std::optional<BlockAim> m_blockAim;
     std::optional<BlockStroke> m_blockStroke;
+
+    // The 2D view, and the 3D camera it put aside.
+    bool m_view2D = false;
+    f32 m_orthographicSize = 10.0f;
+    core::CFrameD m_saved3DCamera;
+    f32 m_saved3DYaw = 0.0f;
+    f32 m_saved3DPitch = 0.0f;
+    // A Tiles stroke: the tilemap it began on, so a drag across another cannot
+    // switch targets half way, and the last cell it reached.
+    struct TileStroke
+    {
+        core::InstanceId tilemap;
+        std::optional<std::array<core::i32, 2>> last;
+        core::u64 gesture = 0;
+        core::u32 edits = 0;
+    };
+    TileOp m_tileOp = TileOp::Paint;
+    core::u16 m_tile = 1;
+    std::optional<TileAim> m_tileAim;
+    std::optional<TileStroke> m_tileStroke;
+    core::u32 m_lastTileEdits = 0;
+    bool m_tilesPanelShown = true;
+    TilesetPreview m_tilesetPreview;
 
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;

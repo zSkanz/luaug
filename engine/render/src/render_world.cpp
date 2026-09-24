@@ -374,9 +374,13 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // no tick ever wrote. That is correct rather than a shortcut -- an editor's
     // camera moves on the render clock, so a frame drawn at `t + alpha` from it
     // is already the camera's position at that instant.
-    const scene::CameraComponent overrideCamera =
+    scene::CameraComponent overrideCamera =
         view != nullptr ? scene::CameraComponent{view->cframe, view->fieldOfView, view->nearPlane, view->farPlane}
                         : scene::CameraComponent{};
+    if (view != nullptr) {
+        overrideCamera.projection = view->projection;
+        overrideCamera.orthographicSize = view->orthographicSize;
+    }
     const scene::CameraComponent* camera = view != nullptr ? &overrideCamera : worldCamera;
 
     if (camera != nullptr) {

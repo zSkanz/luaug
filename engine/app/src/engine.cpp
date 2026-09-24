@@ -2204,15 +2204,22 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const bool blockTook = !brushTook && editor.driveBlocks(authored(), inspector);
             if (blockTook)
                 editor.touch();
+            // The Tiles tool (the 2D layer), on the same terms again.
+            const bool tileTook =
+                !brushTook && !blockTook &&
+                editor.driveTiles(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
+                                  inspector);
+            if (tileTook)
+                editor.touch();
 
-            const bool gizmoTook = !brushTook && !blockTook && editor.driveGizmo(authored(), inspector);
+            const bool gizmoTook = !brushTook && !blockTook && !tileTook && editor.driveGizmo(authored(), inspector);
             // A drag moves parts without ever producing a command, so the one
             // place that knows it happened is here.
             if (gizmoTook)
                 editor.touch();
 
             const core::InstanceId wasSelected = inspector.selection();
-            if (!gizmoTook && !brushTook && !blockTook)
+            if (!gizmoTook && !brushTook && !blockTook && !tileTook)
                 // The root the VIEWPORT is drawing, so a click can only land
                 // on something that is on screen -- the stage's workspace while
                 // a stamp is open, the host's otherwise.
@@ -3086,6 +3093,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     return;
                 meshLoader.syncPrimitives(*device, *cmd, world, meshCache, meshLibrary);
                 (void)meshLoader.syncTextures(*device, *cmd, world, textureLibrary);
+                // The palette's picture: the tileset of the tilemap the Tiles
+                // tool would paint, as loaded (the 2D layer).
+                if (options.editor && &world == &authored()) {
+                    Editor::TilesetPreview preview;
+                    const core::InstanceId painted = Editor::tilemapFor(world, inspector, workspace);
+                    if (const scene::Tilemap2DComponent* tilemap =
+                            painted.valid() ? world.tilemaps2d().find(painted) : nullptr;
+                        tilemap != nullptr && tilemap->tileset.valid()) {
+                        preview.texture = textureLibrary.find(tilemap->tileset);
+                        preview.pixels = textureLibrary.sizeOf(tilemap->tileset);
+                        preview.tileSize = tilemap->tileSize;
+                    }
+                    editor.setTilesetPreview(preview);
+                }
                 // **Only what finished, not the whole library** (D124). A mesh
                 // that lands means the physics mirror can be told what it
                 // collides as -- and this used to walk every entry whenever the
@@ -3144,7 +3165,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // be. The editor's camera is the fallback and never the winner: a
             // game with a camera is still shown through its own, which is the
             // whole of what pressing play means.
-            const render::ViewOverride editorView{editor.cameraCFrame(), EditorFieldOfView, 0.1f, 5000.0f};
+            // The 2D view is the same camera through an orthographic lens.
+            const render::ViewOverride editorView{editor.cameraCFrame(),   EditorFieldOfView,        0.1f, 5000.0f,
+                                                  editor.view2D() ? 1 : 0, editor.orthographicSize()};
             // **And "has a camera" has to mean the same thing here as it does
             // in `extract`, or the fallback misses exactly the case it is for.**
             // `Workspace.CurrentCamera` is a REFERENCE: deleting the camera in
@@ -3405,6 +3428,27 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                                          ? render::DebugColor::fromLinear(0.95f, 0.25f, 0.2f, 1.0f)
                                                          : render::DebugColor::fromLinear(0.95f, 0.75f, 0.25f, 1.0f);
                     debugDraw.wireBox(centre, core::Vec3{half, half, half}, color);
+                }
+                // **The cell a Tiles click would change** (the 2D layer), as a
+                // flat box on the plane: amber to paint, red to erase.
+                if (const std::optional<Editor::TileAim> aim = editor.tileAim(); aim.has_value()) {
+                    if (const scene::Tilemap2DComponent* tilemap = authored().tilemaps2d().find(aim->tilemap);
+                        tilemap != nullptr) {
+                        const double size = static_cast<double>(tilemap->cellSize);
+                        const core::DVec3 origin = snapshot.camera.origin;
+                        const core::Vec3 centre{
+                            static_cast<f32>(static_cast<double>(tilemap->position.x) +
+                                             (static_cast<double>(aim->cell[0]) + 0.5) * size - origin.x),
+                            static_cast<f32>(static_cast<double>(tilemap->position.y) +
+                                             (static_cast<double>(aim->cell[1]) + 0.5) * size - origin.y),
+                            static_cast<f32>(-origin.z)};
+                        const auto half = static_cast<f32>(size * 0.5);
+                        const render::DebugColor color =
+                            editor.tileOp() == Editor::TileOp::Erase
+                                ? render::DebugColor::fromLinear(0.95f, 0.25f, 0.2f, 1.0f)
+                                : render::DebugColor::fromLinear(0.95f, 0.75f, 0.25f, 1.0f);
+                        debugDraw.wireBox(centre, core::Vec3{half, half, 0.01f}, color);
+                    }
                 }
             }
 

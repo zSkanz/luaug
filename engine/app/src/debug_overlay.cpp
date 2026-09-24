@@ -3796,8 +3796,18 @@ void reportLookInput(Editor& editor, bool overViewport)
     // The wheel changes SPEED rather than dollying. A dolly duplicates what W
     // and S already do; a speed control is the thing a four-kilometre world and
     // a four-metre room need different values of.
-    if (overViewport && io.MouseWheel != 0.0f)
-        editor.setCameraSpeed(editor.cameraSpeed() * (io.MouseWheel > 0.0f ? 1.25f : 0.8f));
+    //
+    // **In the 2D view it zooms instead**, about the pointer: there is no
+    // flying to be fast at, and a wheel that zooms is what a 2D editor is.
+    if (overViewport && io.MouseWheel != 0.0f) {
+        if (editor.view2D()) {
+            const ViewportRect& rect = editor.viewport();
+            editor.zoom2D(io.MouseWheel, core::Vec2{io.MousePos.x - rect.x, io.MousePos.y - rect.y});
+        }
+        else {
+            editor.setCameraSpeed(editor.cameraSpeed() * (io.MouseWheel > 0.0f ? 1.25f : 0.8f));
+        }
+    }
 
     // **Latched on the press, and only there.** The first version asked "over
     // the viewport OR dragging", and `IsMouseDragging` becomes true a pixel
@@ -4968,6 +4978,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         panelItem("Stats", icons::ClassDebugService, panels.stats);
         panelItem("Terrain", icons::ClassWorkspace, panels.terrain);
         panelItem("Blocks", icons::ClassPart, panels.blocks);
+        panelItem("Tiles", icons::ClassPart, panels.tiles);
         panelItem("Debug", icons::ClassDebugService, panels.debug);
         ImGui::Separator();
         // Not a panel, but it is a question about what the panels SHOW, and
@@ -6056,6 +6067,97 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
     }
 }
 
+// The Tiles tool's panel (the 2D layer): the 2D view it is used from, what a
+// click does, and the tile it lays -- picked from the tileset's own picture
+// when the renderer has loaded it, and by number when it has not.
+void drawTilesPanel(Editor& editor, scene::World& world, core::InstanceId root, Inspector& inspector)
+{
+    bool flat = editor.view2D();
+    if (ImGui::Checkbox("2D view", &flat))
+        editor.setView2D(flat);
+    ImGui::SetItemTooltip("look straight at the 2D plane: right-drag pans, the wheel zooms about the pointer");
+
+    const core::InstanceId target = Editor::tilemapFor(world, inspector, root);
+    const scene::Tilemap2DComponent* tilemap = target.valid() ? world.tilemaps2d().find(target) : nullptr;
+    if (tilemap == nullptr) {
+        ImGui::TextWrapped("This world has no Tilemap2D. Insert one to paint tiles.");
+        return;
+    }
+    const std::string_view name = world.atoms().text(world.name(target));
+    ImGui::TextDisabled("painting %.*s", static_cast<int>(name.size()), name.data());
+
+    const auto opButton = [&](Editor::TileOp op, const char* word, const char* tip) {
+        const bool on = editor.tileOp() == op && editor.tool() == Editor::Tool::Tiles;
+        if (on)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::Button(word, ImVec2(76.0f * ImGui::GetStyle().FontScaleMain, 0.0f))) {
+            editor.setTileOp(op);
+            editor.setTool(Editor::Tool::Tiles);
+        }
+        if (on)
+            ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%s", tip);
+    };
+    opButton(Editor::TileOp::Paint, "Paint", "the selected tile into every cell the pointer crosses");
+    ImGui::SameLine();
+    opButton(Editor::TileOp::Erase, "Erase", "empties every cell the pointer crosses");
+
+    const Editor::TilesetPreview& preview = editor.tilesetPreview();
+    const int columns = preview.tileSize.x > 0.0f ? static_cast<int>(preview.pixels.x / preview.tileSize.x) : 0;
+    const int rows = preview.tileSize.y > 0.0f ? static_cast<int>(preview.pixels.y / preview.tileSize.y) : 0;
+    SDL_GPUTexture* native =
+        g_device != nullptr && preview.texture.valid() ? rhi::nativeTexture(*g_device, preview.texture) : nullptr;
+    ImGui::Separator();
+    if (native != nullptr && columns > 0 && rows > 0) {
+        // The tileset as a palette, a row of it at a time, wrapped to the
+        // panel. Capped, because a tileset of a hundred thousand tiles is a
+        // texture somebody pointed at by mistake.
+        const float side = 32.0f * ImGui::GetStyle().FontScaleMain;
+        const float spacing = ImGui::GetStyle().ItemSpacing.x;
+        const int across =
+            std::max(1, static_cast<int>((ImGui::GetContentRegionAvail().x + spacing) / (side + 8.0f + spacing)));
+        const int count = std::min(columns * rows, 4096);
+        for (int index = 0; index < count; ++index) {
+            const int column = index % columns;
+            const int row = index / columns;
+            const ImVec2 uv0(static_cast<float>(column) * preview.tileSize.x / preview.pixels.x,
+                             static_cast<float>(row) * preview.tileSize.y / preview.pixels.y);
+            const ImVec2 uv1(uv0.x + preview.tileSize.x / preview.pixels.x,
+                             uv0.y + preview.tileSize.y / preview.pixels.y);
+            const auto tile = static_cast<core::u16>(index + 1);
+            if (index % across != 0)
+                ImGui::SameLine();
+            ImGui::PushID(index);
+            const bool on = editor.tile() == tile;
+            if (on) {
+                ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+            }
+            if (ImGui::ImageButton("##tile", static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)),
+                                   ImVec2(side, side), uv0, uv1)) {
+                editor.setTile(tile);
+                editor.setTileOp(Editor::TileOp::Paint);
+                editor.setTool(Editor::Tool::Tiles);
+            }
+            if (on) {
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor();
+            }
+            ImGui::SetItemTooltip("tile %d", index + 1);
+            ImGui::PopID();
+        }
+    }
+    else {
+        int value = editor.tile();
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("tile", &value))
+            editor.setTile(static_cast<core::u16>(std::clamp(value, 1, 65535)));
+        ImGui::TextDisabled("set the tilemap's Tileset to pick tiles from its picture");
+    }
+    if (editor.lastTileEdits() > 0)
+        ImGui::TextDisabled("last stroke: %u cell(s)", static_cast<unsigned>(editor.lastTileEdits()));
+}
+
 void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId root, Inspector* inspector,
                      script::ScriptRuntime* runtime, Editor* editor, rhi::TextureHandle viewport, bool& laidOut,
                      EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs, IconAtlas* icons,
@@ -6237,6 +6339,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 panels.terrain = true;
             if (chosen.valid() && world->voxels().find(chosen) != nullptr)
                 panels.blocks = true;
+            if (chosen.valid() && world->tilemaps2d().find(chosen) != nullptr)
+                panels.tiles = true;
         }
     }
 
@@ -6279,6 +6383,22 @@ terrainPanelDone:;
         }
         ImGui::End();
     }
+    // **The Tiles tool follows its panel**, as the brush does.
+    bool tilesShown = false;
+    if (panels.tiles) {
+        if (rightColumn != 0)
+            ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
+        tilesShown = ImGui::Begin("Tiles###Tiles", &panels.tiles);
+        if (tilesShown) {
+            if (editor == nullptr || world == nullptr || inspector == nullptr)
+                ImGui::TextDisabled("no world");
+            else
+                drawTilesPanel(*editor, *world, treeRoot, *inspector);
+        }
+        ImGui::End();
+    }
+    if (editor != nullptr)
+        editor->setTilesPanelShown(tilesShown && panels.tiles);
     if (panels.stats) {
         if (ImGui::Begin("Stats", &panels.stats)) {
             drawStats(frame, counters);
@@ -6382,6 +6502,10 @@ terrainPanelDone:;
             if (ImGui::IsKeyPressed(ImGuiKey_B, false))
                 editor->setTool(Editor::Tool::Blocks);
         }
+
+        // Q out of the Tiles tool, whatever else the world has.
+        if (editor->tool() == Editor::Tool::Tiles && ImGui::IsKeyPressed(ImGuiKey_Q, false))
+            editor->setTool(Editor::Tool::Select);
 
         // **F frames the selection**, which is the one camera shortcut every
         // editor in this shape shares -- Unity, Unreal, Godot and Blender all

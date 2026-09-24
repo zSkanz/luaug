@@ -448,6 +448,8 @@ namespace {
         return "paint";
     case Editor::Tool::Blocks:
         return "blocks";
+    case Editor::Tool::Tiles:
+        return "tiles";
     case Editor::Tool::Select:
         break;
     }
@@ -487,6 +489,8 @@ namespace {
         return Editor::Tool::Paint;
     if (name == "blocks")
         return Editor::Tool::Blocks;
+    if (name == "tiles")
+        return Editor::Tool::Tiles;
     return Editor::Tool::Select;
 }
 
@@ -2692,6 +2696,26 @@ core::CFrameD Editor::driveCamera(core::Vec2 lookDelta, core::Vec3 move, f32 dt)
         }
     }
 
+    // **The 2D view pans rather than turns.** A drag moves the plane with the
+    // pointer -- a pixel of drag is a pixel of world -- and WASD pans at a
+    // speed that scales with the zoom, so crossing the screen takes the same
+    // time zoomed in or out.
+    if (m_view2D) {
+        const core::f64 metresPerPixel = m_viewport.height > 0.0f ? 2.0 * static_cast<core::f64>(m_orthographicSize) /
+                                                                        static_cast<core::f64>(m_viewport.height)
+                                                                  : 0.0;
+        const core::f64 pan = static_cast<core::f64>(m_orthographicSize) * 1.5 * static_cast<core::f64>(dt);
+        m_cameraCFrame.rotation = core::Mat3{};
+        m_cameraCFrame.position = {
+            m_cameraCFrame.position.x - static_cast<core::f64>(lookDelta.x) * metresPerPixel +
+                static_cast<core::f64>(move.x) * pan,
+            m_cameraCFrame.position.y + static_cast<core::f64>(lookDelta.y) * metresPerPixel +
+                static_cast<core::f64>(move.z + move.y) * pan,
+            m_cameraCFrame.position.z,
+        };
+        return m_cameraCFrame;
+    }
+
     m_yaw -= lookDelta.x * kRadiansPerPixel;
     m_pitch -= lookDelta.y * kRadiansPerPixel;
     m_pitch = m_pitch > kPitchLimit ? kPitchLimit : (m_pitch < -kPitchLimit ? -kPitchLimit : m_pitch);
@@ -2783,6 +2807,14 @@ namespace {
         return attachment->worldCFrame;
     if (world.models().find(id) != nullptr)
         return scene::pivotOf(world, id);
+    // A sprite is on the plane and turns about Z, so its frame is that.
+    if (const scene::Part2DComponent* sprite = world.parts2d().find(id); sprite != nullptr) {
+        core::CFrameD frame;
+        frame.position =
+            core::DVec3{static_cast<core::f64>(sprite->position.x), static_cast<core::f64>(sprite->position.y), 0.0};
+        frame.rotation = core::fromAxisAngle(core::Vec3{0.0f, 0.0f, 1.0f}, sprite->rotation * 3.14159265f / 180.0f);
+        return frame;
+    }
     return std::nullopt;
 }
 
@@ -2823,6 +2855,18 @@ void Editor::applyDragTransform(scene::World& world, Inspector& inspector, core:
                 continue;
             inspector.enqueue(descendant, cframeName, scene::Value{delta * part->cframe});
         }
+        return;
+    }
+
+    case DragKind::Part2D: {
+        // Back onto the plane: where it went, flattened, and how far it turned
+        // about Z, read off the frame's right axis. A turn about any other
+        // axis has no meaning for a sprite and is dropped rather than
+        // approximated.
+        const core::Vec2 position{static_cast<f32>(after.position.x), static_cast<f32>(after.position.y)};
+        const f32 degrees = std::atan2(after.rotation.m[0][1], after.rotation.m[0][0]) * 180.0f / 3.14159265f;
+        inspector.enqueue(id, world.atoms().intern("Position"), scene::Value{position});
+        inspector.enqueue(id, world.atoms().intern("Rotation"), scene::Value{static_cast<core::f64>(degrees)});
         return;
     }
 
@@ -2914,10 +2958,175 @@ void Editor::setPointer(core::Vec2 pixelInViewport, bool pressed, bool down) noe
 
 // --- The brush (F1) ----------------------------------------------------------
 
+void Editor::setView2D(bool on) noexcept
+{
+    if (on == m_view2D)
+        return;
+    m_view2D = on;
+    m_focusRemaining = 0.0f;
+    if (on) {
+        m_saved3DCamera = m_cameraCFrame;
+        m_saved3DYaw = m_yaw;
+        m_saved3DPitch = m_pitch;
+        // Square on to the plane, and in front of it: a camera behind z = 0
+        // looking down -Z would see nothing that lies on it.
+        m_cameraCFrame.rotation = core::Mat3{};
+        m_cameraCFrame.position.z = std::max(m_cameraCFrame.position.z, 100.0);
+        return;
+    }
+    m_cameraCFrame = m_saved3DCamera;
+    m_yaw = m_saved3DYaw;
+    m_pitch = m_saved3DPitch;
+}
+
+void Editor::zoom2D(f32 steps, core::Vec2 pointerInViewport) noexcept
+{
+    if (!m_view2D || steps == 0.0f)
+        return;
+    const f32 before = m_orthographicSize;
+    // A fixed ratio per notch, so zooming feels the same at any scale.
+    m_orthographicSize = std::clamp(before * std::pow(0.85f, steps), 0.25f, 10000.0f);
+    if (!(m_viewport.width > 0.0f) || !(m_viewport.height > 0.0f))
+        return;
+    // The point under the pointer stays under it: its offset from the middle
+    // of the view scales with the zoom, and the camera moves by the difference.
+    const core::f64 aspect = static_cast<core::f64>(m_viewport.width) / static_cast<core::f64>(m_viewport.height);
+    const core::f64 ndcX =
+        2.0 * static_cast<core::f64>(pointerInViewport.x) / static_cast<core::f64>(m_viewport.width) - 1.0;
+    const core::f64 ndcY =
+        1.0 - 2.0 * static_cast<core::f64>(pointerInViewport.y) / static_cast<core::f64>(m_viewport.height);
+    const core::f64 change = static_cast<core::f64>(before) - static_cast<core::f64>(m_orthographicSize);
+    m_cameraCFrame.position.x += ndcX * aspect * change;
+    m_cameraCFrame.position.y += ndcY * change;
+}
+
+core::InstanceId Editor::tilemapFor(const scene::World& world, const Inspector& inspector,
+                                    core::InstanceId root) noexcept
+{
+    // The selection, or the tilemap it is inside.
+    for (core::InstanceId walk = inspector.selection(); walk.valid() && world.alive(walk);
+         walk = world.parentOf(walk)) {
+        if (world.tilemaps2d().find(walk) != nullptr)
+            return walk;
+    }
+    // Otherwise the first in the world, in pool order.
+    core::InstanceId found;
+    world.tilemaps2d().forEach([&](core::InstanceId id, const scene::Tilemap2DComponent&) {
+        if (!found.valid() && root.valid() && world.isAncestorOf(root, id))
+            found = id;
+    });
+    return found;
+}
+
+bool Editor::driveTiles(scene::World& world, core::InstanceId root, Inspector& inspector)
+{
+    m_tileAim.reset();
+    const core::InstanceId target =
+        m_tileStroke.has_value() ? m_tileStroke->tilemap : tilemapFor(world, inspector, root);
+    scene::Tilemap2DComponent* tilemap = target.valid() ? world.tilemaps2d().find(target) : nullptr;
+
+    if (m_tool != Tool::Tiles || !m_tilesPanelShown || tilemap == nullptr || !(tilemap->cellSize > 0.0f)) {
+        if (m_tileStroke.has_value()) {
+            m_lastTileEdits = m_tileStroke->edits;
+            m_tileStroke.reset();
+        }
+        // A tool with nothing to act on does not eat the click, for the
+        // reason `driveSculpt` gives.
+        return false;
+    }
+
+    // The plane the tiles lie on, z = 0, under the pointer.
+    const PickRay ray = rayThrough(m_pointer);
+    if (std::abs(static_cast<double>(ray.direction.z)) > 1e-6) {
+        const double along = -ray.origin.z / static_cast<double>(ray.direction.z);
+        if (along > 0.0) {
+            const double size = static_cast<double>(tilemap->cellSize);
+            const double x =
+                ray.origin.x + static_cast<double>(ray.direction.x) * along - static_cast<double>(tilemap->position.x);
+            const double y =
+                ray.origin.y + static_cast<double>(ray.direction.y) * along - static_cast<double>(tilemap->position.y);
+            const double cellX = std::floor(x / size);
+            const double cellY = std::floor(y / size);
+            // Past the range a cell is numbered in, there is nothing to aim at.
+            constexpr double Reach = 1.0e9;
+            if (std::abs(cellX) < Reach && std::abs(cellY) < Reach)
+                m_tileAim = TileAim{target, {static_cast<core::i32>(cellX), static_cast<core::i32>(cellY)}};
+        }
+    }
+
+    if (m_tileStroke.has_value() && !m_pointerDown) {
+        m_lastTileEdits = m_tileStroke->edits;
+        m_tileStroke.reset();
+        m_pending.reset();
+        return true;
+    }
+    if (!m_tileStroke.has_value()) {
+        if (!m_pointerPressed || !m_tileAim.has_value())
+            return false;
+        m_tileStroke = TileStroke{target, std::nullopt, 0, 0};
+    }
+
+    if (m_tileAim.has_value() && m_tileAim->cell != m_tileStroke->last) {
+        const std::array<core::i32, 2> to = m_tileAim->cell;
+        const std::array<core::i32, 2> from = m_tileStroke->last.value_or(to);
+        m_tileStroke->last = to;
+        const core::u16 value = m_tileOp == TileOp::Erase ? core::u16{0} : m_tile;
+
+        // Every cell on the line from the last one reached, so a stroke faster
+        // than a cell a frame is still a line. Bresenham, both ends included.
+        std::vector<std::array<core::i32, 2>> cells;
+        {
+            core::i64 x = from[0];
+            core::i64 y = from[1];
+            const core::i64 dx = std::abs(static_cast<core::i64>(to[0]) - x);
+            const core::i64 dy = -std::abs(static_cast<core::i64>(to[1]) - y);
+            const core::i64 sx = x < to[0] ? 1 : -1;
+            const core::i64 sy = y < to[1] ? 1 : -1;
+            core::i64 error = dx + dy;
+            for (;;) {
+                cells.push_back({static_cast<core::i32>(x), static_cast<core::i32>(y)});
+                if (x == to[0] && y == to[1])
+                    break;
+                const core::i64 twice = 2 * error;
+                if (twice >= dy) {
+                    error += dy;
+                    x += sx;
+                }
+                if (twice <= dx) {
+                    error += dx;
+                    y += sy;
+                }
+            }
+        }
+
+        for (const std::array<core::i32, 2>& cell : cells) {
+            if (tilemap->cell(cell[0], cell[1]) == value)
+                continue;
+            // **Recorded on the first cell that changes**, not on the press,
+            // for the reason the block tool gives: a step that undoes nothing
+            // is a step somebody presses ctrl-Z through wondering what it was.
+            if (m_tileStroke->gesture == 0) {
+                m_tileStroke->gesture = inspector.beginGesture();
+                m_history.record(world, m_tileOp == TileOp::Erase ? "Erase Tiles" : "Paint Tiles",
+                                 m_tileStroke->gesture);
+                tilemap = world.tilemaps2d().find(target);
+                if (tilemap == nullptr)
+                    break;
+            }
+            (void)tilemap->setCell(cell[0], cell[1], value);
+            tilemap->revision += 1;
+            m_tileStroke->edits += 1;
+            m_sceneDirty = true;
+        }
+    }
+    m_pending.reset();
+    return true;
+}
+
 void Editor::setTool(Tool tool) noexcept
 {
     // Refused mid-stroke, exactly as `setGizmoMode` is refused mid-drag.
-    if (m_stroke.has_value() || m_blockStroke.has_value())
+    if (m_stroke.has_value() || m_blockStroke.has_value() || m_tileStroke.has_value())
         return;
     m_tool = tool;
     m_preferencesDirty = true;
@@ -3774,6 +3983,9 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
             else if (world.cameras().find(id) != nullptr) {
                 kind = DragKind::Camera;
             }
+            else if (world.parts2d().find(id) != nullptr) {
+                kind = DragKind::Part2D;
+            }
             else if (world.attachments().find(id) != nullptr) {
                 kind = DragKind::Attachment;
                 // What the local `CFrame` is relative to. Derived from the two
@@ -3790,7 +4002,10 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
 
             drag.targets.push_back(id);
             drag.before.push_back(*at);
-            drag.sizes.push_back(part != nullptr ? part->size : core::Vec3{1.0f, 1.0f, 1.0f});
+            const scene::Part2DComponent* sprite = world.parts2d().find(id);
+            drag.sizes.push_back(part != nullptr     ? part->size
+                                 : sprite != nullptr ? core::Vec3{sprite->size.x, sprite->size.y, 1.0f}
+                                                     : core::Vec3{1.0f, 1.0f, 1.0f});
             drag.kinds.push_back(kind);
             drag.parents.push_back(parent);
         }
@@ -3933,7 +4148,11 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
         constexpr f32 kMinimum = 0.01f;
         now = Vec3{now.x < kMinimum ? kMinimum : now.x, now.y < kMinimum ? kMinimum : now.y,
                    now.z < kMinimum ? kMinimum : now.z};
-        inspector.enqueue(drag.targets[index], sizeName, scene::Value{now});
+        // A sprite's size is its width and height; the third axis is not one.
+        if (drag.kinds[index] == DragKind::Part2D)
+            inspector.enqueue(drag.targets[index], sizeName, scene::Value{core::Vec2{now.x, now.y}});
+        else
+            inspector.enqueue(drag.targets[index], sizeName, scene::Value{now});
     }
     return true;
 }

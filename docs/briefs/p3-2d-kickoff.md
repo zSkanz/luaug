@@ -95,7 +95,7 @@ ruled out in writing.
 - **2D-D** Orthographic cameras, the sprite pass, sprite textures and pixel-art
   sampling, tilemap drawing.
   *(B, C and D done 2026-09-23, as one commit -- see Findings 1.)*
-- **2D-E** The editor's 2D view and Tiles tool.
+- **2D-E** The editor's 2D view and Tiles tool. *(Done 2026-09-23.)*
 - **2D-F** `examples/20-platformer`, conformance specs, documentation.
 - **2D-G** Replication: `Part2D` and tilemap edits on protocol 11.
 
@@ -158,3 +158,17 @@ ruled out in writing.
    its two corners, each tile's computed from the same expression as its
    neighbour's, and the shader leaves an unturned sprite's corners exactly as
    given.
+8. **A remembered revision is not evidence after a restore.** An undo puts a
+   tilemap's revision back, and the next edit can arrive at the number the
+   physics mirror built from -- with different cells. `World::restores` counts
+   restores and is never restored itself; a mirror that sees it move rebuilds.
+9. **The 2D view is a lens, not a viewport.** The editor's camera gains an
+   orthographic projection and pans instead of turning; picking, the
+   manipulator and the Tiles tool then worked through the same ray code the 3D
+   view uses, because `rayThroughPixel` already asked the projection. A
+   `Part2D` joins the manipulator as a fifth kind: its frame is its position on
+   the plane turned about Z, and a drag writes `Position` and `Rotation` back.
+10. **The Tiles tool follows its panel**, as the terrain brush does since the
+    owner's report that a brush acting with its panel closed was a trap. A
+    stroke paints the Bresenham line between frames, so a fast drag leaves no
+    gaps, and is one undo step.

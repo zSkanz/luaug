@@ -656,6 +656,10 @@ struct ViewOverride
     f32 fieldOfView = 70.0f;
     f32 nearPlane = 0.1f;
     f32 farPlane = 5000.0f;
+    // `Enum.CameraProjection`, and half the view's height for an orthographic
+    // one: the editor's 2D view is this lens on its own camera.
+    core::i32 projection = 0;
+    f32 orthographicSize = 10.0f;
 };
 
 // Fills `out` from the world.

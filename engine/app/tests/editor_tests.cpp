@@ -5485,3 +5485,170 @@ TEST_CASE("each brush stroke is its own undo step (D168)")
     REQUIRE(rig.editor.history().undo(rig.world));
     CHECK(top(-10.0) < 0.5f);
 }
+
+// --- The 2D layer: the 2D view and the Tiles tool (phase 3) -------------------
+
+namespace {
+
+// The brush rig looking square at the 2D plane through an orthographic lens,
+// with a tilemap in the world and no terrain to confuse a click.
+struct TileRig : BrushRig
+{
+    core::InstanceId tilemap;
+
+    TileRig()
+    {
+        world.destroy(terrain);
+        world.retireDestroyed();
+        tilemap = world.create(classes.findId(atoms.intern("Tilemap2D")));
+        REQUIRE(tilemap.valid());
+        REQUIRE_FALSE(world.setParent(tilemap, workspace).has_value());
+        editor.setViewport(rect);
+        // Ten metres above and below the middle, from fifty metres in front.
+        editor.setCamera(core::orthographic(10.0f, rect.width / rect.height, 0.1f, 5000.0f),
+                         core::lookAt(core::Vec3{}, core::Vec3{0.0f, 0.0f, -1.0f}, core::Vec3{0.0f, 1.0f, 0.0f}),
+                         core::DVec3{0.0, 0.0, 50.0});
+        editor.setTool(Editor::Tool::Tiles);
+    }
+
+    [[nodiscard]] scene::Tilemap2DComponent& tiles() { return *world.tilemaps2d().find(tilemap); }
+
+    bool tileFrame(core::DVec3 at, bool pressed, bool down)
+    {
+        const core::Vec2 pixel = pixelOf(at);
+        if (pressed)
+            editor.requestPick(pixel);
+        editor.setPointer(pixel, pressed, down);
+        const bool took = editor.driveTiles(world, workspace, inspector);
+        if (!took && !editor.driveGizmo(world, inspector))
+            editor.resolvePick(world, workspace, inspector);
+        inspector.applyPending(world);
+        return took;
+    }
+
+    [[nodiscard]] core::InstanceId sprite(core::Vec2 at, core::Vec2 size, core::i32 zIndex = 0)
+    {
+        const core::InstanceId id = world.create(classes.findId(atoms.intern("Part2D")));
+        REQUIRE(id.valid());
+        REQUIRE_FALSE(world.setParent(id, workspace).has_value());
+        scene::Part2DComponent* component = world.parts2d().find(id);
+        component->position = at;
+        component->size = size;
+        component->zIndex = zIndex;
+        return id;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a Tiles click paints the cell under the pointer and is the tool's, not a selection")
+{
+    TileRig rig;
+    CHECK(rig.tileFrame(core::DVec3{2.5, 3.5, 0.0}, true, true));
+    CHECK(rig.tileFrame(core::DVec3{2.5, 3.5, 0.0}, false, false));
+    CHECK(rig.tiles().cell(2, 3) == 1);
+    CHECK(rig.editor.lastTileEdits() == 1);
+    CHECK_FALSE(rig.inspector.selection().valid());
+
+    rig.editor.setTileOp(Editor::TileOp::Erase);
+    CHECK(rig.tileFrame(core::DVec3{2.5, 3.5, 0.0}, true, true));
+    CHECK(rig.tileFrame(core::DVec3{2.5, 3.5, 0.0}, false, false));
+    CHECK(rig.tiles().cell(2, 3) == 0);
+}
+
+TEST_CASE("a fast Tiles stroke paints a line with no gaps, as one undo step")
+{
+    TileRig rig;
+    rig.editor.setTile(7);
+    CHECK(rig.tileFrame(core::DVec3{-4.5, 0.5, 0.0}, true, true));
+    // Nine cells in one frame.
+    CHECK(rig.tileFrame(core::DVec3{4.5, 0.5, 0.0}, false, true));
+    CHECK(rig.tileFrame(core::DVec3{4.5, 0.5, 0.0}, false, false));
+    for (core::i32 x = -5; x <= 4; ++x)
+        CHECK(rig.tiles().cell(x, 0) == 7);
+    CHECK(rig.editor.lastTileEdits() == 10);
+
+    REQUIRE(rig.editor.undo(rig.world, rig.inspector));
+    CHECK(rig.tiles().chunks.empty());
+}
+
+TEST_CASE("the Tiles tool acts only while its panel is on screen")
+{
+    TileRig rig;
+    rig.editor.setTilesPanelShown(false);
+    CHECK_FALSE(rig.tileFrame(core::DVec3{0.5, 0.5, 0.0}, true, true));
+    CHECK(rig.tiles().cell(0, 0) == 0);
+}
+
+TEST_CASE("a click on the plane selects the sprite drawn on top, then the tiles under it")
+{
+    TileRig rig;
+    rig.editor.setTool(Editor::Tool::Select);
+    (void)rig.tiles().setCell(0, 0, 1);
+    const core::InstanceId low = rig.sprite(core::Vec2{0.5f, 0.5f}, core::Vec2{1.0f, 1.0f});
+    const core::InstanceId high = rig.sprite(core::Vec2{0.5f, 0.5f}, core::Vec2{0.5f, 0.5f}, 2);
+    (void)low;
+
+    (void)rig.tileFrame(core::DVec3{0.5, 0.5, 0.0}, true, true);
+    (void)rig.tileFrame(core::DVec3{0.5, 0.5, 0.0}, false, false);
+    CHECK(rig.inspector.selection() == high);
+
+    // Outside the small one and inside the big one.
+    (void)rig.tileFrame(core::DVec3{0.1, 0.1, 0.0}, true, true);
+    (void)rig.tileFrame(core::DVec3{0.1, 0.1, 0.0}, false, false);
+    CHECK(rig.inspector.selection() == low);
+
+    // Only tiles here.
+    rig.world.destroy(low);
+    rig.world.destroy(high);
+    rig.world.retireDestroyed();
+    (void)rig.tileFrame(core::DVec3{0.5, 0.5, 0.0}, true, true);
+    (void)rig.tileFrame(core::DVec3{0.5, 0.5, 0.0}, false, false);
+    CHECK(rig.inspector.selection() == rig.tilemap);
+}
+
+TEST_CASE("a selected Part2D has a manipulator on the plane, turned as it is")
+{
+    TileRig rig;
+    const core::InstanceId id = rig.sprite(core::Vec2{3.0f, -2.0f}, core::Vec2{1.0f, 1.0f});
+    rig.world.parts2d().find(id)->rotation = 90.0f;
+    rig.inspector.select(id);
+    rig.editor.setGizmoLocal(true);
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+    CHECK(frame->transform.position.x == doctest::Approx(3.0));
+    CHECK(frame->transform.position.y == doctest::Approx(-2.0));
+    // Turned a quarter: its right axis points up.
+    CHECK(static_cast<double>(frame->transform.rotation.m[0][1]) == doctest::Approx(1.0).epsilon(1e-4));
+}
+
+TEST_CASE("the 2D view pans with a drag, zooms about the pointer, and gives the 3D camera back")
+{
+    TileRig rig;
+    rig.editor.adoptCamera(
+        core::CFrameD{core::DVec3{1.0, 2.0, 30.0}, core::fromEulerYxz(core::Vec3{-0.4f, 0.7f, 0.0f})});
+    const core::CFrameD before = rig.editor.cameraCFrame();
+
+    rig.editor.setView2D(true);
+    CHECK(rig.editor.cameraCFrame().position.z >= 100.0);
+    CHECK(static_cast<double>(rig.editor.cameraCFrame().rotation.m[2][2]) == doctest::Approx(1.0));
+
+    // A pixel of drag is a pixel of world: 20 metres over 1080 pixels.
+    const core::DVec3 start = rig.editor.cameraCFrame().position;
+    (void)rig.editor.driveCamera(core::Vec2{108.0f, 0.0f}, core::Vec3{}, 0.016f);
+    CHECK(rig.editor.cameraCFrame().position.x == doctest::Approx(start.x - 2.0));
+
+    // Zooming about the middle of the view does not move the camera; about a
+    // corner, it moves towards it.
+    const core::DVec3 middle = rig.editor.cameraCFrame().position;
+    rig.editor.zoom2D(1.0f, core::Vec2{960.0f, 540.0f});
+    CHECK(static_cast<double>(rig.editor.orthographicSize()) == doctest::Approx(8.5));
+    CHECK(rig.editor.cameraCFrame().position.x == doctest::Approx(middle.x));
+    rig.editor.zoom2D(1.0f, core::Vec2{1920.0f, 0.0f});
+    CHECK(rig.editor.cameraCFrame().position.x > middle.x);
+    CHECK(rig.editor.cameraCFrame().position.y > middle.y);
+
+    rig.editor.setView2D(false);
+    CHECK(rig.editor.cameraCFrame().position.x == doctest::Approx(before.position.x));
+    CHECK(rig.editor.cameraCFrame().position.z == doctest::Approx(before.position.z));
+}

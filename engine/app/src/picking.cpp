@@ -2,6 +2,7 @@
 #include <luaug/scene/components.h>
 #include <luaug/scene/world.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -156,6 +157,59 @@ std::optional<PickHit> pickNearest(const scene::World& world, core::InstanceId r
             best = PickHit{id, *distance};
         }
     });
+
+    // **The 2D layer's sprites and tiles**, all on the z = 0 plane. Among them
+    // the one drawn on top is the one clicked: the highest `ZIndex`, a part over
+    // a tilemap at the same one, and the later of two otherwise -- the drawing
+    // order read backwards. Against the 3D parts it is distance, as ever.
+    if (std::abs(static_cast<double>(ray.direction.z)) > 1e-6) {
+        const double along = -ray.origin.z / static_cast<double>(ray.direction.z);
+        if (along > 0.0) {
+            const double x = ray.origin.x + static_cast<double>(ray.direction.x) * along;
+            const double y = ray.origin.y + static_cast<double>(ray.direction.y) * along;
+            std::optional<core::InstanceId> top;
+            core::i32 topZ = 0;
+            bool topIsPart = false;
+            const auto consider = [&](core::InstanceId id, core::i32 zIndex, bool part) {
+                if (!top.has_value() || zIndex > topZ || (zIndex == topZ && (part || !topIsPart))) {
+                    top = id;
+                    topZ = zIndex;
+                    topIsPart = part;
+                }
+            };
+            world.tilemaps2d().forEach([&](core::InstanceId id, const scene::Tilemap2DComponent& tilemap) {
+                if (!inWorld(world, id, root) || !(tilemap.cellSize > 0.0f))
+                    return;
+                const double size = static_cast<double>(tilemap.cellSize);
+                const double cellX = std::floor((x - static_cast<double>(tilemap.position.x)) / size);
+                const double cellY = std::floor((y - static_cast<double>(tilemap.position.y)) / size);
+                if (std::abs(cellX) > 2.0e9 || std::abs(cellY) > 2.0e9)
+                    return;
+                if (tilemap.cell(static_cast<core::i32>(cellX), static_cast<core::i32>(cellY)) != 0)
+                    consider(id, tilemap.zIndex, false);
+            });
+            world.parts2d().forEach([&](core::InstanceId id, const scene::Part2DComponent& sprite) {
+                if (!inWorld(world, id, root))
+                    return;
+                // Into the sprite's own frame, turned back by its rotation.
+                const double angle = static_cast<double>(sprite.rotation) * 3.14159265358979323846 / 180.0;
+                const double dx = x - static_cast<double>(sprite.position.x);
+                const double dy = y - static_cast<double>(sprite.position.y);
+                const double localX = dx * std::cos(angle) + dy * std::sin(angle);
+                const double localY = -dx * std::sin(angle) + dy * std::cos(angle);
+                const double halfX = static_cast<double>(sprite.size.x) * 0.5;
+                const double halfY = static_cast<double>(sprite.size.y) * 0.5;
+                const bool inside = sprite.shape == 1 ? localX * localX + localY * localY <=
+                                                            std::min(halfX, halfY) * std::min(halfX, halfY)
+                                                      : std::abs(localX) <= halfX && std::abs(localY) <= halfY;
+                if (inside)
+                    consider(id, sprite.zIndex, true);
+            });
+            const auto distance = static_cast<f32>(along);
+            if (top.has_value() && (!best.has_value() || distance < best->distance))
+                best = PickHit{*top, distance};
+        }
+    }
 
     return best;
 }
