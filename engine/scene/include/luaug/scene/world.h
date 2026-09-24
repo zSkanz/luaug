@@ -300,6 +300,8 @@ struct NameIndex
     X(PointLightComponent, pointLights)                                                                                \
     X(ParticleEmitterComponent, particleEmitters)                                                                      \
     X(DecalComponent, decals)                                                                                          \
+    X(Part2DComponent, parts2d)                                                                                        \
+    X(Tilemap2DComponent, tilemaps2d)                                                                                  \
     X(SpotLightComponent, spotLights)                                                                                  \
     X(LightingComponent, lighting)                                                                                     \
     X(NameIndex, nameIndices)                                                                                          \
@@ -622,6 +624,15 @@ public:
     //     difference.
     void restore(const WorldSnapshot& snapshot);
 
+    // **How many restores this world has had**, counted up and never restored
+    // itself. What a restore puts back includes every revision counter a
+    // component carries -- a tilemap's, a terrain's -- so a mirror that
+    // remembers "built at revision 6" can meet a DIFFERENT revision 6 after an
+    // undo and a fresh edit. A mirror that also remembers this number knows
+    // when to stop trusting what it remembers. Not state: not in the snapshot,
+    // not hashed, and nothing a script can see.
+    [[nodiscard]] core::u64 restores() const noexcept { return m_restores; }
+
     // --- Frame plumbing ------------------------------------------------------
 
     [[nodiscard]] ChangeQueue& changes() noexcept { return m_changes; }
@@ -734,6 +745,11 @@ public:
     [[nodiscard]] const ComponentPool<CameraComponent>& cameras() const noexcept { return m_cameras; }
     [[nodiscard]] ComponentPool<DecalComponent>& decals() noexcept { return m_decals; }
     [[nodiscard]] const ComponentPool<DecalComponent>& decals() const noexcept { return m_decals; }
+    // The 2D layer (post-v1 phase 3).
+    [[nodiscard]] ComponentPool<Part2DComponent>& parts2d() noexcept { return m_parts2d; }
+    [[nodiscard]] const ComponentPool<Part2DComponent>& parts2d() const noexcept { return m_parts2d; }
+    [[nodiscard]] ComponentPool<Tilemap2DComponent>& tilemaps2d() noexcept { return m_tilemaps2d; }
+    [[nodiscard]] const ComponentPool<Tilemap2DComponent>& tilemaps2d() const noexcept { return m_tilemaps2d; }
     [[nodiscard]] ComponentPool<ParticleEmitterComponent>& particleEmitters() noexcept { return m_particleEmitters; }
     [[nodiscard]] const ComponentPool<ParticleEmitterComponent>& particleEmitters() const noexcept
     {
@@ -843,6 +859,7 @@ private:
 
     EngineState m_engineState;
     ChangeQueue m_changes;
+    core::u64 m_restores = 0;
 };
 
 } // namespace luaug::scene

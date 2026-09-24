@@ -197,8 +197,11 @@ std::optional<CanvasPlacement> placeBillboard(const scene::BillboardGuiComponent
     // **A metre is a metre and a pixel is a pixel.** One screen pixel at this
     // depth is `2 * depth / (projection[1][1] * height)` metres, so an offset
     // keeps its size on the screen and a scale keeps its size in the world.
+    // Under an orthographic camera (the 2D layer) a pixel is the same size at
+    // every depth, which is this with the depth taken out.
     const f32 focal = camera.projection.m[1][1];
-    const f32 metresPerPixel = focal > 0.0f && viewport.y > 0.0f ? 2.0f * depth / (focal * viewport.y) : 0.0f;
+    const f32 scaleDepth = core::isOrthographic(camera.projection) ? 1.0f : depth;
+    const f32 metresPerPixel = focal > 0.0f && viewport.y > 0.0f ? 2.0f * scaleDepth / (focal * viewport.y) : 0.0f;
     const Vec2 canvas{gui.size.x.scale * BillboardPixelsPerMetre + gui.size.x.offset,
                       gui.size.y.scale * BillboardPixelsPerMetre + gui.size.y.offset};
     const Vec2 world{gui.size.x.scale + gui.size.x.offset * metresPerPixel,

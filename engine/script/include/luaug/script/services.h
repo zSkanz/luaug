@@ -23,6 +23,7 @@
 #include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/physics_sync.h"
+#include "luaug/scene/physics_sync_2d.h"
 #include "luaug/scene/skeleton_host.h"
 #include "luaug/script/animation.h"
 #include "luaug/script/binding.h"
@@ -242,6 +243,9 @@ public:
     // which is the same answer an empty world gives -- so every reader checks
     // rather than assuming.
     scene::PhysicsSync* physics = nullptr;
+    // The plane's mirror (the 2D layer), on the same terms: null answers
+    // `Workspace:Raycast2D` with nil.
+    scene::PhysicsSync2D* physics2d = nullptr;
 
     // The input system `InputService` reads and, in exactly one place, writes:
     // `SetVirtualState` drives the four virtual channels, which is the seam that

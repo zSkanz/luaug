@@ -22,8 +22,8 @@ struct ClusterBounds
 // One tile's four rays, evaluated at a depth. The tile's screen rectangle in
 // normalised device coordinates times the depth's own half-extents is the
 // rectangle the cluster covers there.
-[[nodiscard]] ClusterBounds boundsOf(u32 tileX, u32 tileY, f32 nearDepth, f32 farDepth, f32 tanHalfFovX,
-                                     f32 tanHalfFovY) noexcept
+[[nodiscard]] ClusterBounds boundsOf(u32 tileX, u32 tileY, f32 nearDepth, f32 farDepth,
+                                     const core::ViewSpread& spread) noexcept
 {
     const f32 leftNdc = static_cast<f32>(tileX) / static_cast<f32>(kClusterTilesX) * 2.0f - 1.0f;
     const f32 rightNdc = static_cast<f32>(tileX + 1) / static_cast<f32>(kClusterTilesX) * 2.0f - 1.0f;
@@ -39,15 +39,18 @@ struct ClusterBounds
     // A frustum slice's x extent grows with depth, so the near plane supplies
     // one end of the box and the far plane the other -- taken as min and max
     // rather than assumed, because a tile straddling the centre has its widest
-    // edge at the far plane on one side and the near plane on the other.
-    const f32 xa = leftNdc * tanHalfFovX * nearDepth;
-    const f32 xb = leftNdc * tanHalfFovX * farDepth;
-    const f32 xc = rightNdc * tanHalfFovX * nearDepth;
-    const f32 xd = rightNdc * tanHalfFovX * farDepth;
-    const f32 ya = bottomNdc * tanHalfFovY * nearDepth;
-    const f32 yb = bottomNdc * tanHalfFovY * farDepth;
-    const f32 yc = topNdc * tanHalfFovY * nearDepth;
-    const f32 yd = topNdc * tanHalfFovY * farDepth;
+    // edge at the far plane on one side and the near plane on the other. (An
+    // orthographic camera's does not grow, and the same arithmetic holds.)
+    const core::Vec2 nearHalf = spread.at(nearDepth);
+    const core::Vec2 farHalf = spread.at(farDepth);
+    const f32 xa = leftNdc * nearHalf.x;
+    const f32 xb = leftNdc * farHalf.x;
+    const f32 xc = rightNdc * nearHalf.x;
+    const f32 xd = rightNdc * farHalf.x;
+    const f32 ya = bottomNdc * nearHalf.y;
+    const f32 yb = bottomNdc * farHalf.y;
+    const f32 yc = topNdc * nearHalf.y;
+    const f32 yd = topNdc * farHalf.y;
 
     bounds.low =
         Vec3{std::min(std::min(xa, xb), std::min(xc, xd)), std::min(std::min(ya, yb), std::min(yc, yd)), -farDepth};
@@ -126,8 +129,7 @@ void buildClusters(const RenderCamera& camera, std::span<const RenderLight> ligh
     clusterSliceConstants(nearPlane, farPlane, out.sliceScale, out.sliceBias);
     const f32 ratio = farPlane / nearPlane;
 
-    const f32 tanHalfFovX = camera.projection.m[0][0] != 0.0f ? 1.0f / camera.projection.m[0][0] : 1.0f;
-    const f32 tanHalfFovY = camera.projection.m[1][1] != 0.0f ? 1.0f / camera.projection.m[1][1] : 1.0f;
+    const core::ViewSpread spread = core::viewSpread(camera.projection);
 
     out.lightCount = static_cast<u32>(std::min<usize>(lights.size(), kMaxClusteredLights));
     if (out.lightCount == 0)
@@ -168,8 +170,8 @@ void buildClusters(const RenderCamera& camera, std::span<const RenderLight> ligh
         // the near plane is what keeps a light the camera is inside from
         // projecting to nothing.
         const f32 projectionDepth = std::max(lowDepth, nearPlane);
-        const f32 halfWidth = tanHalfFovX * projectionDepth;
-        const f32 halfHeight = tanHalfFovY * projectionDepth;
+        const f32 halfWidth = spread.at(projectionDepth).x;
+        const f32 halfHeight = spread.at(projectionDepth).y;
         const f32 lowX = (entry.position.x - entry.range) / std::max(halfWidth, 1e-6f);
         const f32 highX = (entry.position.x + entry.range) / std::max(halfWidth, 1e-6f);
         const f32 lowY = (entry.position.y - entry.range) / std::max(halfHeight, 1e-6f);
@@ -206,8 +208,7 @@ void buildClusters(const RenderCamera& camera, std::span<const RenderLight> ligh
                 const f32 farDepth = sliceDepth(slice + 1, nearPlane, ratio);
                 for (u32 tileY = entry.tileLow[1]; tileY <= entry.tileHigh[1]; ++tileY) {
                     for (u32 tileX = entry.tileLow[0]; tileX <= entry.tileHigh[0]; ++tileX) {
-                        const ClusterBounds bounds =
-                            boundsOf(tileX, tileY, nearDepth, farDepth, tanHalfFovX, tanHalfFovY);
+                        const ClusterBounds bounds = boundsOf(tileX, tileY, nearDepth, farDepth, spread);
                         if (!sphereTouches(bounds, entry.position, entry.range))
                             continue;
                         const u32 cluster = clusterIndexOf(tileX, tileY, slice);

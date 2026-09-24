@@ -556,6 +556,31 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     // and when streaming arrives that field is what gets divided into real
     // cells. A field with nothing in it writes nothing, which is what keeps
     // every existing scene byte-identical.
+    // **A tilemap's cells** (the 2D layer), which no property carries, as the
+    // terrain's field is not: each painted 16 by 16 block as its corner and its
+    // cells, two bytes each, little-endian, in base64. Blocks in key order, so
+    // the same map writes the same bytes. An empty map writes nothing.
+    if (const Tilemap2DComponent* tilemap = world.tilemaps2d().find(id);
+        tilemap != nullptr && !tilemap->chunks.empty()) {
+        out.key("tiles");
+        out.beginArray();
+        for (const auto& [key, chunk] : tilemap->chunks) {
+            std::vector<core::u8> bytes;
+            bytes.reserve(chunk.size() * 2);
+            for (const core::u16 tile : chunk) {
+                bytes.push_back(static_cast<core::u8>(tile & 0xFFu));
+                bytes.push_back(static_cast<core::u8>(tile >> 8u));
+            }
+            out.beginObject();
+            out.field("x", static_cast<core::i64>(key.x));
+            out.field("y", static_cast<core::i64>(key.y));
+            out.field("cells", core::base64Encode(bytes));
+            out.endObject();
+        }
+        out.endArray();
+        ++report.properties;
+    }
+
     if (const TerrainComponent* terrain = world.terrains().find(id); terrain != nullptr) {
         // **A terrain saved as cells writes where they are, not what they hold**
         // (ADR 0087): the field in memory is only what is resident, so writing
@@ -810,6 +835,36 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
     if (const JsonValue tags = json["tags"]; tags.type() == core::JsonType::Array) {
         for (core::usize index = 0; index < tags.size(); ++index)
             (void)world.addTag(id, world.atoms().intern(tags.at(index).asString()));
+    }
+
+    // A tilemap's painted blocks.
+    if (const JsonValue tiles = json["tiles"]; tiles.type() == core::JsonType::Array) {
+        if (Tilemap2DComponent* tilemap = world.tilemaps2d().find(id); tilemap != nullptr) {
+            bool whole = true;
+            for (core::usize at = 0; at < tiles.size(); ++at) {
+                const JsonValue row = tiles.at(at);
+                const std::optional<std::vector<core::u8>> bytes = core::base64Decode(row["cells"].asString());
+                if (!bytes.has_value() || bytes->size() != sizeof(TileChunk::value_type) * TileChunk{}.size()) {
+                    whole = false;
+                    continue;
+                }
+                TileChunk chunk{};
+                bool painted = false;
+                for (core::usize cell = 0; cell < chunk.size(); ++cell) {
+                    chunk[cell] = static_cast<core::u16>((*bytes)[cell * 2] | ((*bytes)[cell * 2 + 1] << 8u));
+                    painted = painted || chunk[cell] != 0;
+                }
+                if (painted) {
+                    tilemap->chunks[TileChunkKey{static_cast<core::i32>(row["x"].asInteger()),
+                                                 static_cast<core::i32>(row["y"].asInteger())}] = chunk;
+                }
+            }
+            tilemap->revision += 1;
+            if (whole)
+                ++report.properties;
+            else
+                ++report.droppedReferences;
+        }
     }
 
     // Ground saved as cells (ADR 0087): the settings and where the cells are,

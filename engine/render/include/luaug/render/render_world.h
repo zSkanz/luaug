@@ -314,6 +314,34 @@ struct RenderParticle
     f32 distance = 0.0f;
 };
 
+// One sprite as drawn (the 2D layer): a `Part2D`, or one tile of a `Tilemap2D`.
+//
+// **Its rectangle as two corners, not a centre and a size**, so two tiles that
+// share an edge compute it from the same expression and meet exactly -- a
+// centre plus a half-width is a hairline seam between every pair of tiles on
+// some GPU at some zoom.
+struct RenderSprite
+{
+    // Camera-relative, on the plane: low x and y, then high x and y.
+    f32 rect[4]{0.0f, 0.0f, 0.0f, 0.0f};
+    // The plane's depth, camera-relative.
+    f32 z = 0.0f;
+    // About the rectangle's middle, as a cosine and a sine: exactly (1, 0) for
+    // a tile, which the shader takes as "place the corners as given".
+    f32 cosine = 1.0f;
+    f32 sine = 0.0f;
+    // `Enum.Shape2D`: the outline it is drawn as.
+    core::i32 shape = 0;
+    // The image's corners in texture space: left, top, right, bottom. Swapped
+    // for a flipped sprite.
+    f32 uv[4]{0.0f, 0.0f, 1.0f, 1.0f};
+    // The authored colour, still sRGB -- the shader decodes it -- and opacity.
+    f32 color[4]{1.0f, 1.0f, 1.0f, 1.0f};
+    // Invalid draws the colour alone.
+    rhi::TextureHandle texture;
+    bool nearest = false;
+};
+
 // One corner of a world-space UI quad (F3), as `ui_world.hlsl` reads it: the
 // host has already placed it in the world, camera-relative like every f32
 // position here, and the rest travels as a screen UI vertex's does.
@@ -392,6 +420,10 @@ struct RenderWorld
     std::vector<RenderParticle> particles;
     // This frame's decals, in pool order.
     std::vector<RenderDecal> decals;
+    // This frame's sprites (the 2D layer), in the order they are drawn: by
+    // `ZIndex`, a tilemap beneath a part at the same one, and otherwise in the
+    // order they were made. Only those near the view.
+    std::vector<RenderSprite> sprites;
     // This frame's world-space UI (F3), placed by the host after extraction:
     // the UI module owns the layout and the draw list, and the renderer only
     // draws what it is handed.
@@ -424,6 +456,7 @@ struct RenderWorld
         voxelTextures.clear();
         particles.clear();
         decals.clear();
+        sprites.clear();
         worldUiVertices.clear();
         worldUiRuns.clear();
         voxelBlockSize = 1.0f;
@@ -505,7 +538,9 @@ inline constexpr f32 kMaxSortDepth = 655.0f;
 class TextureLibrary
 {
 public:
-    void set(core::NameAtom content, rhi::TextureHandle texture);
+    // With its size in pixels where the loader knows it, which a sprite's
+    // pixel rectangle and a tileset's tiles are measured against.
+    void set(core::NameAtom content, rhi::TextureHandle texture, core::u32 width = 0, core::u32 height = 0);
     void clear() noexcept;
 
     // Removes one entry and HANDS BACK what it held, so the caller can destroy
@@ -522,6 +557,9 @@ public:
     // draws untextured rather than not at all: one that vanished while its
     // texture loaded would be worse.
     [[nodiscard]] rhi::TextureHandle find(core::NameAtom content) const noexcept;
+    // Width and height in pixels, or zero for one not loaded or loaded with no
+    // size given.
+    [[nodiscard]] core::Vec2 sizeOf(core::NameAtom content) const noexcept;
     [[nodiscard]] usize size() const noexcept { return entries_.size(); }
 
 private:
@@ -531,6 +569,8 @@ private:
     {
         core::NameAtom content;
         rhi::TextureHandle texture;
+        core::u32 width = 0;
+        core::u32 height = 0;
     };
     std::vector<Slot> entries_;
 };

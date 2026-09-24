@@ -45,8 +45,17 @@ PickRay rayThroughPixel(const Mat4& projection, const Mat4& view, DVec3 cameraOr
     // space. `transformDirection` drops the translation, which is what a
     // direction wants and also why the camera's position never enters here.
     const Mat4 viewInverse = core::inverse(view);
-    const Vec3 directionWorld = core::normalize(core::transformDirection(viewInverse, directionView));
 
+    // **An orthographic camera (the 2D layer) looks along one direction from
+    // every pixel**, and what the pixel moves is where the ray starts: the
+    // same two numbers are half-extents rather than tangents.
+    if (core::isOrthographic(projection)) {
+        const Vec3 offsetWorld = core::transformDirection(viewInverse, Vec3{ndcX * tanX, ndcY * tanY, 0.0f});
+        const Vec3 forwardWorld = core::normalize(core::transformDirection(viewInverse, Vec3{0.0f, 0.0f, -1.0f}));
+        return PickRay{cameraOrigin + core::toDVec3(offsetWorld), forwardWorld};
+    }
+
+    const Vec3 directionWorld = core::normalize(core::transformDirection(viewInverse, directionView));
     return PickRay{cameraOrigin, directionWorld};
 }
 
@@ -342,8 +351,11 @@ std::optional<core::Vec2> worldToViewport(const Mat4& projection, const Mat4& vi
     const f32 tanX = projection.m[0][0] != 0.0f ? 1.0f / projection.m[0][0] : 1.0f;
     const f32 tanY = projection.m[1][1] != 0.0f ? 1.0f / projection.m[1][1] : 1.0f;
 
-    const f32 ndcX = viewSpace.x / (tanX * -viewSpace.z);
-    const f32 ndcY = viewSpace.y / (tanY * -viewSpace.z);
+    // Divided by depth for perspective; an orthographic camera's half-extents
+    // are the same at every depth.
+    const f32 depth = core::isOrthographic(projection) ? 1.0f : -viewSpace.z;
+    const f32 ndcX = viewSpace.x / (tanX * depth);
+    const f32 ndcY = viewSpace.y / (tanY * depth);
 
     // Back to pixels, with the same Y flip.
     return core::Vec2{rect.x + (ndcX * 0.5f + 0.5f) * width, rect.y + (0.5f - ndcY * 0.5f) * height};
@@ -353,6 +365,9 @@ f32 metresPerPixel(const Mat4& projection, const ViewportRect& rect, DVec3 camer
 {
     if (rect.height <= 0.0f)
         return 0.0f;
+    // Under an orthographic camera a pixel is the same size everywhere.
+    if (core::isOrthographic(projection))
+        return projection.m[1][1] > 0.0f ? 2.0f / (rect.height * projection.m[1][1]) : 0.0f;
 
     const DVec3 offset = world - cameraOrigin;
     const f64 distance = std::sqrt(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z);

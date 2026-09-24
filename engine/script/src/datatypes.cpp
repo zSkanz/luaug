@@ -1496,6 +1496,14 @@ struct RaycastResultData
     float distance = 0.0f;
 };
 
+struct RaycastResult2DData
+{
+    core::InstanceId instance;
+    core::Vec2 position{0.0f, 0.0f};
+    core::Vec2 normal{0.0f, 1.0f};
+    double distance = 0.0;
+};
+
 void raycastParamsDtor(lua_State*, void* userdata)
 {
     static_cast<RaycastParamsData*>(userdata)->~RaycastParamsData();
@@ -1598,6 +1606,30 @@ int raycastResultGetDistance(lua_State* L)
     return 1;
 }
 
+int raycastResult2DGetInstance(lua_State* L)
+{
+    pushInstance(L, checkTagged<RaycastResult2DData>(L, 1, UserdataTag::RaycastResult2D).instance);
+    return 1;
+}
+
+int raycastResult2DGetPosition(lua_State* L)
+{
+    pushVector2(L, checkTagged<RaycastResult2DData>(L, 1, UserdataTag::RaycastResult2D).position);
+    return 1;
+}
+
+int raycastResult2DGetNormal(lua_State* L)
+{
+    pushVector2(L, checkTagged<RaycastResult2DData>(L, 1, UserdataTag::RaycastResult2D).normal);
+    return 1;
+}
+
+int raycastResult2DGetDistance(lua_State* L)
+{
+    lua_pushnumber(L, checkTagged<RaycastResult2DData>(L, 1, UserdataTag::RaycastResult2D).distance);
+    return 1;
+}
+
 void registerQueryTypes(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
 {
     MemberTable& paramGetters = ctx.getters[static_cast<usize>(UserdataTag::RaycastParams)];
@@ -1615,6 +1647,13 @@ void registerQueryTypes(lua_State* L, VmContext& ctx, core::AtomTable& atoms)
     addMember(resultGetters, atoms, "Normal", raycastResultGetNormal);
     addMember(resultGetters, atoms, "Distance", raycastResultGetDistance);
     installTagMetatable(L, UserdataTag::RaycastResult, nullptr, nullptr);
+
+    MemberTable& result2DGetters = ctx.getters[static_cast<usize>(UserdataTag::RaycastResult2D)];
+    addMember(result2DGetters, atoms, "Instance", raycastResult2DGetInstance);
+    addMember(result2DGetters, atoms, "Position", raycastResult2DGetPosition);
+    addMember(result2DGetters, atoms, "Normal", raycastResult2DGetNormal);
+    addMember(result2DGetters, atoms, "Distance", raycastResult2DGetDistance);
+    installTagMetatable(L, UserdataTag::RaycastResult2D, nullptr, nullptr);
 
     const luaL_Reg constructors[] = {{"new", raycastParamsNew}, {nullptr, nullptr}};
     luaL_register(L, "RaycastParams", constructors);
@@ -1713,6 +1752,14 @@ void pushRaycastResult(lua_State* L, core::InstanceId instance, core::DVec3 posi
     void* memory =
         lua_newuserdatataggedwithmetatable(L, sizeof(RaycastResultData), static_cast<int>(UserdataTag::RaycastResult));
     new (memory) RaycastResultData{instance, position, normal, distance};
+}
+
+void pushRaycastResult2D(lua_State* L, core::InstanceId instance, core::Vec2 position, core::Vec2 normal,
+                         double distance)
+{
+    void* memory = lua_newuserdatataggedwithmetatable(L, sizeof(RaycastResult2DData),
+                                                      static_cast<int>(UserdataTag::RaycastResult2D));
+    new (memory) RaycastResult2DData{instance, position, normal, distance};
 }
 
 void registerDatatypes(lua_State* L)

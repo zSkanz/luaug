@@ -30,6 +30,10 @@ Every part overlapping an oriented box, as a fresh array in a stable order -- on
 
 The nearest thing a ray from `origin` hits, or nil. The direction is NOT normalised: its length is how far the ray reaches, so `direction * 100` is a hundred-metre ray. A tie between two surfaces at the same distance resolves the same way on every run, because a query whose answer depends on traversal order is a replay divergence waiting for a body count to change (R10).
 
+### `Raycast2D(origin: Vector2, direction: Vector2, params: RaycastParams? = nil): RaycastResult2D?`
+
+The nearest `Part2D` or `Tilemap2D` a ray on the 2D plane hits, or nil. As with `Raycast`, the direction's length is the reach. Sensors are passed through, and so is a part with `CanCollide` off. Two hits at the same distance resolve the same way on every run (R10).
+
 ### `Spherecast(origin: vector, radius: number, direction: vector, params: RaycastParams? = nil): RaycastResult?`
 
 The same question with a sphere swept along the ray instead of a point. This is what a camera boom or a character's ground check wants: a ray slips through a gap narrower than the thing it is standing in for.

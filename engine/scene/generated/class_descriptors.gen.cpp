@@ -1355,6 +1355,467 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     characterBodyDesc.detachComponents = native::detachCharacterBodyComponents;
     classes.registerClass(characterBodyDesc);
 
+    // --- Part2D ---
+    static std::array<PropertyDesc, 24> part2DProperties;
+    part2DProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Position"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where its middle is, in metres.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getPart2DPosition,
+            .set = native::setPart2DPosition,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Rotation"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Degrees, counter-clockwise. A part with `FixedRotation` keeps whatever this is.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getPart2DRotation,
+            .set = native::setPart2DRotation,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Size"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Width and height in metres: the picture's and the collider's.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.size2_positive"),
+            .get = native::getPart2DSize,
+            .set = native::setPart2DSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Shape"),
+            .type = ValueType::EnumItem,
+            .enumName = atoms.intern("Shape2D"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The outline it is drawn and collides as.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getPart2DShape,
+            .set = native::setPart2DShape,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = ValueType::Color3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Multiplies the image; with no image, the colour it is drawn in.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getPart2DColor,
+            .set = native::setPart2DColor,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Transparency"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "0 is as drawn, 1 is invisible. A transparent part still collides.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getPart2DTransparency,
+            .set = native::setPart2DTransparency,
+        },
+        PropertyDesc{
+            .name = atoms.intern("ZIndex"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Which of two overlapping sprites is in front: the higher. Ties keep the tree's order.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getPart2DZIndex,
+            .set = native::setPart2DZIndex,
+        },
+        PropertyDesc{
+            .name = atoms.intern("FlipX"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Mirrors the picture left to right: a character facing the other way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPart2DFlipX,
+            .set = native::setPart2DFlipX,
+        },
+        PropertyDesc{
+            .name = atoms.intern("FlipY"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Mirrors the picture top to bottom.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPart2DFlipY,
+            .set = native::setPart2DFlipY,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Image"),
+            .type = ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The picture, stretched over `Size`. Its transparent pixels are transparent.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getPart2DImage,
+            .set = native::setPart2DImage,
+        },
+        PropertyDesc{
+            .name = atoms.intern("ImageRectOffset"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The top-left of the part of the image drawn, in pixels: one frame of a sprite sheet.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getPart2DImageRectOffset,
+            .set = native::setPart2DImageRectOffset,
+        },
+        PropertyDesc{
+            .name = atoms.intern("ImageRectSize"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The size of that part in pixels. Zero on both axes draws the whole image.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getPart2DImageRectSize,
+            .set = native::setPart2DImageRectSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Filter"),
+            .type = ValueType::EnumItem,
+            .enumName = atoms.intern("TextureFilter"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Linear for painted art, Nearest for pixel art.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getPart2DFilter,
+            .set = native::setPart2DFilter,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Anchored"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Ground: it does not move, and what lands on it stays. A script may still move it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPart2DAnchored,
+            .set = native::setPart2DAnchored,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CanCollide"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether other parts bump into it. A part that cannot collide is only a picture.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPart2DCanCollide,
+            .set = native::setPart2DCanCollide,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Sensor"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Reports what enters it through `Touched` and pushes nothing: a coin, a checkpoint, a trigger.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPart2DSensor,
+            .set = native::setPart2DSensor,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Density"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Kilograms per square metre: with `Size`, how heavy it is.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getPart2DDensity,
+            .set = native::setPart2DDensity,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Friction"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How much it grips what it slides on. Zero is ice.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getPart2DFriction,
+            .set = native::setPart2DFriction,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Elasticity"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How much of its speed a bounce gives back: 0 lands dead, 1 bounces for ever.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getPart2DElasticity,
+            .set = native::setPart2DElasticity,
+        },
+        PropertyDesc{
+            .name = atoms.intern("FixedRotation"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Never turns, whatever hits it: a character that stays upright.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPart2DFixedRotation,
+            .set = native::setPart2DFixedRotation,
+        },
+        PropertyDesc{
+            .name = atoms.intern("GravityScale"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How strongly `Workspace.Gravity` pulls it: 0 floats, 2 falls twice as hard, and a negative number falls up.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getPart2DGravityScale,
+            .set = native::setPart2DGravityScale,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Velocity"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Metres per second. Written by the simulation every tick, and a script may set it: a jump is setting its y.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getPart2DVelocity,
+            .set = native::setPart2DVelocity,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AngularVelocity"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Degrees per second, counter-clockwise.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getPart2DAngularVelocity,
+            .set = native::setPart2DAngularVelocity,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CollisionGroup"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The group deciding which other parts it collides with, as `PhysicsService` names them.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getPart2DCollisionGroup,
+            .set = native::setPart2DCollisionGroup,
+        },
+    }};
+    static std::array<MethodDesc, 1> part2DMethods;
+    part2DMethods = {{
+        MethodDesc{
+            .name = atoms.intern("ApplyImpulse"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "A sudden push, in kilogram-metres per second, at its middle. Applied at the next tick; an anchored part ignores it.",
+        },
+    }};
+    static std::array<EventDesc, 2> part2DEvents;
+    part2DEvents = {{
+        EventDesc{
+            .name = atoms.intern("Touched"),
+            .slot = 7,
+            .doc = "Fires once when something begins touching it -- another `Part2D`, or a `Tilemap2D`'s solid tiles -- or, for a `Sensor`, begins overlapping it. Deferred like every signal.",
+        },
+        EventDesc{
+            .name = atoms.intern("TouchEnded"),
+            .slot = 8,
+            .doc = "Fires when something that was touching it stops.",
+        },
+    }};
+    ClassDescriptor part2DDesc;
+    part2DDesc.name = atoms.intern("Part2D");
+    part2DDesc.super = instanceClass;
+    part2DDesc.flags = ClassFlags::None;
+    part2DDesc.defaultName = atoms.intern("Part2D");
+    part2DDesc.doc = "A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D world. It lies on the world's XY plane facing -Z, so an orthographic `Camera` looking down -Z sees it as it is; `ZIndex` orders sprites that overlap. It is drawn as its `Image` -- or a flat `Color` without one -- and simulated by 2D physics unless `Anchored`, which makes it ground.";
+    part2DDesc.properties = part2DProperties;
+    part2DDesc.methods = part2DMethods;
+    part2DDesc.events = part2DEvents;
+    part2DDesc.attachComponents = native::attachPart2DComponents;
+    part2DDesc.detachComponents = native::detachPart2DComponents;
+    classes.registerClass(part2DDesc);
+
+    // --- Tilemap2D ---
+    static std::array<PropertyDesc, 10> tilemap2DProperties;
+    tilemap2DProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Position"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where the bottom-left corner of cell (0, 0) is, in metres.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getTilemap2DPosition,
+            .set = native::setTilemap2DPosition,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CellSize"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The side of one cell, in metres.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getTilemap2DCellSize,
+            .set = native::setTilemap2DCellSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Tileset"),
+            .type = ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The image the tiles are cut from.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getTilemap2DTileset,
+            .set = native::setTilemap2DTileset,
+        },
+        PropertyDesc{
+            .name = atoms.intern("TileSize"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "One tile's size in the tileset, in pixels.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.size2_positive"),
+            .get = native::getTilemap2DTileSize,
+            .set = native::setTilemap2DTileSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("ZIndex"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Its place among overlapping sprites, as a `Part2D`'s.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getTilemap2DZIndex,
+            .set = native::setTilemap2DZIndex,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = ValueType::Color3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Multiplies every tile.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getTilemap2DColor,
+            .set = native::setTilemap2DColor,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Filter"),
+            .type = ValueType::EnumItem,
+            .enumName = atoms.intern("TextureFilter"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Nearest by default, because tiles are nearly always pixel art.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getTilemap2DFilter,
+            .set = native::setTilemap2DFilter,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Collides"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether its tiles are solid. Off, it is scenery: a background layer.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getTilemap2DCollides,
+            .set = native::setTilemap2DCollides,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Friction"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How much its tiles grip what slides on them.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getTilemap2DFriction,
+            .set = native::setTilemap2DFriction,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CollisionGroup"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The group its tiles collide as.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getTilemap2DCollisionGroup,
+            .set = native::setTilemap2DCollisionGroup,
+        },
+    }};
+    static std::array<MethodDesc, 4> tilemap2DMethods;
+    tilemap2DMethods = {{
+        MethodDesc{
+            .name = atoms.intern("SetCell"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Puts tile `tile` in cell (`x`, `y`); 0 empties it. Cells are whole numbers, and y grows upwards, as the world's does.",
+        },
+        MethodDesc{
+            .name = atoms.intern("GetCell"),
+            .yields = false,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .doc = "The tile in cell (`x`, `y`), or 0.",
+        },
+        MethodDesc{
+            .name = atoms.intern("FillRect"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Puts `tile` in every cell of the rectangle from (`x0`, `y0`) to (`x1`, `y1`), both corners included.",
+        },
+        MethodDesc{
+            .name = atoms.intern("Clear"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Empties every cell.",
+        },
+    }};
+    ClassDescriptor tilemap2DDesc;
+    tilemap2DDesc.name = atoms.intern("Tilemap2D");
+    tilemap2DDesc.super = instanceClass;
+    tilemap2DDesc.flags = ClassFlags::None;
+    tilemap2DDesc.defaultName = atoms.intern("Tilemap2D");
+    tilemap2DDesc.doc = "A grid of tiles from one tileset image, on the 2D plane (the 2D layer, phase 3): a level you paint. Tile 0 is empty; tile `n` is the `n`-th tile of the tileset, counted along its rows from the top left. Every tile that is not empty is solid when `Collides` is on, as one body whose edges are merged, so a character runs across a floor of tiles without catching on their seams.";
+    tilemap2DDesc.properties = tilemap2DProperties;
+    tilemap2DDesc.methods = tilemap2DMethods;
+    tilemap2DDesc.attachComponents = native::attachTilemap2DComponents;
+    tilemap2DDesc.detachComponents = native::detachTilemap2DComponents;
+    classes.registerClass(tilemap2DDesc);
+
     // --- DataModel ---
     static std::array<PropertyDesc, 2> dataModelProperties;
     dataModelProperties = {{
@@ -1468,13 +1929,19 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 3> workspaceMethods;
+    static std::array<MethodDesc, 4> workspaceMethods;
     workspaceMethods = {{
         MethodDesc{
             .name = atoms.intern("Raycast"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "The nearest thing a ray from `origin` hits, or nil. The direction is NOT normalised: its length is how far the ray reaches, so `direction * 100` is a hundred-metre ray. A tie between two surfaces at the same distance resolves the same way on every run, because a query whose answer depends on traversal order is a replay divergence waiting for a body count to change (R10).",
+        },
+        MethodDesc{
+            .name = atoms.intern("Raycast2D"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The nearest `Part2D` or `Tilemap2D` a ray on the 2D plane hits, or nil. As with `Raycast`, the direction's length is the reach. Sensors are passed through, and so is a part with `CanCollide` off. Two hits at the same distance resolve the same way on every run (R10).",
         },
         MethodDesc{
             .name = atoms.intern("Spherecast"),
@@ -3629,6 +4096,71 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     blockOpacityDesc.docKey = {};
     blockOpacityDesc.items = blockOpacityItems;
     enums.registerEnum(blockOpacityDesc);
+
+    // --- Shape2D ---
+    static std::array<EnumItemDesc, 3> shape2DItems;
+    shape2DItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Box"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Circle"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Capsule"),
+            .value = 2,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor shape2DDesc;
+    shape2DDesc.name = atoms.intern("Shape2D");
+    shape2DDesc.docKey = {};
+    shape2DDesc.items = shape2DItems;
+    enums.registerEnum(shape2DDesc);
+
+    // --- TextureFilter ---
+    static std::array<EnumItemDesc, 2> textureFilterItems;
+    textureFilterItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Linear"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Nearest"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor textureFilterDesc;
+    textureFilterDesc.name = atoms.intern("TextureFilter");
+    textureFilterDesc.docKey = {};
+    textureFilterDesc.items = textureFilterItems;
+    enums.registerEnum(textureFilterDesc);
+
+    // --- CameraProjection ---
+    static std::array<EnumItemDesc, 2> cameraProjectionItems;
+    cameraProjectionItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Perspective"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Orthographic"),
+            .value = 1,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor cameraProjectionDesc;
+    cameraProjectionDesc.name = atoms.intern("CameraProjection");
+    cameraProjectionDesc.docKey = {};
+    cameraProjectionDesc.items = cameraProjectionItems;
+    enums.registerEnum(cameraProjectionDesc);
 }
 
 } // namespace luaug::scene::generated

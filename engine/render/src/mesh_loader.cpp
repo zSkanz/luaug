@@ -335,7 +335,7 @@ core::u32 MeshLoader::pumpTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             continue;
         }
         textures_.push_back(handle);
-        library.set(pending.urn, handle);
+        library.set(pending.urn, handle, pending.work->image.width, pending.work->image.height);
         ++loaded;
         drop();
     }
@@ -406,7 +406,7 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
                 return;
             }
             textures_.push_back(handle);
-            library.set(urn, handle);
+            library.set(urn, handle, texture.width, texture.height);
             ++loaded;
             return;
         }
@@ -462,7 +462,7 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
             return;
         }
         textures_.push_back(handle);
-        library.set(urn, handle);
+        library.set(urn, handle, image.width, image.height);
         ++loaded;
     };
 
@@ -475,6 +475,10 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
     });
     // Decal images (F2): colours, like base colours.
     world.decals().forEach([&](core::InstanceId, const scene::DecalComponent& decal) { load(decal.texture, true); });
+    // The 2D layer's pictures: a sprite's image and a tilemap's tileset.
+    world.parts2d().forEach([&](core::InstanceId, const scene::Part2DComponent& part) { load(part.image, true); });
+    world.tilemaps2d().forEach(
+        [&](core::InstanceId, const scene::Tilemap2DComponent& tilemap) { load(tilemap.tileset, true); });
     // A block world's images (V1), through the same door: compiled when the
     // compiler has seen them, a loose file when it has not.
     world.voxels().forEach([&](core::InstanceId, const scene::VoxelComponent& voxels) {

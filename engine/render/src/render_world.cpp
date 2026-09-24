@@ -144,16 +144,28 @@ const char* primitiveContent(core::i32 shape) noexcept
     }
 }
 
-void TextureLibrary::set(core::NameAtom content, rhi::TextureHandle texture)
+void TextureLibrary::set(core::NameAtom content, rhi::TextureHandle texture, core::u32 width, core::u32 height)
 {
     const auto position =
         std::lower_bound(entries_.begin(), entries_.end(), content,
                          [](const Slot& slot, core::NameAtom value) { return slot.content.id < value.id; });
     if (position != entries_.end() && position->content == content) {
         position->texture = texture;
+        position->width = width;
+        position->height = height;
         return;
     }
-    entries_.insert(position, Slot{content, texture});
+    entries_.insert(position, Slot{content, texture, width, height});
+}
+
+core::Vec2 TextureLibrary::sizeOf(core::NameAtom content) const noexcept
+{
+    const auto position =
+        std::lower_bound(entries_.begin(), entries_.end(), content,
+                         [](const Slot& slot, core::NameAtom value) { return slot.content.id < value.id; });
+    if (position == entries_.end() || !(position->content == content))
+        return core::Vec2{0.0f, 0.0f};
+    return core::Vec2{static_cast<f32>(position->width), static_cast<f32>(position->height)};
 }
 
 void TextureLibrary::clear() noexcept
@@ -383,14 +395,21 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         orientation.position = DVec3{};
         out.camera.view = core::toRenderMatrix(core::inverse(orientation), DVec3{});
         const f32 aspect = viewportAspect > 0.0f ? viewportAspect : 1.0f;
+        // `Enum.CameraProjection`: 0 Perspective, 1 Orthographic (the 2D layer).
+        const bool orthographic = camera->projection == 1;
         out.camera.projection =
-            core::perspective(camera->fieldOfView * kDegreesToRadians, aspect, camera->nearPlane, camera->farPlane);
+            orthographic ? core::orthographic(camera->orthographicSize, aspect, camera->nearPlane, camera->farPlane)
+                         : core::perspective(camera->fieldOfView * kDegreesToRadians, aspect, camera->nearPlane,
+                                             camera->farPlane);
         // The jitter, folded into the projection's translation row -- which is
         // where a sub-pixel offset belongs, because it must move the whole frustum
         // rather than the geometry inside it. Zero everywhere today, so this is a
-        // pair of additions of zero and every golden is unchanged.
-        out.camera.projection.m[2][0] += out.camera.jitter.x;
-        out.camera.projection.m[2][1] += out.camera.jitter.y;
+        // pair of additions of zero and every golden is unchanged. Under an
+        // orthographic projection w is 1, so the row that offsets x and y is the
+        // constant one rather than the one scaled by depth.
+        const int jitterRow = orthographic ? 3 : 2;
+        out.camera.projection.m[jitterRow][0] += out.camera.jitter.x;
+        out.camera.projection.m[jitterRow][1] += out.camera.jitter.y;
         out.camera.viewProjection = out.camera.projection * out.camera.view;
         out.camera.frustum = core::frustumFromViewProjection(out.camera.viewProjection);
     }
@@ -865,6 +884,154 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         drawn.axis = core::transformDirection(drawn.boxToWorld, Vec3{0.0f, 0.0f, 1.0f});
         out.decals.push_back(drawn);
     });
+
+    // --- Sprites (the 2D layer) ----------------------------------------------
+    //
+    // A `Part2D` is one sprite, and a tilemap one per painted tile in a block
+    // near the view. Both lie on the world's z = 0 plane. Culled by the camera's
+    // frustum -- a block at a time for a tilemap, so a level of a thousand
+    // blocks costs a thousand box tests and draws only what is on screen.
+    {
+        struct Keyed
+        {
+            core::i32 zIndex = 0;
+            // Tilemaps beneath parts at the same `ZIndex`: ground behind what
+            // stands on it.
+            bool part = false;
+            RenderSprite sprite;
+        };
+        std::vector<Keyed> keyed;
+        const f32 planeZ = static_cast<f32>(-origin.z);
+        const auto visible = [&](f64 x0, f64 y0, f64 x1, f64 y1) {
+            const AABB bounds{Vec3{static_cast<f32>(x0 - origin.x), static_cast<f32>(y0 - origin.y), planeZ - 0.01f},
+                              Vec3{static_cast<f32>(x1 - origin.x), static_cast<f32>(y1 - origin.y), planeZ + 0.01f}};
+            return core::intersects(out.camera.frustum, bounds);
+        };
+        const auto textureOf = [&](core::NameAtom image) {
+            return materials != nullptr && image.valid() ? materials->find(image) : rhi::TextureHandle{};
+        };
+
+        world.parts2d().forEach([&](core::InstanceId id, const scene::Part2DComponent& part) {
+            if (!inWorld(world, id, root) || part.transparency >= 1.0f)
+                return;
+            // A circle is drawn as wide as its smaller side, as it collides.
+            core::Vec2 half{part.size.x * 0.5f, part.size.y * 0.5f};
+            if (part.shape == 1)
+                half = core::Vec2{std::min(half.x, half.y), std::min(half.x, half.y)};
+            const f64 hx = static_cast<f64>(half.x);
+            const f64 hy = static_cast<f64>(half.y);
+            const f64 reach = std::sqrt(hx * hx + hy * hy);
+            const f64 cx = static_cast<f64>(part.position.x);
+            const f64 cy = static_cast<f64>(part.position.y);
+            if (!visible(cx - reach, cy - reach, cx + reach, cy + reach))
+                return;
+
+            Keyed entry;
+            entry.zIndex = part.zIndex;
+            entry.part = true;
+            RenderSprite& sprite = entry.sprite;
+            sprite.rect[0] = static_cast<f32>(cx - hx - origin.x);
+            sprite.rect[1] = static_cast<f32>(cy - hy - origin.y);
+            sprite.rect[2] = static_cast<f32>(cx + hx - origin.x);
+            sprite.rect[3] = static_cast<f32>(cy + hy - origin.y);
+            sprite.z = planeZ;
+            const f32 angle = part.rotation * kDegreesToRadians;
+            sprite.cosine = part.rotation == 0.0f ? 1.0f : std::cos(angle);
+            sprite.sine = part.rotation == 0.0f ? 0.0f : std::sin(angle);
+            sprite.shape = part.shape;
+            sprite.texture = textureOf(part.image);
+            // A pixel rectangle of the image, where one is set and the size of
+            // the image is known; otherwise all of it.
+            const core::Vec2 pixels = materials != nullptr ? materials->sizeOf(part.image) : core::Vec2{};
+            f32 left = 0.0f;
+            f32 top = 0.0f;
+            f32 right = 1.0f;
+            f32 bottom = 1.0f;
+            if (sprite.texture.valid() && pixels.x > 0.0f && pixels.y > 0.0f && part.imageRectSize.x > 0.0f &&
+                part.imageRectSize.y > 0.0f) {
+                left = part.imageRectOffset.x / pixels.x;
+                top = part.imageRectOffset.y / pixels.y;
+                right = (part.imageRectOffset.x + part.imageRectSize.x) / pixels.x;
+                bottom = (part.imageRectOffset.y + part.imageRectSize.y) / pixels.y;
+            }
+            sprite.uv[0] = part.flipX ? right : left;
+            sprite.uv[1] = part.flipY ? bottom : top;
+            sprite.uv[2] = part.flipX ? left : right;
+            sprite.uv[3] = part.flipY ? top : bottom;
+            sprite.color[0] = part.color.r;
+            sprite.color[1] = part.color.g;
+            sprite.color[2] = part.color.b;
+            sprite.color[3] = 1.0f - part.transparency;
+            sprite.nearest = part.filter == 1;
+            keyed.push_back(entry);
+        });
+
+        world.tilemaps2d().forEach([&](core::InstanceId id, const scene::Tilemap2DComponent& tilemap) {
+            if (!inWorld(world, id, root) || tilemap.chunks.empty())
+                return;
+            const rhi::TextureHandle texture = textureOf(tilemap.tileset);
+            const core::Vec2 pixels = materials != nullptr ? materials->sizeOf(tilemap.tileset) : core::Vec2{};
+            // Tiles per row of the tileset; zero draws every tile as its colour.
+            const core::i32 columns = texture.valid() && tilemap.tileSize.x > 0.0f && tilemap.tileSize.y > 0.0f
+                                          ? static_cast<core::i32>(pixels.x / tilemap.tileSize.x)
+                                          : 0;
+            // A hair inside each tile's rectangle, so a filter never reaches the
+            // neighbouring tile: half a texel for Linear, a hundredth for
+            // Nearest, where it only has to beat rounding.
+            const f32 inset = tilemap.filter == 1 ? 0.01f : 0.5f;
+            const f64 cell = static_cast<f64>(tilemap.cellSize);
+            const f64 baseX = static_cast<f64>(tilemap.position.x);
+            const f64 baseY = static_cast<f64>(tilemap.position.y);
+            const f64 span = static_cast<f64>(scene::TileChunkEdge) * cell;
+            for (const auto& [key, chunk] : tilemap.chunks) {
+                const f64 chunkX = baseX + static_cast<f64>(key.x) * span;
+                const f64 chunkY = baseY + static_cast<f64>(key.y) * span;
+                if (!visible(chunkX, chunkY, chunkX + span, chunkY + span))
+                    continue;
+                for (core::i32 ly = 0; ly < scene::TileChunkEdge; ++ly) {
+                    for (core::i32 lx = 0; lx < scene::TileChunkEdge; ++lx) {
+                        const core::u16 tile = chunk[static_cast<usize>(ly * scene::TileChunkEdge + lx)];
+                        if (tile == 0)
+                            continue;
+                        const core::i32 x = key.x * scene::TileChunkEdge + lx;
+                        const core::i32 y = key.y * scene::TileChunkEdge + ly;
+                        Keyed entry;
+                        entry.zIndex = tilemap.zIndex;
+                        RenderSprite& sprite = entry.sprite;
+                        // Each edge from the same expression its neighbour uses.
+                        sprite.rect[0] = static_cast<f32>(baseX + static_cast<f64>(x) * cell - origin.x);
+                        sprite.rect[1] = static_cast<f32>(baseY + static_cast<f64>(y) * cell - origin.y);
+                        sprite.rect[2] = static_cast<f32>(baseX + static_cast<f64>(x + 1) * cell - origin.x);
+                        sprite.rect[3] = static_cast<f32>(baseY + static_cast<f64>(y + 1) * cell - origin.y);
+                        sprite.z = planeZ;
+                        if (columns > 0) {
+                            const core::i32 index = static_cast<core::i32>(tile) - 1;
+                            const f32 column = static_cast<f32>(index % columns);
+                            const f32 row = static_cast<f32>(index / columns);
+                            sprite.uv[0] = (column * tilemap.tileSize.x + inset) / pixels.x;
+                            sprite.uv[1] = (row * tilemap.tileSize.y + inset) / pixels.y;
+                            sprite.uv[2] = ((column + 1.0f) * tilemap.tileSize.x - inset) / pixels.x;
+                            sprite.uv[3] = ((row + 1.0f) * tilemap.tileSize.y - inset) / pixels.y;
+                            sprite.texture = texture;
+                        }
+                        sprite.color[0] = tilemap.color.r;
+                        sprite.color[1] = tilemap.color.g;
+                        sprite.color[2] = tilemap.color.b;
+                        sprite.nearest = tilemap.filter == 1;
+                        keyed.push_back(entry);
+                    }
+                }
+            }
+        });
+
+        // Stable, so what the sort leaves tied keeps the pools' order (R10).
+        std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) {
+            return a.zIndex != b.zIndex ? a.zIndex < b.zIndex : (!a.part && b.part);
+        });
+        out.sprites.reserve(keyed.size());
+        for (const Keyed& entry : keyed)
+            out.sprites.push_back(entry.sprite);
+    }
 
     // --- Solid parts (M6) ---------------------------------------------------
     //

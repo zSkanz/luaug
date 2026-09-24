@@ -37,6 +37,15 @@ How much of what is behind a block shows through it (V1).
 | `Cutout` | 1 | Holes where its image is transparent: leaves, a fence, a grate. Each pixel is there or not, and the faces between two cutout blocks are drawn, which is what makes a tree full. |
 | `Translucent` | 2 | Blended over what is behind it: glass, water, ice. No face between two blocks of the same type, so a lake is one surface. |
 
+## Enum.CameraProjection
+
+How a `Camera` turns the world into a picture.
+
+| Item | Value | Description |
+|---|---|---|
+| `Perspective` | 0 | Far things smaller, by `FieldOfView`: the 3D camera. |
+| `Orthographic` | 1 | Everything its own size wherever it is, `OrthographicSize` metres from the middle of the view to its top edge: the 2D camera. It looks down the camera's -Z, so a 2D world on the XY plane faces it. |
+
 ## Enum.CharacterState
 
 Whether a `CharacterBody` is standing on something (§2.2). Two items and not three: ground too steep to walk on reads as `Airborne`, because the question a script asks this property is whether it may jump.
@@ -359,6 +368,16 @@ How an `ImageLabel` fits its image into its box (§2.2).
 | `Slice` | 1 | Nine-slice: the four corners are drawn at their own size, the four edges stretch along one axis and the middle stretches along both. `SliceCenter` says where the cuts are. This is how a panel or a button keeps its rounded corners at any size. |
 | `Tile` | 2 | Repeated at its own size until the box is full. |
 
+## Enum.Shape2D
+
+The outline a `Part2D` is drawn and collides as (the 2D layer, phase 3).
+
+| Item | Value | Description |
+|---|---|---|
+| `Box` | 0 | A rectangle the part's `Size`. |
+| `Circle` | 1 | A disc as wide as the smaller of the two sides, so a stretched `Size` gives a round wheel rather than an egg, and the picture and the collider agree. |
+| `Capsule` | 2 | A rectangle with round ends at the top and bottom: what a character stands on, because its rounded foot slides over the seam between two tiles instead of catching. |
+
 ## Enum.SortOrder
 
 What order a `UIListLayout` lays its children out in (§2.2).
@@ -377,6 +396,15 @@ How a `Model` behaves when the streaming system reaches it. The grid decides WHE
 | `Nonatomic` | 0 | Its descendants are placed in cells one at a time, each by its own position, and they arrive and leave independently. The default, and what a world of loose scenery wants: a distant hillside's parts can go one at a time. |
 | `Atomic` | 1 | The model is ONE unit: it goes in a single cell however far its parts spread, and it materialises and evicts whole. A house arrives as a house rather than as forty parts appearing in an order nobody chose, and a machine assembled from moving parts is never half a mechanism. |
 | `Persistent` | 2 | Never enters the grid at all. It stays in the scene, it exists before the first tick, and no eviction reaches it however far the focus walks. The spawn, the checkpoint, and anything a script holds a long-lived reference to. |
+
+## Enum.TextureFilter
+
+How a picture is sampled when it is drawn larger or smaller than it is.
+
+| Item | Value | Description |
+|---|---|---|
+| `Linear` | 0 | Blended between texels: smooth, for painted art. |
+| `Nearest` | 1 | The nearest texel, unblended: sharp pixels, for pixel art at any zoom. |
 
 ## Enum.UserInputType
 

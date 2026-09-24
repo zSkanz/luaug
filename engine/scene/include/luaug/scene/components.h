@@ -391,6 +391,10 @@ struct CameraComponent
     f32 fieldOfView = 70.0f;
     f32 nearPlane = 0.1f;
     f32 farPlane = 5000.0f;
+    // `Enum.CameraProjection`: 0 Perspective, 1 Orthographic (the 2D layer).
+    i32 projection = 0;
+    // Half the view's height in metres, for an orthographic camera.
+    f32 orthographicSize = 10.0f;
 };
 
 struct PointLightComponent
@@ -575,6 +579,122 @@ struct TerrainComponent
     // no business moving, and not simulation state, so the world hash leaves
     // it out as it leaves out a mesh's file name.
     std::string cellIndex;
+};
+
+// --- The 2D layer (post-v1 phase 3, docs/briefs/p3-2d-kickoff.md) ------------
+
+// `Part2D`: a sprite and a body in one, on the XY plane.
+struct Part2DComponent
+{
+    core::Vec2 position{0.0f, 0.0f};
+    // Degrees, counter-clockwise, as authored.
+    f32 rotation = 0.0f;
+    core::Vec2 size{1.0f, 1.0f};
+    // `Enum.Shape2D`: 0 Box, 1 Circle, 2 Capsule.
+    i32 shape = 0;
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+    f32 transparency = 0.0f;
+    i32 zIndex = 0;
+    bool flipX = false;
+    bool flipY = false;
+    core::NameAtom image;
+    // Pixels; a zero size draws the whole image.
+    core::Vec2 imageRectOffset{0.0f, 0.0f};
+    core::Vec2 imageRectSize{0.0f, 0.0f};
+    // `Enum.TextureFilter`: 0 Linear, 1 Nearest.
+    i32 filter = 0;
+    bool anchored = false;
+    bool canCollide = true;
+    bool sensor = false;
+    f32 density = 1.0f;
+    f32 friction = 0.3f;
+    f32 elasticity = 0.0f;
+    bool fixedRotation = false;
+    f32 gravityScale = 1.0f;
+    core::Vec2 velocity{0.0f, 0.0f};
+    // Degrees per second, as authored.
+    f32 angularVelocity = 0.0f;
+    core::NameAtom collisionGroup;
+    // What `ApplyImpulse` asked for since the last tick, applied at the start
+    // of the next -- as a `BasePart`'s is (M5).
+    core::Vec2 pendingImpulse{0.0f, 0.0f};
+};
+
+// One 16 by 16 block of a tilemap's cells.
+inline constexpr i32 TileChunkEdge = 16;
+struct TileChunkKey
+{
+    i32 x = 0;
+    i32 y = 0;
+    [[nodiscard]] constexpr auto operator<=>(const TileChunkKey&) const noexcept = default;
+};
+using TileChunk = std::array<core::u16, static_cast<core::usize>(TileChunkEdge* TileChunkEdge)>;
+
+// `Tilemap2D`: a grid of tiles from one tileset.
+//
+// **Sparse by blocks**, in a sorted map (R10: its order reaches the physics
+// bodies and the draw order). A block that goes empty is dropped, so a map
+// is as large as what is painted, not as the rectangle it spans.
+struct Tilemap2DComponent
+{
+    core::Vec2 position{0.0f, 0.0f};
+    f32 cellSize = 1.0f;
+    core::NameAtom tileset;
+    core::Vec2 tileSize{16.0f, 16.0f};
+    i32 zIndex = 0;
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+    // `Enum.TextureFilter`, Nearest by default: tiles are pixel art.
+    i32 filter = 1;
+    bool collides = true;
+    f32 friction = 0.3f;
+    core::NameAtom collisionGroup;
+    std::map<TileChunkKey, TileChunk> chunks;
+    // Bumped on every change of a cell, and read by whatever rebuilds from
+    // them -- the colliders and the drawing -- the way `fieldRevision` is.
+    core::u64 revision = 0;
+
+    [[nodiscard]] static constexpr i32 floorDivide(i32 value, i32 by) noexcept
+    {
+        return value >= 0 ? value / by : -((-value + by - 1) / by);
+    }
+
+    [[nodiscard]] core::u16 cell(i32 x, i32 y) const noexcept
+    {
+        const TileChunkKey key{floorDivide(x, TileChunkEdge), floorDivide(y, TileChunkEdge)};
+        const auto found = chunks.find(key);
+        if (found == chunks.end())
+            return 0;
+        const i32 lx = x - key.x * TileChunkEdge;
+        const i32 ly = y - key.y * TileChunkEdge;
+        return found->second[static_cast<core::usize>(ly * TileChunkEdge + lx)];
+    }
+
+    // Answers whether the cell changed.
+    bool setCell(i32 x, i32 y, core::u16 tile)
+    {
+        const TileChunkKey key{floorDivide(x, TileChunkEdge), floorDivide(y, TileChunkEdge)};
+        auto found = chunks.find(key);
+        if (found == chunks.end()) {
+            if (tile == 0)
+                return false;
+            found = chunks.emplace(key, TileChunk{}).first;
+        }
+        const i32 lx = x - key.x * TileChunkEdge;
+        const i32 ly = y - key.y * TileChunkEdge;
+        core::u16& at = found->second[static_cast<core::usize>(ly * TileChunkEdge + lx)];
+        if (at == tile)
+            return false;
+        at = tile;
+        if (tile == 0) {
+            bool empty = true;
+            for (const core::u16 other : found->second)
+                empty = empty && other == 0;
+            if (empty)
+                chunks.erase(found);
+        }
+        revision += 1;
+        return true;
+    }
 };
 
 // A registered block type (V1, `VoxelService`). Its id is its position in the

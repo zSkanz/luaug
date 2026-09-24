@@ -86,6 +86,32 @@ TEST_CASE("a ray through the centre of the viewport points straight ahead")
     CHECK(wide(ray.direction.z) == doctest::Approx(-1.0).epsilon(kEpsilon));
 }
 
+TEST_CASE("an orthographic camera's rays are parallel and start where the pixel is")
+{
+    // Ten metres above and below the middle, twice as wide as tall: the 2D
+    // layer's camera.
+    const core::Mat4 projection = core::orthographic(10.0f, 2.0f, 0.1f, 1000.0f);
+    const core::Mat4 view =
+        core::lookAt(core::Vec3{0.0f, 0.0f, 0.0f}, core::Vec3{0.0f, 0.0f, -1.0f}, core::Vec3{0.0f, 1.0f, 0.0f});
+    const core::DVec3 origin{5.0, 3.0, 50.0};
+    const ViewportRect rect{0.0f, 0.0f, 400.0f, 200.0f};
+
+    const PickRay corner = rayThroughPixel(projection, view, origin, rect, {0.0f, 0.0f});
+    CHECK(corner.origin.x == doctest::Approx(-15.0).epsilon(kEpsilon));
+    CHECK(corner.origin.y == doctest::Approx(13.0).epsilon(kEpsilon));
+    CHECK(wide(corner.direction.z) == doctest::Approx(-1.0).epsilon(kEpsilon));
+    CHECK(wide(corner.direction.x) == doctest::Approx(0.0).epsilon(kEpsilon));
+
+    const auto pixel = worldToViewport(projection, view, origin, rect, core::DVec3{25.0, -7.0, -7.0});
+    REQUIRE(pixel.has_value());
+    CHECK(wide(pixel->x) == doctest::Approx(400.0).epsilon(kEpsilon));
+    CHECK(wide(pixel->y) == doctest::Approx(200.0).epsilon(kEpsilon));
+
+    // A pixel is a tenth of a metre wherever the thing is.
+    CHECK(wide(metresPerPixel(projection, rect, origin, core::DVec3{0.0, 0.0, -900.0})) ==
+          doctest::Approx(0.1).epsilon(kEpsilon));
+}
+
 TEST_CASE("the corners open outwards, and the horizontal spread is the aspect ratio")
 {
     // 90 degrees vertical makes the vertical tangent exactly 1, so the numbers

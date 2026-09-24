@@ -101,6 +101,9 @@ endif()
 if(LUAUG_PHYSICS_JOLT)
     target_link_libraries(luaug_app PRIVATE luaug::physics_jolt)
 endif()
+if(LUAUG_PHYSICS_BOX2D)
+    target_link_libraries(luaug_app PRIVATE luaug::physics_box2d)
+endif()
 
 # The debug overlay (ADR 0011). Dev builds only: the option lives beside the
 # dependency in third_party/CMakeLists.txt, and a shipping build declares no
@@ -930,6 +933,25 @@ if(LUAUG_BUILD_TESTS)
         LABELS "gpu-golden"
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 180)
+
+    # The 2D layer's sprite pass (phase 3): an orthographic camera over a
+    # tilemap and one of each thing a `Part2D` is drawn as. The scene says what
+    # each element proves; the golden is what they looked like when checked by
+    # eye. `gpu-golden` like its neighbours: the circle and the capsule are
+    # anti-aliased edges.
+    add_test(NAME screenshot_gate_sprites
+        COMMAND ${CMAKE_COMMAND}
+            -DHOST=$<TARGET_FILE:luaug_host>
+            -DIMGCMP=$<TARGET_FILE:imgcmp>
+            -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/sprites-frame5.png
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/screenshot-gate-sprites.png
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/tests/screenshots/sprites
+            -DFRAMES=5
+            -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
+    set_tests_properties(screenshot_gate_sprites PROPERTIES
+        LABELS "gpu-golden"
+        SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+        TIMEOUT 120)
 
     # --- The lavapipe goldens, which both documents promise (S7.6) -----------
     #

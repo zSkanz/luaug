@@ -72,6 +72,7 @@ guided tour.
 | [`ModuleScript`](modulescript.md) | [`BaseScript`](basescript.md) | Luau that is REQUIRED rather than run. |
 | [`PVInstance`](pvinstance.md) | [`Instance`](instance.md) | The base of everything with a position and orientation in the world: a pivot to move it by, and an offset saying where that pivot sits. |
 | [`Part`](part.md) | [`BasePart`](basepart.md) | The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh. |
+| [`Part2D`](part2d.md) | [`Instance`](instance.md) | A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D world. |
 | [`ParticleEmitter`](particleemitter.md) | [`Instance`](instance.md) | Sparks, smoke, dust and magic (F2). |
 | [`Player`](player.md) | [`Instance`](instance.md) | Somebody taking part in this world (N1). |
 | [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction from its parent's position. |
@@ -88,6 +89,7 @@ guided tour.
 | [`TextButton`](textbutton.md) | [`TextLabel`](textlabel.md) | A `TextLabel` that is meant to be pressed. |
 | [`TextInput`](textinput.md) | [`TextLabel`](textlabel.md) | A single-line editable field (§2.2). |
 | [`TextLabel`](textlabel.md) | [`UIObject`](uiobject.md) | Text in a box (§2.2). |
+| [`Tilemap2D`](tilemap2d.md) | [`Instance`](instance.md) | A grid of tiles from one tileset image, on the 2D plane (the 2D layer, phase 3): a level you paint. |
 | [`UICorner`](uicorner.md) | [`Instance`](instance.md) | Rounds its parent's corners (§2.2). |
 | [`UIListLayout`](uilistlayout.md) | [`Instance`](instance.md) | Stacks its parent's `UIObject` children in a line (§2.2). |
 | [`UIObject`](uiobject.md) | [`Instance`](instance.md) | Anything that occupies a rectangle on screen (§2.2). |

@@ -287,6 +287,19 @@ What a cast hit. Returned by `Workspace:Raycast` and `:Spherecast`, and nil when
 | `Normal` | `vector` | — | read-only | The surface normal there, pointing out of the surface. |
 | `Position` | `vector` | — | read-only | Where on it, in world space. |
 
+## RaycastResult2D
+
+What `Workspace:Raycast2D` hit: a `RaycastResult` on the 2D plane. Nil rather than empty when nothing was hit, for the same reason.
+
+## RaycastResult2D — properties
+
+| Name | Type | Default | Access | Description |
+|---|---|---|---|---|
+| `Distance` | `number` | — | read-only | How far along the ray the hit is, in metres. |
+| `Instance` | `Instance` | — | read-only | The `Part2D` or `Tilemap2D` that was hit. |
+| `Normal` | `Vector2` | — | read-only | The surface normal there, pointing out of the surface. |
+| `Position` | `Vector2` | — | read-only | Where on it, in world units. |
+
 ## Rect
 
 A screen-space rectangle by two corners, in pixels. The corners are **not** sorted and not validated: an `ImageLabel.SliceCenter` whose min is past its max is a mistake for its author to see, not one for a constructor to silently correct.

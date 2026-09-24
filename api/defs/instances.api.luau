@@ -1555,6 +1555,21 @@ local Classes: { Schema.Class } = {
                 ErrorKey = "scene.err.number_above_zero",
                 Doc = "Distance in metres to the far clip plane; geometry beyond it is not drawn.",
             },
+            {
+                Name = "Projection",
+                Type = "Enum.CameraProjection",
+                Doc = "Perspective for a 3D view, Orthographic for a 2D one (the 2D layer, phase 3). An "
+                    .. "orthographic camera ignores `FieldOfView` and shows `OrthographicSize` metres above and "
+                    .. "below the middle of the view, whatever the distance.",
+            },
+            {
+                Name = "OrthographicSize",
+                Type = "number",
+                Default = "10",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "Half the height of what an orthographic camera shows, in metres. Its width follows from "
+                    .. "the window's shape. Zooming a 2D view is changing this.",
+            },
         },
     },
     {
@@ -2908,6 +2923,281 @@ local Classes: { Schema.Class } = {
                     .. "once and keep it.** It always returns a track, even for a clip that is not there -- a "
                     .. "mesh that has not finished loading would otherwise make an ordinary frame a nil index "
                     .. "-- and every call is a handle the VM holds until the world goes away.",
+            },
+        } :: { Schema.Method },
+    },
+    {
+        Name = "Part2D",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Part2D",
+        Doc = "A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D "
+            .. "world. It lies on the world's XY plane facing -Z, so an orthographic `Camera` looking down -Z "
+            .. "sees it as it is; `ZIndex` orders sprites that overlap. It is drawn as its `Image` -- or a flat "
+            .. "`Color` without one -- and simulated by 2D physics unless `Anchored`, which makes it ground.",
+        Properties = {
+            { Name = "Position", Type = "Vector2", Doc = "Where its middle is, in metres." },
+            {
+                Name = "Rotation",
+                Type = "number",
+                Doc = "Degrees, counter-clockwise. A part with `FixedRotation` keeps whatever this is.",
+            },
+            {
+                Name = "Size",
+                Type = "Vector2",
+                Default = "Vector2.new(1, 1)",
+                ErrorKey = "scene.err.size2_positive",
+                Doc = "Width and height in metres: the picture's and the collider's.",
+            },
+            { Name = "Shape", Type = "Enum.Shape2D", Doc = "The outline it is drawn and collides as." },
+            {
+                Name = "Color",
+                Type = "Color3",
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "Multiplies the image; with no image, the colour it is drawn in.",
+            },
+            {
+                Name = "Transparency",
+                Type = "number",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "0 is as drawn, 1 is invisible. A transparent part still collides.",
+            },
+            {
+                Name = "ZIndex",
+                Type = "number",
+                Doc = "Which of two overlapping sprites is in front: the higher. Ties keep the tree's order.",
+            },
+            {
+                Name = "FlipX",
+                Type = "boolean",
+                Doc = "Mirrors the picture left to right: a character facing the other way.",
+            },
+            { Name = "FlipY", Type = "boolean", Doc = "Mirrors the picture top to bottom." },
+            {
+                Name = "Image",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "The picture, stretched over `Size`. Its transparent pixels are transparent.",
+            },
+            {
+                Name = "ImageRectOffset",
+                Type = "Vector2",
+                Doc = "The top-left of the part of the image drawn, in pixels: one frame of a sprite sheet.",
+            },
+            {
+                Name = "ImageRectSize",
+                Type = "Vector2",
+                Doc = "The size of that part in pixels. Zero on both axes draws the whole image.",
+            },
+            {
+                Name = "Filter",
+                Type = "Enum.TextureFilter",
+                Doc = "Linear for painted art, Nearest for pixel art.",
+            },
+            {
+                Name = "Anchored",
+                Type = "boolean",
+                Doc = "Ground: it does not move, and what lands on it stays. A script may still move it.",
+            },
+            {
+                Name = "CanCollide",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether other parts bump into it. A part that cannot collide is only a picture.",
+            },
+            {
+                Name = "Sensor",
+                Type = "boolean",
+                Doc = "Reports what enters it through `Touched` and pushes nothing: a coin, a checkpoint, a "
+                    .. "trigger.",
+            },
+            {
+                Name = "Density",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "Kilograms per square metre: with `Size`, how heavy it is.",
+            },
+            {
+                Name = "Friction",
+                Type = "number",
+                Default = "0.3",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How much it grips what it slides on. Zero is ice.",
+            },
+            {
+                Name = "Elasticity",
+                Type = "number",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How much of its speed a bounce gives back: 0 lands dead, 1 bounces for ever.",
+            },
+            {
+                Name = "FixedRotation",
+                Type = "boolean",
+                Doc = "Never turns, whatever hits it: a character that stays upright.",
+            },
+            {
+                Name = "GravityScale",
+                Type = "number",
+                Default = "1",
+                Doc = "How strongly `Workspace.Gravity` pulls it: 0 floats, 2 falls twice as hard, and a "
+                    .. "negative number falls up.",
+            },
+            {
+                Name = "Velocity",
+                Type = "Vector2",
+                Doc = "Metres per second. Written by the simulation every tick, and a script may set it: a jump "
+                    .. "is setting its y.",
+            },
+            {
+                Name = "AngularVelocity",
+                Type = "number",
+                Doc = "Degrees per second, counter-clockwise.",
+            },
+            {
+                Name = "CollisionGroup",
+                Type = "string",
+                Default = '"Default"',
+                Doc = "The group deciding which other parts it collides with, as `PhysicsService` names them.",
+            },
+        },
+        Methods = {
+            {
+                Name = "ApplyImpulse",
+                Parameters = { { Name = "impulse", Type = "Vector2" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "A sudden push, in kilogram-metres per second, at its middle. Applied at the next tick; an "
+                    .. "anchored part ignores it.",
+            },
+        } :: { Schema.Method },
+        Events = {
+            {
+                Name = "Touched",
+                Parameters = { { Name = "otherPart", Type = "Instance" } },
+                Doc = "Fires once when something begins touching it -- another `Part2D`, or a `Tilemap2D`'s "
+                    .. "solid tiles -- or, for a `Sensor`, begins overlapping it. Deferred like every signal.",
+            },
+            {
+                Name = "TouchEnded",
+                Parameters = { { Name = "otherPart", Type = "Instance" } },
+                Doc = "Fires when something that was touching it stops.",
+            },
+        } :: { Schema.Event },
+    },
+    {
+        Name = "Tilemap2D",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Tilemap2D",
+        Doc = "A grid of tiles from one tileset image, on the 2D plane (the 2D layer, phase 3): a level you "
+            .. "paint. Tile 0 is empty; tile `n` is the `n`-th tile of the tileset, counted along its rows "
+            .. "from the top left. Every tile that is not empty is solid when `Collides` is on, as one body "
+            .. "whose edges are merged, so a character runs across a floor of tiles without catching on their "
+            .. "seams.",
+        Properties = {
+            {
+                Name = "Position",
+                Type = "Vector2",
+                Doc = "Where the bottom-left corner of cell (0, 0) is, in metres.",
+            },
+            {
+                Name = "CellSize",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "The side of one cell, in metres.",
+            },
+            {
+                Name = "Tileset",
+                Type = "Content",
+                ContentKind = "Texture",
+                Doc = "The image the tiles are cut from.",
+            },
+            {
+                Name = "TileSize",
+                Type = "Vector2",
+                Default = "Vector2.new(16, 16)",
+                ErrorKey = "scene.err.size2_positive",
+                Doc = "One tile's size in the tileset, in pixels.",
+            },
+            {
+                Name = "ZIndex",
+                Type = "number",
+                Doc = "Its place among overlapping sprites, as a `Part2D`'s.",
+            },
+            {
+                Name = "Color",
+                Type = "Color3",
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "Multiplies every tile.",
+            },
+            {
+                Name = "Filter",
+                Type = "Enum.TextureFilter",
+                Default = "Enum.TextureFilter.Nearest",
+                Doc = "Nearest by default, because tiles are nearly always pixel art.",
+            },
+            {
+                Name = "Collides",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether its tiles are solid. Off, it is scenery: a background layer.",
+            },
+            {
+                Name = "Friction",
+                Type = "number",
+                Default = "0.3",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How much its tiles grip what slides on them.",
+            },
+            {
+                Name = "CollisionGroup",
+                Type = "string",
+                Default = '"Default"',
+                Doc = "The group its tiles collide as.",
+            },
+        },
+        Methods = {
+            {
+                Name = "SetCell",
+                Parameters = {
+                    { Name = "x", Type = "number" },
+                    { Name = "y", Type = "number" },
+                    { Name = "tile", Type = "number" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Puts tile `tile` in cell (`x`, `y`); 0 empties it. Cells are whole numbers, and y grows "
+                    .. "upwards, as the world's does.",
+            },
+            {
+                Name = "GetCell",
+                Parameters = { { Name = "x", Type = "number" }, { Name = "y", Type = "number" } },
+                Returns = { "number" },
+                ThreadSafety = "ReadParallel",
+                Doc = "The tile in cell (`x`, `y`), or 0.",
+            },
+            {
+                Name = "FillRect",
+                Parameters = {
+                    { Name = "x0", Type = "number" },
+                    { Name = "y0", Type = "number" },
+                    { Name = "x1", Type = "number" },
+                    { Name = "y1", Type = "number" },
+                    { Name = "tile", Type = "number" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Puts `tile` in every cell of the rectangle from (`x0`, `y0`) to (`x1`, `y1`), both "
+                    .. "corners included.",
+            },
+            {
+                Name = "Clear",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Empties every cell.",
             },
         } :: { Schema.Method },
     },

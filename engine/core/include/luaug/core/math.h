@@ -137,6 +137,18 @@ static_assert(sizeof(Mat4) == 16 * sizeof(f32), "Mat4 must upload as 16 tightly 
 // field of view.
 [[nodiscard]] Mat4 perspective(f32 fovYRadians, f32 aspect, f32 nearZ, f32 farZ) noexcept;
 
+// Right-handed, looking down -Z, depth in [0, 1], as `perspective` is.
+// `halfHeight` metres above and below the middle of the view at every depth
+// (the 2D layer's camera, post-v1 phase 3).
+[[nodiscard]] Mat4 orthographic(f32 halfHeight, f32 aspect, f32 nearZ, f32 farZ) noexcept;
+
+// Whether a projection made by one of the two above is the orthographic one:
+// its w does not depend on depth.
+[[nodiscard]] constexpr bool isOrthographic(const Mat4& projection) noexcept
+{
+    return projection.m[2][3] == 0.0f && projection.m[3][3] == 1.0f;
+}
+
 // Right-handed view matrix. `up` need not be perpendicular to the view
 // direction; it is only used to establish the roll.
 [[nodiscard]] Mat4 lookAt(Vec3 eye, Vec3 target, Vec3 up) noexcept;
@@ -539,6 +551,31 @@ struct Vec2
 [[nodiscard]] constexpr Vec2 operator*(Vec2 v, f32 s) noexcept
 {
     return {v.x * s, v.y * s};
+}
+
+// **How wide the view is at a depth**, for either projection. Everything that
+// used to read `1 / projection.m[0][0]` as a tangent -- the light clusters, the
+// shadow cascades, a pick ray -- asks this instead, because under an
+// orthographic camera the same number is a half-width that does not grow.
+struct ViewSpread
+{
+    // Half-extents at depth zero, and how much they grow per metre of depth.
+    Vec2 base{0.0f, 0.0f};
+    Vec2 perMetre{1.0f, 1.0f};
+
+    [[nodiscard]] constexpr Vec2 at(f32 depth) const noexcept
+    {
+        return Vec2{base.x + perMetre.x * depth, base.y + perMetre.y * depth};
+    }
+};
+
+[[nodiscard]] constexpr ViewSpread viewSpread(const Mat4& projection) noexcept
+{
+    const f32 x = projection.m[0][0] != 0.0f ? 1.0f / projection.m[0][0] : 1.0f;
+    const f32 y = projection.m[1][1] != 0.0f ? 1.0f / projection.m[1][1] : 1.0f;
+    if (isOrthographic(projection))
+        return ViewSpread{Vec2{x, y}, Vec2{0.0f, 0.0f}};
+    return ViewSpread{Vec2{0.0f, 0.0f}, Vec2{x, y}};
 }
 
 [[nodiscard]] constexpr Vec2 operator*(f32 s, Vec2 v) noexcept

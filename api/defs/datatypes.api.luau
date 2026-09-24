@@ -1175,6 +1175,38 @@ local Datatypes: { Schema.Datatype } = {
         } :: { Schema.Property },
     },
     {
+        Name = "RaycastResult2D",
+        Module = "script",
+        Doc = "What `Workspace:Raycast2D` hit: a `RaycastResult` on the 2D plane. Nil rather than empty when "
+            .. "nothing was hit, for the same reason.",
+        Properties = {
+            {
+                Name = "Instance",
+                Type = "Instance",
+                ReadOnly = true,
+                Doc = "The `Part2D` or `Tilemap2D` that was hit.",
+            },
+            {
+                Name = "Position",
+                Type = "Vector2",
+                ReadOnly = true,
+                Doc = "Where on it, in world units.",
+            },
+            {
+                Name = "Normal",
+                Type = "Vector2",
+                ReadOnly = true,
+                Doc = "The surface normal there, pointing out of the surface.",
+            },
+            {
+                Name = "Distance",
+                Type = "number",
+                ReadOnly = true,
+                Doc = "How far along the ray the hit is, in metres.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         Name = "Signal",
         Module = "script",
         Doc = "THE signal type, spelled `Signal<T...>` where the pack is what handlers receive and `Wait` "

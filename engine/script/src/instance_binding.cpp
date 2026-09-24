@@ -831,6 +831,105 @@ int methodApplyImpulse(lua_State* L)
     return 0;
 }
 
+// --- The 2D layer (post-v1 phase 3) -------------------------------------------
+
+int methodPart2DApplyImpulse(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::Vec2 impulse = checkVector2(L, 2);
+    // Summed and applied at the next tick, as a `BasePart`'s is: a script may
+    // run at any point in the frame and the solver may not be interrupted.
+    if (!std::isfinite(impulse.x) || !std::isfinite(impulse.y))
+        return 0;
+    if (scene::Part2DComponent* part = world(L).parts2d().find(id); part != nullptr)
+        part->pendingImpulse = part->pendingImpulse + impulse;
+    return 0;
+}
+
+// A cell coordinate: a whole number. A fraction is refused rather than rounded,
+// because which way it rounds is a cell somebody did not mean.
+[[nodiscard]] core::i32 checkCell(lua_State* L, int index)
+{
+    const double number = luaL_checknumber(L, index);
+    if (!std::isfinite(number) || std::floor(number) != number ||
+        number < static_cast<double>(std::numeric_limits<core::i32>::min()) ||
+        number > static_cast<double>(std::numeric_limits<core::i32>::max()))
+        raise(L, LUAUG_TR("script.err.tile_cell"), {});
+    return static_cast<core::i32>(number);
+}
+
+[[nodiscard]] core::u16 checkTile(lua_State* L, int index)
+{
+    const double number = luaL_checknumber(L, index);
+    if (!std::isfinite(number) || std::floor(number) != number || number < 0.0 || number > 65535.0)
+        raise(L, LUAUG_TR("script.err.tile_id"), {});
+    return static_cast<core::u16>(number);
+}
+
+[[nodiscard]] scene::Tilemap2DComponent* tilemapOf(lua_State* L, core::InstanceId id)
+{
+    return world(L).tilemaps2d().find(id);
+}
+
+int methodTilemapSetCell(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::i32 x = checkCell(L, 2);
+    const core::i32 y = checkCell(L, 3);
+    const core::u16 tile = checkTile(L, 4);
+    if (scene::Tilemap2DComponent* tilemap = tilemapOf(L, id); tilemap != nullptr)
+        (void)tilemap->setCell(x, y, tile);
+    return 0;
+}
+
+int methodTilemapGetCell(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::i32 x = checkCell(L, 2);
+    const core::i32 y = checkCell(L, 3);
+    const scene::Tilemap2DComponent* tilemap = tilemapOf(L, id);
+    lua_pushnumber(L, tilemap != nullptr ? static_cast<double>(tilemap->cell(x, y)) : 0.0);
+    return 1;
+}
+
+// The most cells one `FillRect` writes: a thousand by a thousand. Past it the
+// rectangle is a mistake in its corners, and filling it would stop the frame.
+constexpr double MaxFillCells = 1'000'000.0;
+
+int methodTilemapFillRect(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::i32 x0 = checkCell(L, 2);
+    const core::i32 y0 = checkCell(L, 3);
+    const core::i32 x1 = checkCell(L, 4);
+    const core::i32 y1 = checkCell(L, 5);
+    const core::u16 tile = checkTile(L, 6);
+    const core::i32 lowX = std::min(x0, x1);
+    const core::i32 highX = std::max(x0, x1);
+    const core::i32 lowY = std::min(y0, y1);
+    const core::i32 highY = std::max(y0, y1);
+    const double cells = (static_cast<double>(highX) - lowX + 1.0) * (static_cast<double>(highY) - lowY + 1.0);
+    if (cells > MaxFillCells)
+        raise(L, LUAUG_TR("script.err.tile_rect_too_large"), {});
+    if (scene::Tilemap2DComponent* tilemap = tilemapOf(L, id); tilemap != nullptr) {
+        for (core::i32 y = lowY; y <= highY; ++y) {
+            for (core::i32 x = lowX; x <= highX; ++x)
+                (void)tilemap->setCell(x, y, tile);
+        }
+    }
+    return 0;
+}
+
+int methodTilemapClear(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    if (scene::Tilemap2DComponent* tilemap = tilemapOf(L, id); tilemap != nullptr && !tilemap->chunks.empty()) {
+        tilemap->chunks.clear();
+        tilemap->revision += 1;
+    }
+    return 0;
+}
+
 int methodCharacterMove(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
@@ -1474,6 +1573,11 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"PVInstance", "PivotTo", methodPivotTo},
     {"Model", "GetExtentsSize", methodGetExtentsSize},
     {"BasePart", "ApplyImpulse", methodApplyImpulse},
+    {"Part2D", "ApplyImpulse", methodPart2DApplyImpulse},
+    {"Tilemap2D", "SetCell", methodTilemapSetCell},
+    {"Tilemap2D", "GetCell", methodTilemapGetCell},
+    {"Tilemap2D", "FillRect", methodTilemapFillRect},
+    {"Tilemap2D", "Clear", methodTilemapClear},
     {"CharacterBody", "Move", methodCharacterMove},
     {"CharacterBody", "Jump", methodCharacterJump},
     {"Ragdoll", "Build", methodRagdollBuild},

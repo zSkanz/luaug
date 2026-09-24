@@ -237,6 +237,19 @@ Mat4 perspective(f32 fovYRadians, f32 aspect, f32 nearZ, f32 farZ) noexcept
     return result;
 }
 
+Mat4 orthographic(f32 halfHeight, f32 aspect, f32 nearZ, f32 farZ) noexcept
+{
+    // Depth to [0, 1] with the near plane at 0, the same way round as
+    // `perspective`, so a depth buffer means the same thing under either.
+    Mat4 result;
+    result.m[0][0] = 1.0f / (halfHeight * aspect);
+    result.m[1][1] = 1.0f / halfHeight;
+    result.m[2][2] = 1.0f / (nearZ - farZ);
+    result.m[3][2] = nearZ / (nearZ - farZ);
+    result.m[3][3] = 1.0f;
+    return result;
+}
+
 namespace {
 
 // The up vector to actually build a basis from.

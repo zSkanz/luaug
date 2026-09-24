@@ -1130,13 +1130,14 @@ TEST_CASE("every Content property the engine ships says which files it accepts")
             CHECK_MESSAGE((kind == "Mesh" || kind == "Texture" || kind == "Audio" || kind == "Font"), where);
         }
     }
-    // Ten today: a mesh, two images, a font, a sound, a `Material`'s four maps,
-    // and a `Decal`'s image (F2). A number rather than a list, so adding one is
-    // a one-line change here and dropping one is a failure.
+    // Twelve today: a mesh, two images, a font, a sound, a `Material`'s four
+    // maps, a `Decal`'s image (F2), and the 2D layer's sprite and tileset. A
+    // number rather than a list, so adding one is a one-line change here and
+    // dropping one is a failure.
     //
     // **No `Material` kind any more**: a material is an instance, and the
     // property that names one is an instance reference rather than a path.
-    CHECK(contentProperties == 10);
+    CHECK(contentProperties == 12);
 }
 
 TEST_CASE("a reference with a setter is editable, and one without is not")

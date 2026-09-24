@@ -3319,9 +3319,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // Counting level zero here while the backend drew level two would
             // be a triangle count that describes a frame nobody rendered, and a
             // stat that lies is worse than one that is missing.
-            const f32 lodPixelsPerUnit = snapshot.camera.valid && uiViewport.y > 0.0f
-                                             ? 0.5f * uiViewport.y * snapshot.camera.projection.m[1][1]
-                                             : 0.0f;
+            const f32 lodPixelsPerUnit =
+                snapshot.camera.valid && uiViewport.y > 0.0f && !core::isOrthographic(snapshot.camera.projection)
+                    ? 0.5f * uiViewport.y * snapshot.camera.projection.m[1][1]
+                    : 0.0f;
             for (const render::DrawItem& draw : snapshot.draws) {
                 // Counted from the snapshot rather than from the backend: it is
                 // the same number, it costs nothing, and it is available on a

@@ -139,6 +139,11 @@ enum class UserdataTag : int
     // one tick and there is nothing behind it to mutate.
     InputObject = 19,
 
+    // What `Workspace:Raycast2D` hit (the 2D layer): `RaycastResult` on the
+    // plane, with `Vector2`s where that one has vectors and any instance where
+    // that one has a `BasePart` -- a tilemap is hit as often as a part.
+    RaycastResult2D = 20,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,

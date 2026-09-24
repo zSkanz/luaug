@@ -259,10 +259,9 @@ struct ShadowFit
     core::Vec3 forward{0.0f, 0.0f, -1.0f};
     core::Vec3 right{1.0f, 0.0f, 0.0f};
     core::Vec3 up{0.0f, 1.0f, 0.0f};
-    // `1 / projection.m[0][0]` and `1 / projection.m[1][1]`, which is what
-    // `core::perspective` puts there.
-    f32 tanHalfFovX = 0.5f;
-    f32 tanHalfFovY = 0.3f;
+    // How wide the camera's view is at a depth -- the two tangents for a
+    // perspective camera, two constant half-extents for an orthographic one.
+    core::ViewSpread spread{core::Vec2{0.0f, 0.0f}, core::Vec2{0.5f, 0.3f}};
     f32 nearPlane = 0.1f;
     core::DVec3 origin;
     // Everything that can cast into this frame. **What this buys is the whole of

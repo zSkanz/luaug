@@ -535,6 +535,39 @@ bool setCameraFarPlane(scene::World& world, core::InstanceId id, const Value& va
     return true;
 }
 
+Value getCameraProjection(const scene::World& world, core::InstanceId id)
+{
+    const scene::CameraComponent* camera = readCamera(world, id);
+    return camera == nullptr ? Value{} : Value{scene::EnumValue{generated::CameraProjectionEnumId, camera->projection}};
+}
+
+bool setCameraProjection(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* item = std::get_if<scene::EnumValue>(&value);
+    scene::CameraComponent* camera = writeCamera(world, id);
+    if (camera == nullptr || item == nullptr || item->enumId != generated::CameraProjectionEnumId || item->value < 0 ||
+        item->value > 1)
+        return false;
+    camera->projection = item->value;
+    return true;
+}
+
+Value getCameraOrthographicSize(const scene::World& world, core::InstanceId id)
+{
+    const scene::CameraComponent* camera = readCamera(world, id);
+    return camera == nullptr ? Value{} : Value{static_cast<f64>(camera->orthographicSize)};
+}
+
+bool setCameraOrthographicSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::CameraComponent* camera = writeCamera(world, id);
+    f32 size = 0.0f;
+    if (camera == nullptr || !takePositive(value, size))
+        return false;
+    camera->orthographicSize = size;
+    return true;
+}
+
 void attachCameraComponents(scene::World& world, core::InstanceId id)
 {
     world.cameras().add(id, scene::CameraComponent{});

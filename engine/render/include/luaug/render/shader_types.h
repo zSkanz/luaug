@@ -444,6 +444,21 @@ struct GpuParticle
 
 static_assert(sizeof(GpuParticle) == 48, "GpuParticle is a vertex stride; see particle.hlsl");
 
+// One sprite (the 2D layer), per instance, for `sprite`.
+struct GpuSprite
+{
+    // Camera-relative low x, low y, high x, high y.
+    f32 rect[4]{};
+    // x cosine, y sine, z the plane's depth, w `Enum.Shape2D`.
+    f32 turn[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    // Left, top, right, bottom in texture space.
+    f32 uv[4]{0.0f, 0.0f, 1.0f, 1.0f};
+    // sRGB colour and opacity.
+    f32 color[4]{1.0f, 1.0f, 1.0f, 1.0f};
+};
+
+static_assert(sizeof(GpuSprite) == 64, "GpuSprite is a vertex stride; see sprite.hlsl");
+
 // Vertex stage, `b0 space1`, for `particle`.
 struct GpuParticleUniforms
 {

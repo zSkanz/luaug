@@ -175,6 +175,19 @@ local Classes: { Schema.Class } = {
                     .. "count to change (R10).",
             },
             {
+                Name = "Raycast2D",
+                Parameters = {
+                    { Name = "origin", Type = "Vector2" },
+                    { Name = "direction", Type = "Vector2" },
+                    { Name = "params", Type = "RaycastParams?", Default = "nil" },
+                },
+                Returns = { "RaycastResult2D?" },
+                ThreadSafety = "Unsafe",
+                Doc = "The nearest `Part2D` or `Tilemap2D` a ray on the 2D plane hits, or nil. As with `Raycast`, "
+                    .. "the direction's length is the reach. Sensors are passed through, and so is a part with "
+                    .. "`CanCollide` off. Two hits at the same distance resolve the same way on every run (R10).",
+            },
+            {
                 Name = "Spherecast",
                 Parameters = {
                     { Name = "origin", Type = "vector" },

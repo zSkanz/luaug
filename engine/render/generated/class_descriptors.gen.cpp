@@ -307,7 +307,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(boneDesc);
 
     // --- Camera ---
-    static std::array<scene::PropertyDesc, 4> cameraProperties;
+    static std::array<scene::PropertyDesc, 6> cameraProperties;
     cameraProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("CFrame"),
@@ -352,6 +352,29 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
             .get = native::getCameraFarPlane,
             .set = native::setCameraFarPlane,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Projection"),
+            .type = scene::ValueType::EnumItem,
+            .enumName = atoms.intern("CameraProjection"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Perspective for a 3D view, Orthographic for a 2D one (the 2D layer, phase 3). An orthographic camera ignores `FieldOfView` and shows `OrthographicSize` metres above and below the middle of the view, whatever the distance.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_enum_item"),
+            .get = native::getCameraProjection,
+            .set = native::setCameraProjection,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("OrthographicSize"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Half the height of what an orthographic camera shows, in metres. Its width follows from the window's shape. Zooming a 2D view is changing this.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getCameraOrthographicSize,
+            .set = native::setCameraOrthographicSize,
         },
     }};
     scene::ClassDescriptor cameraDesc;

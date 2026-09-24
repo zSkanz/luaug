@@ -52,6 +52,7 @@ void World::restore(const WorldSnapshot& snapshot)
     // entries describe instances that may no longer exist, and the only thing
     // that reads them is the VM the caller rebuilds after this returns.
     m_changes.clear();
+    ++m_restores;
 }
 
 } // namespace luaug::scene

@@ -800,6 +800,56 @@ int workspaceRaycast(lua_State* L)
     return 1;
 }
 
+// **The plane's ray** (the 2D layer). The same `RaycastParams` as the 3D one,
+// read the same way: the filter names instances and their descendants, and the
+// group is the one the ray collides as.
+int workspaceRaycast2D(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const core::Vec2 origin = checkVector2(L, 2);
+    const core::Vec2 direction = checkVector2(L, 3);
+
+    const scene::PhysicsSync2D* sync = services(L).physics2d;
+    if (sync == nullptr) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    physics::Raycast2DFilter filter;
+    std::vector<u64> storage;
+    if (!lua_isnoneornil(L, 4)) {
+        const RaycastQuery params = checkRaycastParams(L, 4);
+        filter.include = params.mode == 1;
+        World& w = world(L);
+        std::vector<core::InstanceId> descendants;
+        for (const core::InstanceId id : params.filter) {
+            if (!w.alive(id))
+                continue;
+            storage.push_back(scene::PhysicsSync2D::userDataOf(id));
+            descendants.clear();
+            w.collectDescendants(id, descendants);
+            for (const core::InstanceId descendant : descendants)
+                storage.push_back(scene::PhysicsSync2D::userDataOf(descendant));
+        }
+        filter.userData = storage;
+        if (!params.collisionGroup.empty()) {
+            const u16 group = w.collisionGroups().find(w.atoms().lookup(params.collisionGroup));
+            if (group == scene::CollisionGroups::kInvalid)
+                raise(L, LUAUG_TR("scene.err.unknown_collision_group"));
+            if (group < physics::kMaxCollisionGroups2D)
+                filter.group = static_cast<physics::CollisionGroup2D>(group);
+        }
+    }
+
+    const std::optional<scene::PhysicsSync2D::Hit> hit = sync->raycast(origin, direction, filter);
+    if (!hit.has_value()) {
+        lua_pushnil(L);
+        return 1;
+    }
+    pushRaycastResult2D(L, hit->instance, hit->position, hit->normal, hit->distance);
+    return 1;
+}
+
 int workspaceSpherecast(lua_State* L)
 {
     (void)checkInstance(L, 1);
@@ -1477,6 +1527,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"AudioService", "PlayLocal", audioServicePlayLocal},
 
     {"Workspace", "Raycast", workspaceRaycast},
+    {"Workspace", "Raycast2D", workspaceRaycast2D},
     {"Workspace", "Spherecast", workspaceSpherecast},
     {"Workspace", "GetBodiesInBox", workspaceGetBodiesInBox},
 

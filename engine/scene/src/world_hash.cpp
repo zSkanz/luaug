@@ -264,6 +264,19 @@ u64 World::worldHash() const
         // carries that is not a property and requires this hash to notice.
         if (const ParticleEmitterComponent* emitter = m_particleEmitters.find(id); emitter != nullptr)
             hasher.pod(emitter->emitted);
+        // The 2D layer: a push asked for and not yet applied, and a tilemap's
+        // cells, which decide what is solid and which no property carries.
+        if (const Part2DComponent* part = m_parts2d.find(id); part != nullptr) {
+            hasher.vec2(part->pendingImpulse);
+        }
+        if (const Tilemap2DComponent* tilemap = m_tilemaps2d.find(id); tilemap != nullptr) {
+            for (const auto& [key, chunk] : tilemap->chunks) {
+                hasher.pod(key.x);
+                hasher.pod(key.y);
+                for (const core::u16 tile : chunk)
+                    hasher.pod(tile);
+            }
+        }
 
         // **The terrain field, which no property can carry** (ADR 0082). It is
         // megabytes of samples, so it is not in the walk below and has to be

@@ -192,6 +192,37 @@ TEST_CASE("perspective maps the depth range to [0, 1]")
     CHECK(near(depthOf(-farZ), 1.0f));
 }
 
+TEST_CASE("orthographic maps the depth range to [0, 1] and the height to [-1, 1] at every depth")
+{
+    constexpr f32 nearZ = 0.5f;
+    constexpr f32 farZ = 200.0f;
+    const Mat4 projection = orthographic(10.0f, 2.0f, nearZ, farZ);
+    CHECK(isOrthographic(projection));
+    CHECK_FALSE(isOrthographic(perspective(1.0472f, 2.0f, nearZ, farZ)));
+
+    // w is 1, so clip space is NDC.
+    const auto project = [&projection](Vec3 view) {
+        return Vec3{projection.m[0][0] * view.x + projection.m[3][0], projection.m[1][1] * view.y + projection.m[3][1],
+                    projection.m[2][2] * view.z + projection.m[3][2]};
+    };
+    CHECK(near(project(Vec3{0.0f, 0.0f, -nearZ}).z, 0.0f));
+    CHECK(near(project(Vec3{0.0f, 0.0f, -farZ}).z, 1.0f));
+    // Ten metres up and twenty across are the edges, near and far alike.
+    CHECK(near(project(Vec3{20.0f, 10.0f, -1.0f}).x, 1.0f));
+    CHECK(near(project(Vec3{20.0f, 10.0f, -150.0f}).y, 1.0f));
+}
+
+TEST_CASE("the view's spread grows with depth under perspective and not under orthographic")
+{
+    const ViewSpread flat = viewSpread(orthographic(10.0f, 2.0f, 0.5f, 200.0f));
+    CHECK(near(flat.at(1.0f).y, 10.0f));
+    CHECK(near(flat.at(100.0f).x, 20.0f));
+
+    const ViewSpread deep = viewSpread(perspective(1.5707964f, 1.0f, 0.1f, 100.0f));
+    CHECK(near(deep.at(0.0f).x, 0.0f));
+    CHECK(near(deep.at(4.0f).y, 4.0f));
+}
+
 // --- Mat3 --------------------------------------------------------------------
 
 TEST_CASE("the default Mat3 is the identity and behaves like one")

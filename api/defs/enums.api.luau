@@ -802,6 +802,55 @@ local Definition: Schema.Definition = {
                 },
             } :: { Schema.EnumItem },
         },
+        {
+            Name = "Shape2D",
+            Doc = "The outline a `Part2D` is drawn and collides as (the 2D layer, phase 3).",
+            Items = {
+                { Name = "Box", Value = 0, Doc = "A rectangle the part's `Size`." },
+                {
+                    Name = "Circle",
+                    Value = 1,
+                    Doc = "A disc as wide as the smaller of the two sides, so a stretched `Size` gives a round "
+                        .. "wheel rather than an egg, and the picture and the collider agree.",
+                },
+                {
+                    Name = "Capsule",
+                    Value = 2,
+                    Doc = "A rectangle with round ends at the top and bottom: what a character stands on, because "
+                        .. "its rounded foot slides over the seam between two tiles instead of catching.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "TextureFilter",
+            Doc = "How a picture is sampled when it is drawn larger or smaller than it is.",
+            Items = {
+                { Name = "Linear", Value = 0, Doc = "Blended between texels: smooth, for painted art." },
+                {
+                    Name = "Nearest",
+                    Value = 1,
+                    Doc = "The nearest texel, unblended: sharp pixels, for pixel art at any zoom.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
+            Name = "CameraProjection",
+            Doc = "How a `Camera` turns the world into a picture.",
+            Items = {
+                {
+                    Name = "Perspective",
+                    Value = 0,
+                    Doc = "Far things smaller, by `FieldOfView`: the 3D camera.",
+                },
+                {
+                    Name = "Orthographic",
+                    Value = 1,
+                    Doc = "Everything its own size wherever it is, `OrthographicSize` metres from the middle of "
+                        .. "the view to its top edge: the 2D camera. It looks down the camera's -Z, so a 2D world "
+                        .. "on the XY plane faces it.",
+                },
+            } :: { Schema.EnumItem },
+        },
     },
 }
 

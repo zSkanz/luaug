@@ -22,6 +22,7 @@
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/physics_sync.h"
+#include "luaug/scene/physics_sync_2d.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/modules.h"
@@ -333,6 +334,7 @@ public:
 
     [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
+    [[nodiscard]] scene::PhysicsSync2D* physics2d() noexcept { return m_physics2d ? &*m_physics2d : nullptr; }
     [[nodiscard]] script::ScriptRuntime& runtime() noexcept { return *m_runtime; }
 
     // **Throws the VM away and builds another one on the same world** (ADR 0058).
@@ -420,6 +422,11 @@ private:
     // reference to this and tears its world down in its own destructor.
     physics::PhysicsResult m_backend;
     std::optional<scene::PhysicsSync> m_physics;
+    // The plane's simulation (the 2D layer), beside the 3D one and stepped
+    // after it: the two share no body, so the order between them is only
+    // the order their signals are raised in.
+    physics::Physics2DResult m_backend2d;
+    std::optional<scene::PhysicsSync2D> m_physics2d;
     input::InputSystem m_input;
 
     // The skeletons the mesh loader reads out of each glTF, and the system that

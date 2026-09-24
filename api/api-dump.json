@@ -321,6 +321,15 @@
         {
           "Name": "NearPlane",
           "Type": "number"
+        },
+        {
+          "Name": "OrthographicSize",
+          "Type": "number",
+          "Default": "10"
+        },
+        {
+          "Name": "Projection",
+          "Type": "Enum.CameraProjection"
         }
       ],
       "Methods": [],
@@ -1611,6 +1620,149 @@
       "Events": []
     },
     {
+      "Name": "Part2D",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Anchored",
+          "Type": "boolean"
+        },
+        {
+          "Name": "AngularVelocity",
+          "Type": "number"
+        },
+        {
+          "Name": "CanCollide",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "CollisionGroup",
+          "Type": "string",
+          "Default": "\"Default\""
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "Density",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Elasticity",
+          "Type": "number"
+        },
+        {
+          "Name": "Filter",
+          "Type": "Enum.TextureFilter"
+        },
+        {
+          "Name": "FixedRotation",
+          "Type": "boolean"
+        },
+        {
+          "Name": "FlipX",
+          "Type": "boolean"
+        },
+        {
+          "Name": "FlipY",
+          "Type": "boolean"
+        },
+        {
+          "Name": "Friction",
+          "Type": "number",
+          "Default": "0.3"
+        },
+        {
+          "Name": "GravityScale",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Image",
+          "Type": "Content"
+        },
+        {
+          "Name": "ImageRectOffset",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "ImageRectSize",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "Position",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "Rotation",
+          "Type": "number"
+        },
+        {
+          "Name": "Sensor",
+          "Type": "boolean"
+        },
+        {
+          "Name": "Shape",
+          "Type": "Enum.Shape2D"
+        },
+        {
+          "Name": "Size",
+          "Type": "Vector2",
+          "Default": "Vector2.new(1, 1)"
+        },
+        {
+          "Name": "Transparency",
+          "Type": "number"
+        },
+        {
+          "Name": "Velocity",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "ZIndex",
+          "Type": "number"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "ApplyImpulse",
+          "Parameters": [
+            {
+              "Name": "impulse",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": [
+        {
+          "Name": "TouchEnded",
+          "Parameters": [
+            {
+              "Name": "otherPart",
+              "Type": "Instance"
+            }
+          ]
+        },
+        {
+          "Name": "Touched",
+          "Parameters": [
+            {
+              "Name": "otherPart",
+              "Type": "Instance"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "Name": "ParticleEmitter",
       "Extends": "Instance",
       "Tags": [],
@@ -2855,6 +3007,130 @@
       "Events": []
     },
     {
+      "Name": "Tilemap2D",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CellSize",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "Collides",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "CollisionGroup",
+          "Type": "string",
+          "Default": "\"Default\""
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        },
+        {
+          "Name": "Filter",
+          "Type": "Enum.TextureFilter",
+          "Default": "Enum.TextureFilter.Nearest"
+        },
+        {
+          "Name": "Friction",
+          "Type": "number",
+          "Default": "0.3"
+        },
+        {
+          "Name": "Position",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "TileSize",
+          "Type": "Vector2",
+          "Default": "Vector2.new(16, 16)"
+        },
+        {
+          "Name": "Tileset",
+          "Type": "Content"
+        },
+        {
+          "Name": "ZIndex",
+          "Type": "number"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Clear",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FillRect",
+          "Parameters": [
+            {
+              "Name": "x0",
+              "Type": "number"
+            },
+            {
+              "Name": "y0",
+              "Type": "number"
+            },
+            {
+              "Name": "x1",
+              "Type": "number"
+            },
+            {
+              "Name": "y1",
+              "Type": "number"
+            },
+            {
+              "Name": "tile",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetCell",
+          "Parameters": [
+            {
+              "Name": "x",
+              "Type": "number"
+            },
+            {
+              "Name": "y",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "ReadParallel"
+        },
+        {
+          "Name": "SetCell",
+          "Parameters": [
+            {
+              "Name": "x",
+              "Type": "number"
+            },
+            {
+              "Name": "y",
+              "Type": "number"
+            },
+            {
+              "Name": "tile",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "TweenService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -3447,6 +3723,26 @@
             }
           ],
           "Returns": ["RaycastResult?"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Raycast2D",
+          "Parameters": [
+            {
+              "Name": "origin",
+              "Type": "Vector2"
+            },
+            {
+              "Name": "direction",
+              "Type": "Vector2"
+            },
+            {
+              "Name": "params",
+              "Type": "RaycastParams?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["RaycastResult2D?"],
           "ThreadSafety": "Unsafe"
         },
         {
@@ -4207,6 +4503,35 @@
         {
           "Name": "Position",
           "Type": "vector",
+          "ReadOnly": true
+        }
+      ],
+      "Methods": [],
+      "Operators": []
+    },
+    {
+      "Name": "RaycastResult2D",
+      "Constructors": [],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "Distance",
+          "Type": "number",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Instance",
+          "Type": "Instance",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Normal",
+          "Type": "Vector2",
+          "ReadOnly": true
+        },
+        {
+          "Name": "Position",
+          "Type": "Vector2",
           "ReadOnly": true
         }
       ],
@@ -5239,6 +5564,19 @@
       ]
     },
     {
+      "Name": "CameraProjection",
+      "Items": [
+        {
+          "Name": "Orthographic",
+          "Value": 1
+        },
+        {
+          "Name": "Perspective",
+          "Value": 0
+        }
+      ]
+    },
+    {
       "Name": "CharacterState",
       "Items": [
         {
@@ -6059,6 +6397,23 @@
       ]
     },
     {
+      "Name": "Shape2D",
+      "Items": [
+        {
+          "Name": "Box",
+          "Value": 0
+        },
+        {
+          "Name": "Capsule",
+          "Value": 2
+        },
+        {
+          "Name": "Circle",
+          "Value": 1
+        }
+      ]
+    },
+    {
       "Name": "SortOrder",
       "Items": [
         {
@@ -6085,6 +6440,19 @@
         {
           "Name": "Persistent",
           "Value": 2
+        }
+      ]
+    },
+    {
+      "Name": "TextureFilter",
+      "Items": [
+        {
+          "Name": "Linear",
+          "Value": 0
+        },
+        {
+          "Name": "Nearest",
+          "Value": 1
         }
       ]
     },

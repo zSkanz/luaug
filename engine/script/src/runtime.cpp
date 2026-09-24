@@ -252,6 +252,11 @@ void ScriptRuntime::setPhysics(scene::PhysicsSync* physics)
     m_impl->services.physics = physics;
 }
 
+void ScriptRuntime::setPhysics2D(scene::PhysicsSync2D* physics)
+{
+    m_impl->services.physics2d = physics;
+}
+
 void ScriptRuntime::setInput(input::InputSystem* input)
 {
     m_impl->services.input = input;

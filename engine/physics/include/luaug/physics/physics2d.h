@@ -85,6 +85,10 @@ struct Shape2DDesc
     // Where the shape sits in the body's frame.
     core::Vec2 offset{0.0f, 0.0f};
     f32 angle = 0.0f;
+    // A chain that closes on itself: the outline of a solid region, collided
+    // from outside. Counter-clockwise around the solid, so its outside is the
+    // segments' right. Needs at least three points; an open chain four.
+    bool loop = false;
 };
 
 struct Body2DDesc
@@ -106,6 +110,9 @@ struct Body2DDesc
     bool fixedRotation = false;
     // Reports what overlaps it and pushes nothing.
     bool sensor = false;
+    // False collides with nothing at all, and the body still moves: a part
+    // that falls through the world, as a `CanCollide = false` part does.
+    bool collides = true;
     // Continuous collision against other moving bodies, for something small
     // and fast; every body already has it against static ones.
     bool bullet = false;
@@ -145,6 +152,18 @@ struct Contact2D
     bool sensor = false;
 };
 
+// What a ray may hit. The default hits everything but sensors.
+struct Raycast2DFilter
+{
+    // True: only bodies whose user data `userData` lists. False: every body
+    // but those.
+    bool include = false;
+    std::span<const u64> userData;
+    // Cast as a body of this group would collide: bodies of a group it does
+    // not collide with are passed through. Empty casts as every group.
+    std::optional<CollisionGroup2D> group;
+};
+
 struct Raycast2DHit
 {
     u64 userData = 0;
@@ -182,9 +201,11 @@ public:
     [[nodiscard]] virtual std::span<const Contact2D> contacts(World2DHandle world) const = 0;
 
     // The first body the segment from `origin` to `origin + translation` hits,
-    // ignoring sensors and the groups `ignored` names (a bit per group).
+    // sensors aside. Two hits at one distance resolve to the lower user data,
+    // so the answer does not hang on the tree's traversal order (R10).
     [[nodiscard]] virtual std::optional<Raycast2DHit> raycast(World2DHandle world, core::Vec2 origin,
-                                                              core::Vec2 translation, u64 ignored = 0) const = 0;
+                                                              core::Vec2 translation,
+                                                              const Raycast2DFilter& filter = {}) const = 0;
 
     // Whether bodies of two groups collide. Every pair does until told
     // otherwise; a body created after the change sees it, and one created before

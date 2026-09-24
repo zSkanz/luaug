@@ -37,7 +37,9 @@ cbuffer GpuParticleLighting : register(b0, space3)
     float4 ParticleFogColor;
     // x: fog start, z: 1 / (end - start), zero when fog is off.
     float4 ParticleFogRange;
-    // x near plane, y far plane, zw one over the target's size in pixels.
+    // x near plane, y far plane, zw one over the target's size in pixels. A
+    // NEGATIVE near plane is an orthographic camera (the 2D layer), whose
+    // depth is linear already.
     float4 ParticleDepth;
 };
 
@@ -107,11 +109,14 @@ float4 FragmentMain(Interpolants input) : SV_Target0
     }
 
     // The scene's depth at this pixel, linear, against the particle's own.
-    const float near = ParticleDepth.x;
+    const bool orthographic = ParticleDepth.x < 0.0f;
+    const float near = abs(ParticleDepth.x);
     const float far = ParticleDepth.y;
     const float device = SceneDepth.SampleLevel(SceneDepthSampler, input.Position.xy * ParticleDepth.zw, 0.0f).r;
-    const float scene = (near * far) / max(far - device * (far - near), 1e-6f);
-    const float soft = saturate((scene - input.ViewDepth) / clamp(input.HalfSize, 1e-3f, 1.0f));
+    const float scene = orthographic ? near + device * (far - near)
+                                     : (near * far) / max(far - device * (far - near), 1e-6f);
+    const float own = orthographic ? near + input.Position.z * (far - near) : input.ViewDepth;
+    const float soft = saturate((scene - own) / clamp(input.HalfSize, 1e-3f, 1.0f));
 
     const float alpha = input.Color.a * coverage * soft;
     if (alpha <= 0.002f)

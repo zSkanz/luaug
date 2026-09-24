@@ -25,6 +25,16 @@ using core::Mat4;
 using core::u32;
 using core::Vec3;
 
+// Pixels a metre covers at a metre's distance, for choosing a mesh's level of
+// detail. Zero -- always the finest level -- under an orthographic camera, where
+// how big a thing looks does not depend on how far away it is.
+[[nodiscard]] f32 lodPixelsPerUnit(const render::RenderCamera& camera, u32 height) noexcept
+{
+    if (height == 0 || core::isOrthographic(camera.projection))
+        return 0.0f;
+    return 0.5f * static_cast<f32>(height) * camera.projection.m[1][1];
+}
+
 // Further than any camera in this engine can see, so a cascade boundary set to
 // it is never the one a fragment selects.
 constexpr f32 kUnreachableDistance = 1.0e9f;
@@ -394,6 +404,9 @@ private:
     [[nodiscard]] bool ensureDecals(rhi::IDevice& device);
     // The world UI pipelines and buffer, on the same lazy terms.
     [[nodiscard]] bool ensureWorldUi(rhi::IDevice& device);
+    // The sprite pipeline and its instance buffer (the 2D layer), on the same
+    // lazy terms: a world with nothing on the plane builds neither.
+    [[nodiscard]] bool ensureSprites(rhi::IDevice& device);
 
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
@@ -605,6 +618,13 @@ private:
     bool particleTried_ = false;
     std::vector<GpuParticle> particleStaging_;
     u32 particleCount_ = 0;
+    // The 2D layer's sprites: one instance each, drawn in runs that share an
+    // image and a filter.
+    rhi::PipelineHandle spritePipeline_{};
+    rhi::BufferHandle spriteBuffer_{};
+    bool spriteTried_ = false;
+    std::vector<GpuSprite> spriteStaging_;
+    u32 spriteCount_ = 0;
     // The palette the terrain shader reads, filled once a frame.
     GpuTerrainSurfaceUniforms terrainSurface_{};
 };
@@ -1431,7 +1451,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
 
     for (rhi::PipelineHandle* pipeline :
          {&terrainPipeline_, &terrainShadowPipeline_, &voxelPipeline_, &particlePipeline_, &voxelTilePipeline_,
-          &voxelBlendPipeline_, &voxelShadowPipeline_, &decalPipeline_, &worldUiPipeline_, &worldUiOnTopPipeline_}) {
+          &voxelBlendPipeline_, &voxelShadowPipeline_, &decalPipeline_, &worldUiPipeline_, &worldUiOnTopPipeline_,
+          &spritePipeline_}) {
         if (pipeline->valid())
             device.destroy(*pipeline);
         *pipeline = {};
@@ -1445,6 +1466,10 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     if (worldUiBuffer_.valid())
         device.destroy(worldUiBuffer_);
     worldUiBuffer_ = {};
+    if (spriteBuffer_.valid())
+        device.destroy(spriteBuffer_);
+    spriteBuffer_ = {};
+    spriteTried_ = false;
     if (voxelAtlas_.valid())
         device.destroy(voxelAtlas_);
     voxelAtlas_ = {};
@@ -1480,7 +1505,7 @@ void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshC
     // The SAME level the submission will choose, from the same function and the
     // same camera -- a batch whose members disagreed about their level of detail
     // would draw one mesh with another's index range.
-    const f32 pixelsPerUnit = height_ > 0 ? 0.5f * static_cast<f32>(height_) * world.camera.projection.m[1][1] : 0.0f;
+    const f32 pixelsPerUnit = lodPixelsPerUnit(world.camera, height_);
 
     const auto instanceable = [&](const DrawItem& draw) {
         // Transparent draws are never batched: their ORDER is their
@@ -1687,8 +1712,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
     // so a shadow could be cast by different geometry than the object drawn --
     // which is a shadow that does not match its caster. Choosing once, from the
     // camera, keeps the two the same mesh.
-    const f32 pixelsPerUnit =
-        world.camera.valid && height_ > 0 ? 0.5f * static_cast<f32>(height_) * world.camera.projection.m[1][1] : 0.0f;
+    const f32 pixelsPerUnit = world.camera.valid ? lodPixelsPerUnit(world.camera, height_) : 0.0f;
     // The draws arrive sorted (Decision 7), so this walks them in order and
     // never reorders. Grouping is `extract`'s job and re-deriving it here would
     // be the backend doing work bgfx would have to repeat.
@@ -1934,6 +1958,10 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
 // name tags, and a fixed buffer rather than one that grows under a frame.
 constexpr u32 MaxWorldUiVertices = 60000;
 
+// A frame's sprites stop here (the 2D layer): four megabytes of instances, and
+// a screen of 16-pixel tiles at 4K is a little over thirty thousand of them.
+constexpr u32 MaxSprites = 65536;
+
 bool DefaultRenderer::ensureWorldUi(rhi::IDevice& device)
 {
     if (worldUiTried_)
@@ -2110,6 +2138,64 @@ bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
         .debugName = "particles",
     });
     return particlePipeline_.valid() && particleBuffer_.valid();
+}
+
+bool DefaultRenderer::ensureSprites(rhi::IDevice& device)
+{
+    if (spriteTried_)
+        return spritePipeline_.valid() && spriteBuffer_.valid();
+    spriteTried_ = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+
+    core::EngineError error;
+    const rhi::ShaderHandle vertex = shaderLibrary_->create(device, "sprite", rhi::ShaderStage::Vertex, &error);
+    const rhi::ShaderHandle fragment = shaderLibrary_->create(device, "sprite", rhi::ShaderStage::Fragment, &error);
+    for (const rhi::ShaderHandle handle : {vertex, fragment}) {
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+    }
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+
+    const std::array<rhi::VertexAttribute, 4> attributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 32},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 48},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> buffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = sizeof(GpuSprite), .perInstance = true},
+    };
+    // Straight alpha, as a picture's transparent pixels are stored.
+    const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{
+        .format = kHdrFormat,
+        .blend = {.enabled = true},
+    }};
+    spritePipeline_ = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        // A flipped sprite is still a sprite, and the plane is seen from
+        // either side.
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        // Tested and never written, like every blended surface: a 3D part in
+        // front of the plane hides a sprite, and sprites order among
+        // themselves by `ZIndex`, which is the order they are drawn in.
+        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "sprite",
+    });
+    spriteBuffer_ = device.createBuffer({
+        .usage = rhi::BufferUsage::Vertex,
+        .sizeBytes = static_cast<u32>(MaxSprites * sizeof(GpuSprite)),
+        .debugName = "sprites",
+    });
+    return spritePipeline_.valid() && spriteBuffer_.valid();
 }
 
 bool DefaultRenderer::ensureVoxel(rhi::IDevice& device)
@@ -2361,6 +2447,32 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         particleCount_ = static_cast<u32>(count);
     }
 
+    // This frame's sprites (the 2D layer), up before any pass for the same
+    // reason. Past `MaxSprites` the rest are not drawn: the order is ZIndex
+    // first, so what goes is the front-most, which is loud rather than subtle.
+    spriteCount_ = 0;
+    if (!world.sprites.empty() && ensureSprites(device)) {
+        spriteStaging_.clear();
+        const usize count = std::min<usize>(world.sprites.size(), MaxSprites);
+        spriteStaging_.reserve(count);
+        for (usize at = 0; at < count; ++at) {
+            const RenderSprite& sprite = world.sprites[at];
+            GpuSprite gpu;
+            for (usize axis = 0; axis < 4; ++axis) {
+                gpu.rect[axis] = sprite.rect[axis];
+                gpu.uv[axis] = sprite.uv[axis];
+                gpu.color[axis] = sprite.color[axis];
+            }
+            gpu.turn[0] = sprite.cosine;
+            gpu.turn[1] = sprite.sine;
+            gpu.turn[2] = sprite.z;
+            gpu.turn[3] = static_cast<f32>(sprite.shape);
+            spriteStaging_.push_back(gpu);
+        }
+        cmd.upload(spriteBuffer_, asBytes(spriteStaging_.data(), spriteStaging_.size() * sizeof(GpuSprite)), 0);
+        spriteCount_ = static_cast<u32>(count);
+    }
+
     // This frame's world UI, up before any pass for the same reason (F3).
     worldUiVertexCount_ = 0;
     if (!world.worldUiVertices.empty() && ensureWorldUi(device)) {
@@ -2520,8 +2632,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     fit.up = Vec3{cameraFrame.m[1][0], cameraFrame.m[1][1], cameraFrame.m[1][2]};
     // The camera looks down -Z, so its forward is the negated third axis.
     fit.forward = Vec3{-cameraFrame.m[2][0], -cameraFrame.m[2][1], -cameraFrame.m[2][2]};
-    fit.tanHalfFovX = world.camera.projection.m[0][0] != 0.0f ? 1.0f / world.camera.projection.m[0][0] : 0.5f;
-    fit.tanHalfFovY = world.camera.projection.m[1][1] != 0.0f ? 1.0f / world.camera.projection.m[1][1] : 0.3f;
+    fit.spread = core::viewSpread(world.camera.projection);
     fit.nearPlane = world.camera.nearPlane;
     fit.origin = world.camera.origin;
 
@@ -2699,7 +2810,11 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.pushDebugGroup("occlusion");
     const u32 occlusionWidth = renderWidth_ > 1 ? renderWidth_ / 2 : 1;
     const u32 occlusionHeight = renderHeight_ > 1 ? renderHeight_ / 2 : 1;
-    if (!settings_.ambientOcclusion) {
+    // The screen-space passes rebuild a position from depth as a perspective
+    // camera made it, and an orthographic one (the 2D layer) is not that --
+    // so under one they are off rather than wrong.
+    const bool orthographic = core::isOrthographic(world.camera.projection);
+    if (!settings_.ambientOcclusion || orthographic) {
         // White is "nothing is occluded", which is what the forward pass
         // multiplies its ambient term by when this one is switched off.
         clearPass(cmd, occlusion_, occlusionWidth, occlusionHeight, "occlusion-off",
@@ -2749,7 +2864,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // forward pass because the forward pass samples what it writes. Off, it is
     // a white clear, which the forward pass's `min` then ignores.
     cmd.pushDebugGroup("contact-shadow");
-    if (!settings_.contactShadows || !world.camera.valid || settings_.shadowCascades == 0) {
+    if (!settings_.contactShadows || !world.camera.valid || settings_.shadowCascades == 0 || orthographic) {
         clearPass(cmd, contact_, renderWidth_, renderHeight_, "contact-off", rhi::ColorRgba{1.0f, 1.0f, 1.0f, 1.0f});
     }
     else {
@@ -2981,6 +3096,37 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
         }
 
+        // **The 2D layer's sprites**, after everything opaque and before the
+        // blended 3D surfaces: a picture on the plane is hidden by a solid part
+        // in front of it, and a pane of glass in front of it is drawn over it.
+        // In runs of one image and one filter, which a tilemap makes long.
+        if (spriteCount_ > 0) {
+            GpuWorldUiView spriteView;
+            spriteView.viewProjection = world.camera.viewProjection;
+            cmd.setPipeline(spritePipeline_);
+            cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&spriteView, sizeof(spriteView)));
+            const std::array<rhi::BufferHandle, 1> spriteBuffers{spriteBuffer_};
+            cmd.bindVertexBuffers(0, spriteBuffers);
+            u32 first = 0;
+            while (first < spriteCount_) {
+                const RenderSprite& lead = world.sprites[first];
+                u32 end = first + 1;
+                while (end < spriteCount_ && world.sprites[end].texture == lead.texture &&
+                       world.sprites[end].nearest == lead.nearest) {
+                    ++end;
+                }
+                const std::array<rhi::TextureBinding, 1> texture{
+                    rhi::TextureBinding{lead.texture.valid() ? lead.texture : whitePixel_,
+                                        lead.nearest ? pointSampler_ : environmentSampler_}};
+                cmd.bindTextures(rhi::ShaderStage::Fragment, 0, texture);
+                cmd.draw(6, end - first, 0, first);
+                stats_.drawCalls += 1;
+                first = end;
+            }
+            // The frame block again, for the blended surfaces below.
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
+        }
+
         // Blended, after the opaque pass has filled depth, back to front. The
         // frame uniforms are still bound -- same block, same slot, same values
         // -- so only the pipeline changes.
@@ -3027,7 +3173,10 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             lighting.fogRange[0] = frame.fogRange[0];
             lighting.fogRange[1] = frame.fogRange[1];
             lighting.fogRange[2] = frame.fogRange[2];
-            lighting.depth[0] = world.camera.nearPlane;
+            // Negative for an orthographic camera: `particle.hlsl` reads the
+            // sign to know its depth is linear.
+            lighting.depth[0] =
+                core::isOrthographic(world.camera.projection) ? -world.camera.nearPlane : world.camera.nearPlane;
             lighting.depth[1] = world.camera.farPlane;
             lighting.depth[2] = 1.0f / static_cast<f32>(renderWidth_);
             lighting.depth[3] = 1.0f / static_cast<f32>(renderHeight_);

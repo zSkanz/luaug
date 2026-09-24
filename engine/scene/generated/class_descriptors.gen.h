@@ -65,6 +65,9 @@ inline constexpr EnumId NetworkTopologyEnumId = 24;
 inline constexpr EnumId ParticleShapeEnumId = 25;
 inline constexpr EnumId FaceEnumId = 26;
 inline constexpr EnumId BlockOpacityEnumId = 27;
+inline constexpr EnumId Shape2DEnumId = 28;
+inline constexpr EnumId TextureFilterEnumId = 29;
+inline constexpr EnumId CameraProjectionEnumId = 30;
 
 } // namespace generated
 
@@ -255,6 +258,82 @@ Value getCharacterBodyGrounded(const World& world, core::InstanceId id);
 Value getCharacterBodyState(const World& world, core::InstanceId id);
 void attachCharacterBodyComponents(World& world, core::InstanceId id);
 void detachCharacterBodyComponents(World& world, core::InstanceId id);
+
+// Part2D
+Value getPart2DPosition(const World& world, core::InstanceId id);
+bool setPart2DPosition(World& world, core::InstanceId id, const Value& value);
+Value getPart2DRotation(const World& world, core::InstanceId id);
+bool setPart2DRotation(World& world, core::InstanceId id, const Value& value);
+Value getPart2DSize(const World& world, core::InstanceId id);
+bool setPart2DSize(World& world, core::InstanceId id, const Value& value);
+Value getPart2DShape(const World& world, core::InstanceId id);
+bool setPart2DShape(World& world, core::InstanceId id, const Value& value);
+Value getPart2DColor(const World& world, core::InstanceId id);
+bool setPart2DColor(World& world, core::InstanceId id, const Value& value);
+Value getPart2DTransparency(const World& world, core::InstanceId id);
+bool setPart2DTransparency(World& world, core::InstanceId id, const Value& value);
+Value getPart2DZIndex(const World& world, core::InstanceId id);
+bool setPart2DZIndex(World& world, core::InstanceId id, const Value& value);
+Value getPart2DFlipX(const World& world, core::InstanceId id);
+bool setPart2DFlipX(World& world, core::InstanceId id, const Value& value);
+Value getPart2DFlipY(const World& world, core::InstanceId id);
+bool setPart2DFlipY(World& world, core::InstanceId id, const Value& value);
+Value getPart2DImage(const World& world, core::InstanceId id);
+bool setPart2DImage(World& world, core::InstanceId id, const Value& value);
+Value getPart2DImageRectOffset(const World& world, core::InstanceId id);
+bool setPart2DImageRectOffset(World& world, core::InstanceId id, const Value& value);
+Value getPart2DImageRectSize(const World& world, core::InstanceId id);
+bool setPart2DImageRectSize(World& world, core::InstanceId id, const Value& value);
+Value getPart2DFilter(const World& world, core::InstanceId id);
+bool setPart2DFilter(World& world, core::InstanceId id, const Value& value);
+Value getPart2DAnchored(const World& world, core::InstanceId id);
+bool setPart2DAnchored(World& world, core::InstanceId id, const Value& value);
+Value getPart2DCanCollide(const World& world, core::InstanceId id);
+bool setPart2DCanCollide(World& world, core::InstanceId id, const Value& value);
+Value getPart2DSensor(const World& world, core::InstanceId id);
+bool setPart2DSensor(World& world, core::InstanceId id, const Value& value);
+Value getPart2DDensity(const World& world, core::InstanceId id);
+bool setPart2DDensity(World& world, core::InstanceId id, const Value& value);
+Value getPart2DFriction(const World& world, core::InstanceId id);
+bool setPart2DFriction(World& world, core::InstanceId id, const Value& value);
+Value getPart2DElasticity(const World& world, core::InstanceId id);
+bool setPart2DElasticity(World& world, core::InstanceId id, const Value& value);
+Value getPart2DFixedRotation(const World& world, core::InstanceId id);
+bool setPart2DFixedRotation(World& world, core::InstanceId id, const Value& value);
+Value getPart2DGravityScale(const World& world, core::InstanceId id);
+bool setPart2DGravityScale(World& world, core::InstanceId id, const Value& value);
+Value getPart2DVelocity(const World& world, core::InstanceId id);
+bool setPart2DVelocity(World& world, core::InstanceId id, const Value& value);
+Value getPart2DAngularVelocity(const World& world, core::InstanceId id);
+bool setPart2DAngularVelocity(World& world, core::InstanceId id, const Value& value);
+Value getPart2DCollisionGroup(const World& world, core::InstanceId id);
+bool setPart2DCollisionGroup(World& world, core::InstanceId id, const Value& value);
+void attachPart2DComponents(World& world, core::InstanceId id);
+void detachPart2DComponents(World& world, core::InstanceId id);
+
+// Tilemap2D
+Value getTilemap2DPosition(const World& world, core::InstanceId id);
+bool setTilemap2DPosition(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DCellSize(const World& world, core::InstanceId id);
+bool setTilemap2DCellSize(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DTileset(const World& world, core::InstanceId id);
+bool setTilemap2DTileset(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DTileSize(const World& world, core::InstanceId id);
+bool setTilemap2DTileSize(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DZIndex(const World& world, core::InstanceId id);
+bool setTilemap2DZIndex(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DColor(const World& world, core::InstanceId id);
+bool setTilemap2DColor(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DFilter(const World& world, core::InstanceId id);
+bool setTilemap2DFilter(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DCollides(const World& world, core::InstanceId id);
+bool setTilemap2DCollides(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DFriction(const World& world, core::InstanceId id);
+bool setTilemap2DFriction(World& world, core::InstanceId id, const Value& value);
+Value getTilemap2DCollisionGroup(const World& world, core::InstanceId id);
+bool setTilemap2DCollisionGroup(World& world, core::InstanceId id, const Value& value);
+void attachTilemap2DComponents(World& world, core::InstanceId id);
+void detachTilemap2DComponents(World& world, core::InstanceId id);
 
 // DataModel
 Value getDataModelEngineVersion(const World& world, core::InstanceId id);

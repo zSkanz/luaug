@@ -19,3 +19,5 @@ offers is on the base's page, which is what keeps one added member on
 | `FarPlane` | `number` | — | read/write | Distance in metres to the far clip plane; geometry beyond it is not drawn. |
 | `FieldOfView` | `number` | — | read/write | The vertical field of view in degrees. Clamped to a sane open interval: zero and 180 both produce a projection matrix that renders nothing. |
 | `NearPlane` | `number` | — | read/write | Distance in metres to the near clip plane. Small values buy little and cost depth precision everywhere, so this is worth raising rather than lowering. |
+| `OrthographicSize` | `number` | `10` | read/write | Half the height of what an orthographic camera shows, in metres. Its width follows from the window's shape. Zooming a 2D view is changing this. |
+| `Projection` | `Enum.CameraProjection` | — | read/write | Perspective for a 3D view, Orthographic for a 2D one (the 2D layer, phase 3). An orthographic camera ignores `FieldOfView` and shows `OrthographicSize` metres above and below the middle of the view, whatever the distance. |

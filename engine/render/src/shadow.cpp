@@ -127,7 +127,8 @@ ShadowCascades fitShadowCascades(const ShadowFit& fit, const ShadowCascades* pre
         f32 radius = 0.0f;
         for (const f32 depth : {sliceNear, sliceFar}) {
             const Vec3 axis = fit.forward * depth;
-            const Vec3 offset = fit.right * (depth * fit.tanHalfFovX) + fit.up * (depth * fit.tanHalfFovY);
+            const core::Vec2 half = fit.spread.at(depth);
+            const Vec3 offset = fit.right * half.x + fit.up * half.y;
             radius = std::max(radius, core::length(axis + offset - centre));
         }
         radius = std::max(radius, 1e-3f);

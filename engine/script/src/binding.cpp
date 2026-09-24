@@ -67,6 +67,8 @@ const char* typeName(UserdataTag tag) noexcept
         return "RaycastParams";
     case UserdataTag::RaycastResult:
         return "RaycastResult";
+    case UserdataTag::RaycastResult2D:
+        return "RaycastResult2D";
     case UserdataTag::Vector2:
         return "Vector2";
     case UserdataTag::UDim:

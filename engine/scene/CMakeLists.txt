@@ -24,12 +24,15 @@ luaug_add_module(scene
         src/scene_file.cpp
         src/json_slice.cpp
         src/native_accessors.cpp
+        src/native_accessors_2d.cpp
         src/partition.cpp
         src/pivot.cpp
         src/physics_sync.cpp
+        src/physics_sync_2d.cpp
         src/players.cpp
         src/ragdoll_build.cpp
         src/streaming_glue.cpp
+        src/tile_outline.cpp
         src/voxel_fluid.cpp
         generated/class_descriptors.gen.cpp
     DEPS
@@ -71,6 +74,7 @@ luaug_add_module_tests(scene
         tests/scene_file_tests.cpp
         tests/partition_tests.cpp
         tests/physics_sync_tests.cpp
+        tests/physics_sync_2d_tests.cpp
         tests/ragdoll_build_tests.cpp
         tests/streaming_glue_tests.cpp
         tests/voxel_fluid_tests.cpp

@@ -67,6 +67,9 @@ inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
 inline constexpr scene::EnumId ParticleShapeEnumId = 25;
 inline constexpr scene::EnumId FaceEnumId = 26;
 inline constexpr scene::EnumId BlockOpacityEnumId = 27;
+inline constexpr scene::EnumId Shape2DEnumId = 28;
+inline constexpr scene::EnumId TextureFilterEnumId = 29;
+inline constexpr scene::EnumId CameraProjectionEnumId = 30;
 
 } // namespace generated
 

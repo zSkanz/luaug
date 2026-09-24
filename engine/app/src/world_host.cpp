@@ -320,6 +320,14 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         m_runtime->setPhysics(&*m_physics);
     }
 #endif
+#if LUAUG_PHYSICS_BOX2D
+    m_backend2d = physics::createBox2DPhysics();
+    if (m_backend2d != nullptr) {
+        m_physics2d.emplace(*m_world, *m_backend2d);
+        m_physics2d->setWorkspace(m_workspace);
+        m_runtime->setPhysics2D(&*m_physics2d);
+    }
+#endif
 
     if (!options.projectPath.empty()) {
         if (std::optional<core::EngineError> error = mountProject(options.projectPath); error.has_value())
@@ -484,6 +492,8 @@ std::optional<core::EngineError> WorldHost::restartRuntime()
     m_runtime->setInput(&m_input);
     if (m_physics.has_value())
         m_runtime->setPhysics(&*m_physics);
+    if (m_physics2d.has_value())
+        m_runtime->setPhysics2D(&*m_physics2d);
 
     // **The services are the ones that were already there.** `registerServices`
     // adopted the DataModel, and everything under it is found rather than made,
@@ -835,6 +845,8 @@ void WorldHost::tick()
 
     if (m_physics.has_value())
         m_physics->step(state.fixedTimestep);
+    if (m_physics2d.has_value())
+        m_physics2d->step(state.fixedTimestep);
     // Fluids are simulation too, and move in the same half of the tick: a
     // script that breaks a dam in `PreSimulation` sees the first block of
     // water move in `PostSimulation`.

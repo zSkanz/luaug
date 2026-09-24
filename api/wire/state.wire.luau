@@ -612,6 +612,19 @@ local Excluded: { Schema.Excluded } = {
             .. "replicated -- the character and its name.",
     },
     { Name = "SurfaceGui", Reason = "World-space UI. The same as `BillboardGui`." },
+    {
+        Name = "Part2D",
+        Reason = "**Not yet, and deliberately.** The 2D layer (phase 3) lands for one machine first: a "
+            .. "2D body's state is a position, an angle and two velocities on the plane, and carrying it "
+            .. "is a field set of its own and therefore a protocol bump (11), which "
+            .. "docs/briefs/p3-2d-kickoff.md schedules after the layer has an example that plays. A "
+            .. "replica meanwhile sees no 2D parts at all rather than stale ones.",
+    },
+    {
+        Name = "Tilemap2D",
+        Reason = "The same as `Part2D`, and its bulk -- the painted cells -- is not a property, as a "
+            .. "`Terrain`'s is not: when it travels it arrives with the world, and an edit as a message.",
+    },
     { Name = "Frame", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextLabel", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextButton", Reason = "Screen-space UI. The same as `ScreenGui`." },

@@ -108,6 +108,15 @@ end
 declare extern type EnumBlockOpacity extends EnumItem with
 end
 
+declare extern type EnumShape2D extends EnumItem with
+end
+
+declare extern type EnumTextureFilter extends EnumItem with
+end
+
+declare extern type EnumCameraProjection extends EnumItem with
+end
+
 declare extern type Vector3 with
     --- The X component. Lowercase because it is a field of the VM primitive itself, like a string's
     --- length, and not a member of a type this project defines -- the one documented exception to the
@@ -321,6 +330,17 @@ declare extern type RaycastResult with
     read Normal: vector
     --- How far along the cast the hit is, in metres. The direction passed to a cast is not normalised
     --- -- its length is the range -- so this is a distance rather than a fraction.
+    read Distance: number
+end
+
+declare extern type RaycastResult2D with
+    --- The `Part2D` or `Tilemap2D` that was hit.
+    read Instance: Instance
+    --- Where on it, in world units.
+    read Position: Vector2
+    --- The surface normal there, pointing out of the surface.
+    read Normal: Vector2
+    --- How far along the ray the hit is, in metres.
     read Distance: number
 end
 
@@ -1042,6 +1062,13 @@ declare extern type Camera extends PVInstance with
     NearPlane: number
     --- Distance in metres to the far clip plane; geometry beyond it is not drawn.
     FarPlane: number
+    --- Perspective for a 3D view, Orthographic for a 2D one (the 2D layer, phase 3). An orthographic
+    --- camera ignores `FieldOfView` and shows `OrthographicSize` metres above and below the middle of
+    --- the view, whatever the distance.
+    Projection: EnumCameraProjection
+    --- Half the height of what an orthographic camera shows, in metres. Its width follows from the
+    --- window's shape. Zooming a 2D view is changing this.
+    OrthographicSize: number
 end
 
 declare extern type PointLight extends Instance with
@@ -1578,6 +1605,100 @@ declare extern type AnimationPlayer extends Instance with
     function LoadAnimation(self, content: Content): AnimationTrack
 end
 
+declare extern type Part2D extends Instance with
+    --- Where its middle is, in metres.
+    Position: Vector2
+    --- Degrees, counter-clockwise. A part with `FixedRotation` keeps whatever this is.
+    Rotation: number
+    --- Width and height in metres: the picture's and the collider's.
+    Size: Vector2
+    --- The outline it is drawn and collides as.
+    Shape: EnumShape2D
+    --- Multiplies the image; with no image, the colour it is drawn in.
+    Color: Color3
+    --- 0 is as drawn, 1 is invisible. A transparent part still collides.
+    Transparency: number
+    --- Which of two overlapping sprites is in front: the higher. Ties keep the tree's order.
+    ZIndex: number
+    --- Mirrors the picture left to right: a character facing the other way.
+    FlipX: boolean
+    --- Mirrors the picture top to bottom.
+    FlipY: boolean
+    --- The picture, stretched over `Size`. Its transparent pixels are transparent.
+    Image: Content
+    --- The top-left of the part of the image drawn, in pixels: one frame of a sprite sheet.
+    ImageRectOffset: Vector2
+    --- The size of that part in pixels. Zero on both axes draws the whole image.
+    ImageRectSize: Vector2
+    --- Linear for painted art, Nearest for pixel art.
+    Filter: EnumTextureFilter
+    --- Ground: it does not move, and what lands on it stays. A script may still move it.
+    Anchored: boolean
+    --- Whether other parts bump into it. A part that cannot collide is only a picture.
+    CanCollide: boolean
+    --- Reports what enters it through `Touched` and pushes nothing: a coin, a checkpoint, a trigger.
+    Sensor: boolean
+    --- Kilograms per square metre: with `Size`, how heavy it is.
+    Density: number
+    --- How much it grips what it slides on. Zero is ice.
+    Friction: number
+    --- How much of its speed a bounce gives back: 0 lands dead, 1 bounces for ever.
+    Elasticity: number
+    --- Never turns, whatever hits it: a character that stays upright.
+    FixedRotation: boolean
+    --- How strongly `Workspace.Gravity` pulls it: 0 floats, 2 falls twice as hard, and a negative
+    --- number falls up.
+    GravityScale: number
+    --- Metres per second. Written by the simulation every tick, and a script may set it: a jump is
+    --- setting its y.
+    Velocity: Vector2
+    --- Degrees per second, counter-clockwise.
+    AngularVelocity: number
+    --- The group deciding which other parts it collides with, as `PhysicsService` names them.
+    CollisionGroup: string
+    --- Fires once when something begins touching it -- another `Part2D`, or a `Tilemap2D`'s solid tiles
+    --- -- or, for a `Sensor`, begins overlapping it. Deferred like every signal.
+    read Touched: Signal<Instance>
+    --- Fires when something that was touching it stops.
+    read TouchEnded: Signal<Instance>
+    --- A sudden push, in kilogram-metres per second, at its middle. Applied at the next tick; an
+    --- anchored part ignores it.
+    function ApplyImpulse(self, impulse: Vector2): ()
+end
+
+declare extern type Tilemap2D extends Instance with
+    --- Where the bottom-left corner of cell (0, 0) is, in metres.
+    Position: Vector2
+    --- The side of one cell, in metres.
+    CellSize: number
+    --- The image the tiles are cut from.
+    Tileset: Content
+    --- One tile's size in the tileset, in pixels.
+    TileSize: Vector2
+    --- Its place among overlapping sprites, as a `Part2D`'s.
+    ZIndex: number
+    --- Multiplies every tile.
+    Color: Color3
+    --- Nearest by default, because tiles are nearly always pixel art.
+    Filter: EnumTextureFilter
+    --- Whether its tiles are solid. Off, it is scenery: a background layer.
+    Collides: boolean
+    --- How much its tiles grip what slides on them.
+    Friction: number
+    --- The group its tiles collide as.
+    CollisionGroup: string
+    --- Puts tile `tile` in cell (`x`, `y`); 0 empties it. Cells are whole numbers, and y grows upwards,
+    --- as the world's does.
+    function SetCell(self, x: number, y: number, tile: number): ()
+    --- The tile in cell (`x`, `y`), or 0.
+    function GetCell(self, x: number, y: number): number
+    --- Puts `tile` in every cell of the rectangle from (`x0`, `y0`) to (`x1`, `y1`), both corners
+    --- included.
+    function FillRect(self, x0: number, y0: number, x1: number, y1: number, tile: number): ()
+    --- Empties every cell.
+    function Clear(self): ()
+end
+
 declare extern type DataModel extends Instance with
     --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
     --- runtime is chosen before the VM exists, so nothing a script does can change it.
@@ -1648,6 +1769,10 @@ declare extern type Workspace extends Instance with
     --- surfaces at the same distance resolves the same way on every run, because a query whose answer
     --- depends on traversal order is a replay divergence waiting for a body count to change (R10).
     function Raycast(self, origin: vector, direction: vector, params: RaycastParams?): RaycastResult?
+    --- The nearest `Part2D` or `Tilemap2D` a ray on the 2D plane hits, or nil. As with `Raycast`, the
+    --- direction's length is the reach. Sensors are passed through, and so is a part with `CanCollide`
+    --- off. Two hits at the same distance resolve the same way on every run (R10).
+    function Raycast2D(self, origin: Vector2, direction: Vector2, params: RaycastParams?): RaycastResult2D?
     --- The same question with a sphere swept along the ray instead of a point. This is what a camera
     --- boom or a character's ground check wants: a ray slips through a gap narrower than the thing it
     --- is standing in for.
@@ -2464,6 +2589,22 @@ declare Enum: {
         Translucent: EnumBlockOpacity,
         GetEnumItems: (self: any) -> { EnumBlockOpacity },
     },
+    Shape2D: {
+        Box: EnumShape2D,
+        Circle: EnumShape2D,
+        Capsule: EnumShape2D,
+        GetEnumItems: (self: any) -> { EnumShape2D },
+    },
+    TextureFilter: {
+        Linear: EnumTextureFilter,
+        Nearest: EnumTextureFilter,
+        GetEnumItems: (self: any) -> { EnumTextureFilter },
+    },
+    CameraProjection: {
+        Perspective: EnumCameraProjection,
+        Orthographic: EnumCameraProjection,
+        GetEnumItems: (self: any) -> { EnumCameraProjection },
+    },
 }
 
 declare Vector3: {
@@ -2591,6 +2732,8 @@ declare Instance: {
         & (("AudioGroup") -> AudioGroup)
         & (("Sound") -> Sound)
         & (("AnimationPlayer") -> AnimationPlayer)
+        & (("Part2D") -> Part2D)
+        & (("Tilemap2D") -> Tilemap2D)
         & (("RemoteEvent") -> RemoteEvent)
         & (("RemoteFunction") -> RemoteFunction),
     stamp: (name: string, linked: boolean?) -> Instance,

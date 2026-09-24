@@ -79,6 +79,8 @@ struct RaycastQuery
 // private to this file, the way every other datatype's does.
 void pushRaycastResult(lua_State* L, core::InstanceId instance, core::DVec3 position, core::Vec3 normal,
                        core::f32 distance);
+void pushRaycastResult2D(lua_State* L, core::InstanceId instance, core::Vec2 position, core::Vec2 normal,
+                         core::f64 distance);
 
 // The bridge between a `scene::Value` and a Luau value. It lives here rather
 // than beside the Instance bindings because this file owns every userdata type

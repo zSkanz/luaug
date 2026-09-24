@@ -48,12 +48,17 @@ ruled out in writing.
    `architecture.md` reserved for it.
    - Each sprite is one instance: position, size, rotation, UV rect, colour
      and flip.
-   - Sprites are sorted by `ZIndex`, then tree order: a painter's order a game
-     controls.
+   - Sprites are sorted by `ZIndex`; at one `ZIndex` a tilemap is beneath a
+     part, and otherwise the order is the order they were made. A painter's
+     order a game controls. *(Amended in 2D-D: "tree order" would have been a
+     tree walk per frame for a tie-break nobody asked for.)*
    - They are depth-tested against 3D and do not write depth.
-   - Premultiplied alpha, as particles use.
+   - Straight alpha, as a picture's transparent pixels are stored. *(Amended in
+     2D-D from premultiplied: nothing upstream premultiplies an image.)*
+   - Unlit: a sprite is art, and its `Color` is an sRGB colour decoded as the
+     world UI decodes one.
    - A batch breaks on a change of texture or filter. Tile instances go
-     through the same pass, culled to the view.
+     through the same pass, culled to the view a block at a time.
 5. **Physics is `PhysicsSync2D`, beside the 3D mirror and shaped like it.**
    - Script writes are applied at the start of the tick and the results
      written back quietly.
@@ -65,9 +70,12 @@ ruled out in writing.
    system), carries its own trigonometry and orders its contacts. The world
    hash covers `Part2D` through its properties. A two-world test holds it bit
    for bit.
-7. **Replication:** `Part2D` replicates its properties. A tilemap's cells are
-   excluded by name, as `Terrain` is (ADR 0069, decision 7), until a game
-   needs to edit a tilemap live over the network.
+7. **Replication:** *(Amended in 2D-C.)* Neither class is on protocol 10;
+   both are excluded by name with the reason. Carrying a `Part2D` is a field
+   set of its own and so a protocol bump, and it is stage 2D-G, after the
+   layer has an example that plays. A tilemap's cells will travel as a
+   `Terrain`'s would (ADR 0069, decision 7): with the world, and an edit as a
+   message.
 8. **Editor:**
    - A 2D view: an orthographic camera looking down -Z, pan with the right or
      middle button, zoom with the wheel, and a grid in the XY plane.
@@ -86,8 +94,10 @@ ruled out in writing.
 - **2D-C** `PhysicsSync2D`, the host's wiring, `Touched`, `Raycast2D`.
 - **2D-D** Orthographic cameras, the sprite pass, sprite textures and pixel-art
   sampling, tilemap drawing.
+  *(B, C and D done 2026-09-23, as one commit -- see Findings 1.)*
 - **2D-E** The editor's 2D view and Tiles tool.
 - **2D-F** `examples/20-platformer`, conformance specs, documentation.
+- **2D-G** Replication: `Part2D` and tilemap edits on protocol 11.
 
 ## The survey this rests on (2026-09-23)
 
@@ -113,4 +123,38 @@ ruled out in writing.
 
 ## Findings
 
-(Filled in as the stages correct what this brief assumed.)
+1. **B, C and D could not land apart.** `inertcheck` refuses a component
+   field that nothing reads, and a sprite's picture is read only by the
+   renderer while its body is read only by the mirror. Three commits would
+   each have carried `Inert` markers for the next to delete; one commit
+   carries none.
+2. **The survey named six perspective assumptions; there were ten.** Beyond
+   the six: the occlusion pass's uniforms, the world UI's billboard scale, the
+   LOD statistic the engine counts beside the renderer, the jitter (an
+   orthographic projection's x and y offset lives in the constant row, not the
+   depth row), and the soft particles' depth linearisation. The fix is one
+   question every consumer now asks, `core::viewSpread`: how wide the view is
+   at a depth. It is two tangents under perspective and two constant
+   half-extents under orthographic, and the same arithmetic serves both.
+3. **The screen-space passes are off under an orthographic camera.** Ambient
+   occlusion and contact shadows rebuild a position from depth as a
+   perspective camera made it; teaching them the other shape is work for a
+   2D game that does not want either. Soft particles were taught it, because
+   a 2D game does want particles: a negative near plane in their uniforms is
+   the flag.
+4. **A tile outline needs a rule where two regions touch at a corner.** Two
+   boundary edges start at that corner, and taking the wrong one fuses the
+   regions into one figure-of-eight loop that Box2D refuses. The walk takes
+   the sharpest LEFT turn, which keeps to the region it is going round.
+5. **Box2D's closest-hit ray keeps whichever equal hit its tree reached
+   first.** `Raycast2D` casts with its own callback that keeps the nearest
+   and breaks a tie on the lower user data, so the answer is a fact about the
+   world (R10) -- and the same callback applies the instance filter, which
+   Box2D's category bits cannot express.
+6. **A sprite sheet is measured in pixels, and the texture library did not
+   know any.** It now keeps each image's size beside its handle.
+7. **Tiles meet only if their shared edge is one number.** A centre plus a
+   half-width puts a hairline between tiles at some zooms. A sprite is sent as
+   its two corners, each tile's computed from the same expression as its
+   neighbour's, and the shader leaves an unturned sprite's corners exactly as
+   given.

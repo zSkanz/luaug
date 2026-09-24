@@ -45,6 +45,7 @@ struct BodyRecord
     u32 generation = 0;
     bool alive = false;
     CollisionGroup2D group = kDefaultCollisionGroup2D;
+    bool collides = true;
 };
 
 struct WorldRecord
@@ -169,6 +170,8 @@ public:
         shape.enableSensorEvents = true;
         shape.enableContactEvents = true;
         shape.filter = record->filterFor(desc.group);
+        if (!desc.collides)
+            shape.filter.maskBits = 0;
         if (!addShape(body, shape, desc.shape)) {
             b2DestroyBody(body);
             return {};
@@ -188,6 +191,7 @@ public:
         held.generation = ++m_generation;
         held.alive = true;
         held.group = desc.group;
+        held.collides = desc.collides;
         return Body2DHandle{index, held.generation};
     }
 
@@ -253,22 +257,44 @@ public:
     }
 
     [[nodiscard]] std::optional<Raycast2DHit> raycast(World2DHandle world, core::Vec2 origin, core::Vec2 translation,
-                                                      u64 ignored) const override
+                                                      const Raycast2DFilter& filter) const override
     {
         const WorldRecord* record = resolve(world);
         if (record == nullptr)
             return std::nullopt;
-        b2QueryFilter filter = b2DefaultQueryFilter();
-        filter.maskBits = ~ignored;
-        const b2RayResult result = b2World_CastRayClosest(record->id, toBox(origin), toBox(translation), filter);
-        if (!result.hit || !b2Shape_IsValid(result.shapeId))
-            return std::nullopt;
-        Raycast2DHit hit;
-        hit.userData = unpackUser(b2Shape_GetUserData(result.shapeId));
-        hit.point = fromBox(result.point);
-        hit.normal = fromBox(result.normal);
-        hit.fraction = result.fraction;
-        return hit;
+        b2QueryFilter query = b2DefaultQueryFilter();
+        if (filter.group.has_value()) {
+            const u32 slot = std::min<u32>(*filter.group, kMaxCollisionGroups2D - 1);
+            query.categoryBits = u64{1} << slot;
+            query.maskBits = record->collides[slot];
+        }
+
+        // Every hit is offered and the nearest kept, rather than letting the
+        // cast clip to each one it meets: clipping keeps whichever of two equal
+        // hits the tree reached first.
+        struct Closest
+        {
+            const Raycast2DFilter* filter = nullptr;
+            std::optional<Raycast2DHit> best;
+        } closest{&filter, std::nullopt};
+        const auto offer = [](b2ShapeId shape, b2Vec2 point, b2Vec2 normal, float fraction, void* context) -> float {
+            auto& self = *static_cast<Closest*>(context);
+            if (b2Shape_IsSensor(shape))
+                return -1.0f;
+            const u64 user = unpackUser(b2Shape_GetUserData(shape));
+            const bool listed = std::find(self.filter->userData.begin(), self.filter->userData.end(), user) !=
+                                self.filter->userData.end();
+            if (self.filter->include != listed)
+                return -1.0f;
+            if (!self.best.has_value() || fraction < self.best->fraction ||
+                (fraction == self.best->fraction && user < self.best->userData)) {
+                self.best = Raycast2DHit{user, fromBox(point), fromBox(normal), fraction};
+            }
+            // Clip to this hit but not past it, so an equal one is still seen.
+            return fraction;
+        };
+        (void)b2World_CastRay(record->id, toBox(origin), toBox(translation), query, offer, &closest);
+        return closest.best;
     }
 
     void setGroupsCollidable(World2DHandle world, CollisionGroup2D a, CollisionGroup2D b, bool collidable) override
@@ -288,10 +314,14 @@ public:
         for (const BodyRecord& held : record->bodies) {
             if (!held.alive || (held.group != a && held.group != b))
                 continue;
-            std::array<b2ShapeId, 4> shapes{};
+            // Every shape: a chain is one shape per segment.
+            std::vector<b2ShapeId> shapes(static_cast<std::size_t>(b2Body_GetShapeCount(held.id)));
             const int count = b2Body_GetShapes(held.id, shapes.data(), static_cast<int>(shapes.size()));
+            b2Filter filter = record->filterFor(held.group);
+            if (!held.collides)
+                filter.maskBits = 0;
             for (int at = 0; at < count; ++at)
-                b2Shape_SetFilter(shapes[static_cast<std::size_t>(at)], record->filterFor(held.group));
+                b2Shape_SetFilter(shapes[static_cast<std::size_t>(at)], filter);
         }
     }
 
@@ -332,8 +362,9 @@ private:
         }
         case Shape2DType::Chain: {
             // An open chain's first and last points are ghosts: they shape the
-            // collision at its ends and are not themselves a segment.
-            if (shape.points.size() < 4)
+            // collision at its ends and are not themselves a segment. A loop
+            // has none.
+            if (shape.points.size() < (shape.loop ? 3u : 4u))
                 return false;
             std::vector<b2Vec2> points;
             points.reserve(shape.points.size());
@@ -346,6 +377,7 @@ private:
             chain.materials = &def.material;
             chain.materialCount = 1;
             chain.filter = def.filter;
+            chain.isLoop = shape.loop;
             chain.enableSensorEvents = true;
             return B2_IS_NON_NULL(b2CreateChain(body, &chain));
         }

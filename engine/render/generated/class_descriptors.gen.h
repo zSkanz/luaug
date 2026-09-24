@@ -67,6 +67,9 @@ inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
 inline constexpr scene::EnumId ParticleShapeEnumId = 25;
 inline constexpr scene::EnumId FaceEnumId = 26;
 inline constexpr scene::EnumId BlockOpacityEnumId = 27;
+inline constexpr scene::EnumId Shape2DEnumId = 28;
+inline constexpr scene::EnumId TextureFilterEnumId = 29;
+inline constexpr scene::EnumId CameraProjectionEnumId = 30;
 
 } // namespace generated
 
@@ -137,6 +140,10 @@ scene::Value getCameraNearPlane(const scene::World& world, core::InstanceId id);
 bool setCameraNearPlane(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getCameraFarPlane(const scene::World& world, core::InstanceId id);
 bool setCameraFarPlane(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getCameraProjection(const scene::World& world, core::InstanceId id);
+bool setCameraProjection(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getCameraOrthographicSize(const scene::World& world, core::InstanceId id);
+bool setCameraOrthographicSize(scene::World& world, core::InstanceId id, const scene::Value& value);
 void attachCameraComponents(scene::World& world, core::InstanceId id);
 void detachCameraComponents(scene::World& world, core::InstanceId id);
 
