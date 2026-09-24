@@ -3117,6 +3117,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             static std::vector<PickMarker> markers;
             collectPickMarkers(host->world(), authoredRoot(), markers);
             for (const PickMarker& marker : markers) {
+                // Not the one the eye is inside (`eyeInsideMarker`): from in
+                // there it is two lines across the whole picture.
+                if (snapshot.camera.valid && eyeInsideMarker(snapshot.camera.origin, marker.at))
+                    continue;
                 // Brighter for the selected one, because the reason to look at
                 // these is to find the one you are moving.
                 const bool chosen = inspector.isSelected(marker.instance);

@@ -798,3 +798,15 @@ TEST_CASE("two overlapping markers resolve to the one the pointer is more on")
     REQUIRE(hit.has_value());
     CHECK(hit->instance == far);
 }
+
+TEST_CASE("a marker the eye is inside is not one the eye can see or click")
+{
+    // **The owner's "is a grid on the camera normal?"**: the editor starts where
+    // the scene's Camera is, inside that camera's marker, which from there is
+    // two lines across the whole view -- and a ray from inside it hits it
+    // whatever it is aimed at.
+    CHECK(luaug::app::eyeInsideMarker(core::DVec3{1.0, 2.0, 3.0}, core::DVec3{1.0, 2.0, 3.0}));
+    CHECK(luaug::app::eyeInsideMarker(core::DVec3{0.0, 0.0, 0.0}, core::DVec3{0.3, 0.0, 0.0}));
+    // A step back and it is an ordinary marker again.
+    CHECK_FALSE(luaug::app::eyeInsideMarker(core::DVec3{0.0, 0.0, 0.0}, core::DVec3{2.0, 0.0, 0.0}));
+}

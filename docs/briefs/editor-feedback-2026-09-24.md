@@ -26,6 +26,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       next match, jump to bracket, block comment).
 - [x] **Text UI has a TextTransparency.**
 - [x] **`Material` is a known global** to the lint and to completion.
+- [x] **Play brings the viewport to the front.**
+- [x] **No cross of lines through the view at the scene camera.** It was that
+      camera's marker, seen from inside.
 - [x] **A CFrame's rotation is editable in Properties**, as the three angles
       `Orientation` uses, beside its position -- it was nine read-only numbers.
 - [x] **WASD flies without a held mouse button.** While the viewport has focus
@@ -179,3 +182,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
     out of the build -- and hands a path that ends on an engine class to
     reflection. Where it cannot follow a value it says so and the old answer
     stands.
+17. **The "grid on the camera" was the camera's own marker.** The editor
+    starts at the scene's `CurrentCamera`, inside the wire sphere drawn round
+    every camera so it can be seen and clicked; from inside, a sphere is two
+    lines across the view. A ray from inside also passed within its radius
+    whatever it was aimed at, so a click could select the camera instead of
+    the part behind. A marker the eye is inside is now neither drawn nor
+    picked (`eyeInsideMarker`).

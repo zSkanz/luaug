@@ -165,6 +165,22 @@ void collectPickMarkers(const scene::World& world, core::InstanceId root, std::v
 // it sits on, big enough to hit without aiming.
 inline constexpr f32 kPickMarkerRadius = 0.28f;
 
+// **A marker the eye is inside of, or all but touching.** The editor's camera
+// starts where the scene's own `Camera` is, so the one marker it most often
+// sits in is that camera's: drawn from inside, its wire sphere is two lines
+// across the whole view (the owner's "is a grid on the camera normal?"), and
+// a ray from inside it passes within its radius whatever it is aimed at, so a
+// click meant for a part behind it selected the camera instead. Such a marker
+// is neither drawn nor picked; step back and it is both again.
+[[nodiscard]] inline bool eyeInsideMarker(core::DVec3 eye, core::DVec3 marker) noexcept
+{
+    const core::f64 dx = marker.x - eye.x;
+    const core::f64 dy = marker.y - eye.y;
+    const core::f64 dz = marker.z - eye.z;
+    const core::f64 reach = static_cast<core::f64>(kPickMarkerRadius) * 2.0;
+    return dx * dx + dy * dy + dz * dz < reach * reach;
+}
+
 // --- The manipulators -------------------------------------------------------
 //
 // **All of this is arithmetic and none of it is a UI callback**, for the reason

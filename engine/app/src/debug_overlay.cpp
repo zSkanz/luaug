@@ -7865,6 +7865,16 @@ terrainPanelDone:;
             editor->setLayoutRevision(Editor::CurrentLayoutRevision);
     }
 
+    // **Play brings the viewport to the front** (the owner's report): a script
+    // tab docked over it, or the keyboard in another panel, left somebody
+    // pressing play and watching code while the game ran behind it. Once, on
+    // the frame play begins, and only when there is a viewport to show.
+    static bool s_wasPlaying = false;
+    const bool playing = editor != nullptr && editor->inPlayMode();
+    if (playing && !s_wasPlaying && panels.viewport)
+        ImGui::SetWindowFocus("Viewport###Viewport");
+    s_wasPlaying = playing;
+
     // **Last, because it paints over a strip that has already been laid out.**
     // Every window in the central node has been submitted by now, so the tab bar
     // knows where each tab is; before this point it does not.

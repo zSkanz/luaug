@@ -4550,6 +4550,8 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
     // a wall must still make it unreachable.
     static std::vector<PickMarker> markers;
     collectPickMarkers(world, root, markers);
+    // Not the one the eye is inside (`eyeInsideMarker`).
+    std::erase_if(markers, [&ray](const PickMarker& marker) { return eyeInsideMarker(ray.origin, marker.at); });
     if (const std::optional<PickHit> marker = pickMarker(
             markers, ray, kPickMarkerRadius, hit.has_value() ? hit->distance : std::numeric_limits<f32>::infinity());
         marker.has_value()) {
