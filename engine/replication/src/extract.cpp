@@ -10,6 +10,137 @@
 #include "wire_schema.gen.h"
 
 namespace luaug::replication {
+
+namespace {
+
+// --- ADR 0090's two encodings ----------------------------------------------------------
+//
+// Written member by member at fixed offsets, never as a struct, so padding can
+// never reach the wire and a cell that was cleared compares equal to one that
+// was written with the same values.
+
+constexpr asset::MaterialField PackedOrder[] = {asset::MaterialField::Color,      asset::MaterialField::Transparency,
+                                                asset::MaterialField::Emissive,   asset::MaterialField::Metalness,
+                                                asset::MaterialField::Roughness,  asset::MaterialField::NormalScale,
+                                                asset::MaterialField::AlphaCutoff};
+
+void putFloats(FieldValue& out, core::usize at, std::initializer_list<float> values) noexcept
+{
+    for (const float value : values) {
+        std::memcpy(out.raw.data() + at, &value, sizeof(value));
+        at += sizeof(value);
+    }
+}
+
+[[nodiscard]] float floatAt(const FieldValue& value, core::usize at) noexcept
+{
+    float out = 0.0f;
+    std::memcpy(&out, value.raw.data() + at, sizeof(out));
+    return out;
+}
+
+void packValues(FieldValue& out, asset::MaterialFieldMask set, const asset::MaterialProperties& p) noexcept
+{
+    out.raw.fill(0);
+    std::memcpy(out.raw.data(), &set, sizeof(set));
+    putFloats(out, 4,
+              {p.color.r, p.color.g, p.color.b, p.transparency, p.emissive.r, p.emissive.g, p.emissive.b, p.metalness,
+               p.roughness, p.normalScale, p.alphaCutoff});
+}
+
+void unpackValues(const FieldValue& value, asset::MaterialFieldMask& set, asset::MaterialProperties& p) noexcept
+{
+    std::memcpy(&set, value.raw.data(), sizeof(set));
+    p.color = core::Color3{floatAt(value, 4), floatAt(value, 8), floatAt(value, 12)};
+    p.transparency = floatAt(value, 16);
+    p.emissive = core::Color3{floatAt(value, 20), floatAt(value, 24), floatAt(value, 28)};
+    p.metalness = floatAt(value, 32);
+    p.roughness = floatAt(value, 36);
+    p.normalScale = floatAt(value, 40);
+    p.alphaCutoff = floatAt(value, 44);
+}
+
+void setOverrides(FieldValue& out, const asset::MaterialOverrides& overrides) noexcept
+{
+    packValues(out, overrides.set, asset::overrideValues(overrides));
+}
+
+[[nodiscard]] asset::MaterialOverrides asOverrides(const FieldValue& value) noexcept
+{
+    asset::MaterialFieldMask set = 0;
+    asset::MaterialProperties values;
+    unpackValues(value, set, values);
+    asset::MaterialOverrides out;
+    for (const asset::MaterialField field : PackedOrder) {
+        if ((set & asset::fieldBit(field)) != 0)
+            (void)asset::setOverride(out, field, values);
+    }
+    return out;
+}
+
+void setCloneValues(FieldValue& out, const scene::MaterialClone& clone) noexcept
+{
+    packValues(out, clone.set, clone.values);
+    out.raw[MaterialOverridesBytes] = static_cast<core::u8>(clone.values.alphaMode);
+    out.raw[MaterialOverridesBytes + 1] = clone.values.doubleSided ? 1u : 0u;
+}
+
+// What a replica's copy of a clone is numbered: the authority's number in the
+// top half of the range, which a replica's own scripts count up from the bottom
+// of and never reach.
+constexpr core::u32 ReplicatedCloneBase = 0x80000000u;
+
+// The map field a wire name is, or `Count`.
+[[nodiscard]] asset::MaterialField cloneMapField(std::string_view name) noexcept
+{
+    if (name == "MaterialCloneColorMap")
+        return asset::MaterialField::ColorMap;
+    if (name == "MaterialCloneNormalMap")
+        return asset::MaterialField::NormalMap;
+    if (name == "MaterialCloneMetallicRoughnessMap")
+        return asset::MaterialField::MetallicRoughnessMap;
+    if (name == "MaterialCloneEmissiveMap")
+        return asset::MaterialField::EmissiveMap;
+    return asset::MaterialField::Count;
+}
+
+[[nodiscard]] const std::string* mapOf(const asset::MaterialProperties& p, asset::MaterialField field) noexcept
+{
+    switch (field) {
+    case asset::MaterialField::ColorMap:
+        return &p.colorMap;
+    case asset::MaterialField::NormalMap:
+        return &p.normalMap;
+    case asset::MaterialField::MetallicRoughnessMap:
+        return &p.metallicRoughnessMap;
+    case asset::MaterialField::EmissiveMap:
+        return &p.emissiveMap;
+    default:
+        return nullptr;
+    }
+}
+
+void setMapOf(asset::MaterialProperties& p, asset::MaterialField field, std::string_view text)
+{
+    switch (field) {
+    case asset::MaterialField::ColorMap:
+        p.colorMap = text;
+        break;
+    case asset::MaterialField::NormalMap:
+        p.normalMap = text;
+        break;
+    case asset::MaterialField::MetallicRoughnessMap:
+        p.metallicRoughnessMap = text;
+        break;
+    case asset::MaterialField::EmissiveMap:
+        p.emissiveMap = text;
+        break;
+    default:
+        break;
+    }
+}
+
+} // namespace
 namespace {
 
 using core::InstanceId;
@@ -51,19 +182,34 @@ using generated::Source;
             setVec3(out, part->size);
             return true;
         }
-        // The engine default material's two parameters (ADR 0090): what a part
-        // overrides, or the default's own white and zero. The material a part
-        // wears and its other parameters are not on this protocol.
-        if (field.name == "Color") {
-            const asset::MaterialOverrides& overrides = part->materialParameters;
-            const core::Color3 colour =
-                overrides.has(asset::MaterialField::Color) ? overrides.color : core::Color3{1.0f, 1.0f, 1.0f};
-            setVec3(out, core::Vec3{colour.r, colour.g, colour.b});
+        // **What the part wears** (ADR 0090): the material by name, the part's
+        // overrides, and -- when it wears a runtime copy -- the copy's number,
+        // what it changed and the maps it names.
+        if (field.name == "Material") {
+            setU32(out, part->material.id);
             return true;
         }
-        if (field.name == "Transparency") {
-            const asset::MaterialOverrides& overrides = part->materialParameters;
-            setF32(out, overrides.has(asset::MaterialField::Transparency) ? overrides.transparency : 0.0f);
+        if (field.name == "MaterialParameters") {
+            setOverrides(out, part->materialParameters);
+            return true;
+        }
+        const scene::MaterialClone* clone =
+            part->materialClone != 0 ? world.materialClone(part->materialClone) : nullptr;
+        if (field.name == "MaterialClone") {
+            setU32(out, clone != nullptr ? part->materialClone : 0u);
+            return true;
+        }
+        if (field.name == "MaterialCloneValues") {
+            // Zero when there is no copy, so putting one back on is a change.
+            if (clone != nullptr)
+                setCloneValues(out, *clone);
+            return true;
+        }
+        if (const asset::MaterialField map = cloneMapField(field.name); map != asset::MaterialField::Count) {
+            core::u32 atom = 0;
+            if (clone != nullptr && (clone->set & asset::fieldBit(map)) != 0)
+                atom = world.atoms().lookup(*mapOf(clone->values, map)).id;
+            setU32(out, atom);
             return true;
         }
         return false;
@@ -332,25 +478,59 @@ using generated::Source;
             part->size = asVec3(value);
             return true;
         }
-        // The default is not an override, so a white or opaque part on the
-        // authority is one with nothing overridden here too.
-        if (field.name == "Color") {
-            const core::Vec3 colour = asVec3(value);
-            asset::MaterialProperties values;
-            values.color = core::Color3{colour.x, colour.y, colour.z};
-            if (values.color == core::Color3{1.0f, 1.0f, 1.0f})
-                asset::clearOverride(part->materialParameters, asset::MaterialField::Color);
-            else
-                (void)asset::setOverride(part->materialParameters, asset::MaterialField::Color, values);
+        // The name arrives as this machine's own atom (the session translated
+        // it); an empty one is the engine default.
+        if (field.name == "Material") {
+            const core::NameAtom atom{asU32(value)};
+            part->material = world.atoms().text(atom).empty() ? core::NameAtom{} : atom;
             return true;
         }
-        if (field.name == "Transparency") {
-            asset::MaterialProperties values;
-            values.transparency = asF32(value);
-            if (values.transparency == 0.0f)
-                asset::clearOverride(part->materialParameters, asset::MaterialField::Transparency);
+        if (field.name == "MaterialParameters") {
+            part->materialParameters = asOverrides(value);
+            return true;
+        }
+        if (field.name == "MaterialClone") {
+            const core::u32 authority = asU32(value);
+            if (authority == 0) {
+                if (part->materialClone != 0)
+                    world.requestMaterialSweep();
+                part->materialClone = 0;
+                return true;
+            }
+            // Adopted under the authority's number, pointed at what the part
+            // wears -- which arrived first, in field order.
+            part->materialClone = ReplicatedCloneBase | authority;
+            (void)world.adoptMaterialClone(part->materialClone, part->material);
+            return true;
+        }
+        if (field.name == "MaterialCloneValues") {
+            scene::MaterialClone* clone =
+                part->materialClone != 0 ? world.writeMaterialClone(part->materialClone) : nullptr;
+            if (clone == nullptr)
+                return true;
+            // The maps are set by their own fields; only the rest comes from here.
+            constexpr asset::MaterialFieldMask Maps = asset::fieldBit(asset::MaterialField::ColorMap) |
+                                                      asset::fieldBit(asset::MaterialField::NormalMap) |
+                                                      asset::fieldBit(asset::MaterialField::MetallicRoughnessMap) |
+                                                      asset::fieldBit(asset::MaterialField::EmissiveMap);
+            asset::MaterialFieldMask set = 0;
+            unpackValues(value, set, clone->values);
+            clone->values.alphaMode = static_cast<core::i32>(value.raw[MaterialOverridesBytes]);
+            clone->values.doubleSided = value.raw[MaterialOverridesBytes + 1] != 0;
+            clone->set = static_cast<asset::MaterialFieldMask>((set & ~Maps) | (clone->set & Maps));
+            return true;
+        }
+        if (const asset::MaterialField map = cloneMapField(field.name); map != asset::MaterialField::Count) {
+            scene::MaterialClone* clone =
+                part->materialClone != 0 ? world.writeMaterialClone(part->materialClone) : nullptr;
+            if (clone == nullptr)
+                return true;
+            const std::string_view text = world.atoms().text(core::NameAtom{asU32(value)});
+            setMapOf(clone->values, map, text);
+            if (text.empty())
+                clone->set = static_cast<asset::MaterialFieldMask>(clone->set & ~asset::fieldBit(map));
             else
-                (void)asset::setOverride(part->materialParameters, asset::MaterialField::Transparency, values);
+                clone->set |= asset::fieldBit(map);
             return true;
         }
         return false;

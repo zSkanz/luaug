@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 11;
+inline constexpr u32 ProtocolVersion = 12;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -41,6 +41,8 @@ enum class Encoding : u8
     Color3 = 10,
     NameAtom = 11,
     InstanceRef = 12,
+    MaterialOverrides = 13,
+    MaterialValues = 14,
 };
 
 // **`Component` is the case that matters.** The most-replicated fact in any
@@ -94,10 +96,16 @@ inline constexpr FieldDesc CommonFields[] = {
 inline constexpr FieldDesc BasePartFields[] = {
     {"CFrame", 1, Encoding::CFrameD, Source::Component, "parts"},
     {"Size", 2, Encoding::Vector3, Source::Component, "parts"},
-    {"Color", 3, Encoding::Color3, Source::Component, "parts"},
-    {"Transparency", 4, Encoding::F32, Source::Component, "parts"},
     {"Anchored", 5, Encoding::Bool, Source::Component, "rigidBodies"},
     {"CanCollide", 6, Encoding::Bool, Source::Component, "rigidBodies"},
+    {"Material", 7, Encoding::NameAtom, Source::Component, "parts"},
+    {"MaterialParameters", 8, Encoding::MaterialOverrides, Source::Component, "parts"},
+    {"MaterialClone", 9, Encoding::U32, Source::Component, "parts"},
+    {"MaterialCloneValues", 10, Encoding::MaterialValues, Source::Component, "parts"},
+    {"MaterialCloneColorMap", 11, Encoding::NameAtom, Source::Component, "parts"},
+    {"MaterialCloneNormalMap", 12, Encoding::NameAtom, Source::Component, "parts"},
+    {"MaterialCloneMetallicRoughnessMap", 13, Encoding::NameAtom, Source::Component, "parts"},
+    {"MaterialCloneEmissiveMap", 14, Encoding::NameAtom, Source::Component, "parts"},
 };
 
 inline constexpr FieldDesc CharacterBodyFields[] = {

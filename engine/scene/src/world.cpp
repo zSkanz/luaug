@@ -987,6 +987,14 @@ u32 World::cloneMaterial(core::NameAtom source, asset::MaterialFieldMask set, co
     return id;
 }
 
+MaterialClone& World::adoptMaterialClone(u32 id, core::NameAtom source)
+{
+    MaterialClone& clone = m_materialClones[id];
+    clone.source = source;
+    ++m_mutations;
+    return clone;
+}
+
 const MaterialClone* World::materialClone(u32 id) const noexcept
 {
     const auto found = m_materialClones.find(id);

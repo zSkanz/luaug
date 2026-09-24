@@ -19,6 +19,7 @@
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
+#include <cstring>
 #include <doctest/doctest.h>
 #include <string>
 
@@ -89,6 +90,21 @@ void candidates(core::AtomTable& atoms, wire::Encoding encoding, replication::Fi
         replication::setNetId(a, replication::NetId{});
         replication::setNetId(b, replication::NetId{});
         return;
+    case wire::Encoding::MaterialOverrides:
+    case wire::Encoding::MaterialValues: {
+        // A mask selecting `Color` (bit 0), then the colour: two different
+        // tints, which is a value a replica would be sent.
+        const auto fill = [](replication::FieldValue& out, float red) {
+            out.raw.fill(0);
+            const core::u16 set = 1;
+            std::memcpy(out.raw.data(), &set, sizeof(set));
+            const float colour[3]{red, 0.5f, 0.25f};
+            std::memcpy(out.raw.data() + 4, colour, sizeof(colour));
+        };
+        fill(a, 0.25f);
+        fill(b, 0.75f);
+        return;
+    }
     default:
         // Vector3, Color3 and the rest are three floats.
         replication::setVec3(a, core::Vec3{0.25f, 0.5f, 0.75f});
@@ -168,6 +184,10 @@ TEST_CASE("every replicated field that is not a property is state the world hash
         // Not written back: `Emitted` is a running total a replica only moves
         // forward, so a fresh instance per class is the clean slate.
         world.destroy(id);
+        // Retired, which also sweeps the material copy a part adopted: the
+        // next class must start from a world with none, or applying the same
+        // copy's values again would change nothing.
+        world.retireDestroyed();
     }
     // Every class the wire carries with state of its own was reached.
     CHECK(checked > 30);

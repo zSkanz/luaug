@@ -188,6 +188,12 @@ usize wireBytes(generated::Encoding encoding) noexcept
         return 12;
     case generated::Encoding::Position:
         return 24;
+    // ADR 0090. Fixed-size like every other encoding here, laid out by
+    // `extract.cpp`'s packers: a mask, then the values it may select.
+    case generated::Encoding::MaterialOverrides:
+        return MaterialOverridesBytes;
+    case generated::Encoding::MaterialValues:
+        return MaterialValuesBytes;
     case generated::Encoding::CFrameD:
         // Three f64 of position and nine f32 of rotation.
         //

@@ -9,6 +9,7 @@
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
+#include <cstring>
 #include <doctest/doctest.h>
 #include <ostream>
 
@@ -94,7 +95,16 @@ TEST_CASE("extracting a part reads every field it declares")
     const core::usize common = std::size(generated::CommonFields);
     CHECK(asCFrame(fields[common + 0]).position.x == doctest::Approx(10.0));
     CHECK(static_cast<double>(asVec3(fields[common + 1]).y) == doctest::Approx(3.0));
-    CHECK(static_cast<double>(asF32(fields[common + 3])) == doctest::Approx(0.25));
+    // `MaterialParameters` (ADR 0090), after Anchored, CanCollide and Material:
+    // a u16 mask, then the values at fixed offsets, Transparency the fourth
+    // float after the four-byte head.
+    const FieldValue& parameters = fields[common + 5];
+    core::u16 set = 0;
+    std::memcpy(&set, parameters.raw.data(), sizeof(set));
+    CHECK((set & asset::fieldBit(asset::MaterialField::Transparency)) != 0);
+    float transparency = 0.0f;
+    std::memcpy(&transparency, parameters.raw.data() + 16, sizeof(transparency));
+    CHECK(static_cast<double>(transparency) == doctest::Approx(0.25));
 }
 
 TEST_CASE("an extraction that cannot read a field fails whole")

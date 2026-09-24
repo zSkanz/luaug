@@ -50,6 +50,13 @@ export type Encoding =
     | "Color3"
     | "NameAtom" -- interned string, sent by id with the table replicated once
     | "InstanceRef" -- a network id, never a pointer and never a path
+    -- ADR 0090: a part's overrides of its material, as one value -- which of the
+    -- seven parameters are set, and their values.
+    | "MaterialOverrides"
+    -- ADR 0090: what a runtime clone of a material changed -- which fields are
+    -- set, and the numbers, colours, alpha mode and sidedness. The four maps
+    -- travel as names beside it.
+    | "MaterialValues"
 
 --- One replicated field.
 export type Field = {

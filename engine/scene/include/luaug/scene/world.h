@@ -618,6 +618,11 @@ public:
     [[nodiscard]] u32 cloneMaterial(core::NameAtom source, asset::MaterialFieldMask set,
                                     const asset::MaterialProperties& values);
     [[nodiscard]] const MaterialClone* materialClone(u32 id) const noexcept;
+    // **A clone somebody else made** -- a replica's copy of one the authority
+    // cloned (ADR 0090). Made under the id given, or found there, and pointed at
+    // `source`; the counter `cloneMaterial` numbers from is not touched, so a
+    // replica's own scripts cannot collide with a range they never reach.
+    MaterialClone& adoptMaterialClone(u32 id, core::NameAtom source);
     // Counted as a mutation: every part wearing the clone changes with it.
     [[nodiscard]] MaterialClone* writeMaterialClone(u32 id) noexcept;
     [[nodiscard]] const MaterialClones& materialClones() const noexcept { return m_materialClones; }

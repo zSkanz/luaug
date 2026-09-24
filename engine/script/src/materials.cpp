@@ -126,6 +126,16 @@ int materialSet(lua_State* L)
     }
     asset::copyMaterialField(Field, values, clone->values);
     clone->set |= asset::fieldBit(Field);
+    // A map is a name, and the wire sends a name as this world's atom for it.
+    if constexpr (Field == MaterialField::ColorMap || Field == MaterialField::NormalMap ||
+                  Field == MaterialField::MetallicRoughnessMap || Field == MaterialField::EmissiveMap) {
+        const std::string* written = Field == MaterialField::ColorMap      ? &values.colorMap
+                                     : Field == MaterialField::NormalMap   ? &values.normalMap
+                                     : Field == MaterialField::EmissiveMap ? &values.emissiveMap
+                                                                           : &values.metallicRoughnessMap;
+        if (!written->empty())
+            (void)world(L).atoms().intern(*written);
+    }
     return 0;
 }
 

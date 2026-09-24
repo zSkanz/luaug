@@ -4,6 +4,7 @@
 // transport delivers at the next poll and the lossy one misbehaves from a seed,
 // so a failure reproduces exactly -- which is the property a replication bug
 // most needs and a socket least provides.
+#include "luaug/asset/material.h"
 #include "luaug/core/i18n.h"
 #include "luaug/net/memory_transport.h"
 #include "luaug/replication/extract.h"
@@ -966,6 +967,74 @@ TEST_CASE("a decal placed on the authority is seen on a replica, image and all")
     match.server.world.decals().find(decal)->texture = match.server.atoms.intern("asset://textures/footprint.png");
     match.run(3);
     CHECK(match.client.atoms.text(match.client.world.decals().find(seen)->texture) == "asset://textures/footprint.png");
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a part's material, its overrides and a runtime copy all reach a replica, which draws them")
+{
+    // **The surface the wire never carried** (ADR 0090): a part's `Color` went
+    // out and its `Material` never did, so a replica drew every part bare.
+    PlayedMatch match;
+    // The file is content both machines have, as a mesh is.
+    asset::MaterialLibrary serverMaterials;
+    asset::MaterialLibrary clientMaterials;
+    asset::MaterialAsset brick;
+    brick.properties.color = core::Color3{0.6f, 0.3f, 0.2f};
+    brick.properties.roughness = 0.9f;
+    brick.instanceParameters = asset::fieldBit(asset::MaterialField::Transparency);
+    brick.written = asset::AllMaterialFields;
+    serverMaterials.put("asset://materials/brick.material.json", brick);
+    clientMaterials.put("asset://materials/brick.material.json", brick);
+    match.server.world.setMaterialLibrary(&serverMaterials);
+    match.client.world.setMaterialLibrary(&clientMaterials);
+
+    const core::InstanceId wall = match.part("Wall", core::DVec3{0.0, 1.0, 0.0});
+    const core::InstanceId crate = match.part("Crate", core::DVec3{2.0, 1.0, 0.0});
+    scene::PartComponent* worn = match.server.world.parts().find(wall);
+    worn->material = match.server.atoms.intern("asset://materials/brick.material.json");
+    asset::MaterialProperties faded;
+    faded.transparency = 0.5f;
+    (void)asset::setOverride(worn->materialParameters, asset::MaterialField::Transparency, faded);
+
+    // **The authority clones it, changes its colour and its map, and puts it on
+    // the crate** -- a copy is state the run produced, and it travels with
+    // what it changed.
+    const core::u32 clone = match.server.world.cloneMaterial(worn->material, 0, asset::MaterialProperties{});
+    match.server.world.holdMaterialClone(clone);
+    scene::MaterialClone* copy = match.server.world.writeMaterialClone(clone);
+    REQUIRE(copy != nullptr);
+    copy->values.color = core::Color3{0.0f, 1.0f, 0.0f};
+    copy->values.colorMap = "asset://textures/moss.png";
+    (void)match.server.atoms.intern(copy->values.colorMap);
+    copy->set = asset::fieldBit(asset::MaterialField::Color) | asset::fieldBit(asset::MaterialField::ColorMap);
+    scene::PartComponent* boxed = match.server.world.parts().find(crate);
+    boxed->material = worn->material;
+    boxed->materialClone = clone;
+    match.run(4);
+
+    const scene::PartComponent* seenWall = match.client.world.parts().find(match.copyOf(wall));
+    REQUIRE(seenWall != nullptr);
+    CHECK(match.client.atoms.text(seenWall->material) == "asset://materials/brick.material.json");
+    CHECK(seenWall->materialParameters.has(asset::MaterialField::Transparency));
+    const asset::ResolvedMaterial wallLook = match.client.world.surfaceOf(*seenWall);
+    CHECK(wallLook.properties.transparency == 0.5f);
+    CHECK(wallLook.properties.roughness == 0.9f);
+
+    // **And the replica draws the copy's colour** -- the ledger's own test.
+    const scene::PartComponent* seenCrate = match.client.world.parts().find(match.copyOf(crate));
+    REQUIRE(seenCrate != nullptr);
+    REQUIRE(seenCrate->materialClone != 0);
+    const asset::ResolvedMaterial crateLook = match.client.world.surfaceOf(*seenCrate);
+    CHECK(crateLook.properties.color == core::Color3{0.0f, 1.0f, 0.0f});
+    CHECK(crateLook.properties.colorMap == "asset://textures/moss.png");
+    // What the copy did not change still reads through to the asset.
+    CHECK(crateLook.properties.roughness == 0.9f);
+
+    // A change to the copy reaches the replica too.
+    match.server.world.writeMaterialClone(clone)->values.color = core::Color3{0.0f, 0.0f, 1.0f};
+    match.run(3);
+    CHECK(match.client.world.surfaceOf(*match.client.world.parts().find(match.copyOf(crate))).properties.color ==
+          core::Color3{0.0f, 0.0f, 1.0f});
     CHECK(match.replica->checksumFailures() == 0);
 }
 

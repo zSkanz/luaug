@@ -37,6 +37,14 @@ struct FieldValue
     [[nodiscard]] bool operator==(const FieldValue& other) const noexcept { return raw == other.raw; }
 };
 
+// ADR 0090's two: a part's overrides (a u16 mask, two bytes of padding, then
+// Color, Transparency, Emissive, Metalness, Roughness, NormalScale and
+// AlphaCutoff as f32), and what a runtime clone changed (the same, with the
+// mask covering every field and the alpha mode and sidedness as a byte each).
+inline constexpr core::usize MaterialOverridesBytes = 4 + 4 * 11;
+inline constexpr core::usize MaterialValuesBytes = MaterialOverridesBytes + 4;
+static_assert(MaterialValuesBytes <= FieldValue::Bytes, "a clone's values must fit in a field cell");
+
 static_assert(sizeof(core::DVec3) + sizeof(core::Mat3) <= FieldValue::Bytes,
               "a CFrameD must fit in a field cell, or the widest encoding has outgrown it");
 

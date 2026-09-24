@@ -103,6 +103,8 @@ local EncodingOrder: { string } = {
     "Color3",
     "NameAtom",
     "InstanceRef",
+    "MaterialOverrides",
+    "MaterialValues",
 }
 for index, name in EncodingOrder do
     emit(`    {name} = {index - 1},`)

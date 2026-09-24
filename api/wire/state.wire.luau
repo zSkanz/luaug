@@ -68,24 +68,6 @@ local BasePartFields: { Schema.Field } = {
             .. "nothing.",
     },
     {
-        Name = "Color",
-        Id = 3,
-        Encoding = "Color3",
-        Source = "Component",
-        Component = "parts",
-        Doc = "Games signal state with colour -- a captured point, a damaged crate -- so it is "
-            .. "gameplay rather than decoration.",
-    },
-    {
-        Name = "Transparency",
-        Id = 4,
-        Encoding = "F32",
-        Source = "Component",
-        Component = "parts",
-        Doc = "The same argument as `Color`: it is how a game says a thing is a ghost, is picked up, "
-            .. "or is about to vanish.",
-    },
-    {
         Name = "Anchored",
         Id = 5,
         Encoding = "Bool",
@@ -104,6 +86,96 @@ local BasePartFields: { Schema.Field } = {
         Component = "rigidBodies",
         Doc = "A door that opened on the authority and not on the replica is a player walking into a "
             .. "wall that is not there.",
+    }, -- **The surface, which the wire never carried** (ADR 0090). A part's
+    -- `Color` and `Transparency` went out and its `Material` never did, so a
+    -- replica drew every part bare; a part wears a material now, and all of
+    -- what it wears travels.
+    {
+        Name = "Material",
+        Id = 7,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "parts",
+        Doc = "The material asset the part wears, by URN, or none for the engine default. A name rather "
+            .. "than the material itself: the file is content both machines have, as a mesh is.",
+    },
+    {
+        Name = "MaterialParameters",
+        Id = 8,
+        Encoding = "MaterialOverrides",
+        Source = "Component",
+        Component = "parts",
+        Doc = "What the part overrides -- the tint and fade a game signals state with, which is gameplay "
+            .. "rather than decoration.",
+    },
+    {
+        Name = "MaterialClone",
+        Id = 9,
+        Encoding = "U32",
+        Source = "Component",
+        Component = "parts",
+        Doc = "Which runtime copy of the material the part wears, by the authority's own number, or zero "
+            .. "for the asset itself. Parts that share a copy share it on the replica too.",
+    },
+    {
+        Name = "MaterialCloneValues",
+        Id = 10,
+        Encoding = "MaterialValues",
+        Source = "Component",
+        Component = "parts",
+        Doc = "What that copy changed. **Carried with each part that wears it** rather than as an object "
+            .. "of its own, so a copy is never named before it has arrived; zero when the part wears none, "
+            .. "so taking one off and putting it back is a change the diff sees.",
+    },
+    {
+        Name = "MaterialCloneColorMap",
+        Id = 11,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "parts",
+        Doc = "A map the copy changed, by URN; the three below are the others.",
+    },
+    {
+        Name = "MaterialCloneNormalMap",
+        Id = 12,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "parts",
+        Doc = "The copy's normal map, when it changed it.",
+    },
+    {
+        Name = "MaterialCloneMetallicRoughnessMap",
+        Id = 13,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "parts",
+        Doc = "The copy's metallic-roughness map, when it changed it.",
+    },
+    {
+        Name = "MaterialCloneEmissiveMap",
+        Id = 14,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "parts",
+        Doc = "The copy's emissive map, when it changed it.",
+    },
+}
+
+--- **Retired**: a part has no colour or transparency of its own since ADR 0090;
+--- the two are its material's parameters and travel in `MaterialParameters`.
+--- The ids stay claimed for ever.
+local BasePartRetired: { Schema.RetiredField } = {
+    {
+        Name = "Color",
+        Id = 3,
+        Since = "2.0.0",
+        Reason = "a part's colour is its material's parameter (ADR 0090); see MaterialParameters",
+    },
+    {
+        Name = "Transparency",
+        Id = 4,
+        Since = "2.0.0",
+        Reason = "a part's see-through is its material's parameter (ADR 0090); see MaterialParameters",
     },
 }
 
@@ -570,6 +642,7 @@ local Classes: { Schema.Class } = {
         Doc = "The moving half of nearly every game, and therefore the field set that decides whether "
             .. "replication is affordable at all. `Part` and `MeshPart` inherit it.",
         Fields = BasePartFields,
+        Retired = BasePartRetired,
     },
     {
         Name = "CharacterBody",
