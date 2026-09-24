@@ -887,7 +887,47 @@ namespace {
     return name == "Workspace" || name == "ReplicatedStorage" || name == "ServerStorage";
 }
 
+[[nodiscard]] bool isClass(const scene::World& world, core::InstanceId id, std::string_view className) noexcept
+{
+    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    return descriptor != nullptr && world.atoms().text(descriptor->name) == className;
+}
+
 } // namespace
+
+std::optional<std::string> Editor::scriptFolderOf(const scene::World& world, core::InstanceId target)
+{
+    // Folder names from the target up to the service, then reversed: the path
+    // a file needs under `src/scripts` to mount back exactly here.
+    std::vector<std::string_view> folders;
+    for (core::InstanceId walk = target; walk.valid() && world.alive(walk); walk = world.parentOf(walk)) {
+        if (isClass(world, walk, "ScriptService")) {
+            std::string path;
+            for (auto name = folders.rbegin(); name != folders.rend(); ++name) {
+                if (!path.empty())
+                    path.push_back('/');
+                path.append(*name);
+            }
+            return path;
+        }
+        // Only folders mount as directories. A script inside a script is not a
+        // file layout the mount can produce.
+        if (!isClass(world, walk, "Folder"))
+            return std::nullopt;
+        folders.push_back(world.atoms().text(world.name(walk)));
+    }
+    return std::nullopt;
+}
+
+bool Editor::insideScriptService(const scene::World& world, core::InstanceId id)
+{
+    for (core::InstanceId walk = world.alive(id) ? world.parentOf(id) : core::InstanceId{}; walk.valid();
+         walk = world.parentOf(walk)) {
+        if (isClass(world, walk, "ScriptService"))
+            return true;
+    }
+    return false;
+}
 
 bool Editor::isEngineOwned(const scene::World& world, core::InstanceId id, core::InstanceId root) noexcept
 {
@@ -1046,11 +1086,24 @@ bool Editor::canParentInto(const scene::World& world, core::InstanceId id, core:
     // inside it -- `streaming_glue.cpp` says so where it sets the flag, and the
     // scene serializer relies on exactly that economy -- so an instance that is
     // not itself generated may still be sitting inside something that is.
+    //
+    // **And nothing inside a service the scene does not save.** `ScriptService`
+    // is the mount of `src/scripts` and `Lighting` keeps no children in a
+    // scene, so a part made or dropped in either was there until the next save
+    // or the next play and then gone without a word. The data model's own
+    // children are the services themselves, and the same is true of them.
     for (core::InstanceId walk = id; walk.valid(); walk = world.parentOf(walk)) {
         if (world.generated(walk))
             return false;
-        if (walk == root)
+        const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(walk));
+        const bool service = descriptor != nullptr && scene::hasFlag(descriptor->flags, scene::ClassFlags::Service);
+        if (service && !holdsAuthoredContent(world, walk))
+            return false;
+        if (walk == root) {
+            if (isClass(world, walk, "DataModel"))
+                return walk != id;
             break;
+        }
     }
     return true;
 }
@@ -1066,9 +1119,14 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
                                           core::InstanceId newParent, core::InstanceId root)
 {
     ReparentPlan plan;
-    if (!world.alive(newParent) ||
-        (newParent != root && !authorable(world, newParent, root) &&
-         !(holdsAuthoredContent(world, newParent) && canParentInto(world, newParent, root)))) {
+    if (!world.alive(newParent)) {
+        plan.targetRefuses = true;
+        return plan;
+    }
+    // **Into `ScriptService` a script becomes a FILE** (see `ReparentPlan`),
+    // and nothing else goes there at all.
+    plan.toScriptFiles = scriptFolderOf(world, newParent).has_value();
+    if (!plan.toScriptFiles && !canParentInto(world, newParent, root)) {
         plan.targetRefuses = true;
         return plan;
     }
@@ -1081,6 +1139,19 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
 
     for (const core::InstanceId id : ordered) {
         if (isEngineOwned(world, id, root)) {
+            ++plan.refused;
+            continue;
+        }
+        // **A mounted script is its file.** Moving it would leave the file to
+        // mount it again at the next open -- two copies, both running.
+        if (insideScriptService(world, id)) {
+            ++plan.refused;
+            plan.mountedRefused = true;
+            continue;
+        }
+        // Only a `Script` becomes an entry file: a `ModuleScript` mounted there
+        // would come back as a `Script` and start running.
+        if (plan.toScriptFiles && !isClass(world, id, "Script")) {
             ++plan.refused;
             continue;
         }
@@ -2158,7 +2229,7 @@ bool Editor::assignStampTo(scene::World& world, core::InstanceId root, core::Ins
 }
 
 bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
-                      core::InstanceId root, Inspector& inspector)
+                      core::InstanceId root, Inspector& inspector, std::optional<core::u32> at)
 {
     if (ids.empty())
         return false;
@@ -2169,7 +2240,21 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
     // something the person had stopped thinking about.
     const ReparentPlan plan = planReparent(world, ids, newParent, root);
     if (plan.targetRefuses) {
-        m_status = EditorStatus{"nothing authored can live in that", true};
+        m_status = EditorStatus{"nothing authored can live in that -- the scene does not save what is put there", true};
+        return false;
+    }
+    if (plan.mountedRefused && plan.movable.empty()) {
+        m_status =
+            EditorStatus{"a script in ScriptService is its file in src/scripts -- move or delete the file", true};
+        return false;
+    }
+    if (plan.toScriptFiles) {
+        // The frame loop writes the files and mounts them (see
+        // `ReparentPlan::toScriptFiles`); a world-only move here would be lost.
+        m_status = EditorStatus{plan.movable.empty() ? "only a Script can go into ScriptService -- it becomes a file "
+                                                       "in src/scripts, and a ModuleScript would start running"
+                                                     : "scripts go into ScriptService as files",
+                                true};
         return false;
     }
 
@@ -2185,6 +2270,8 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
         if (world.setParent(id, newParent).has_value())
             ++refused;
     }
+    if (at.has_value() && plan.movable.size() == 1 && world.parentOf(plan.movable.front()) == newParent)
+        (void)world.moveChild(newParent, plan.movable.front(), *at);
 
     inspector.pruneDead(world);
     inspector.onWorldRestored();
@@ -2333,7 +2420,7 @@ namespace {
 } // namespace
 
 bool Editor::groupSelection(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
-                            Inspector& inspector)
+                            Inspector& inspector, bool asFolder)
 {
     if (ids.empty()) {
         m_status = EditorStatus{"select something to group", true};
@@ -2355,6 +2442,10 @@ bool Editor::groupSelection(scene::World& world, std::span<const core::InstanceI
         wantsModel = wantsModel || world.parts().find(id) != nullptr || world.models().find(id) != nullptr;
         movable.push_back(id);
     }
+    // Asked for by name, a folder is what it is: somebody tidying four parts
+    // into a folder is organising the tree, not making something to move.
+    if (asFolder)
+        wantsModel = false;
 
     if (movable.empty()) {
         m_status = EditorStatus{"nothing there can be grouped -- the world and its services stay where they are", true};
@@ -2816,7 +2907,10 @@ core::CFrameD Editor::driveCamera(core::Vec2 lookDelta, core::Vec3 move, f32 dt)
     // Only while editing. Inside play mode the game owns its camera, paused or
     // not: a person who paused to look at something did not ask for the tool's
     // view.
-    if (!editing(m_run) || !m_cameraAdopted)
+    //
+    // **Except when the view is detached** (Shift+P): then the game keeps its
+    // camera and this one is the view, so flying it is the point.
+    if ((!editing(m_run) && !cameraDetached()) || !m_cameraAdopted)
         return m_cameraCFrame;
 
     constexpr f32 kRadiansPerPixel = 0.0032f;
@@ -2913,7 +3007,15 @@ void Editor::setGizmoMode(GizmoMode mode) noexcept
     if (m_drag.has_value())
         return;
     m_gizmoMode = mode;
+    m_handlesShown = true;
     m_preferencesDirty = true;
+}
+
+void Editor::setHandlesShown(bool shown) noexcept
+{
+    if (m_drag.has_value())
+        return;
+    m_handlesShown = shown;
 }
 
 void Editor::setGizmoLocal(bool local) noexcept
@@ -3029,7 +3131,7 @@ void Editor::applyDragTransform(scene::World& world, Inspector& inspector, core:
 
 std::optional<GizmoFrame> Editor::gizmoFrame(const scene::World& world, const Inspector& inspector) const
 {
-    if (!editing(m_run) || !m_hasCamera)
+    if (!editing(m_run) || !m_hasCamera || !m_handlesShown)
         return std::nullopt;
 
     const core::InstanceId primary = inspector.selection();
@@ -4464,7 +4566,11 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
     // selecting the wheel of a car hands back the opposite of what the grouping
     // was for. Double-clicking drills in, and a click outside what was drilled
     // comes back out.
-    if (hit.has_value()) {
+    if (hit.has_value() && request.direct) {
+        // **Alt: the part itself.** No resolution and no drill: the model stays
+        // closed, so the next plain click selects it whole again.
+    }
+    else if (hit.has_value()) {
         const core::InstanceId resolved = resolveSelection(world, root, hit->instance, m_drilled);
 
         if (request.opening) {

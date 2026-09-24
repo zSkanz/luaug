@@ -19,7 +19,7 @@
 // `!ImGui::IsAnyItemActive()`. The pane satisfies that guard honestly rather
 // than working around it: it claims ImGui's active id and calls
 // `SetActiveIdUsingAllKeyboardKeys`, which is exactly what `InputTextEx` does.
-// While the caret is in code, Escape, Delete, F2, W/E/R and the world's
+// While the caret is in code, Escape, Delete, F2, Ctrl+1 to Ctrl+4 and the world's
 // Ctrl+C/V/X/D do not fire -- and Ctrl+S still saves, it just saves the script.
 // Escape releases the pane rather than clearing the selection, so one press
 // leaves the code and a second means what the shell says it means.

@@ -70,6 +70,33 @@ pages are, so it knows a property's type, its enum, whether it is read-only, and
 whether it is **stored and not yet acted on** — and it says so rather than
 letting you click something that will do nothing.
 
+## Moving around and the keys
+
+Click into the viewport and **W, A, S, D fly, Q and E go down and up**, with
+Shift to go faster and the wheel to change speed. Hold the right button to
+look around. The keys fly only while the viewport has focus, and never while
+Ctrl or Alt is held, so a shortcut never moves the camera.
+
+| Keys | Do |
+|---|---|
+| Ctrl+1 | Select, with no handles on the selection |
+| Ctrl+2 / Ctrl+3 / Ctrl+4 | Move / scale / rotate handles |
+| Ctrl+L | Switch the handles between world and local axes |
+| Alt (while dragging) | Suspend snapping |
+| Alt+click | Select the part itself, not the model it is in |
+| Double-click | Open a model, to select what is inside it |
+| F | Frame the selection |
+| Escape | Leave a terrain or block brush, then close a model, then deselect; in play, stop |
+| Ctrl+D, Delete, F2 | Duplicate, delete, rename |
+| Ctrl+G / Ctrl+Alt+G | Group into a Model / into a Folder |
+| Ctrl+Shift+G or Ctrl+U | Ungroup |
+| Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+Shift+V | Copy / cut / paste beside / paste into |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Shift+P (playing) | Fly free: leave the game's camera and fly the editor's while the game runs |
+
+Picking up a terrain or block brush lets go of the selection, and selecting
+something (in the Explorer, or by inserting it) puts the brush down.
+
 ## Undo
 
 Undo and redo, over property edits and over structure. Coalesced, so dragging a
@@ -96,13 +123,6 @@ moved is where the world a project *starts* with is written down.
 
 ## What it does not have yet
 
-The editor is being built in phases, and this is the honest state of it:
-
-- **Manipulators** — dragging a translate, rotate or scale handle in the
-  viewport — are in progress. Editing a transform today means typing numbers in
-  the properties panel.
-- **Multi-select**, creating an instance from the viewport, and reparenting by
-  drag are in the same phase.
 - **Stop restores the world, not the script VM.** A script that mutated its own
   module state carries that across a stop.
 

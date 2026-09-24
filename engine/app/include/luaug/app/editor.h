@@ -158,6 +158,9 @@ struct PickRequest
     // click selects the outermost `Model` above what it landed on, and this is
     // the gesture that gets at the parts inside one.
     bool opening = false;
+    // Alt was held: select exactly what the ray hit, inside whatever model it
+    // belongs to, without opening that model.
+    bool direct = false;
 };
 
 // What the editor is doing with the world.
@@ -512,6 +515,8 @@ struct EditorCommands
     // a direction, because they are two verbs a person means separately and a
     // toolbar draws two buttons for.
     bool groupSelection = false;
+    // Group into a `Folder` rather than letting the selection decide.
+    bool groupAsFolder = false;
     bool ungroupSelection = false;
     // Rename an instance. Both halves or neither -- and singular, because
     // renaming four things to one name is not a thing anybody means.
@@ -520,6 +525,10 @@ struct EditorCommands
 
     // Move the selection under this. Set by a drop in the Explorer.
     core::InstanceId reparentTo;
+    // **And then to this place among its new siblings**, for one instance
+    // dropped on the edge of a row under ANOTHER parent: the line drawn between
+    // two rows is a promise about where it lands, not only in what.
+    std::optional<core::u32> reparentIndex;
 
     // **Move ONE instance to a place among its siblings** (S5.18). Set by a drop
     // in the top or bottom band of an Explorer row, where a drop in the middle
@@ -658,9 +667,9 @@ struct EditorCommands
     [[nodiscard]] bool mutatesWorld() const noexcept
     {
         return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || groupSelection ||
-               ungroupSelection || reparentTo.valid() || reorderChild.valid() || renameInstance.valid() || paste ||
-               pasteInto || cutSelection || !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo ||
-               redo || newScene || !assignMaterialPath.empty();
+               groupAsFolder || ungroupSelection || reparentTo.valid() || reorderChild.valid() ||
+               renameInstance.valid() || paste || pasteInto || cutSelection || !placeStamp.empty() ||
+               breakStamp.valid() || stampSubject.valid() || undo || redo || newScene || !assignMaterialPath.empty();
     }
 
     [[nodiscard]] bool any() const noexcept
@@ -669,12 +678,12 @@ struct EditorCommands
                undo || redo || colorAsked || copySelection || cutSelection || paste || pasteInto ||
                stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
                !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
-               duplicateSelection || groupSelection || ungroupSelection || reparentTo.valid() || reorderChild.valid() ||
-               renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
-               !deleteContent.empty() || !duplicateContent.empty() || newStampClass != scene::InvalidClass ||
-               !renameContent.empty() || !assignStampPath.empty() || importAssets || importParent.valid() ||
-               openScript.valid() || !assignMaterialPath.empty() || !openMaterial.empty() || !newMaterial.empty() ||
-               !newMaterialVariantOf.empty();
+               duplicateSelection || groupSelection || groupAsFolder || ungroupSelection || reparentTo.valid() ||
+               reorderChild.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
+               !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
+               newStampClass != scene::InvalidClass || !renameContent.empty() || !assignStampPath.empty() ||
+               importAssets || importParent.valid() || openScript.valid() || !assignMaterialPath.empty() ||
+               !openMaterial.empty() || !newMaterial.empty() || !newMaterialVariantOf.empty();
     }
 };
 
@@ -801,9 +810,10 @@ public:
     [[nodiscard]] core::DVec3 cameraOrigin() const noexcept { return m_cameraOrigin; }
     [[nodiscard]] bool hasCamera() const noexcept { return m_hasCamera; }
 
-    void requestPick(core::Vec2 pixelInViewport, bool additive = false, bool opening = false) noexcept
+    void requestPick(core::Vec2 pixelInViewport, bool additive = false, bool opening = false,
+                     bool direct = false) noexcept
     {
-        m_pending = PickRequest{pixelInViewport, additive, opening};
+        m_pending = PickRequest{pixelInViewport, additive, opening, direct};
     }
     [[nodiscard]] bool pickPending() const noexcept { return m_pending.has_value(); }
 
@@ -1409,9 +1419,26 @@ public:
         // `refused` because it is a fact about the TARGET, and a drag of four
         // things onto it fails for one reason rather than four.
         bool targetRefuses = false;
+        // **The target is `ScriptService` or a folder in it**, where what a
+        // project runs comes from the files under `src/scripts` and nothing is
+        // saved in the scene. A `Script` dropped there is moved by writing its
+        // source to the matching file and mounting it -- which is the frame
+        // loop's job, because it needs the disk and the VM; `movable` is what it
+        // moves.
+        bool toScriptFiles = false;
+        // Something turned away was a mounted script, which says "move the
+        // file" rather than "cannot go there".
+        bool mountedRefused = false;
     };
     [[nodiscard]] static ReparentPlan planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                                    core::InstanceId newParent, core::InstanceId root);
+
+    // The directory under `src/scripts` a script dropped on `target` belongs
+    // in -- empty for `ScriptService` itself -- or nothing when the target is
+    // not the service or a folder inside it.
+    [[nodiscard]] static std::optional<std::string> scriptFolderOf(const scene::World& world, core::InstanceId target);
+    // Strictly inside `ScriptService`: a mounted script, or a folder of them.
+    [[nodiscard]] static bool insideScriptService(const scene::World& world, core::InstanceId id);
 
     // --- The clipboard -------------------------------------------------------
     //
@@ -1437,8 +1464,10 @@ public:
     [[nodiscard]] static bool canReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                           core::InstanceId newParent, core::InstanceId root);
 
+    // `at`, for a single instance, is the place among its new siblings it ends
+    // at -- the same step, so one Ctrl+Z takes the whole drop back.
     bool reparent(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId newParent,
-                  core::InstanceId root, Inspector& inspector);
+                  core::InstanceId root, Inspector& inspector, std::optional<core::u32> at = std::nullopt);
 
     // **Moves `child` to `index` among its siblings**, as one undo step (S5.18).
     //
@@ -1475,8 +1504,11 @@ public:
     // Refused, with a reason, when: nothing is selected, everything selected is
     // engine-owned, or the selection includes the authored root -- a world
     // cannot be put inside something in it.
+    //
+    // `asFolder` makes the container a `Folder` whatever is selected -- the
+    // grouping for organising rather than for moving as one.
     bool groupSelection(scene::World& world, std::span<const core::InstanceId> ids, core::InstanceId root,
-                        Inspector& inspector);
+                        Inspector& inspector, bool asFolder = false);
 
     // **Takes each selected container's children out and destroys it**, and
     // selects what came out.
@@ -2142,8 +2174,15 @@ public:
 
     [[nodiscard]] GizmoMode gizmoMode() const noexcept { return m_gizmoMode; }
     // Refused mid-drag: changing what a drag means half way through it is not
-    // something a person can have meant.
+    // something a person can have meant. Choosing a mode shows the handles.
     void setGizmoMode(GizmoMode mode) noexcept;
+
+    // **Select with no handles** (Ctrl+1). A selection that only wants to be
+    // looked at, renamed or read in Properties has a manipulator in the way of
+    // every click beside it; hiding it keeps the mode it had, so Ctrl+2 comes
+    // back to the same kind of handle. Refused mid-drag, like the mode.
+    [[nodiscard]] bool handlesShown() const noexcept { return m_handlesShown; }
+    void setHandlesShown(bool shown) noexcept;
 
     // **World axes or the selection's own.** Which one is right depends on the
     // part, which is why it is a person's choice and not this file's: a rotated
@@ -2534,6 +2573,7 @@ private:
     std::optional<asset::TerrainHit> m_brushAim;
     std::optional<Stroke> m_stroke;
 
+    bool m_handlesShown = true;
     GizmoMode m_gizmoMode = GizmoMode::Translate;
     bool m_gizmoLocal = false;
     GizmoOrigin m_gizmoOrigin = GizmoOrigin::Pivot;

@@ -394,6 +394,39 @@ TEST_CASE("a directory mounts src/scripts as a tree, with subdirectories as Fold
     CHECK_FALSE(world.findFirstChild(scriptService, world.atoms().lookup("util")).valid());
 }
 
+TEST_CASE("a file written into src/scripts while editing mounts where opening the project would put it")
+{
+    // **The second half of moving a script into ScriptService**: the editor
+    // writes the file and the host mounts it now, into the folder that
+    // already exists -- not a second `enemy` beside the first.
+    Captured log;
+    Project project;
+    project.write("src/scripts/enemy/patrol.luau", "");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    CHECK(host.projectRoot() == project.root);
+
+    project.write("src/scripts/enemy/spawner.luau", "print('spawned')");
+    const core::InstanceId made = host.mountScriptFile("enemy/spawner.luau");
+    REQUIRE(made.valid());
+
+    scene::World& world = host.world();
+    const core::InstanceId scriptService = world.findFirstChildOfClass(
+        host.runtime().dataModel(), world.classes().findId(world.atoms().lookup("ScriptService")));
+    const core::InstanceId enemy = world.findFirstChild(scriptService, world.atoms().lookup("enemy"));
+    REQUIRE(enemy.valid());
+    CHECK(world.parentOf(made) == enemy);
+    CHECK(world.childCount(scriptService) == 1);
+    CHECK(world.atoms().text(world.name(made)) == "spawner");
+    const std::optional<scene::Value> source = world.getProperty(made, world.atoms().lookup("Source"));
+    REQUIRE(source.has_value());
+    CHECK(std::get<std::string>(*source) == "print('spawned')");
+
+    // A file that is not there mounts nothing.
+    CHECK_FALSE(host.mountScriptFile("missing.luau").valid());
+}
+
 TEST_CASE("entry scripts start in path-sorted order, whatever order the walk found them")
 {
     Captured log;

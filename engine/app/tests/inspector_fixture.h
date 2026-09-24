@@ -379,6 +379,12 @@ struct Fixture
     // The content tree's root is a `Folder`, because that is what it is: a
     // place to put things (ADR 0052).
     scene::ClassId folderClass = scene::InvalidClass;
+    // **The mount of `src/scripts`, flagged as the service it is**, and a
+    // `Script` and a `ModuleScript` by name: the Explorer's rules about what
+    // may go into it read the class names and the flag, nothing more.
+    scene::ClassId scriptServiceClass = scene::InvalidClass;
+    scene::ClassId scriptClass = scene::InvalidClass;
+    scene::ClassId moduleScriptClass = scene::InvalidClass;
     scene::EnumId moodEnum = scene::InvalidEnum;
 
     Fixture()
@@ -615,6 +621,19 @@ struct Fixture
         folderClass = classes.registerClass({
             .name = atoms.intern("Folder"),
             .defaultName = atoms.intern("Folder"),
+        });
+        scriptServiceClass = classes.registerClass({
+            .name = atoms.intern("ScriptService"),
+            .flags = scene::ClassFlags::Service,
+            .defaultName = atoms.intern("ScriptService"),
+        });
+        scriptClass = classes.registerClass({
+            .name = atoms.intern("Script"),
+            .defaultName = atoms.intern("Script"),
+        });
+        moduleScriptClass = classes.registerClass({
+            .name = atoms.intern("ModuleScript"),
+            .defaultName = atoms.intern("ModuleScript"),
         });
     }
 

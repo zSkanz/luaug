@@ -642,6 +642,23 @@ std::optional<core::EngineError> WorldHost::mountProject(const std::filesystem::
     return std::nullopt;
 }
 
+core::InstanceId WorldHost::mountScriptFile(std::string_view relative)
+{
+    const std::filesystem::path scriptsRoot = m_root / "src" / "scripts";
+    const std::filesystem::path file = scriptsRoot / std::filesystem::path(std::string(relative));
+    std::string source;
+    if (!readFile(file, source))
+        return {};
+    std::error_code ec;
+    const std::array<script::MountedScript, 1> entry{script::MountedScript{
+        .path = toProjectPath(std::filesystem::relative(file, m_root, ec)),
+        .mountPath = toProjectPath(std::filesystem::relative(file, scriptsRoot, ec)),
+        .source = std::move(source),
+    }};
+    const std::vector<core::InstanceId> made = script::mountScripts(m_runtime->state(), entry);
+    return made.empty() ? core::InstanceId{} : made.front();
+}
+
 std::optional<core::EngineError> WorldHost::mountConformance(const std::filesystem::path& root)
 {
     std::error_code ec;

@@ -320,6 +320,62 @@ void submitSelection(const scene::World& world, std::span<const core::InstanceId
     }
 }
 
+// **What a selected `Camera` sees, as a wireframe**: the pyramid from its
+// position out to a few metres, or the box of an orthographic one. A camera is
+// a point with an orientation, and the question somebody placing one has is
+// what will be in the shot -- which a marker alone cannot answer.
+//
+// Drawn to a fixed depth rather than to the far plane, because a far plane
+// five kilometres out is a pyramid nobody can see the near end of. The aspect
+// is the viewport's, which is the image the camera will be drawn into.
+void submitCameraVolumes(const scene::World& world, std::span<const core::InstanceId> selection,
+                         core::DVec3 cameraOrigin, f32 aspect, render::DebugDraw& draw)
+{
+    constexpr f32 kShownDepth = 6.0f;
+    const render::DebugColor colour = render::DebugColor::fromLinear(0.95f, 0.85f, 0.25f);
+    for (const core::InstanceId id : selection) {
+        const scene::CameraComponent* camera = id.valid() && world.alive(id) ? world.cameras().find(id) : nullptr;
+        if (camera == nullptr)
+            continue;
+        const core::Mat4 transform = core::toRenderMatrix(camera->cframe, cameraOrigin);
+        const auto at = [&transform](f32 x, f32 y, f32 z) {
+            return core::transformPoint(transform, core::Vec3{x, y, z});
+        };
+
+        const f32 depth = camera->farPlane < kShownDepth ? camera->farPlane : kShownDepth;
+        const f32 nearDepth = camera->nearPlane < depth ? camera->nearPlane : depth * 0.01f;
+        f32 nearHalfY = 0.0f;
+        f32 farHalfY = 0.0f;
+        if (camera->projection == 1) {
+            nearHalfY = camera->orthographicSize;
+            farHalfY = camera->orthographicSize;
+        }
+        else {
+            const f32 slope = std::tan(camera->fieldOfView * 0.5f * 3.14159265f / 180.0f);
+            nearHalfY = slope * nearDepth;
+            farHalfY = slope * depth;
+        }
+        const f32 nearHalfX = nearHalfY * aspect;
+        const f32 farHalfX = farHalfY * aspect;
+
+        // Forward is -Z in the camera's own frame.
+        const core::Vec3 nearCorners[4] = {at(-nearHalfX, -nearHalfY, -nearDepth),
+                                           at(nearHalfX, -nearHalfY, -nearDepth), at(nearHalfX, nearHalfY, -nearDepth),
+                                           at(-nearHalfX, nearHalfY, -nearDepth)};
+        const core::Vec3 farCorners[4] = {at(-farHalfX, -farHalfY, -depth), at(farHalfX, -farHalfY, -depth),
+                                          at(farHalfX, farHalfY, -depth), at(-farHalfX, farHalfY, -depth)};
+        for (int corner = 0; corner < 4; ++corner) {
+            const int next = (corner + 1) % 4;
+            draw.line(nearCorners[corner], nearCorners[next], colour);
+            draw.line(farCorners[corner], farCorners[next], colour);
+            draw.line(nearCorners[corner], farCorners[corner], colour);
+        }
+        // Which way is up in the shot: a small tick above the far edge.
+        draw.line(at(-farHalfX * 0.2f, farHalfY, -depth), at(0.0f, farHalfY * 1.2f, -depth), colour);
+        draw.line(at(0.0f, farHalfY * 1.2f, -depth), at(farHalfX * 0.2f, farHalfY, -depth), colour);
+    }
+}
+
 void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 {
     for (const render::RenderPart& part : snapshot.parts) {
@@ -1335,6 +1391,82 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return open != nullptr ? open->workspace() : host->runtime().dataModel();
         };
 
+        // **A `Script` dropped into `ScriptService` becomes a file** (see
+        // `Editor::ReparentPlan::toScriptFiles`): its source is written to
+        // `src/scripts/<folders>/<name>.luau`, the scene's copy is removed, and
+        // the file is mounted now -- exactly what opening the project would have
+        // made of it. A name whose file already exists is left where it was,
+        // because overwriting somebody's script with a drag is not a move.
+        const auto moveScriptsToFiles = [&](std::span<const core::InstanceId> scripts, const std::string& folder) {
+            scene::World& world = authored();
+            const std::filesystem::path scriptsRoot = host->projectRoot() / "src" / "scripts";
+            if (host->projectRoot().empty()) {
+                editor.report("this project is a single file -- it has no src/scripts to move a script into", true);
+                return;
+            }
+            editor.history().record(world, scripts.size() == 1
+                                               ? "Move to ScriptService"
+                                               : "Move " + std::to_string(scripts.size()) + " to ScriptService");
+            const core::NameAtom sourceName = world.atoms().intern("Source");
+            std::vector<core::InstanceId> mounted;
+            core::usize clashed = 0;
+            std::string lastPath;
+            for (const core::InstanceId id : scripts) {
+                const std::string name(world.atoms().text(world.name(id)));
+                // A name that is not a plain file name cannot round-trip through
+                // the mount, which names the instance after the file.
+                if (name.empty() || name.find_first_of("/\\:*?\"<>|") != std::string::npos || name == "." ||
+                    name == "..") {
+                    ++clashed;
+                    continue;
+                }
+                const std::string relative = folder.empty() ? name + ".luau" : folder + "/" + name + ".luau";
+                const std::filesystem::path file = scriptsRoot / std::filesystem::path(relative);
+                std::error_code ec;
+                if (std::filesystem::exists(file, ec)) {
+                    ++clashed;
+                    continue;
+                }
+                std::string source;
+                if (const std::optional<scene::Value> value = world.getProperty(id, sourceName);
+                    value.has_value() && std::holds_alternative<std::string>(*value)) {
+                    source = std::get<std::string>(*value);
+                }
+                std::filesystem::create_directories(file.parent_path(), ec);
+                {
+                    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+                    out.write(source.data(), static_cast<std::streamsize>(source.size()));
+                    if (!out) {
+                        ++clashed;
+                        continue;
+                    }
+                }
+                (void)world.destroy(id);
+                if (const core::InstanceId made = host->mountScriptFile(relative); made.valid())
+                    mounted.push_back(made);
+                lastPath = "src/scripts/" + relative;
+            }
+            world.retireDestroyed();
+            inspector.pruneDead(world);
+            inspector.onWorldRestored();
+            if (!mounted.empty()) {
+                inspector.select(mounted);
+                inspector.reveal(mounted.front());
+            }
+            editor.touch();
+            if (mounted.empty())
+                editor.report("nothing moved -- a file of that name is already in src/scripts", true);
+            else if (clashed > 0)
+                editor.report("moved " + std::to_string(mounted.size()) + " script(s) to src/scripts; " +
+                                  std::to_string(clashed) + " kept, a file of that name already exists",
+                              true);
+            else
+                editor.report(mounted.size() == 1
+                                  ? "moved to " + lastPath
+                                  : "moved " + std::to_string(mounted.size()) + " scripts to src/scripts",
+                              false);
+        };
+
         if (options.editor && inspector.pendingCount() > 0)
             editor.history().record(authored(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
@@ -1875,7 +2007,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // a span into the inspector would be a span into a vector that
                 // has been rewritten underneath it.
                 if (editorCommands.deleteSelection || editorCommands.duplicateSelection ||
-                    editorCommands.groupSelection || editorCommands.ungroupSelection ||
+                    editorCommands.groupSelection || editorCommands.groupAsFolder || editorCommands.ungroupSelection ||
                     editorCommands.reparentTo.valid() || editorCommands.reorderChild.valid()) {
                     const std::vector<core::InstanceId> acting(inspector.selectionSet().begin(),
                                                                inspector.selectionSet().end());
@@ -1890,7 +2022,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                              inspector);
                     }
                     else if (editorCommands.reparentTo.valid()) {
-                        (void)editor.reparent(authored(), acting, editorCommands.reparentTo, authoredRoot(), inspector);
+                        const Editor::ReparentPlan plan =
+                            Editor::planReparent(authored(), acting, editorCommands.reparentTo, authoredRoot());
+                        if (plan.toScriptFiles && !plan.movable.empty() && stageOf() == nullptr)
+                            moveScriptsToFiles(plan.movable,
+                                               *Editor::scriptFolderOf(authored(), editorCommands.reparentTo));
+                        else
+                            // With a place when it was dropped on the edge of a
+                            // row under another parent: moved in, and put where
+                            // the line was drawn.
+                            (void)editor.reparent(authored(), acting, editorCommands.reparentTo, authoredRoot(),
+                                                  inspector, editorCommands.reparentIndex);
                     }
                     if (editorCommands.deleteSelection) {
                         (void)editor.deleteInstances(authored(), acting, authoredRoot(), inspector);
@@ -1903,8 +2045,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // around what was just freed. Neither key can produce that
                     // pair; the order is stated so it cannot depend on which
                     // `if` came first.
-                    if (editorCommands.groupSelection) {
-                        (void)editor.groupSelection(authored(), acting, authoredRoot(), inspector);
+                    if (editorCommands.groupSelection || editorCommands.groupAsFolder) {
+                        (void)editor.groupSelection(authored(), acting, authoredRoot(), inspector,
+                                                    editorCommands.groupAsFolder);
                     }
                     if (editorCommands.ungroupSelection) {
                         (void)editor.ungroupSelection(authored(), acting, authoredRoot(), inspector);
@@ -3011,13 +3154,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // previous frame's mouse. It moves on the RENDER clock and not the
             // tick, because a world that is not ticking is exactly when somebody
             // is flying it.
-            if (options.editor && editing(editor.runState()) && editor.cameraAdopted()) {
+            // A detached view in play mode (Shift+P) flies the same camera.
+            if (options.editor && (editing(editor.runState()) || editor.cameraDetached()) && editor.cameraAdopted()) {
                 const Editor::LookInput& look = editor.lookInput();
                 (void)editor.driveCamera(look.active ? editorLookDelta : core::Vec2{}, look.move,
                                          static_cast<f32>(frame.renderDt));
             }
 
-            const bool gameTakesInput = !options.editor || editor.inPlayMode();
+            // **Not while the view is detached**: the fly keys are the editor's
+            // then, and a character walking off on the same WASD that flies
+            // the camera is two things answering one key.
+            const bool gameTakesInput = !options.editor || (editor.inPlayMode() && !editor.cameraDetached());
             if (gameTakesInput) {
                 host->pumpInput(events);
             }
@@ -3286,9 +3433,21 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // Only while EDITING. In play mode the world belongs to the game and
             // a tool's mark on it would be in every screenshot somebody takes of
             // their own game.
-            const std::span<const core::InstanceId> outlined = options.editor && editing(editor.runState())
-                                                                   ? inspector.selectionSet()
-                                                                   : std::span<const core::InstanceId>{};
+            //
+            // **And everything inside what is selected.** A `Model` is not a
+            // draw, so outlining only the selection lit nothing when a model was
+            // clicked -- the one selection whose extent somebody most needs to
+            // see. Its descendants are what it looks like.
+            static std::vector<core::InstanceId> outlinedTree;
+            outlinedTree.clear();
+            if (options.editor && editing(editor.runState())) {
+                for (const core::InstanceId id : inspector.selectionSet()) {
+                    outlinedTree.push_back(id);
+                    if (authored().alive(id) && authored().firstChild(id).valid())
+                        authored().collectDescendants(id, outlinedTree);
+                }
+            }
+            const std::span<const core::InstanceId> outlined = outlinedTree;
             // **The stage, when one is open.** A prefab is looked at on its
             // own; drawing it inside the game's scene is what a person saw and
             // called wrong, and it was.
@@ -3477,6 +3636,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // editor draws over the world goes here for the same reason.
             if (options.editor) {
                 submitSelection(host->world(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
+                if (editing(editor.runState()))
+                    submitCameraVolumes(authored(), inspector.selectionSet(), snapshot.camera.origin, aspect,
+                                        debugDraw);
                 // The manipulator over the outline, because the outline says
                 // WHAT is selected and the manipulator is the thing being
                 // aimed at.

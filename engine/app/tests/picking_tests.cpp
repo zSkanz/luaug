@@ -546,6 +546,65 @@ TEST_CASE("a drag along an arm reports a point on that arm, and the delta is the
     CHECK(close(static_cast<f32>(end->x - start->x), 4.0f, 0.01f));
 }
 
+TEST_CASE("an arm dragged past its horizon stays in front of the camera and in reach")
+{
+    // **The defect a person reported as "a small mouse movement moves it
+    // forever".** The Z arm runs away from a camera looking level over the
+    // ground, so on screen it climbs toward the horizon and stops there. The old
+    // solve took the point on the infinite line nearest the pointer's ray, and a
+    // pointer at or above that horizon is nearest a point kilometres away or
+    // BEHIND the camera -- one pixel of mouse was the part leaving the world.
+    const TestCamera camera = cameraAt({0.0, 2.0, 0.0}, {0.0f, 0.0f, -1.0f}, 60.0f, 16.0f / 9.0f);
+    const ViewportRect rect{0.0f, 0.0f, 1920.0f, 1080.0f};
+    const core::DVec3 centre{0.0, 0.0, -30.0};
+    const GizmoFrame frame = gizmoAt(camera, rect, centre);
+    const GizmoHandle zAxis{2, false, false, 0.0f};
+
+    const std::optional<core::Vec2> grabbed =
+        worldToViewport(camera.projection, camera.view, camera.origin, rect, centre);
+    REQUIRE(grabbed.has_value());
+
+    // From the handle up past the horizon (row 540 for a level camera) one pixel
+    // at a time. Every answer must be in front of the camera and no further than
+    // a sane multiple of the distance the drag started at; a pixel with no usable
+    // answer returns nothing and the part stays where the last one put it.
+    const f32 horizon = rect.height * 0.5f;
+    for (f32 row = grabbed->y; row > horizon - 20.0f; row -= 1.0f) {
+        const PickRay ray = rayThroughPixel(camera.projection, camera.view, camera.origin, rect, {grabbed->x, row});
+        const std::optional<core::DVec3> point = gizmoDragPoint(ray, frame, zAxis);
+        if (!point.has_value())
+            continue;
+        CHECK(std::isfinite(point->z));
+        CHECK(point->z < camera.origin.z);
+        CHECK(point->z > centre.z - 30.0 * 50.0);
+    }
+
+    // And well below the horizon the drag still follows the pointer along the
+    // arm, away from the camera as the pointer rises.
+    const PickRay nearer = rayThroughPixel(camera.projection, camera.view, camera.origin, rect, *grabbed);
+    const PickRay farther =
+        rayThroughPixel(camera.projection, camera.view, camera.origin, rect, {grabbed->x, grabbed->y - 10.0f});
+    const std::optional<core::DVec3> from = gizmoDragPoint(nearer, frame, zAxis);
+    const std::optional<core::DVec3> to = gizmoDragPoint(farther, frame, zAxis);
+    REQUIRE(from.has_value());
+    REQUIRE(to.has_value());
+    CHECK(to->z < from->z);
+    CHECK(close(static_cast<f32>(from->z - centre.z), 0.0f, 0.05f));
+}
+
+TEST_CASE("a plane handle seen above its horizon answers nothing rather than a point behind the camera")
+{
+    const TestCamera camera = cameraAt({0.0, 2.0, 0.0}, {0.0f, 0.0f, -1.0f}, 60.0f, 16.0f / 9.0f);
+    const ViewportRect rect{0.0f, 0.0f, 1920.0f, 1080.0f};
+    const GizmoFrame frame = gizmoAt(camera, rect, core::DVec3{0.0, 0.0, -30.0});
+    const GizmoHandle floor{1, true, false, 0.0f};
+
+    // Straight ahead and a little up: this ray never meets the ground plane in
+    // front of the camera, only behind it.
+    const PickRay sky = rayThroughPixel(camera.projection, camera.view, camera.origin, rect, {960.0f, 400.0f});
+    CHECK_FALSE(gizmoDragPoint(sky, frame, floor).has_value());
+}
+
 TEST_CASE("a plane handle drags in its own plane and never out of it")
 {
     const TestCamera camera = cameraAt({0.0, 20.0, 0.0}, {0.0f, -1.0f, -0.4f}, 60.0f, 16.0f / 9.0f);

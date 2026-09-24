@@ -996,6 +996,94 @@ TEST_CASE("a drop target lights up for exactly the drops that would move somethi
     CHECK(world.parentOf(folder) == root);
 }
 
+TEST_CASE("ScriptService takes a Script as a file and nothing else, and a mounted script stays in it")
+{
+    // **Reported as "I cannot drag a script from Workspace to the script
+    // service".** The service is the mount of `src/scripts` and the scene saves
+    // nothing in it, so the drop is a move into a FILE -- which the frame loop
+    // performs -- and anything else there would be lost at the next save.
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const auto make = [&](scene::ClassId cls, std::string_view name, core::InstanceId parent) {
+        const core::InstanceId id = world.create(cls);
+        world.setName(id, fixture.atom(name));
+        REQUIRE_FALSE(world.setParent(id, parent).has_value());
+        return id;
+    };
+    const core::InstanceId workspace = make(fixture.workspaceClass, "Workspace", root);
+    const core::InstanceId service = make(fixture.scriptServiceClass, "ScriptService", root);
+    const core::InstanceId enemy = make(fixture.folderClass, "enemy", service);
+    const core::InstanceId script = make(fixture.scriptClass, "Spawner", workspace);
+    const core::InstanceId module = make(fixture.moduleScriptClass, "Shared", workspace);
+    const core::InstanceId part = make(fixture.widgetClass, "Crate", workspace);
+    const core::InstanceId mounted = make(fixture.scriptClass, "patrol", enemy);
+
+    // Nothing is created in it: the plus is drawn from this.
+    CHECK_FALSE(Editor::canParentInto(world, service, root));
+    CHECK_FALSE(Editor::canParentInto(world, enemy, root));
+    CHECK(Editor::canParentInto(world, workspace, root));
+
+    // The directory a drop means.
+    CHECK(Editor::scriptFolderOf(world, service) == std::optional<std::string>{""});
+    CHECK(Editor::scriptFolderOf(world, enemy) == std::optional<std::string>{"enemy"});
+    CHECK_FALSE(Editor::scriptFolderOf(world, workspace).has_value());
+
+    // A Script lights the row and is what moves; a ModuleScript and a part do not.
+    const std::array<core::InstanceId, 1> scripts{script};
+    const Editor::ReparentPlan plan = Editor::planReparent(world, scripts, enemy, root);
+    CHECK(plan.toScriptFiles);
+    REQUIRE(plan.movable.size() == 1);
+    CHECK(plan.movable.front() == script);
+    const std::array<core::InstanceId, 2> others{module, part};
+    CHECK_FALSE(Editor::canReparent(world, others, service, root));
+
+    // The world-only verb never makes the move: it would be lost at the save.
+    CHECK_FALSE(editor.reparent(world, scripts, service, root, inspector));
+    CHECK(world.parentOf(script) == workspace);
+
+    // And a mounted script does not leave: the file would mount it again.
+    const std::array<core::InstanceId, 1> fromFile{mounted};
+    const Editor::ReparentPlan out = Editor::planReparent(world, fromFile, workspace, root);
+    CHECK(out.movable.empty());
+    CHECK(out.mountedRefused);
+    CHECK_FALSE(editor.reparent(world, fromFile, workspace, root, inspector));
+    CHECK(world.parentOf(mounted) == enemy);
+}
+
+TEST_CASE("a drop at a place under another parent moves and places in one undo step")
+{
+    app::testing::Fixture fixture;
+    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
+    Editor editor;
+    Inspector inspector;
+
+    const core::InstanceId root = fixture.widget(world, "Root");
+    const core::InstanceId from = fixture.widget(world, "From");
+    const core::InstanceId to = fixture.widget(world, "To");
+    const core::InstanceId moved = fixture.widget(world, "Moved");
+    const core::InstanceId first = fixture.widget(world, "First");
+    const core::InstanceId second = fixture.widget(world, "Second");
+    REQUIRE_FALSE(world.setParent(from, root).has_value());
+    REQUIRE_FALSE(world.setParent(to, root).has_value());
+    REQUIRE_FALSE(world.setParent(moved, from).has_value());
+    REQUIRE_FALSE(world.setParent(first, to).has_value());
+    REQUIRE_FALSE(world.setParent(second, to).has_value());
+
+    // Between First and Second.
+    const std::array<core::InstanceId, 1> one{moved};
+    REQUIRE(editor.reparent(world, one, to, root, inspector, 1u));
+    CHECK(world.firstChild(to) == first);
+    CHECK(world.nextSibling(first) == moved);
+    CHECK(world.nextSibling(moved) == second);
+
+    REQUIRE(editor.undo(world, inspector));
+    CHECK(world.parentOf(moved) == from);
+}
+
 TEST_CASE("creating lands under the parent that was asked, is selected, and one undo takes it back")
 {
     // The gate item, driven through `Editor` rather than through a mouse: the

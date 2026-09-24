@@ -512,32 +512,74 @@ std::optional<GizmoHandle> pickGizmo(const PickRay& ray, const GizmoFrame& frame
     return best;
 }
 
+namespace {
+
+// Where a DRAG may land along its ray, or nothing.
+//
+// **In front of the camera, not grazing, and within reach.** A pointer at or
+// past the horizon of the plane a drag solves against meets it kilometres away
+// or behind the eye, and following that answer is the part leaving the world on
+// one pixel of mouse -- reported as "a small movement moves it forever". A
+// pixel with no usable answer answers nothing and the part stays where the last
+// one put it, which is what the pointer running out of plane should look like.
+[[nodiscard]] std::optional<f32> dragHit(const PickRay& ray, DVec3 point, Vec3 normal, f32 reach) noexcept
+{
+    // About a degree and a half of grazing, and fifty times the distance the
+    // handle is at: well past anything a hand means, well short of absurd.
+    constexpr f32 kGrazing = 0.025f;
+    constexpr f32 kFurthest = 50.0f;
+
+    const f32 facing = core::dot(ray.direction, normal);
+    if (facing > -kGrazing && facing < kGrazing)
+        return std::nullopt;
+    const f32 along = core::dot(core::toVec3(point - ray.origin), normal) / facing;
+    if (!(along > 0.0f) || along > kFurthest * (reach > 1.0f ? reach : 1.0f))
+        return std::nullopt;
+    return along;
+}
+
+} // namespace
+
 std::optional<DVec3> gizmoDragPoint(const PickRay& ray, const GizmoFrame& frame, const GizmoHandle& handle) noexcept
 {
     Vec3 axes[3];
     gizmoAxes(frame, axes);
     const DVec3 centre = frame.transform.position;
+    const Vec3 toCentre = core::toVec3(centre - ray.origin);
+    const f32 reach = core::length(toCentre);
 
     if (handle.plane || handle.uniform) {
         // A plane handle solves against its own plane; the middle solves against
         // the one facing the camera, which is what makes a screen-space drag
         // follow the pointer exactly.
         const Vec3 normal = handle.plane ? axes[handle.axis] : ray.direction * -1.0f;
-        const std::optional<f32> hit = intersectPlane(ray, centre, normal);
+        const std::optional<f32> hit = dragHit(ray, centre, normal, reach);
         if (!hit.has_value())
             return std::nullopt;
         return ray.origin + core::toDVec3(ray.direction * *hit);
     }
 
-    // An axis handle: the point on the infinite LINE through the centre that
-    // the ray comes nearest to -- the line rather than the arm, because a drag
-    // that ran off the end of the arm would stop moving.
-    const DVec3 far = centre + core::toDVec3(axes[handle.axis]);
-    const Approach approach = approachSegment(ray, centre, far);
-    if (!approach.valid)
+    // **An axis handle: through the plane that holds the axis and faces the
+    // camera**, projected back onto the axis. The line rather than the arm,
+    // because a drag that ran off the end of the arm would stop moving.
+    //
+    // It was the point on the line nearest the pointer's ray, which is the same
+    // answer while the arm crosses the view and none at all as it recedes: past
+    // the arm's vanishing point the nearest point is behind the camera. The
+    // plane has a horizon `dragHit` can refuse at; the nearest point did not.
+    const Vec3 axis = axes[handle.axis];
+    const Vec3 across = toCentre - axis * core::dot(toCentre, axis);
+    const f32 acrossLength = core::length(across);
+    // The arm pointing straight at the camera has no such plane, and a drag
+    // along a line seen end-on has no answer anyway.
+    if (!(acrossLength > 1e-4f * (reach > 1.0f ? reach : 1.0f)))
+        return std::nullopt;
+    const std::optional<f32> hit = dragHit(ray, centre, across * (1.0f / acrossLength), reach);
+    if (!hit.has_value())
         return std::nullopt;
 
-    return centre + core::toDVec3(axes[handle.axis] * approach.alongSegment);
+    const Vec3 onPlane = core::toVec3(ray.origin - centre) + ray.direction * *hit;
+    return centre + core::toDVec3(axis * core::dot(onPlane, axis));
 }
 
 std::optional<f32> gizmoDragAngle(const PickRay& ray, const GizmoFrame& frame, const GizmoHandle& handle) noexcept
@@ -546,7 +588,10 @@ std::optional<f32> gizmoDragAngle(const PickRay& ray, const GizmoFrame& frame, c
     gizmoAxes(frame, axes);
     const DVec3 centre = frame.transform.position;
 
-    const std::optional<f32> hit = intersectPlane(ray, centre, axes[handle.axis]);
+    // Refused past the ring's horizon for the reason a drag point is: a ring
+    // seen edge-on answers with angles that jump half a turn per pixel.
+    const std::optional<f32> hit =
+        dragHit(ray, centre, axes[handle.axis], core::length(core::toVec3(centre - ray.origin)));
     if (!hit.has_value())
         return std::nullopt;
 

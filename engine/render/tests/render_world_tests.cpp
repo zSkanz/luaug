@@ -14,6 +14,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "luaug_test_nearly.h"
 
@@ -664,7 +665,7 @@ TEST_CASE("a MeshPart's wire box appears only while its mesh has not loaded")
     }
 }
 
-// --- Render interpolation (D047, architecture.md §3) -------------------------
+// --- Render interpolation (D047, architecture.md Â§3) -------------------------
 //
 // The simulation is a fixed 60 Hz and a display is not, so a frame between two
 // ticks has to be drawn between two states or the world steps while the camera
@@ -819,7 +820,7 @@ TEST_CASE("clearing the history is what makes a restored world stop interpolatin
 // can hold; what the mask and the dilate then make of it needs a device and, in
 // the end, a person looking at it.
 //
-// The differential is the point (MASTER_PROMPT.md §8): extracting the same world
+// The differential is the point (MASTER_PROMPT.md Â§8): extracting the same world
 // twice, once with a selection and once without, must not produce the same draw
 // list.
 TEST_CASE("a selected instance comes out marked, and nothing else does")
@@ -867,6 +868,44 @@ TEST_CASE("a selected instance comes out marked, and nothing else does")
     for (core::usize index = 0; index < plain.draws.size(); ++index)
         differs = differs || plain.draws[index].outlined != selected.draws[index].outlined;
     CHECK(differs);
+}
+
+TEST_CASE("a long selection is searched, and marks exactly what it holds in any order")
+{
+    // **Past sixteen the renderer sorts the list and searches it**, because a
+    // selected model outlines every part inside it. The order the list arrives
+    // in is the editor's, so the answer must not depend on it.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom content = fixture.atoms.intern("asset://models/box.glb");
+    render::MeshLibrary meshes;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{0, 1};
+    entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
+    entry.sectionCount = 1;
+    meshes.set(content, entry);
+
+    std::vector<core::InstanceId> parts;
+    for (int index = 0; index < 24; ++index)
+        parts.push_back(fixture.meshPartAt(workspace, core::DVec3{index * 1.5 - 18.0, 0.0, -30.0}, content));
+
+    // Twenty of the twenty-four, reversed, with a stale id mixed in.
+    std::vector<core::InstanceId> selection(parts.rbegin(), parts.rbegin() + 20);
+    selection.insert(selection.begin() + 5, core::InstanceId{9999, 1});
+    render::RenderWorld selected;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, selected,
+                    nullptr, selection);
+    REQUIRE(selected.draws.size() == 24);
+
+    core::usize marked = 0;
+    for (const render::DrawItem& draw : selected.draws) {
+        if (draw.outlined)
+            ++marked;
+    }
+    CHECK(marked == 20);
 }
 
 TEST_CASE("a disabled light contributes nothing, and does not spend a budget slot")

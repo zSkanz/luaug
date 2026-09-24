@@ -249,6 +249,15 @@ public:
     [[nodiscard]] const scene::SceneIoReport& bootSceneReport() const noexcept { return m_bootSceneReport; }
 
     [[nodiscard]] core::u64 mountedScriptCount() const;
+
+    // **Mounts one more file of `src/scripts`**, while editing, exactly as the
+    // project's open would have: a `Script` under `ScriptService` at the path
+    // the file is at, its folders made as needed, and a row in the mount table
+    // so play starts it and a require resolves against it. `relative` is under
+    // `src/scripts`, with '/' separators. Nothing when the file cannot be read.
+    [[nodiscard]] core::InstanceId mountScriptFile(std::string_view relative);
+    // The directory the project was mounted from; empty for a single file.
+    [[nodiscard]] const std::filesystem::path& projectRoot() const noexcept { return m_root; }
     [[nodiscard]] core::u64 scriptLoadFailures() const;
 
     [[nodiscard]] scene::World& world() noexcept { return *m_world; }

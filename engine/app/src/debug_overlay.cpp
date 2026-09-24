@@ -766,6 +766,11 @@ core::u32 g_addOpenRow = 0;
 // run in -- panels draw, then shortcuts. See both ends for why the popup being
 // open is not a question that can be asked afterwards.
 bool g_escapeTaken = false;
+// Last frame's tool and selection, so the shell can tell a brush being picked
+// up from one already in hand, and a new selection from the same one.
+Editor::Tool g_lastTool = Editor::Tool::Select;
+core::InstanceId g_lastSelection;
+core::usize g_lastSelectionCount = 0;
 // Which row of the add menu the keyboard is on, and the filter that list was
 // built from. See the menu itself for why a highlight of our own rather than
 // ImGui's navigation: the keyboard belongs to the search box, and a list you
@@ -1469,7 +1474,38 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 const bool above = fromTree && dropHeight > 0.0f && pointerY < rowMin.y + band;
                 const bool below = fromTree && dropHeight > 0.0f && pointerY > rowMax.y - band;
 
-                if (above || below) {
+                // **The edge of a row under ANOTHER parent is still a place.**
+                // It used to accept the drop and do nothing, because a reorder
+                // only moves among siblings -- so a script dragged to between
+                // two rows of a different folder simply stayed where it was.
+                // Now it moves in and lands at the line.
+                const core::InstanceId edgeParent = world.parentOf(row.id);
+                const core::InstanceId edgeDragged =
+                    fromTree ? (inspector.selectionCount() == 1 ? inspector.selectionSet().front()
+                                                                : static_cast<const InstanceDrag*>(peek->Data)->id)
+                             : core::InstanceId{};
+                const bool edgeElsewhere = (above || below) && edgeDragged.valid() && edgeParent.valid() &&
+                                           world.parentOf(edgeDragged) != edgeParent;
+                if (edgeElsewhere) {
+                    const bool lands = inspector.selectionCount() == 1 &&
+                                       Editor::canReparent(world, inspector.selectionSet(), edgeParent, root);
+                    if (lands && ImGui::AcceptDragDropPayload(kInstanceDragPayload) != nullptr) {
+                        core::u32 target = 0;
+                        for (core::InstanceId sibling = world.firstChild(edgeParent);
+                             sibling.valid() && sibling != row.id; sibling = world.nextSibling(sibling)) {
+                            ++target;
+                        }
+                        commands->reparentTo = edgeParent;
+                        // Appended last by the move, then put at the line.
+                        commands->reparentIndex = below ? target + 1 : target;
+                    }
+                    if (lands) {
+                        const float y = below ? rowMax.y : rowMin.y;
+                        ImGui::GetForegroundDrawList()->AddLine(ImVec2(rowMin.x, y), ImVec2(rowMax.x, y),
+                                                                ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+                    }
+                }
+                else if (above || below) {
                     // **The place it will OCCUPY**, which is what `moveChild`
                     // takes -- reading it as "before whatever stands here now"
                     // lands a downward drag one place short, every time. The
@@ -1647,6 +1683,8 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     commands->duplicateSelection = true;
                 if (iconMenuItem(icons, icons::ClassModel, "Group", "Ctrl+G", false, !engineOwned))
                     commands->groupSelection = true;
+                if (iconMenuItem(icons, icons::ClassFolder, "Group as Folder", "Ctrl+Alt+G", false, !engineOwned))
+                    commands->groupAsFolder = true;
                 // Offered only on something that HAS children, because
                 // ungrouping a part is not a thing and a greyed row says that
                 // better than a refusal after the click does.
@@ -4117,8 +4155,9 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
         if (detached)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
         if (toolButton(icons::ActionVisible, "eye",
-                       detached ? "looking through the editor's camera -- click to go back to the game's"
-                                : "fly the editor's camera while the game runs. The simulation is untouched")) {
+                       detached ? "looking through the editor's camera -- click to go back to the game's  (Shift+P)"
+                                : "fly the editor's camera while the game runs. The simulation is untouched  "
+                                  "(Shift+P)")) {
             editor.setCameraDetached(!detached);
         }
         if (detached)
@@ -4132,17 +4171,19 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
     ImGui::TextDisabled("|");
 
     ImGui::SameLine();
-    const bool selecting = editor.tool() == Editor::Tool::Select;
+    const bool selecting = editor.tool() == Editor::Tool::Select && !editor.handlesShown();
     if (selecting)
         ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (toolButton(icons::ActionSelect, "select", "return to object selection (Q)"))
+    if (toolButton(icons::ActionSelect, "select", "select, with no handles in the way  (Ctrl+1)")) {
         editor.setTool(Editor::Tool::Select);
+        editor.setHandlesShown(false);
+    }
     if (selecting)
         ImGui::PopStyleColor();
 
     const auto modeButton = [&](GizmoMode mode, std::string_view id, const char* word, const char* tip) {
         ImGui::SameLine();
-        const bool on = editor.tool() == Editor::Tool::Select && editor.gizmoMode() == mode;
+        const bool on = editor.tool() == Editor::Tool::Select && editor.handlesShown() && editor.gizmoMode() == mode;
         if (on)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
         if (toolButton(id, word, tip)) {
@@ -4152,9 +4193,9 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
         if (on)
             ImGui::PopStyleColor();
     };
-    modeButton(GizmoMode::Translate, icons::ActionMove, "move", "move the selection  (W)");
-    modeButton(GizmoMode::Rotate, icons::ActionRotate, "turn", "turn the selection  (E)");
-    modeButton(GizmoMode::Scale, icons::ActionScale, "size", "resize the selection  (R)");
+    modeButton(GizmoMode::Translate, icons::ActionMove, "move", "move the selection  (Ctrl+2)");
+    modeButton(GizmoMode::Scale, icons::ActionScale, "size", "resize the selection  (Ctrl+3)");
+    modeButton(GizmoMode::Rotate, icons::ActionRotate, "turn", "turn the selection  (Ctrl+4)");
 
     // **Greyed while resizing, because a size has no world space to be in.**
     // Three numbers in the part's own frame is what a `Size` is, so the scale
@@ -4169,8 +4210,8 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
         editor.setGizmoLocal(!editor.gizmoLocal());
     ImGui::EndDisabled();
     ImGui::SetItemTooltip(sizing                ? "a size is in the part's own axes, so resizing is always local"
-                          : editor.gizmoLocal() ? "the selection's own axes -- click for the world's"
-                                                : "the world's axes -- click for the selection's own");
+                          : editor.gizmoLocal() ? "the selection's own axes -- click for the world's  (Ctrl+L)"
+                                                : "the world's axes -- click for the selection's own  (Ctrl+L)");
 
     // **Where the gizmo sits over a selection** (S5.17), beside the axis-space
     // toggle because they are the same kind of question: one is which way the
@@ -4278,16 +4319,16 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
     if (!inPlay) {
         switch (editor.tool()) {
         case Editor::Tool::Sculpt:
-            status = "Sculpt (Q: select)";
+            status = "Sculpt (Ctrl+1: select)";
             break;
         case Editor::Tool::Paint:
-            status = "Paint (Q: select)";
+            status = "Paint (Ctrl+1: select)";
             break;
         case Editor::Tool::Blocks:
-            status = "Blocks (Q: select)";
+            status = "Blocks (Ctrl+1: select)";
             break;
         case Editor::Tool::Tiles:
-            status = "Tiles (Q: select)";
+            status = "Tiles (Ctrl+1: select)";
             break;
         case Editor::Tool::Select:
             break;
@@ -4295,8 +4336,8 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
     }
     fitControl(ImGui::CalcTextSize(status).x);
     ImGui::TextDisabled("%s", status);
-    ImGui::SetItemTooltip("Q returns to selection. Choose terrain and block operations in their panels.\nRight-drag to "
-                          "look. WASD/QE to fly. Scroll for speed (%.0f m/s).",
+    ImGui::SetItemTooltip("Ctrl+1 returns to selection. Choose terrain and block operations in their panels.\n"
+                          "WASD/QE fly while the viewport has focus; right-drag to look. Scroll for speed (%.0f m/s).",
                           static_cast<double>(editor.cameraSpeed()));
 
     // The status used to be a second line here, and moving it is not cosmetic:
@@ -4351,14 +4392,27 @@ void reportLookInput(Editor& editor, bool overViewport)
     Editor::LookInput look;
     look.active = g_lookLatched;
 
-    if (look.active) {
+    // **The keys fly without the button** while the viewport has the keyboard,
+    // which is where somebody's hands already are after clicking into the world.
+    // Never with Ctrl or Alt held: those make a key a SHORTCUT, and Ctrl+D both
+    // duplicating and sliding the camera right is a key doing two things.
+    // Never while a text field has the keyboard, either, which a detached view
+    // in play mode would otherwise steal from a game's chat box.
+    const bool viewportHasKeys = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
+                                 (editor.cameraDetached() && !io.WantCaptureKeyboard);
+    const bool shortcutHeld = io.KeyCtrl || io.KeyAlt || io.KeySuper;
+    if (look.active || (viewportHasKeys && !shortcutHeld && !io.WantTextInput && !ImGui::IsAnyItemActive())) {
         const auto axis = [](ImGuiKey positive, ImGuiKey negative) -> f32 {
             return (ImGui::IsKeyDown(positive) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(negative) ? 1.0f : 0.0f);
         };
         const f32 sprint = ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0f : 1.0f;
-        look.move =
-            core::Vec3{axis(ImGuiKey_D, ImGuiKey_A), axis(ImGuiKey_E, ImGuiKey_Q), axis(ImGuiKey_W, ImGuiKey_S)} *
-            sprint;
+        // Not even with the button held: a shortcut pressed mid-turn is still a
+        // shortcut, and the keys it shares with flying must not also fly.
+        if (!shortcutHeld) {
+            look.move =
+                core::Vec3{axis(ImGuiKey_D, ImGuiKey_A), axis(ImGuiKey_E, ImGuiKey_Q), axis(ImGuiKey_W, ImGuiKey_S)} *
+                sprint;
+        }
     }
 
     editor.setLookInput(look);
@@ -4486,8 +4540,12 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
         // way -- a first click that selected the model followed by a second
         // that opened it is exactly the gesture, and treating them as two
         // requests would make the first one's selection flicker.
+        //
+        // **Alt picks the part itself**, whatever model it is in: the quick
+        // way to one wheel of a car without opening the car first.
         if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+            editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left),
+                               ImGui::GetIO().KeyAlt);
         }
 
         reportLookInput(editor, overImage);
@@ -6443,7 +6501,7 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
             ImGui::GetFontSize());
         return open;
     };
-    ImGui::TextWrapped("Choose a tool, then drag in the viewport. Q returns to selection.");
+    ImGui::TextWrapped("Choose a tool, then drag in the viewport. Ctrl+1 returns to selection.");
     ImGui::Spacing();
     // --- Create ---------------------------------------------------
     if (section("Create", icons::ActionAdd, terrain == nullptr ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
@@ -6697,7 +6755,7 @@ void drawViewportSettings(Editor* editor, EditorPanels& panels, const IconAtlas*
     f32 speed = editor->cameraSpeed();
     if (ImGui::DragFloat("##fly-speed", &speed, 0.5f, 0.1f, 1000.0f, "%.1f"))
         editor->setCameraSpeed(speed);
-    ImGui::TextWrapped("Right-drag to look. WASD/QE to fly. Scroll to adjust speed.");
+    ImGui::TextWrapped("WASD/QE fly while the viewport has focus; right-drag to look. Scroll to adjust speed.");
     ImGui::SeparatorText("Snapping");
     bool snap = editor->snapping();
     if (toggle(icons::ActionGrid, "Enable snapping", snap, "Hold Alt to temporarily suspend snapping."))
@@ -7269,6 +7327,12 @@ terrainPanelDone:;
         // and the honest one: while you are testing, the tool keeps one key.
         if (editor != nullptr && editor->inPlayMode())
             commands.play = false;
+        else if (editor != nullptr && editor->tool() != Editor::Tool::Select) {
+            // **Out of a brush before letting go of anything.** Q did this
+            // until it became a fly key, and a brush somebody cannot put down
+            // with the key they reach for first is a brush they are stuck in.
+            editor->setTool(Editor::Tool::Select);
+        }
         else if (editor != nullptr && editor->drilled().valid()) {
             // **One level out before letting go** (S5.3). Somebody who has
             // double-clicked into a model and wants out again reaches for
@@ -7281,31 +7345,74 @@ terrainPanelDone:;
             commands.clearSelection = true;
     }
 
-    // **W, E, R for the three manipulators**, which is what every editor in this
-    // shape uses and therefore what somebody's hands already know. They do not
-    // collide with the fly camera: that reads WASD only while the right button
-    // is held, and these are refused while it is.
+    // **A brush and a selection do not share the viewport.** Picking up a
+    // terrain or block brush lets go of the selection, so a click is a stroke
+    // and never also a handle; and something newly selected -- a row in the
+    // Explorer, a part just inserted -- puts the brush down, because the person
+    // has just said what they want to work on and it is not the ground. The
+    // Tiles tool is left out of both: it paints the tilemap that IS selected.
+    if (editor != nullptr && inspector != nullptr) {
+        const auto isBrush = [](Editor::Tool tool) {
+            return tool == Editor::Tool::Sculpt || tool == Editor::Tool::Paint || tool == Editor::Tool::Blocks;
+        };
+        const Editor::Tool tool = editor->tool();
+        const core::InstanceId primary = inspector->selection();
+        const core::usize count = inspector->selectionCount();
+        if (isBrush(tool) && !isBrush(g_lastTool)) {
+            if (count > 0)
+                commands.clearSelection = true;
+        }
+        else if (isBrush(tool) && count > 0 && (primary != g_lastSelection || count != g_lastSelectionCount)) {
+            editor->setTool(Editor::Tool::Select);
+            // And what was selected is shown, in front of the brush's panel.
+            selectDockTab("Properties");
+        }
+        g_lastTool = editor->tool();
+        g_lastSelection = primary;
+        g_lastSelectionCount = count;
+    }
+
+    // **Shift+P flies free while the game runs**: the view leaves the game's
+    // camera and the fly keys drive the editor's, with the simulation untouched
+    // -- the eye on the transport, on the key people already use for it. The
+    // game sees the key too, the same arrangement Escape has.
+    if (editor != nullptr && editor->inPlayMode() && ImGui::GetIO().KeyShift && !ImGui::GetIO().KeyCtrl &&
+        !ImGui::GetIO().KeyAlt && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() &&
+        ImGui::IsKeyPressed(ImGuiKey_P, false)) {
+        editor->setCameraDetached(!editor->cameraDetached());
+    }
+
+    // **Ctrl+1 to Ctrl+4 for select, move, scale and rotate, and Ctrl+L for
+    // the space**, which is the set most people arriving here already have in
+    // their hands -- and the reason single letters are not used: W, A, S, D, Q
+    // and E fly the camera without a held button, so a tool key among them
+    // would move the view and change the tool with one press.
     //
     // Alt suspends the grid for as long as it is held. That way round because
     // the number somebody wants is far more often a round one, so the modifier
     // is for the exception rather than for the rule.
+    const bool ctrlOnly = ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeyAlt;
     if (editor != nullptr && !ImGui::IsAnyItemActive() && !popupOpen && !editor->lookInput().active) {
-        if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
+        if (ctrlOnly && ImGui::IsKeyPressed(ImGuiKey_1, false)) {
+            editor->setTool(Editor::Tool::Select);
+            editor->setHandlesShown(false);
+        }
+        if (ctrlOnly && ImGui::IsKeyPressed(ImGuiKey_2, false)) {
             editor->setTool(Editor::Tool::Select);
             editor->setGizmoMode(GizmoMode::Translate);
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
-            editor->setTool(Editor::Tool::Select);
-            editor->setGizmoMode(GizmoMode::Rotate);
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+        if (ctrlOnly && ImGui::IsKeyPressed(ImGuiKey_3, false)) {
             editor->setTool(Editor::Tool::Select);
             editor->setGizmoMode(GizmoMode::Scale);
         }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+        if (ctrlOnly && ImGui::IsKeyPressed(ImGuiKey_4, false)) {
             editor->setTool(Editor::Tool::Select);
-        if (editor->hasTerrain()) {
+            editor->setGizmoMode(GizmoMode::Rotate);
+        }
+        if (ctrlOnly && ImGui::IsKeyPressed(ImGuiKey_L, false))
+            editor->setGizmoLocal(!editor->gizmoLocal());
+
+        if (editor->hasTerrain() && !ImGui::GetIO().KeyCtrl) {
             if (ImGui::IsKeyPressed(ImGuiKey_T, false)) {
                 editor->setTool(Editor::Tool::Sculpt);
                 panels.terrain = true;
@@ -7411,9 +7518,14 @@ terrainPanelDone:;
             if (ImGui::IsKeyPressed(ImGuiKey_G, false)) {
                 if (ImGui::GetIO().KeyShift)
                     commands.ungroupSelection = true;
+                else if (ImGui::GetIO().KeyAlt)
+                    commands.groupAsFolder = true;
                 else
                     commands.groupSelection = true;
             }
+            // Ctrl+U as well, which is the ungroup many hands already know.
+            if (ImGui::IsKeyPressed(ImGuiKey_U, false))
+                commands.ungroupSelection = true;
             if (ImGui::IsKeyPressed(ImGuiKey_C, false))
                 commands.copySelection = true;
             if (ImGui::IsKeyPressed(ImGuiKey_X, false))

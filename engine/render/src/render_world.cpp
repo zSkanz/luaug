@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 namespace luaug::render {
 namespace {
@@ -412,11 +413,24 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     if (!root.valid())
         return;
 
-    // Linear, and it is the cheap answer rather than the lazy one: an editor
-    // selection is a handful of instances, the common case is none at all, and
-    // a hash lookup per draw would cost more on a list of ten thousand than
-    // this costs on a list of four.
-    const auto isOutlined = [outlined](core::InstanceId id) {
+    // Linear for a handful, which is the common case and the cheap answer: a
+    // search structure per frame would cost more on a list of four than the
+    // walk does. **Sorted once and searched past that**, because a selected
+    // model outlines every part inside it, and a castle of two thousand parts
+    // walked once per draw is four million comparisons a frame.
+    constexpr usize kLinearOutline = 16;
+    const auto byId = [](core::InstanceId a, core::InstanceId b) {
+        return a.index != b.index ? a.index < b.index : a.generation < b.generation;
+    };
+    static thread_local std::vector<core::InstanceId> sortedOutline;
+    sortedOutline.clear();
+    if (outlined.size() > kLinearOutline) {
+        sortedOutline.assign(outlined.begin(), outlined.end());
+        std::sort(sortedOutline.begin(), sortedOutline.end(), byId);
+    }
+    const auto isOutlined = [outlined, &byId](core::InstanceId id) {
+        if (outlined.size() > kLinearOutline)
+            return std::binary_search(sortedOutline.begin(), sortedOutline.end(), id, byId);
         for (const core::InstanceId selected : outlined) {
             if (selected == id)
                 return true;
