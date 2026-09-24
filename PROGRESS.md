@@ -291,53 +291,39 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 
 ## Blocked — needs human
 
-- **Making the repository public is the one act reserved for the owner.** It is
-  a one-way door in practice -- the whole history becomes readable and
-  cloneable, and un-publishing does not un-clone -- so it is §10's kind of
-  decision, asked rather than taken
-  ([`docs/finish-line.md`](docs/finish-line.md), decision 1). It also decides
-  the item below: a public repository does not spend Actions quota. **The
-  v1.0.0 release is published**, with `LuauG-Open-World-v1.0.0-win64.zip`
-  attached, and reaches nobody until this is answered. The second archive
-  ADR 0054 makes possible -- the editor itself -- is **prepared and not tagged**
-  (S8.6): the tree declares 1.1.0, the changelog carries the editor phase, and
-  `lute tools/repo/package.luau` writes `LuauG-1.1.0-win64` whose binary says
-  `LuauG 1.1.0 (editor)`. `git tag v1.1.0 && git push --tags` and attaching the
-  archive are the owner's, beside this.
-- **Actions is blocked on billing, and only the account holder can clear it.**
-  GitHub's own annotation is quoted under State above. Until it is cleared there
-  is no Tier-3 at all, so every tag from M6 onward carries a Tier-1 and a Tier-2
-  result and no macOS one -- a gap in the evidence rather than a failure, and
-  the notes say so in the open.
-- **The Android run of `examples/02-meshes` is due.** Deferred by the human
-  until M4.5 closed, and M4.5 and M5 have both closed since. It is a device
-  checkpoint rather than milestone work, and it is here so that it is asked for
-  rather than forgotten.
+- **The Android run of `examples/02-meshes` is due**, and it is the one item
+  here. Phase 5 (mobile) is closed until the owner opens it (R15), and a device
+  check is the owner's to run. It is listed so that it is asked for rather than
+  forgotten.
 
-## Decisions pending ADR
+What this section used to hold, resolved, for whoever remembers it:
 
-- **`churn10k` reads 7.32 ms/tick, and whether that is a regression is a
-  judgement somebody may want to remake.** 2.02 at M2, 4.96 at M5 when its scene
-  became ten thousand rigid bodies, 7.32 since M6: two thirds of its anchored
-  parts are written every tick, so D031 makes two thirds of them kinematic
-  bodies in the broadphase layer Jolt re-fits each tick. That is the semantic
-  the fix exists to provide, applied to a scene that was never written to be a
-  physics test. It is under its 16 ms budget at every step and itemised in the
-  baselines. If the answer is "that is a regression", §8 wants an ADR; the two
-  candidate answers are the mirror's dirty-flag design and a `churn10k` whose
-  moving parts stop being anchored. Decision 3 in
-  [`docs/finish-line.md`](docs/finish-line.md).
-- **Jolt's `CROSS_PLATFORM_DETERMINISTIC` build switch is off**, which is
-  ADR 0025's level B rather than an oversight -- upstream documents it as buying
-  determinism across compiler, OS and architecture for about 8% of the library's
-  speed (`third_party/jolt/Docs/Architecture.md`). Turning it on is one line and
-  would likely make the win↔linux comparison green; it has a performance bill,
-  which is what makes it a record rather than an edit. Decision 4 in
-  [`docs/finish-line.md`](docs/finish-line.md).
-- **The rest of the ADR debt is tracked in the campaign rather than here.**
-  `docs/finish-line.md` S2.7 names the two records that were owed when it
-  opened: the material reversal, and the Part B deviation justified only in
-  commit messages.
+- **The repository is public** (2026-08-27). That also ended the Actions
+  billing block: standard runners are free on a public repository.
+- **v1.0.0 and v1.1.0 are released** on GitHub, v1.1.0 (the editor) on
+  2026-09-23.
+
+## Decisions taken
+
+- **`churn10k`'s 7.32 ms/tick is accepted** (the owner, 2026-09-24). Two
+  thirds of its anchored parts are written every tick, so D031 makes them
+  kinematic, and Jolt re-fits that broadphase layer every tick. That is the
+  semantic the fix exists for, applied to a scene that was never a physics test,
+  and it is under the scenario's own budget, which is 32 ms since `8f80ccf1`. Neither of the two alternatives -- a
+  dirty-flag mirror, or a scene whose moving parts are not anchored -- is taken.
+  [`docs/finish-line.md`](docs/finish-line.md) decision 3 had already ruled it
+  not a regression; the owner's word closes the question.
+- **Jolt's `CROSS_PLATFORM_DETERMINISTIC` is ON** (ADR 0074, 2026-09-23), at
+  upstream's documented cost of about 8% of the library's speed. Decision 4 in
+  `docs/finish-line.md` is closed by it.
+
+## Now
+
+The 2026-09-24 mandate: every piece of depth the phases deferred --
+navigation's crowds, links, costs, sizes and 2D; multiplayer's ownership, teams,
+a public protocol and rollback; 2D joints, sprite animation, and 2D on the wire;
+a post-processing API; the terrain's one-sided skirt. The ledger is
+[`docs/briefs/mandate-2026-09-24.md`](docs/briefs/mandate-2026-09-24.md).
 
 ## Session Log
 
