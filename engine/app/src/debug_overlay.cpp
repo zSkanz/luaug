@@ -946,7 +946,7 @@ struct ContentDrag
         g_addHighlightFilter.clear();
         ImGui::SetKeyboardFocusHere();
     }
-    ImGui::SetNextItemWidth(210.0f);
+    ImGui::SetNextItemWidth(210.0f * ImGui::GetStyle().FontScaleMain);
     // "search" rather than "filter": one is what a person is doing
     // and the other is what the code is doing, and a hint is written
     // for the first of those. It is also the word on every other box
@@ -1821,7 +1821,9 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // everything inside the chunk wrong -- `Chunk_-3_0_0/Ground` is not
             // itself generated, so it wore a plus, took the create, and lost it
             // at the next eviction.
-            if (commands != nullptr && Editor::canParentInto(world, row.id, root)) {
+            // And on ScriptService and its folders, where a Script is made as a file.
+            if (commands != nullptr &&
+                (Editor::canParentInto(world, row.id, root) || Editor::scriptFolderOf(world, row.id).has_value())) {
                 // **Shown on the row under the pointer and on the selected
                 // ones -- and EXISTING on all of them.** The two are different
                 // questions and conflating them is what broke the first click.
@@ -2200,7 +2202,7 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
         ImGui::SetKeyboardFocusHere();
     }
 
-    ImGui::SetNextItemWidth(240.0f);
+    ImGui::SetNextItemWidth(240.0f * ImGui::GetStyle().FontScaleMain);
     (void)ImGui::InputTextWithHint("##filter", "search", g_refFilter.data(), g_refFilter.size());
     const std::string_view needle(g_refFilter.data());
 
@@ -3009,7 +3011,7 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
                 // declared below this, for the modals.
                 if (ImGui::IsWindowAppearing())
                     filter.fill(0);
-                ImGui::SetNextItemWidth(220.0f);
+                ImGui::SetNextItemWidth(220.0f * ImGui::GetStyle().FontScaleMain);
                 ImGui::InputTextWithHint("##joint-filter", "filter", filter.data(), filter.size());
 
                 ImGui::BeginChild("joint-list", ImVec2(220.0f, 260.0f));
@@ -3343,9 +3345,9 @@ void drawAttributes(scene::World& world, Inspector& inspector, core::InstanceId 
 
         const float trash = ImGui::GetFrameHeight();
         const float inner = ImGui::GetStyle().ItemInnerSpacing.x;
-        ImGui::SetNextItemWidth(140.0f);
+        ImGui::SetNextItemWidth(140.0f * ImGui::GetStyle().FontScaleMain);
         ImGui::TextUnformatted(text.data(), text.data() + text.size());
-        ImGui::SameLine(150.0f);
+        ImGui::SameLine(150.0f * ImGui::GetStyle().FontScaleMain);
         ImGui::SetNextItemWidth(-(trash + inner));
 
         // **Typed by what it HOLDS.** An attribute has no declared type, so the
@@ -3405,10 +3407,10 @@ void drawAttributes(scene::World& world, Inspector& inspector, core::InstanceId 
     ImGui::Separator();
     static std::array<char, 96> newName{};
     static int newType = 1;
-    ImGui::SetNextItemWidth(140.0f);
+    ImGui::SetNextItemWidth(140.0f * ImGui::GetStyle().FontScaleMain);
     ImGui::InputTextWithHint("##attr-name", "name", newName.data(), newName.size());
-    ImGui::SameLine(150.0f);
-    ImGui::SetNextItemWidth(110.0f);
+    ImGui::SameLine(150.0f * ImGui::GetStyle().FontScaleMain);
+    ImGui::SetNextItemWidth(110.0f * ImGui::GetStyle().FontScaleMain);
     ImGui::Combo("##attr-type", &newType, "true/false\0number\0text\0vector\0colour\0");
     ImGui::SameLine();
     const bool named = newName[0] != '\0';
@@ -3974,7 +3976,7 @@ void drawMemory(script::ScriptRuntime& runtime)
 }
 
 void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCommands = nullptr,
-                 const IconAtlas* icons = nullptr)
+                 const IconAtlas* icons = nullptr, bool docked = false)
 {
     ConsoleLog& log = console();
 
@@ -4001,8 +4003,15 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
     // **The log is the part that grows.** One REPL line and its spacing sit
     // under it and everything else the panel has is the log's -- see
     // `consoleLogHeight`, which is where the arithmetic is asserted.
+    //
+    // **Docked, the panel is as tall as its dock**, and a fixed 160-pixel floor
+    // pushed the input line out of a short one -- reported as the console's
+    // layout leaving its window. There the floor is three lines of text; the
+    // fixed height stays for the F3 overlay, whose console sits at the end of a
+    // scrolling window with nothing to fill.
+    const f32 logFloor = docked ? ImGui::GetTextLineHeightWithSpacing() * 3.0f : kConsoleLogMinHeight;
     const f32 logHeight =
-        consoleLogHeight(ImGui::GetContentRegionAvail().y, ImGui::GetFrameHeightWithSpacing(), kConsoleLogMinHeight);
+        consoleLogHeight(ImGui::GetContentRegionAvail().y, ImGui::GetFrameHeightWithSpacing(), logFloor);
 
     if (ImGui::BeginChild("log", ImVec2(0.0f, logHeight), ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_HorizontalScrollbar)) {
@@ -4306,8 +4315,8 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
             for (const Row& row : Rows) {
                 ImGui::PushID(row.label);
                 ImGui::TextUnformatted(row.label);
-                ImGui::SameLine(60.0f);
-                ImGui::SetNextItemWidth(140.0f);
+                ImGui::SameLine(60.0f * ImGui::GetStyle().FontScaleMain);
+                ImGui::SetNextItemWidth(140.0f * ImGui::GetStyle().FontScaleMain);
                 f32 step = editor.snapStep(row.mode);
                 if (ImGui::DragFloat("##step", &step, step * 0.05f + 0.001f, row.slowest, row.fastest, row.format))
                     editor.setSnapStep(row.mode, step);
@@ -6142,15 +6151,35 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // the shell is actually drawn at. Committed on release: dragging it
         // rewrites the whole style every frame, and writing the file that often
         // is a file write per pixel of travel.
-        f32 scale = resolveUiScale(g_appearance.scale, g_displayScale);
+        //
+        // **Applied when the slider is let go, not while it is dragged**
+        // (reported as the scale "not respecting" the hand on it): every step
+        // of a live drag resized the dialog and the slider itself, so the value
+        // under the pointer moved while the pointer did not, and the drag ran
+        // away. The number follows the drag; the interface follows the release.
+        static f32 s_draggedScale = 0.0f;
+        f32 scale = s_draggedScale > 0.0f ? s_draggedScale : resolveUiScale(g_appearance.scale, g_displayScale);
         ImGui::TextUnformatted("Interface scale");
         ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::SliderFloat("##interface-scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx")) {
-            g_appearance.scale = scale;
-            applyTheme(themeById(g_appearance.themeId), resolveUiScale(scale, g_displayScale));
-        }
-        if (ImGui::IsItemDeactivatedAfterEdit())
+        if (ImGui::SliderFloat("##interface-scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx"))
+            s_draggedScale = scale;
+        if (ImGui::IsItemDeactivatedAfterEdit() && s_draggedScale > 0.0f) {
+            g_appearance.scale = s_draggedScale;
+            s_draggedScale = 0.0f;
             applyAppearance();
+        }
+        // The sizes people actually pick, one click each.
+        for (const f32 preset : {1.0f, 1.25f, 1.5f, 1.75f, 2.0f}) {
+            char label[16];
+            (void)std::snprintf(label, sizeof(label), "%d%%", static_cast<int>(std::lround(preset * 100.0f)));
+            if (preset != 1.0f)
+                ImGui::SameLine();
+            if (ImGui::Button(label)) {
+                g_appearance.scale = preset;
+                s_draggedScale = 0.0f;
+                applyAppearance();
+            }
+        }
         if (labeledIconButton(icons, icons::ActionRefresh, "Match display")) {
             // Zero is the stored spelling of "ask the display", which is what
             // this button puts back -- not the number the display happens to
@@ -7404,7 +7433,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // is what somebody wants when the VM failed to boot.
     if (panels.console) {
         if (ImGui::Begin((tabIconPad() + "Console###Console").c_str(), &panels.console))
-            drawConsole(runtime, &scriptCommands, icons);
+            drawConsole(runtime, &scriptCommands, icons, true);
         ImGui::End();
     }
 

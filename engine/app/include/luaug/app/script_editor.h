@@ -156,6 +156,16 @@ struct OpenScript
     std::size_t completionIndex = 0;
     // What accepting a row replaces: the partial word, and nothing else.
     Range completionReplace;
+    // **The edit an accept made is not a reason to offer the list again.** The
+    // accepted word matched itself, so the list came straight back and the
+    // next Enter accepted it a second time instead of breaking the line --
+    // reported as "Enter does not work on a suggestion".
+    bool justAccepted = false;
+
+    // **Take the caret the next time the pane is drawn**: set when the tab is
+    // opened or focused, so a script just made is typed into at once, with the
+    // caret on its first line, instead of waiting for a click.
+    bool claimCaret = false;
 
     [[nodiscard]] bool dirty() const noexcept { return document.revision() != savedRevision; }
 };

@@ -79,6 +79,8 @@ struct SyntaxPalette
     core::Color3 operatorToken;
     // `@native`, `@checked`.
     core::Color3 attribute;
+    // A name in a type annotation: `number` in `local x: number`.
+    core::Color3 typeName;
     // A broken string, comment or codepoint -- what a half-typed line produces.
     core::Color3 errorToken;
 };

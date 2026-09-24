@@ -86,10 +86,21 @@ private:
 }
 
 // **The services whose contents a scene carries beside the world's** (ADR
-// 0080), in the order a file writes them. They are not the world -- nothing
-// under them is drawn or simulated -- but what an editor put in them is part
-// of what a game starts with.
-constexpr std::array<std::string_view, 2> StorageServices{"ReplicatedStorage", "ServerStorage"};
+// 0080). What an editor put in them is part of what a game starts with.
+//
+// **Every service, not a list of three.** The Explorer lets a person put an
+// instance inside any other (the owner: "whether it does anything is another
+// story"), and a service the scene did not carry was one where what they put
+// was there until the next save and then gone -- a `ScreenGui` in `UIService`
+// was the one reported. Two are not carried: the world, which is the file's
+// root, and `ScriptService`, which is the mount of `src/scripts` and is saved
+// as files.
+//
+// These three come first, in this order, because files already name them in
+// it; any other follows in the data model's own order. Written only when
+// something is kept there, so every scene written before is the byte-for-byte
+// file it was.
+constexpr std::array<std::string_view, 3> FirstServices{"ReplicatedStorage", "ServerStorage", "UIService"};
 
 // The service of that class under the world's data model, or nothing.
 [[nodiscard]] core::InstanceId storageNamed(const World& world, std::string_view className) noexcept
@@ -105,14 +116,56 @@ constexpr std::array<std::string_view, 2> StorageServices{"ReplicatedStorage", "
     return {};
 }
 
+// **Made by a system, so nobody wrote it down and a scene does not record
+// it**: a streamed chunk (and the whole subtree with it), or a `Player`, which
+// the engine makes for somebody taking part and nothing can author.
+[[nodiscard]] bool engineMade(const World& world, core::InstanceId id) noexcept
+{
+    if (world.generated(id))
+        return true;
+    const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    return descriptor != nullptr && world.atoms().text(descriptor->name) == "Player";
+}
+
 // Whether a storage holds anything a scene would write.
 [[nodiscard]] bool holdsAuthored(const World& world, core::InstanceId service) noexcept
 {
     for (core::InstanceId child = world.firstChild(service); child.valid(); child = world.nextSibling(child)) {
-        if (!world.generated(child))
+        if (!engineMade(world, child))
             return true;
     }
     return false;
+}
+
+// Whether a service's contents are a scene's to carry (see `FirstServices`).
+[[nodiscard]] bool carriedService(const World& world, core::InstanceId id) noexcept
+{
+    const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    if (descriptor == nullptr || !hasFlag(descriptor->flags, ClassFlags::Service))
+        return false;
+    const std::string_view name = world.atoms().text(descriptor->name);
+    return name != "Workspace" && name != "ScriptService";
+}
+
+// The carried services, by class name, in the order a file writes them.
+[[nodiscard]] std::vector<std::pair<std::string_view, core::InstanceId>> carriedServices(const World& world)
+{
+    std::vector<std::pair<std::string_view, core::InstanceId>> services;
+    for (const std::string_view name : FirstServices) {
+        if (const core::InstanceId service = storageNamed(world, name); service.valid())
+            services.emplace_back(name, service);
+    }
+    const core::InstanceId workspace = workspaceOf(world);
+    const core::InstanceId dataModel = workspace.valid() ? world.parentOf(workspace) : core::InstanceId{};
+    for (core::InstanceId child = dataModel.valid() ? world.firstChild(dataModel) : core::InstanceId{}; child.valid();
+         child = world.nextSibling(child)) {
+        if (!carriedService(world, child))
+            continue;
+        const std::string_view name = world.atoms().text(world.classes().find(world.classOf(child))->name);
+        if (std::find(FirstServices.begin(), FirstServices.end(), name) == FirstServices.end())
+            services.emplace_back(name, child);
+    }
+    return services;
 }
 
 // --- writing ---------------------------------------------------------------
@@ -353,7 +406,7 @@ void collectPaths(const World& world, core::InstanceId id, const std::string& pr
         // Not written, so not nameable. A path collected for something the file
         // will not contain is a reference that resolves to nothing on load,
         // which is worse than the null the dropped-reference count reports.
-        if (world.generated(child))
+        if (engineMade(world, child))
             continue;
         collectPaths(world, child, path, out);
     }
@@ -748,7 +801,7 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
             // A system made it, so nobody wrote it down and a scene does not
             // record it -- and the whole subtree goes with it, because the parts
             // inside a streamed chunk were not separately authored either.
-            if (world.generated(child))
+            if (engineMade(world, child))
                 continue;
             writeInstance(out, world, child, paths, report, expandStamped, stamps);
         }
@@ -1491,16 +1544,15 @@ void clearScene(World& world)
     // in one pass drops the rest of the list. The storages are the scene's
     // too (ADR 0080).
     std::vector<core::InstanceId> containers{workspace};
-    for (const std::string_view name : StorageServices) {
-        if (const core::InstanceId service = storageNamed(world, name); service.valid())
-            containers.push_back(service);
-    }
+    for (const auto& [name, service] : carriedServices(world))
+        containers.push_back(service);
     std::vector<core::InstanceId> authored;
     for (const core::InstanceId container : containers) {
         for (core::InstanceId child = world.firstChild(container); child.valid(); child = world.nextSibling(child)) {
             // Not authored, so not a scene's to remove. A new scene is not a
-            // reason to evict the ground a streaming system put there.
-            if (world.generated(child))
+            // reason to evict the ground a streaming system put there, or the
+            // player somebody is.
+            if (engineMade(world, child))
                 continue;
             authored.push_back(child);
         }
@@ -1566,9 +1618,8 @@ std::string writeScene(const World& world, SceneIoReport* report, StampLibrary* 
         std::unordered_map<core::u32, std::string> paths;
         collectPaths(world, workspace, {}, paths);
         std::vector<std::pair<std::string_view, core::InstanceId>> storages;
-        for (const std::string_view name : StorageServices) {
-            const core::InstanceId service = storageNamed(world, name);
-            if (service.valid() && holdsAuthored(world, service)) {
+        for (const auto& [name, service] : carriedServices(world)) {
+            if (holdsAuthored(world, service)) {
                 collectPaths(world, service, {}, paths);
                 storages.emplace_back(name, service);
             }
@@ -1635,10 +1686,13 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
     std::vector<std::pair<std::string, core::InstanceId>> roots{
         {std::string(world.atoms().text(world.name(workspace))), workspace}};
     if (const JsonValue storage = root["storage"]; storage.type() == core::JsonType::Object) {
-        for (const std::string_view name : StorageServices) {
+        // In the file's order, and whichever services it names: one this build
+        // does not have, or one a scene does not carry, is skipped.
+        for (core::usize entry = 0; entry < storage.size(); ++entry) {
+            const std::string_view name = storage.keyAt(entry);
             const JsonValue node = storage[name];
             const core::InstanceId service = storageNamed(world, name);
-            if (node.type() != core::JsonType::Object || !service.valid())
+            if (node.type() != core::JsonType::Object || !service.valid() || !carriedService(world, service))
                 continue;
             applyNode(world, service, node, pending, out);
             if (const JsonValue children = node["children"]; children.type() == core::JsonType::Array) {

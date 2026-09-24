@@ -611,6 +611,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // The instance an Explorer import will parent what it makes under, held
     // across the frames the dialog is open.
     core::InstanceId importParent;
+    // **A script just made, opened on the next frame** with the caret on its
+    // first line: somebody who inserts a script is about to write in it, and a
+    // tree row they must double-click first is a step between them and that.
+    core::InstanceId scriptToOpen;
 
     ViewportTarget viewportTarget;
     // The editor's icons, built once from `content/icons` on the first frame
@@ -1467,6 +1471,48 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                               false);
         };
 
+        // **A Script made inside `ScriptService` is a new file** under
+        // `src/scripts`, for the reason a dropped one is: the service is the
+        // mount of that directory and the scene saves nothing in it. Named
+        // `Script`, `Script2`, ... -- the first name no file has -- and opened
+        // at once, like any script just made.
+        const auto createScriptFile = [&](const std::string& folder) {
+            if (host->projectRoot().empty()) {
+                editor.report("this project is a single file -- it has no src/scripts to make a script in", true);
+                return;
+            }
+            const std::filesystem::path scriptsRoot = host->projectRoot() / "src" / "scripts";
+            std::string relative;
+            std::error_code ec;
+            for (int attempt = 1; attempt < 1000; ++attempt) {
+                const std::string name = attempt == 1 ? "Script" : "Script" + std::to_string(attempt);
+                const std::string candidate = folder.empty() ? name + ".luau" : folder + "/" + name + ".luau";
+                if (!std::filesystem::exists(scriptsRoot / std::filesystem::path(candidate), ec)) {
+                    relative = candidate;
+                    break;
+                }
+            }
+            const std::filesystem::path file = scriptsRoot / std::filesystem::path(relative);
+            std::filesystem::create_directories(file.parent_path(), ec);
+            {
+                std::ofstream out(file, std::ios::binary | std::ios::trunc);
+                if (relative.empty() || !out) {
+                    editor.report("could not write a new script into src/scripts", true);
+                    return;
+                }
+            }
+            const core::InstanceId made = host->mountScriptFile(relative);
+            if (!made.valid()) {
+                editor.report("wrote src/scripts/" + relative + " but could not mount it", true);
+                return;
+            }
+            inspector.select(made);
+            inspector.reveal(made);
+            scriptToOpen = made;
+            editor.touch();
+            editor.report("made src/scripts/" + relative, false);
+        };
+
         if (options.editor && inspector.pendingCount() > 0)
             editor.history().record(authored(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
@@ -1566,7 +1612,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // states: opening a tab reads a property, saving walks a file,
                 // and a reload replaces the world -- none of which may happen
                 // inside the callback that noticed the click.
-                if (editorCommands.openScript.valid()) {
+                const core::InstanceId opening =
+                    editorCommands.openScript.valid() ? editorCommands.openScript : scriptToOpen;
+                scriptToOpen = core::InstanceId{};
+                if (opening.valid()) {
                     // **`authored()` and not the scene's world.** The Explorer
                     // draws the open stamp's tree while there is one, so the id
                     // that arrives here is a handle into THAT world -- and an id
@@ -1576,7 +1625,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     // it, which is exactly what was reported.
                     scene::World& w = authored();
                     const bool inStamp = editor.stampSession().open();
-                    const core::InstanceId id = editorCommands.openScript;
+                    const core::InstanceId id = opening;
                     const std::optional<scene::Value> source = w.getProperty(id, w.atoms().intern("Source"));
                     const auto* text = source.has_value() ? std::get_if<std::string>(&source.value()) : nullptr;
 
@@ -1591,6 +1640,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
                     scripts.open(id, inStamp ? ScriptOrigin::Stamp : ScriptOrigin::Scene, chunk, file,
                                  std::string(w.atoms().text(w.name(id))), text != nullptr ? *text : std::string{});
+                }
+
+                // **A tab says what its script is called NOW** (the owner's
+                // report: a script renamed in the Explorer kept its old name on
+                // its tab). Read from the world the tab came from, every frame,
+                // because a rename can come from the Explorer, F2, an undo or a
+                // script, and the tab should not have to hear about each.
+                for (std::size_t tabIndex = 0; tabIndex < scripts.count(); ++tabIndex) {
+                    OpenScript* shown = scripts.at(tabIndex);
+                    if (shown == nullptr)
+                        continue;
+                    Editor::Stage* const stage = stageOf();
+                    if (shown->origin == ScriptOrigin::Stamp && stage == nullptr)
+                        continue;
+                    const scene::World& w = shown->origin == ScriptOrigin::Stamp ? stage->world() : host->world();
+                    if (!w.alive(shown->instance))
+                        continue;
+                    const std::string_view now = w.atoms().text(w.name(shown->instance));
+                    if (shown->title != now)
+                        shown->title = std::string(now);
                 }
 
                 ScriptEditorCommands scriptCommands = overlay->takeScriptCommands();
@@ -1998,9 +2067,34 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // Before the delete and the duplicate, so a frame that somehow
                 // carried both acts on a world the create has already finished
                 // with rather than on one halfway through it.
+                // The name of what was just made, when it is code: see
+                // `scriptToOpen`.
+                const auto openIfScript = [&](bool made) {
+                    const core::InstanceId id = inspector.selection();
+                    if (!made || !authored().alive(id))
+                        return;
+                    const scene::ClassDescriptor* made_ = authored().classes().find(authored().classOf(id));
+                    const std::string_view name =
+                        made_ != nullptr ? authored().atoms().text(made_->name) : std::string_view{};
+                    if (name == "Script" || name == "ModuleScript")
+                        scriptToOpen = id;
+                };
                 if (editorCommands.createClass != scene::InvalidClass && editorCommands.createParent.valid()) {
-                    (void)editor.createInstance(authored(), editorCommands.createClass, editorCommands.createParent,
-                                                authoredRoot(), inspector);
+                    if (const std::optional<std::string> folder =
+                            Editor::scriptFolderOf(authored(), editorCommands.createParent);
+                        folder.has_value() && stageOf() == nullptr) {
+                        const scene::ClassDescriptor* asked = authored().classes().find(editorCommands.createClass);
+                        if (asked != nullptr && authored().atoms().text(asked->name) == "Script")
+                            createScriptFile(*folder);
+                        else
+                            editor.report("ScriptService holds the files in src/scripts -- only a Script can be made "
+                                          "there, and it becomes a file",
+                                          true);
+                    }
+                    else {
+                        openIfScript(editor.createInstance(authored(), editorCommands.createClass,
+                                                           editorCommands.createParent, authoredRoot(), inspector));
+                    }
                 }
                 // The ribbon's insert: into the selection when it can hold
                 // authored things, and into the Workspace the viewport draws
@@ -2014,7 +2108,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             ? primary
                             : (stageOf() != nullptr ? stageOf()->workspace() : host->workspace());
                     if (cls != scene::InvalidClass)
-                        (void)editor.createInstance(authored(), cls, parent, authoredRoot(), inspector);
+                        openIfScript(editor.createInstance(authored(), cls, parent, authoredRoot(), inspector));
                 }
                 // **Copied before either verb runs**, because both of them
                 // change the selection -- a duplicate selects the copies -- and

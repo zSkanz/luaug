@@ -873,20 +873,6 @@ bool Editor::redo(scene::World& world, Inspector& inspector)
 
 namespace {
 
-// **A service that holds authored content**: the world, and the two storages
-// (ADR 0080). The engine owns them -- nobody moves or deletes one -- and they
-// are still places to put things. The Explorer's root is the data model, so a
-// drag onto one of them names a service as the new parent, and asking only
-// `isEngineOwned` refused every such drop, the world's included.
-[[nodiscard]] bool holdsAuthoredContent(const scene::World& world, core::InstanceId id) noexcept
-{
-    const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
-    if (descriptor == nullptr)
-        return false;
-    const std::string_view name = world.atoms().text(descriptor->name);
-    return name == "Workspace" || name == "ReplicatedStorage" || name == "ServerStorage";
-}
-
 [[nodiscard]] bool isClass(const scene::World& world, core::InstanceId id, std::string_view className) noexcept
 {
     const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
@@ -1087,17 +1073,16 @@ bool Editor::canParentInto(const scene::World& world, core::InstanceId id, core:
     // scene serializer relies on exactly that economy -- so an instance that is
     // not itself generated may still be sitting inside something that is.
     //
-    // **And nothing inside a service the scene does not save.** `ScriptService`
-    // is the mount of `src/scripts` and `Lighting` keeps no children in a
-    // scene, so a part made or dropped in either was there until the next save
-    // or the next play and then gone without a word. The data model's own
-    // children are the services themselves, and the same is true of them.
+    // **Anything else takes a child** -- the owner: "I should be able to put an
+    // instance inside any other; whether it does anything is another story" --
+    // and the scene saves what is inside every service (`scene_file.cpp`,
+    // `FirstServices`). One exception: `ScriptService` is the mount of
+    // `src/scripts`, where a Script is made or moved as a FILE
+    // (`scriptFolderOf`), because the scene saves nothing there.
     for (core::InstanceId walk = id; walk.valid(); walk = world.parentOf(walk)) {
         if (world.generated(walk))
             return false;
-        const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(walk));
-        const bool service = descriptor != nullptr && scene::hasFlag(descriptor->flags, scene::ClassFlags::Service);
-        if (service && !holdsAuthoredContent(world, walk))
+        if (isClass(world, walk, "ScriptService"))
             return false;
         if (walk == root) {
             if (isClass(world, walk, "DataModel"))

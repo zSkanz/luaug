@@ -788,3 +788,31 @@ TEST_CASE("a name inside quotes is where a child belongs and is not underlined")
 
     CHECK(lintOf(fixture, tree, "local b = workspace:FindFirstChild(\"Baseplate\")").empty());
 }
+
+TEST_CASE("a name is offered once, whether or not the file already uses it")
+{
+    // **The owner's report**: `print("Hello world!")` on one line and `pr` on
+    // the next offered `print` twice, "in this file" and "global".
+    Reflection fixture;
+    const std::vector<Completion> list = at(fixture, "print(\"Hello world!\")\npr");
+    CHECK(std::count_if(list.begin(), list.end(), [](const Completion& c) { return c.label == "print"; }) == 1);
+    const Completion* print = find(list, "print");
+    REQUIRE(print != nullptr);
+    CHECK(print->detail != "in this file");
+}
+
+TEST_CASE("a call with a string argument and no parentheses offers nothing inside the string")
+{
+    // `print"olá"` is a call in Luau; inside its string there is nothing to
+    // complete, accented or not, and nothing to complete after it either.
+    Reflection fixture;
+    CHECK(at(fixture, "print\"ol").empty());
+    CHECK(at(fixture, "print\"ol\xC3\xA1").empty());
+    // After the closing quote the request is an empty word with nothing it
+    // hangs off, which the pane does not open a list for.
+    ScriptDocument closed("print\"ol\xC3\xA1\"");
+    const CompletionRequest after = app::completionAt(closed, Position{0, closed.lineLength(0)});
+    CHECK(after.prefix.empty());
+    CHECK(after.subject.empty());
+    CHECK(after.quoted == app::CompletionQuoted::No);
+}

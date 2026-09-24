@@ -75,6 +75,7 @@ constexpr Theme kDark{
             .comment = rgb(0x94A7B2),
             .operatorToken = rgb(0xA9B2BD),
             .attribute = rgb(0xFFD479),
+            .typeName = rgb(0x5CD6E6),
             .errorToken = rgb(0xF87F73),
         },
 };
@@ -107,6 +108,7 @@ constexpr Theme kLight{
             .comment = rgb(0x5E6773),
             .operatorToken = rgb(0x3D444D),
             .attribute = rgb(0x8A5A00),
+            .typeName = rgb(0x0B6477),
             .errorToken = rgb(0xB3261E),
         },
 };

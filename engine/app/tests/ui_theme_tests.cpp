@@ -116,7 +116,7 @@ TEST_CASE("every syntax token is legible on the code pane's own ground")
         } tokens[]{
             {"keyword", syntax.keyword},     {"identifier", syntax.identifier}, {"number", syntax.number},
             {"string", syntax.string},       {"comment", syntax.comment},       {"operatorToken", syntax.operatorToken},
-            {"attribute", syntax.attribute}, {"errorToken", syntax.errorToken},
+            {"attribute", syntax.attribute}, {"errorToken", syntax.errorToken}, {"typeName", syntax.typeName},
         };
 
         for (const auto& token : tokens) {

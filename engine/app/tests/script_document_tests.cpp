@@ -254,6 +254,53 @@ TEST_CASE("Luau's own lexer decides the colours")
     CHECK(kindAt(strings, 0, 10) == TokenKind::String);
 }
 
+TEST_CASE("the names in a type colour as types, where the grammar puts a type")
+{
+    // **The owner's report: "our editor does not colour types."** The lexer
+    // has no type lexeme; these are the places the grammar says one begins.
+    //           0         1         2         3         4
+    //           0123456789012345678901234567890123456789012345
+    ScriptDocument local("local speed: number = 12");
+    CHECK(kindAt(local, 0, 6) == TokenKind::Identifier); // speed
+    CHECK(kindAt(local, 0, 13) == TokenKind::Type);      // number
+    CHECK(kindAt(local, 0, 22) == TokenKind::Number);    // 12
+
+    ScriptDocument signature("function f(a: string, b: Part?): boolean");
+    CHECK(kindAt(signature, 0, 11) == TokenKind::Identifier); // a
+    CHECK(kindAt(signature, 0, 14) == TokenKind::Type);       // string
+    CHECK(kindAt(signature, 0, 22) == TokenKind::Identifier); // b
+    CHECK(kindAt(signature, 0, 25) == TokenKind::Type);       // Part
+    CHECK(kindAt(signature, 0, 33) == TokenKind::Type);       // boolean
+
+    // A method call is not an annotation.
+    ScriptDocument call("part:Destroy()");
+    CHECK(kindAt(call, 0, 5) == TokenKind::Identifier);
+
+    // `type`, `export` and the declared name; the right-hand side is a type;
+    // a field name inside a table type is not.
+    ScriptDocument alias("export type Point = { x: number, y: number }");
+    CHECK(kindAt(alias, 0, 0) == TokenKind::Keyword);     // export
+    CHECK(kindAt(alias, 0, 7) == TokenKind::Keyword);     // type
+    CHECK(kindAt(alias, 0, 12) == TokenKind::Type);       // Point
+    CHECK(kindAt(alias, 0, 22) == TokenKind::Identifier); // x
+    CHECK(kindAt(alias, 0, 25) == TokenKind::Type);       // number
+
+    // `::`, `->` and a generic list.
+    ScriptDocument cast("local n = value :: number");
+    CHECK(kindAt(cast, 0, 10) == TokenKind::Identifier); // value
+    CHECK(kindAt(cast, 0, 19) == TokenKind::Type);       // number
+    ScriptDocument generic("local function first<T>(list: { T }): T");
+    CHECK(kindAt(generic, 0, 21) == TokenKind::Type); // T
+    CHECK(kindAt(generic, 0, 32) == TokenKind::Type); // T inside { }
+    ScriptDocument arrow("local f: (number) -> string");
+    CHECK(kindAt(arrow, 0, 10) == TokenKind::Type); // number
+    CHECK(kindAt(arrow, 0, 21) == TokenKind::Type); // string
+
+    // An ordinary comparison is not a generic list.
+    ScriptDocument compare("if a < b then end");
+    CHECK(kindAt(compare, 0, 7) == TokenKind::Identifier);
+}
+
 TEST_CASE("a half-typed line still colours rather than throwing")
 {
     // The lexer answers `Broken*` for this rather than raising, which is the
@@ -565,4 +612,25 @@ TEST_CASE("a file that does not parse is not linted")
         sawError = true;
     }
     CHECK(sawError);
+}
+
+TEST_CASE("Ctrl+/ comments a block at its shallowest indent, and takes the comments out again")
+{
+    ScriptDocument document("local a = 1\n    local b = 2\n\nprint(a)");
+    REQUIRE(document.toggleComment(0, 3));
+    CHECK(document.text() == "-- local a = 1\n--     local b = 2\n\n-- print(a)");
+    // One Ctrl+Z takes the whole block back.
+    Position caret{0, 0};
+    REQUIRE(document.undo(caret));
+    CHECK(document.text() == "local a = 1\n    local b = 2\n\nprint(a)");
+
+    ScriptDocument indented("    x()\n    y()");
+    REQUIRE(indented.toggleComment(0, 1));
+    CHECK(indented.text() == "    -- x()\n    -- y()");
+    REQUIRE(indented.toggleComment(0, 1));
+    CHECK(indented.text() == "    x()\n    y()");
+
+    // A block of blank lines has nothing to comment.
+    ScriptDocument blank("\n\n");
+    CHECK_FALSE(blank.toggleComment(0, 2));
 }

@@ -110,6 +110,11 @@ enum class TokenKind : core::u8
     // A broken string, comment or codepoint. The lexer answers with these rather
     // than throwing, which is why a half-typed line still colours.
     Error,
+    // A name in a TYPE: after `:` in a declaration, after `::` and `->`, the
+    // right of `type X =`, and a generic list. The Luau lexer has no such
+    // lexeme -- `number` is a `Name` like any other -- so the highlighter marks
+    // it from where it stands (see `markTypes`).
+    Type,
 };
 
 // A run within one line. In column order, never overlapping. Gaps between runs
@@ -234,6 +239,13 @@ public:
     // rather than a delete and an insert, so Ctrl+Z takes the whole move back:
     // a move somebody has to undo twice is a move that will eat a line.
     bool moveLines(core::u32 first, core::u32 last, int delta);
+
+    // **Ctrl+/: comment the lines, or uncomment them when every one already
+    // is.** A `-- ` goes in at the block's shallowest indent, so the comments
+    // line up; taking them out removes a `--` and the one space after it.
+    // Blank lines are left alone either way. One `replace`, so one Ctrl+Z.
+    // False when there was nothing to do.
+    bool toggleComment(core::u32 first, core::u32 last);
 
     [[nodiscard]] std::string textIn(Range range) const;
 

@@ -97,6 +97,35 @@ Ctrl or Alt is held, so a shortcut never moves the camera.
 Picking up a terrain or block brush lets go of the selection, and selecting
 something (in the Explorer, or by inserting it) puts the brush down.
 
+Above the viewport, the **Home** tab is the toolbar with the snap steps beside
+the snap switch; **Model** inserts a part, model, folder or script and groups
+and duplicates; **Test** plays, pauses, steps and flies free; **View** shows and
+hides panels and overlays.
+
+## Where things can go
+
+Every instance in the Explorer takes a child from its **+** -- whether the child
+does anything there is another matter -- and the scene saves what is inside
+every service, not only `Workspace`. Two exceptions: streamed chunks are the
+streaming system's, and `ScriptService` is the project's `src/scripts`
+directory: a Script made or dropped there is written as a file and mounted.
+
+## The script editor
+
+A script opens with the caret on its first line. `(`, `[`, `{` and quotes close
+themselves; a closer typed where one stands steps over it; a bracket or quote
+typed over a selection wraps it. Suggestions are accepted with Enter, Tab or a
+click. Type annotations are coloured as types. An error says what is wrong at
+the end of its line, and in full under the pointer.
+
+| Keys | Do |
+|---|---|
+| Ctrl+/ | Comment or uncomment the line, or every selected line |
+| Ctrl+Space | Offer suggestions |
+| Alt+Up / Alt+Down | Move the line or selection |
+| Ctrl+F / Ctrl+H / Ctrl+G | Find / replace / go to |
+| Ctrl+S | Save the script |
+
 ## Undo
 
 Undo and redo, over property edits and over structure. Coalesced, so dragging a

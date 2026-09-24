@@ -184,6 +184,49 @@ Position ScriptDocument::prevColumn(Position at) const noexcept
     return from;
 }
 
+bool ScriptDocument::toggleComment(u32 first, u32 last)
+{
+    if (first > last || first >= lineCount())
+        return false;
+    last = std::min(last, lineCount() - 1);
+
+    bool any = false;
+    bool allCommented = true;
+    u32 indent = ~0u;
+    for (u32 index = first; index <= last; ++index) {
+        const std::string_view text = line(index);
+        const u32 at = indentOf(index);
+        if (at >= text.size())
+            continue;
+        any = true;
+        indent = std::min(indent, at);
+        if (text.substr(at, 2) != "--")
+            allCommented = false;
+    }
+    if (!any)
+        return false;
+
+    std::string rewritten;
+    for (u32 index = first; index <= last; ++index) {
+        std::string row(line(index));
+        const u32 at = indentOf(index);
+        if (at < row.size()) {
+            if (allCommented) {
+                const std::size_t drop = row.size() > at + 2 && row[at + 2] == ' ' ? 3 : 2;
+                row.erase(at, drop);
+            }
+            else {
+                row.insert(indent, "-- ");
+            }
+        }
+        rewritten += row;
+        if (index < last)
+            rewritten.push_back('\n');
+    }
+    (void)replace(Range{Position{first, 0}, Position{last, lineLength(last)}}, rewritten);
+    return true;
+}
+
 bool ScriptDocument::moveLines(u32 first, u32 last, int delta)
 {
     if (delta == 0 || first > last || last >= lineCount())

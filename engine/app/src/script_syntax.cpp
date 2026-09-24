@@ -196,6 +196,144 @@ struct LexerScratch
 
 #endif
 
+#if LUAUG_LUAU_COMPILER
+
+[[nodiscard]] std::string_view textOf(std::string_view text, const Token& token) noexcept
+{
+    return text.substr(token.column, token.length);
+}
+
+// **The names in a type, marked from where they stand** (the owner's report:
+// "the editor does not colour types"). Luau's lexer has no type lexeme --
+// `number` is a `Name` like any other -- and the grammar
+// (https://luau.org/grammar/) says where a type begins: after `:` in a binding,
+// after `::`, after `->`, on the right of `type X =`, and in a generic list.
+// This walks one line's tokens and turns the identifiers in those places into
+// `Type`, and the contextual keywords (`type`, `export`, `continue`) into
+// keywords where they begin a statement.
+//
+// One line at a time, like the lexer it follows: a type that runs onto the next
+// line colours its first line. A method call `obj:Method(` is not a binding --
+// the colon is followed by a name and then a call -- and is left alone.
+void markTypes(std::string_view text, std::vector<Token>& tokens)
+{
+    const auto isOp = [&](std::size_t at, std::string_view op) {
+        return at < tokens.size() && tokens[at].kind == TokenKind::Operator && textOf(text, tokens[at]) == op;
+    };
+    const auto isName = [&](std::size_t at, std::string_view name = {}) {
+        return at < tokens.size() && tokens[at].kind == TokenKind::Identifier &&
+               (name.empty() || textOf(text, tokens[at]) == name);
+    };
+
+    // `export type Name`, `type Name`, `continue` -- contextual keywords the
+    // lexer reads as names, so they are only keywords where a statement starts.
+    std::size_t start = 0;
+    if (isName(0, "export") && isName(1, "type")) {
+        tokens[0].kind = TokenKind::Keyword;
+        start = 1;
+    }
+    bool typeStatement = false;
+    if (isName(start, "type") && isName(start + 1)) {
+        tokens[start].kind = TokenKind::Keyword;
+        tokens[start + 1].kind = TokenKind::Type;
+        typeStatement = true;
+    }
+    if (tokens.size() == 1 && isName(0, "continue"))
+        tokens[0].kind = TokenKind::Keyword;
+
+    // A generic list `<T, U...>`: every name up to the matching `>` is a type.
+    const auto markGenerics = [&](std::size_t open) {
+        int depth = 0;
+        for (std::size_t at = open; at < tokens.size(); ++at) {
+            if (isOp(at, "<"))
+                ++depth;
+            else if (isOp(at, ">") && --depth == 0)
+                return at;
+            else if (tokens[at].kind == TokenKind::Identifier)
+                tokens[at].kind = TokenKind::Type;
+        }
+        return tokens.size();
+    };
+    // `function name<T>(`, `local function name<T>(`, `function M.name<T>(`.
+    const auto namesFunction = [&](std::size_t before) {
+        std::size_t at = before;
+        while (at > 0 && (tokens[at].kind == TokenKind::Identifier || isOp(at, ".") || isOp(at, ":")))
+            --at;
+        return tokens[at].kind == TokenKind::Keyword && textOf(text, tokens[at]) == "function";
+    };
+
+    bool inType = false;
+    int depth = 0;
+    for (std::size_t at = 0; at < tokens.size(); ++at) {
+        Token& token = tokens[at];
+        const std::string_view here = textOf(text, token);
+
+        if (!inType) {
+            if (token.kind != TokenKind::Operator)
+                continue;
+            if (here == "::" || here == "->") {
+                inType = true;
+                depth = 0;
+            }
+            else if (here == ":" && at > 0) {
+                // `obj:Method(`, `obj:Method "x"` and `obj:Method {}` are calls.
+                const bool call =
+                    isName(at + 1) && (isOp(at + 2, "(") || isOp(at + 2, "{") ||
+                                       (at + 2 < tokens.size() && tokens[at + 2].kind == TokenKind::String));
+                if (!call) {
+                    inType = true;
+                    depth = 0;
+                }
+            }
+            else if (here == "=" && typeStatement) {
+                inType = true;
+                depth = 0;
+            }
+            else if (here == "<" && at > 0 &&
+                     ((typeStatement && at == start + 2) ||
+                      (tokens[at - 1].kind == TokenKind::Identifier && namesFunction(at - 1)))) {
+                at = markGenerics(at);
+            }
+            continue;
+        }
+
+        switch (token.kind) {
+        case TokenKind::Operator:
+            if (here == "(" || here == "{" || here == "[" || here == "<") {
+                ++depth;
+            }
+            else if (here == ")" || here == "}" || here == "]" || here == ">") {
+                // A closer the type did not open ends it: the `)` of a
+                // parameter list, the `}` of the table the annotation sat in.
+                if (depth == 0)
+                    inType = false;
+                else
+                    --depth;
+            }
+            else if (depth == 0 && (here == "=" || here == ",")) {
+                inType = false;
+            }
+            break;
+        case TokenKind::Keyword:
+            // `nil` is a type; `function` opens a function type; any other
+            // keyword -- `then`, `do`, `in`, `end` -- is code again.
+            if (here != "nil" && here != "function" && here != "true" && here != "false")
+                inType = false;
+            break;
+        case TokenKind::Identifier:
+            // A field name in a table type (`{ name: string }`) is not a type,
+            // and `typeof(x)` is a call inside one.
+            if (!(depth > 0 && isOp(at + 1, ":")) && here != "typeof")
+                token.kind = TokenKind::Type;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+#endif
+
 } // namespace
 
 LineState lexLine(std::string_view text, core::u32 lineIndex, LineState entry, std::vector<Token>& out)
@@ -222,10 +360,14 @@ LineState lexLine(std::string_view text, core::u32 lineIndex, LineState entry, s
             return entry;
         }
         pushToken(out, 0, static_cast<core::u32>(close), kind);
-        return lexSegment(text, lineIndex, static_cast<core::u32>(close), out);
+        const LineState next = lexSegment(text, lineIndex, static_cast<core::u32>(close), out);
+        markTypes(text, out);
+        return next;
     }
 
-    return lexSegment(text, lineIndex, 0, out);
+    const LineState next = lexSegment(text, lineIndex, 0, out);
+    markTypes(text, out);
+    return next;
 #endif
 }
 

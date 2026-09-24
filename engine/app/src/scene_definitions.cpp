@@ -124,7 +124,8 @@ std::string sceneDefinitions(const scene::World& world)
     // so a project with none keeps the plain `game`.
     const core::InstanceId dataModel = workspace.valid() ? world.parentOf(workspace) : core::InstanceId{};
     std::string storages;
-    for (const std::string_view storage : {std::string_view{"ReplicatedStorage"}, std::string_view{"ServerStorage"}}) {
+    for (const std::string_view storage :
+         {std::string_view{"ReplicatedStorage"}, std::string_view{"ServerStorage"}, std::string_view{"UIService"}}) {
         for (core::InstanceId service = dataModel.valid() ? world.firstChild(dataModel) : core::InstanceId{};
              service.valid(); service = world.nextSibling(service)) {
             if (classNameOf(world, service) != storage)

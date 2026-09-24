@@ -653,6 +653,12 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                     std::string word(document.line(line).substr(token.column, token.length));
                     if (word == request.prefix || !startsWith(word, request.prefix))
                         continue;
+                    // **One row per name** (the owner's report: `print` offered
+                    // twice, "in this file" and "global"). A word the file uses
+                    // that the engine already offers is the engine's row.
+                    const auto offered = [&word](const Completion& row) { return row.label == word; };
+                    if (std::find_if(out.begin(), out.end(), offered) != out.end())
+                        continue;
                     if (std::find(words.begin(), words.end(), word) == words.end())
                         words.push_back(std::move(word));
                 }

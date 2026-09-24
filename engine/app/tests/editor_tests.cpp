@@ -30,6 +30,7 @@
 #include <system_error>
 #include <vector>
 
+#include "../../ui/generated/class_descriptors.gen.h"
 #include "class_descriptors.gen.h"
 #include "inspector_fixture.h"
 
@@ -5378,6 +5379,35 @@ TEST_CASE("a scene keeps what is in the two storages, and a scene with none is u
     scene::clearScene(rig.world);
     CHECK(rig.world.childCount(replicated) == 0);
     CHECK(rig.world.childCount(server) == 0);
+}
+
+TEST_CASE("a scene keeps the screens under UIService, and the Explorer can make one there")
+{
+    // **Reported as "the plus is there on some services and not on
+    // UIService".** The scene did not save what was under it, so a screen made
+    // there was lost at the next save; it is saved now, and so the Explorer
+    // offers the plus.
+    BrushRig rig;
+    // The screen classes are the ui module's, which the rig does not register.
+    luaug::ui::generated::registerClasses(rig.classes, rig.atoms);
+    const std::string plain = scene::writeScene(rig.world);
+    const scene::ClassId uiClass = rig.classes.findId(rig.atoms.intern("UIService"));
+    REQUIRE(uiClass != scene::InvalidClass);
+    const core::InstanceId ui = rig.world.create(uiClass);
+    rig.world.setName(ui, rig.atoms.intern("UIService"));
+    REQUIRE_FALSE(rig.world.setParent(ui, rig.root).has_value());
+    CHECK(scene::writeScene(rig.world) == plain);
+    CHECK(Editor::canParentInto(rig.world, ui, rig.root));
+
+    const core::InstanceId screen = rig.world.create(rig.classes.findId(rig.atoms.intern("ScreenGui")));
+    rig.world.setName(screen, rig.atoms.intern("Hud"));
+    REQUIRE_FALSE(rig.world.setParent(screen, ui).has_value());
+
+    const std::string text = scene::writeScene(rig.world);
+    CHECK(text.find("\"UIService\"") != std::string::npos);
+    REQUIRE_FALSE(scene::readScene(rig.world, text).has_value());
+    CHECK(rig.world.findFirstChild(ui, rig.atoms.intern("Hud")).valid());
+    CHECK(rig.world.childCount(ui) == 1);
 }
 
 TEST_CASE("each brush stroke is its own undo step (D168)")

@@ -36,7 +36,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       while sculpting stayed under the brush instead of being selected.
 - [x] **Opening the terrain tools clears the selection**, so a brush and a
       selected part never compete for the same click.
-- [ ] **Interface scale in Preferences** behaves oddly -- find out what it does
+- [x] **Interface scale in Preferences** behaves oddly -- find out what it does
       not respect and fix it.
 
 ## Explorer and Properties
@@ -54,29 +54,35 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Script editor
 
-- [ ] **A new script opens with the caret on line 1**, visible and blinking.
-- [ ] **Hover and completion boxes contrast with the code** behind them, and
+- [x] **A new script opens with the caret on line 1**, visible and blinking.
+- [x] **Hover and completion boxes contrast with the code** behind them, and
       their text wraps inside the box instead of running past it.
-- [ ] **One suggestion per name.** `print` showed twice, "in this file" and
+- [x] **One suggestion per name.** `print` showed twice, "in this file" and
       "global", in a file that never declared it.
-- [ ] **A suggestion can be clicked**, and **Enter accepts one**.
-- [ ] **No completion popup without a caret** in the editor.
-- [ ] **`print"olá"` does not confuse completion.**
-- [ ] **Pairs close themselves**: `(`, `[`, `{`, `"` and `'` insert their
+- [x] **A suggestion can be clicked**, and **Enter accepts one**.
+- [x] **No completion popup without a caret** in the editor.
+- [x] **`print"olá"` does not confuse completion.**
+- [x] **Pairs close themselves**: `(`, `[`, `{`, `"` and `'` insert their
       closer; typing the closer steps over it; a quote or bracket typed over a
       selection wraps it.
-- [ ] **Space between the line numbers and the code.**
-- [ ] **One Ctrl+Z undoes one action.** Some needed two.
-- [ ] **An error says what is wrong** at the end of its line, not only with a
+- [x] **Space between the line numbers and the code.**
+- [x] **One Ctrl+Z undoes one action.** Some needed two.
+- [x] **An error says what is wrong** at the end of its line, not only with a
       red underline.
-- [ ] **Ctrl+/ comments and uncomments** the line or every line selected.
-- [ ] **Type annotations are coloured** as the Luau grammar reads them: the
+- [x] **Ctrl+/ comments and uncomments** the line or every line selected.
+- [x] **Type annotations are coloured** as the Luau grammar reads them: the
       names after `:`, `->` and `type X =`, generics, and `typeof`.
-- [ ] **Renaming a script renames its tab**, in the Explorer or anywhere else.
+- [x] **Renaming a script renames its tab**, in the Explorer or anywhere else.
 
 ## Console
 
-- [ ] **The console's layout stays inside its window.**
+- [x] **The console's layout stays inside its window.**
+
+## Explorer, second report
+
+- [x] **Any instance takes a child from the plus**, and the scene keeps what is
+      put inside any service (the owner: "whether it does anything is another
+      story"). `ScriptService` makes the Script a file.
 
 ## Findings
 
@@ -117,3 +123,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
    window has no padding, so "is the cursor past the padding" was true for
    every button and each one took a row of its own. A flag set per tab is the
    answer; found by capturing the window, not by a test.
+8. **"Enter does not accept" was the list coming back.** The accepted word
+   matched itself, so the list reopened under the caret and the next Enter
+   accepted it again instead of breaking the line. An accept no longer offers
+   the list, and a row that is exactly what is typed is not offered at all.
+9. **Two undo steps were an erase and an insert.** Typing, pasting or
+   indenting over a selection erased it and then inserted, which the
+   document recorded as two steps; it is one `replace` now.
+10. **The interface scale ran away under the hand dragging it.** Every step
+    of the drag rescaled the dialog and the slider, so the value under a still
+    pointer changed. The scale is applied on release, with one-click presets.
+11. **The scene kept three services and the Explorer let you fill all of
+    them.** A `ScreenGui` made in `UIService` was lost at the next save. Every
+    service's contents are saved now except the world (the file's root) and
+    `ScriptService` (files); a `Player` is never written, because the engine
+    makes those. A scene with nothing in them is byte-for-byte what it was.
+12. **Types have no lexeme.** Luau's lexer reads `number` as a `Name`; the
+    highlighter marks names where the grammar puts a type -- after a binding's
+    `:`, after `::` and `->`, on the right of `type X =`, and in a generic
+    list -- one line at a time, like the lexer it follows.
