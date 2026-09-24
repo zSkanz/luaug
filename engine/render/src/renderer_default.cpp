@@ -3326,8 +3326,12 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
                 bloom.threshold[0] = kBloomThreshold;
                 bloom.threshold[1] = kBloomKnee;
             }
+            // **Clamped at the edges, never wrapped** (D181): the material
+            // sampler repeats, and a kernel this wide at a coarse level reached
+            // round the screen -- the ground's glow at the bottom edge drew a
+            // band along the top.
             const std::array<rhi::TextureBinding, 1> source{
-                rhi::TextureBinding{level == 0 ? hdr_ : bloom_[level - 1], linearSampler_}};
+                rhi::TextureBinding{level == 0 ? hdr_ : bloom_[level - 1], environmentSampler_}};
             sourceWidth = bloomLevelSize(renderWidth_, level);
             sourceHeight = bloomLevelSize(renderHeight_, level);
             fullscreenPass(cmd, bloomDownPipeline_, bloom_[level], sourceWidth, sourceHeight, "bloom-down", source,
@@ -3339,7 +3343,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             bloom.texelRadius[0] = 1.0f / static_cast<f32>(bloomLevelSize(renderWidth_, level));
             bloom.texelRadius[1] = 1.0f / static_cast<f32>(bloomLevelSize(renderHeight_, level));
             bloom.texelRadius[2] = 1.0f;
-            const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{bloom_[level], linearSampler_}};
+            const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{bloom_[level], environmentSampler_}};
             // `LoadOp::Load`, because the pipeline blends ADDITIVELY into what
             // the downsample already put there -- reading and writing one target
             // in one pass is what every backend refuses.
@@ -3361,7 +3365,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     tonemap.exposureBloom[0] = world.environment.exposureCompensation;
     tonemap.exposureBloom[1] = kBloomIntensity;
     const std::array<rhi::TextureBinding, 3> tonemapBindings{
-        rhi::TextureBinding{hdr_, linearSampler_}, rhi::TextureBinding{bloom_[0], linearSampler_},
+        rhi::TextureBinding{hdr_, environmentSampler_}, rhi::TextureBinding{bloom_[0], environmentSampler_},
         rhi::TextureBinding{exposure_[nextExposure], linearSampler_}};
 
     // With anti-aliasing on, this writes the LDR texture the resolve reads and
