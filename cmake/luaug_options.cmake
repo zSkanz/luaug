@@ -138,6 +138,10 @@ cmake_dependent_option(LUAUG_DEBUG_UI
 # a claim the build has to be able to make rather than a promise in an ADR.
 option(LUAUG_PHYSICS_JOLT "Build the Jolt physics backend (the v1 default)" ON)
 
+# The 2D backend (ADR 0008), from post-v1 phase 3: Box2D behind `IPhysics2D`,
+# beside Jolt rather than instead of it -- a world may hold both kinds of body.
+option(LUAUG_PHYSICS_BOX2D "Build the Box2D 2D physics backend" ON)
+
 # Jolt's own wireframe output, bridged to the engine's debug draw (roadmap M5).
 #
 # It is a dependent option and not a plain one because the thing it turns on is

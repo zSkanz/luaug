@@ -8,6 +8,7 @@
 
 #include "luaug/core/error.h"
 #include "luaug/physics/physics.h"
+#include "luaug/physics/physics2d.h"
 
 #include <memory>
 
@@ -21,6 +22,15 @@ using PhysicsResult = std::unique_ptr<IPhysics3D>;
 // call and tears it down when the last instance is destroyed -- which is why
 // this is a creator rather than a constructor a caller could invoke twice.
 [[nodiscard]] PhysicsResult createJoltPhysics(core::EngineError* outError = nullptr);
+#endif
+
+using Physics2DResult = std::unique_ptr<IPhysics2D>;
+
+#if LUAUG_PHYSICS_BOX2D
+// The 2D backend (ADR 0008). Box2D keeps no process-wide state, so unlike
+// Jolt's this could be a constructor; it is a creator for the same reason the
+// rest of this file is -- no header outside the backend sees a Box2D type.
+[[nodiscard]] Physics2DResult createBox2DPhysics();
 #endif
 
 } // namespace luaug::physics

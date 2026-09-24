@@ -19,6 +19,7 @@ luaug_add_module(physics_api
 # so selecting it fails to compile instead of returning null at startup.
 target_compile_definitions(luaug_physics_api INTERFACE
     LUAUG_PHYSICS_JOLT=$<BOOL:${LUAUG_PHYSICS_JOLT}>
+    LUAUG_PHYSICS_BOX2D=$<BOOL:${LUAUG_PHYSICS_BOX2D}>
 )
 
 set(luaug_physics_test_modules physics_api)
@@ -44,10 +45,28 @@ if(LUAUG_PHYSICS_JOLT)
     list(APPEND luaug_physics_test_modules physics_jolt)
 endif()
 
+# The 2D backend (ADR 0008, post-v1 phase 3): the same arrangement -- a module
+# with no public header, behind `IPhysics2D` in the seam.
+if(LUAUG_PHYSICS_BOX2D)
+    luaug_add_module(physics_box2d
+        LAYER 2
+        SOURCES
+            src/physics2d/box2d_physics.cpp
+        DEPS
+            core
+        API_DEPS
+            physics_api
+        PRIVATE_DEPS
+            box2d
+    )
+    list(APPEND luaug_physics_test_modules physics_box2d)
+endif()
+
 luaug_add_module_tests(physics
     SOURCES
         tests/constraint_tests.cpp
         tests/physics_tests.cpp
+        tests/physics2d_tests.cpp
         tests/terrain_shape_tests.cpp
     MODULES
         ${luaug_physics_test_modules}

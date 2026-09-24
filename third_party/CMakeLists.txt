@@ -520,6 +520,34 @@ if(LUAUG_PHYSICS_JOLT)
 endif()
 
 # ---------------------------------------------------------------------------
+# Box2D 3.1.1 (ADR 0008), from post-v1 phase 3.
+#
+# Its sources directly, not upstream's CMake, which configures the samples
+# application by default and fetches Tracy for profiling -- the BLAKE3
+# reasoning: a target of our own is smaller than the configuration that would
+# suppress theirs. C17 for `_Static_assert` and anonymous unions, which is what
+# upstream builds it as. SIMD is left at upstream's default (SSE2 and NEON,
+# which every tier has); Box2D's results do not depend on it -- it carries its
+# own sine and cosine and orders its contacts, for determinism -- and the
+# `-ffp-contract=off` the engine builds with applies here too.
+#
+# No threads: nothing hands it a task system, so it steps on the caller's.
+# ---------------------------------------------------------------------------
+if(LUAUG_PHYSICS_BOX2D AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/box2d/src/world.c")
+    file(GLOB LUAUG_BOX2D_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/box2d/src/*.c")
+    add_library(box2d STATIC ${LUAUG_BOX2D_SOURCES})
+    target_include_directories(box2d SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/box2d/include")
+    target_include_directories(box2d PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/box2d/src")
+    set_target_properties(box2d PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES C_EXTENSIONS YES)
+    # Upstream's warnings are upstream's (the Jolt rule): ours are not applied.
+    if(MSVC)
+        target_compile_options(box2d PRIVATE /W0)
+    else()
+        target_compile_options(box2d PRIVATE -w)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # BLAKE3 (architecture.md §2: `ContentHash` is BLAKE3-128).
 #
 # Three C files and no upstream project: `blake3/c/CMakeLists.txt` builds a

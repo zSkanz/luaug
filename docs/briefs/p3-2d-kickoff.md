@@ -1,0 +1,116 @@
+# Phase 3 — the 2D layer: kickoff
+
+Opened by the owner on 2026-09-23 ("you can get going on the 2D and the navmesh",
+the mandate's S6). ADR 0008 settled the physics library at planning: Box2D
+3.1.1, behind an `IPhysics2D` of its own. This brief settles the rest before
+any of it is built. It is read top to bottom by whoever continues it, and its
+**Findings** section is filled in as the work corrects it.
+
+## What "a 2D layer" means here
+
+A complete 2D game: sprites with sheets and pixel-art sampling, tilemaps you
+paint, 2D physics with triggers, a 2D camera, and a 2D workflow in the editor.
+It is not "an orthographic camera pointed at 3D boxes", which the roadmap
+ruled out in writing.
+
+## Decisions
+
+1. **2D lives in the same world, on the XY plane**, as Unity's 2D does.
+   - A 2D object is an instance under `Workspace`. Its world position is
+     `(x, y, depth)`, where its layer decides the depth.
+   - Scenes, the editor, undo, streaming, scripts, the world hash and
+     replication are therefore the same machinery, not a second copy.
+   - A game may mix the two: a 2D level in front of a 3D background, or 3D
+     characters on a tilemap.
+2. **Two classes carry it.**
+   - **`Part2D`** is a sprite and a body in one, as a `Part` is a mesh and a
+     body.
+     - Transform and look: `Position` (`Vector2`), `Rotation` (degrees),
+       `Size`, `Shape` (Box, Circle, Capsule), `Color`, `Transparency`,
+       `ZIndex`, `FlipX`/`FlipY`.
+     - Its picture: `Image`, with `ImageRectOffset`/`ImageRectSize` for sheets
+       and a `Filter` (Linear, Nearest) for pixel art.
+     - Its body: `Anchored` (static), `CanCollide`, `Sensor`, `Density`,
+       `Friction`, `Elasticity`, `FixedRotation`, `GravityScale`, `Velocity`,
+       `AngularVelocity`, `CollisionGroup`.
+     - `Touched` and `TouchEnded` fire with the other part, and
+       `ApplyImpulse` pushes it.
+   - **`Tilemap2D`** is a grid of tiles from one tileset image.
+     - Properties: `CellSize`, `Tileset`, `TileSize`, `ZIndex`, `Collides`.
+     - Methods: `SetCell`, `GetCell`, `FillRect`, `Clear`.
+     - Its solid cells become chains of edges: one body, merged runs, no
+       seams to catch on.
+3. **The 2D camera is a `Camera` with `Projection = Orthographic`** and an
+   `OrthographicSize` (half the view's height, in metres). It looks down -Z.
+   Every place that read a perspective-only quantity from the projection is
+   changed to ask the camera; six are named in the survey below.
+4. **Rendering is one instanced sprite pass in the forward pass**, in the slot
+   `architecture.md` reserved for it.
+   - Each sprite is one instance: position, size, rotation, UV rect, colour
+     and flip.
+   - Sprites are sorted by `ZIndex`, then tree order: a painter's order a game
+     controls.
+   - They are depth-tested against 3D and do not write depth.
+   - Premultiplied alpha, as particles use.
+   - A batch breaks on a change of texture or filter. Tile instances go
+     through the same pass, culled to the view.
+5. **Physics is `PhysicsSync2D`, beside the 3D mirror and shaped like it.**
+   - Script writes are applied at the start of the tick and the results
+     written back quietly.
+   - Contacts become deferred `Touched` signals.
+   - Workspace gravity's x and y are the 2D world's gravity.
+   - `workspace:Raycast2D(origin, direction, params?)` answers the first
+     `Part2D` or tilemap hit.
+6. **Determinism:** Box2D runs single-threaded (it is never handed a task
+   system), carries its own trigonometry and orders its contacts. The world
+   hash covers `Part2D` through its properties. A two-world test holds it bit
+   for bit.
+7. **Replication:** `Part2D` replicates its properties. A tilemap's cells are
+   excluded by name, as `Terrain` is (ADR 0069, decision 7), until a game
+   needs to edit a tilemap live over the network.
+8. **Editor:**
+   - A 2D view: an orthographic camera looking down -Z, pan with the right or
+     middle button, zoom with the wheel, and a grid in the XY plane.
+   - A **Tiles** tool paints and erases the selected tilemap's cells from a
+     palette of its tileset, one undo step per stroke. The Blocks tool is its
+     model.
+9. **Example:** `examples/20-platformer`, a character that runs and jumps on a
+   painted tilemap, with coins as sensors and a camera that follows.
+
+## Stages, each ending with the full gate green and a push
+
+- **2D-A** Box2D vendored, `IPhysics2D` and its backend, tests. *(Done
+  2026-09-23.)*
+- **2D-B** `Part2D` and `Tilemap2D` in the IDL, their components, their
+  accessors, the scene format, the world hash.
+- **2D-C** `PhysicsSync2D`, the host's wiring, `Touched`, `Raycast2D`.
+- **2D-D** Orthographic cameras, the sprite pass, sprite textures and pixel-art
+  sampling, tilemap drawing.
+- **2D-E** The editor's 2D view and Tiles tool.
+- **2D-F** `examples/20-platformer`, conformance specs, documentation.
+
+## The survey this rests on (2026-09-23)
+
+- **Cameras** are perspective only.
+  - `core::perspective` is the one projection.
+  - These read `projection.m[1][1]` as `1/tan(fov/2)` and must learn
+    orthographic: the clusters (`clusters.cpp:130`), the shadow cascade fit
+    (`renderer_default.cpp:2524`), LOD pixels per unit (`:1682`), picking
+    (`picking.cpp:362`), contact-shadow uniforms (`shader_types.h:370`) and
+    editor framing (`editor.cpp:2616`).
+- **Textures:**
+  - Loose PNGs decode with stb_image to one mip.
+  - `MeshLoader::syncTextures` walks the pools that name textures, and a
+    sprite pool is one more walk.
+  - `pointSampler_` already exists; the voxel atlas uses it for pixel art.
+- **The nearest existing path to a sprite** is the world UI (`ui_world.hlsl`:
+  camera-relative textured quads, depth-tested, no depth write) and the
+  particle pass's instancing (`SV_VertexID` corners and per-instance
+  attributes).
+- **The model for adding a render class** is `Decal`, across the IDL,
+  components, `native_accessors.cpp`, extraction, the renderer, the shader, the
+  texture walk, the wire schema and the tests.
+
+## Findings
+
+(Filled in as the stages correct what this brief assumed.)
