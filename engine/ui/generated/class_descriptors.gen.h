@@ -167,10 +167,10 @@ scene::Value getTextLabelTextSize(const scene::World& world, core::InstanceId id
 bool setTextLabelTextSize(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelFont(const scene::World& world, core::InstanceId id);
 bool setTextLabelFont(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getTextLabelHorizontalAlignment(const scene::World& world, core::InstanceId id);
-bool setTextLabelHorizontalAlignment(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getTextLabelVerticalAlignment(const scene::World& world, core::InstanceId id);
-bool setTextLabelVerticalAlignment(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getTextLabelTextXAlignment(const scene::World& world, core::InstanceId id);
+bool setTextLabelTextXAlignment(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getTextLabelTextYAlignment(const scene::World& world, core::InstanceId id);
+bool setTextLabelTextYAlignment(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelTextWrapped(const scene::World& world, core::InstanceId id);
 bool setTextLabelTextWrapped(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelRichText(const scene::World& world, core::InstanceId id);

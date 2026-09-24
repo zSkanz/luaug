@@ -53,7 +53,6 @@ once, at migration.
 | Was | Is | Why |
 |---|---|---|
 | `MouseEnter` / `MouseLeave`, `InputBegan` on a GUI | **`PointerEntered` / `PointerExited` / `Activated`** | Device-neutral: a click, a tap and a bound gamepad button are one event. |
-| `TextXAlignment` / `TextYAlignment` | **`HorizontalAlignment` / `VerticalAlignment`** | One alignment vocabulary, shared with layout. |
 | `UserInputService`, `ContextActionService`, `Mouse` | **The Input Action System** | One model, rebindable and promptable by default. |
 
 ## Audio and assets

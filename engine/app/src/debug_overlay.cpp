@@ -4780,30 +4780,37 @@ void drawRibbonView(EditorPanels& panels, const IconAtlas* icons)
 
 } // namespace
 
+// **An icon on each tab** (the owner: the tabs need pictures), painted over
+// the room `tabIconPad` leaves before the label. Laid from the left: a
+// centred ribbon was tried and the owner preferred it where it was.
 void drawRibbon(Editor& editor, EditorCommands& commands, EditorPanels& panels, const IconAtlas* icons)
 {
     if (!ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_NoTooltip))
         return;
-    if (ImGui::BeginTabItem("Home")) {
-        drawTransport(editor, commands, panels, icons);
+
+    const auto tab = [&](const char* label, std::string_view icon, auto&& body) {
+        const std::string text = tabIconPad() + label + "###ribbon-" + label;
+        const bool open = ImGui::BeginTabItem(text.c_str());
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        const float glyph = ImGui::GetFontSize();
+        paintActionIcon(icons, icon,
+                        ImVec2(min.x + ImGui::GetStyle().FramePadding.x, min.y + (max.y - min.y - glyph) * 0.5f),
+                        glyph);
+        if (!open)
+            return;
+        body();
         ImGui::EndTabItem();
-    }
+    };
+
+    tab("Home", icons::ActionTools, [&] { drawTransport(editor, commands, panels, icons); });
     // Home only while a stamp is open: the stamp's own session controls are
     // there, and the other tabs act on the scene the stamp has set aside.
     if (!editor.stampSession().open()) {
-        if (ImGui::BeginTabItem("Model")) {
-            drawRibbonModel(editor, commands, panels, icons);
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Test")) {
-            drawRibbonTest(editor, commands, icons);
-            ImGui::EndTabItem();
-        }
+        tab("Model", icons::ClassModel, [&] { drawRibbonModel(editor, commands, panels, icons); });
+        tab("Test", icons::ActionPlay, [&] { drawRibbonTest(editor, commands, icons); });
     }
-    if (ImGui::BeginTabItem("View")) {
-        drawRibbonView(panels, icons);
-        ImGui::EndTabItem();
-    }
+    tab("View", icons::ActionVisible, [&] { drawRibbonView(panels, icons); });
     ImGui::EndTabBar();
 }
 

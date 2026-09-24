@@ -27,6 +27,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **Text UI has a TextTransparency.**
 - [x] **`Material` is a known global** to the lint and to completion.
 - [x] **Play brings the viewport to the front.**
+- [x] **The ribbons tabs have icons.** (Centring was tried and reverted at the owners word: it looked better on the left.)
+- [x] **An index is a step in completion**: `Snake.Body[1].` offers what a
+      `BasePart` has.
+- [x] **A colour written in code has a swatch and the Properties picker**,
+      which writes the value back in the form it was written in.
+- [x] **A text's properties sit under Text**, `TextTransparency` included.
+- [x] **Text alignment is `TextXAlignment` / `TextYAlignment`** (the owner's
+      call, reversing a recorded divergence); old scenes read the old names.
+- [x] **The selection is the part's own outline**, not a box standing off it.
+- [x] **A part moved further than its own size in one tick is drawn where it
+      landed**, not slid there (the owner's snake).
 - [x] **No cross of lines through the view at the scene camera.** It was that
       camera's marker, seen from inside.
 - [x] **A CFrame's rotation is editable in Properties**, as the three angles
@@ -189,3 +200,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
     whatever it was aimed at, so a click could select the camera instead of
     the part behind. A marker the eye is inside is now neither drawn nor
     picked (`eyeInsideMarker`).
+18. **The selection had two marks, and one stood off the part.** The renderer
+    outlines a selected part along its silhouette; the E1 wire box was still
+    drawn over it with a margin of 1% of the part's size -- metres, on a large
+    one. The box is drawn now only on the debug path, which has no outline.
+19. **The snake was the engine's, not the script's.** Its tail is moved to the
+    front of its head with one `CFrame` write, which is a teleport; the render
+    interpolation (D047) drew every frame between two ticks at a point between
+    where the tail was and where it went, so it slid through the body. A move
+    longer than the part's largest side (and at least half a metre) is now
+    drawn where it landed; a glide is interpolated as before. `streaming_soak`
+    was also run five times on Windows and passed every time: its
+    intermittence is on the Linux tier only.

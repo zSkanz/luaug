@@ -429,7 +429,7 @@ status.Position = UDim2.new(0, 16, 0, 0)
 status.Text = "Checkpoint 0 / 3"
 status.TextSize = 16
 status.TextColor = Color3.fromRGB(232, 236, 244)
-status.HorizontalAlignment = Enum.HorizontalAlignment.Left
+status.TextXAlignment = Enum.HorizontalAlignment.Left
 status.BackgroundTransparency = 1
 status.Parent = hud
 
@@ -447,7 +447,7 @@ objective.Position = UDim2.new(0, 344, 0, 0)
 objective.Text = "Jump the gaps"
 objective.TextSize = 16
 objective.TextColor = Color3.fromRGB(196, 206, 224)
-objective.HorizontalAlignment = Enum.HorizontalAlignment.Left
+objective.TextXAlignment = Enum.HorizontalAlignment.Left
 objective.BackgroundTransparency = 1
 objective.Parent = hud
 

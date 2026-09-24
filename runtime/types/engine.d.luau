@@ -1422,11 +1422,12 @@ declare extern type TextLabel extends UIObject with
     --- a fallback. Glyphs are rasterised on demand and cached by face, size and codepoint, so a
     --- `TextSize` a tween is animating costs one entry per quarter-pixel rather than one per frame.
     Font: Content
-    --- Where the text sits across the box. One alignment vocabulary shared with the layouts (§2.5,
-    --- divergence #23).
-    HorizontalAlignment: EnumHorizontalAlignment
-    --- Where it sits down the box.
-    VerticalAlignment: EnumVerticalAlignment
+    --- Where the text sits across the box: `Left`, `Center` or `Right`. Named for the text, because a
+    --- layout's `HorizontalAlignment` places children and this places words; the values are the same
+    --- enum a layout uses.
+    TextXAlignment: EnumHorizontalAlignment
+    --- Where the text sits down the box: `Top`, `Center` or `Bottom`.
+    TextYAlignment: EnumVerticalAlignment
     --- Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word wider
     --- than the box -- a word cut in half at a random letter is worse than one that overhangs.
     TextWrapped: boolean

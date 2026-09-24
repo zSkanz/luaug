@@ -47,9 +47,11 @@
 // states: the editor exists for whoever is building a game, never for a player.
 #pragma once
 
+#include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -475,6 +477,34 @@ void moduleMembers(const std::string& source, std::vector<ModuleMember>& out);
 // Where it lands on an engine class it names the class, which the caller
 // answers from reflection. Anything it cannot follow answers `known = false`,
 // and the caller falls back to what it did before.
+// **A colour written in code**, for the swatch the script editor draws beside
+// it and the picker that rewrites it (the owner: "the same colour picker the
+// Properties has"). `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)` and
+// `Color3.fromHex("#rrggbb")`, with literal numbers or a literal string --
+// a colour built from variables is not one a picker can rewrite.
+enum class ColorLiteralKind : core::u8
+{
+    New,
+    FromRgb,
+    FromHex,
+};
+struct ColorLiteral
+{
+    ColorLiteralKind kind = ColorLiteralKind::New;
+    // What is inside the parentheses, which is what the picker replaces.
+    Range args;
+    core::Color3 color;
+};
+// The first such colour on a line, or nothing.
+[[nodiscard]] std::optional<ColorLiteral> findColorLiteral(std::string_view line, core::u32 lineIndex);
+// The arguments a colour is written back as: three decimals at most for
+// `new`, whole numbers for `fromRGB`, `"#RRGGBB"` for `fromHex`.
+[[nodiscard]] std::string formatColorLiteral(ColorLiteralKind kind, core::Color3 color);
+
+// The path segment an index takes: `a.b[i].` reads as `{"a", "b", "[]"}`, the
+// element of `a.b`.
+inline constexpr std::string_view kElementStep = "[]";
+
 struct SourceMember
 {
     std::string name;

@@ -1495,3 +1495,14 @@ TEST_CASE("the properties filter finds every word anywhere in a name or its head
     CHECK(propertyMatches("Material", "appearance mat"));
     CHECK_FALSE(propertyMatches("Anchored", "appear"));
 }
+
+TEST_CASE("a text's own properties sit under Text")
+{
+    // **The owner's report**: `TextTransparency` fell under Behavior beside a
+    // Text heading, and the text's alignment belongs there too.
+    CHECK(luaug::app::propertyCategory("TextTransparency").name == "Text");
+    CHECK(luaug::app::propertyCategory("TextXAlignment").name == "Text");
+    CHECK(luaug::app::propertyCategory("TextYAlignment").name == "Text");
+    // A layout's alignment is still the layout's.
+    CHECK(luaug::app::propertyCategory("HorizontalAlignment").name == "Layout");
+}

@@ -904,3 +904,25 @@ TEST_CASE("self inside a method is an instance, and a list type's element is its
     CHECK(has(tailList, "CFrame"));
     CHECK(has(tailList, "Anchored"));
 }
+
+TEST_CASE("an index is a step: a list's element offers its class's members")
+{
+    // **The owner's report**: `Snake.Body[1].` offered nothing although the
+    // file says `Body: { BasePart }`.
+    Reflection fixture;
+    const std::vector<Completion> list = completeAfter(fixture, std::string(kSnake), "Snake.Body[1].");
+    CHECK(has(list, "CFrame"));
+    CHECK(has(list, "Anchored"));
+    const std::vector<Completion> nested =
+        completeAfter(fixture, std::string(kSnake), "TheLifeSnake.Body[#TheLifeSnake.Body].");
+    CHECK(has(nested, "CFrame"));
+
+    // And the request reads the brackets as a step.
+    ScriptDocument document("local p = Snake.Body[1].Po");
+    const CompletionRequest request = app::completionAt(document, Position{0, document.lineLength(0)});
+    REQUIRE(request.path.size() == 3);
+    CHECK(request.path[0] == "Snake");
+    CHECK(request.path[1] == "Body");
+    CHECK(request.path[2] == "[]");
+    CHECK(request.prefix == "Po");
+}

@@ -11,6 +11,13 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Changed -- BREAKING
 
+- **A text's alignment is `TextXAlignment` / `TextYAlignment`** on `TextLabel`
+  (and what extends it), where it was `HorizontalAlignment` /
+  `VerticalAlignment`. The values are still `Enum.HorizontalAlignment` and
+  `Enum.VerticalAlignment`, and a layout keeps its own `HorizontalAlignment`.
+  A script writing the old names must be changed; a scene saved with them
+  opens with them read under the new ones.
+
 - **A material is an asset, and a part wears one** (ADR 0090). **This is a
   breaking change to the public API, and the release that carries it is a major
   version.**

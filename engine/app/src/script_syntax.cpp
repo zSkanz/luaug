@@ -795,6 +795,15 @@ public:
         return {};
     }
 
+    // An element of a list type: `{ BasePart }` indexed is a `BasePart`.
+    [[nodiscard]] Shape elementOf(const Shape& shape, int depth) const
+    {
+        const Luau::AstTypeTable* table = typeTableOf(shape, depth + 1);
+        if (table != nullptr && table->indexer != nullptr)
+            return fromType(table->indexer->resultType, depth + 1);
+        return {};
+    }
+
     [[nodiscard]] SourceMembers membersOf(const Shape& shape) const
     {
         SourceMembers out;
@@ -943,11 +952,8 @@ private:
         if (const auto* field = expr->as<Luau::AstExprIndexName>(); field != nullptr)
             return fieldOf(shapeOfExpr(field->expr, depth + 1), field->index.value != nullptr ? field->index.value : "",
                            depth + 1);
-        if (const auto* index = expr->as<Luau::AstExprIndexExpr>(); index != nullptr) {
-            const Luau::AstTypeTable* table = typeTableOf(shapeOfExpr(index->expr, depth + 1), depth + 1);
-            if (table != nullptr && table->indexer != nullptr)
-                return fromType(table->indexer->resultType, depth + 1);
-        }
+        if (const auto* index = expr->as<Luau::AstExprIndexExpr>(); index != nullptr)
+            return elementOf(shapeOfExpr(index->expr, depth + 1), depth + 1);
         return {};
     }
 
@@ -1048,7 +1054,7 @@ SourceMembers sourceMembersOf(const std::string& source, std::span<const std::st
     if (shape.kind == Shape::Kind::None && model.hasTable(path[0]))
         shape = Shape{Shape::Kind::Table, path[0], nullptr};
     for (std::size_t step = 1; step < path.size() && shape.kind != Shape::Kind::None; ++step)
-        shape = model.fieldOf(shape, path[step], 0);
+        shape = path[step] == kElementStep ? model.elementOf(shape, 0) : model.fieldOf(shape, path[step], 0);
     return model.membersOf(shape);
 #endif
 }

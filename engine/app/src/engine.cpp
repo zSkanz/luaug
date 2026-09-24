@@ -3747,7 +3747,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // the space it converts to -- see `submitSelection`. Everything the
             // editor draws over the world goes here for the same reason.
             if (options.editor) {
-                submitSelection(host->world(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
+                // **The wire box only when nothing else marks the selection.**
+                // The renderer outlines a selected part along its own
+                // silhouette; a box drawn over that, with a margin of 1% of the
+                // part's size, stood metres outside a large part -- reported as
+                // "the selection is outside the part". It stays for the debug
+                // path, which draws the world as wire boxes and has no outline.
+                const bool outlinedByRenderer = renderer != nullptr && renderer->valid() && snapshot.camera.valid;
+                if (!outlinedByRenderer)
+                    submitSelection(host->world(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
                 if (editing(editor.runState()))
                     submitCameraVolumes(authored(), inspector.selectionSet(), snapshot.camera.origin, aspect,
                                         debugDraw);

@@ -2338,17 +2338,18 @@ local Classes: { Schema.Class } = {
                     .. "animating costs one entry per quarter-pixel rather than one per frame.",
             },
             {
-                Name = "HorizontalAlignment",
+                Name = "TextXAlignment",
                 Type = "Enum.HorizontalAlignment",
                 Default = "Enum.HorizontalAlignment.Center",
-                Doc = "Where the text sits across the box. One alignment vocabulary shared with the layouts "
-                    .. "(§2.5, divergence #23).",
+                Doc = "Where the text sits across the box: `Left`, `Center` or `Right`. Named for the text, "
+                    .. "because a layout's `HorizontalAlignment` places children and this places words; the "
+                    .. "values are the same enum a layout uses.",
             },
             {
-                Name = "VerticalAlignment",
+                Name = "TextYAlignment",
                 Type = "Enum.VerticalAlignment",
                 Default = "Enum.VerticalAlignment.Center",
-                Doc = "Where it sits down the box.",
+                Doc = "Where the text sits down the box: `Top`, `Center` or `Bottom`.",
             },
             {
                 Name = "TextWrapped",

@@ -644,9 +644,9 @@ local Definition: Schema.Definition = {
         },
         {
             Name = "HorizontalAlignment",
-            Doc = "Alignment along the X axis. One vocabulary for two jobs (§2.5, divergence #23): a "
-                .. "`TextLabel` aligns its text with it and a `UIListLayout` aligns its children with it, and "
-                .. "there is deliberately no `TextXAlignment` beside it.",
+            Doc = "Alignment along the X axis. One set of values for two jobs: a `TextLabel`'s "
+                .. "`TextXAlignment` places its words with it and a `UIListLayout`'s `HorizontalAlignment` "
+                .. "places its children with it.",
             Items = {
                 { Name = "Left", Value = 0 },
                 { Name = "Center", Value = 1 },
@@ -655,7 +655,8 @@ local Definition: Schema.Definition = {
         },
         {
             Name = "VerticalAlignment",
-            Doc = "Alignment along the Y axis, and the same one vocabulary as `HorizontalAlignment`.",
+            Doc = "Alignment along the Y axis: a `TextLabel`'s `TextYAlignment` and a layout's "
+                .. "`VerticalAlignment`.",
             Items = {
                 { Name = "Top", Value = 0 },
                 { Name = "Center", Value = 1 },

@@ -247,6 +247,25 @@ void collectMembers(const scene::ClassRegistry& classes, const core::AtomTable& 
 {
     u32 at = end;
     while (true) {
+        // **An index is a step too**: `Snake.Body[1].` is the element of
+        // `Snake.Body`, written as the segment `[]` (the owner's report -- the
+        // chain stopped at the bracket and the list offered nothing). Whatever
+        // is inside the brackets is skipped, nested ones included.
+        while (at > 0 && line[at - 1] == ']') {
+            int depth = 0;
+            u32 open = at;
+            while (open > 0) {
+                --open;
+                if (line[open] == ']')
+                    ++depth;
+                else if (line[open] == '[' && --depth == 0)
+                    break;
+            }
+            if (depth != 0 || line[open] != '[')
+                return at;
+            path.insert(path.begin(), std::string(kElementStep));
+            at = open;
+        }
         std::string called;
         const u32 callStart = readNamingCall(line, at, called);
         u32 start = callStart;

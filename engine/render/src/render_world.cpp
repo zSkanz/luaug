@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 namespace luaug::render {
@@ -84,6 +85,15 @@ constexpr f32 kDegreesToRadians = kPi / 180.0f;
 {
     constexpr core::i32 Capsule = 3;
     return world.characterBodies().find(id) != nullptr ? Capsule : part.shape;
+}
+
+// How far a part may move in one tick and still be drawn gliding there: its
+// largest side, and never less than half a metre, so a small fast thing -- a
+// ball, a bullet -- keeps its interpolation. Past it, the move is a teleport.
+[[nodiscard]] core::f64 teleportReach(Vec3 size) noexcept
+{
+    const f32 largest = std::fmax(size.x, std::fmax(size.y, size.z));
+    return static_cast<core::f64>(std::fmax(largest, 0.5f));
 }
 
 [[nodiscard]] Vec3 primitiveScale(core::i32 shape, Vec3 size) noexcept
@@ -457,12 +467,25 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // Anything with no previous transform is drawn where it is: something that
     // streamed in this tick has no earlier position to come from, and smearing
     // it in from a stale slot would be worse than the step it replaces.
-    const auto at = [&](core::InstanceId id, const CFrameD& current) -> CFrameD {
+    //
+    // **A move longer than `teleport` in one tick is a teleport**, drawn where
+    // it landed: a part's own largest side, for a part. The owner's snake moved
+    // its tail to the front of its head with one `CFrame` write, and the frames
+    // between two ticks drew the tail sliding through the body to get there.
+    // Something that GLIDES -- a lift, a platform, a falling crate -- moves far
+    // less than its own size per tick and is interpolated as before.
+    const auto at = [&](core::InstanceId id, const CFrameD& current,
+                        core::f64 teleport = std::numeric_limits<core::f64>::infinity()) -> CFrameD {
         if (history == nullptr || alpha <= 0.0f)
             return current;
         const CFrameD* earlier = history->previous(id);
         if (earlier == nullptr)
             return current;
+        {
+            const DVec3 step = current.position - earlier->position;
+            if (step.x * step.x + step.y * step.y + step.z * step.z > teleport * teleport)
+                return current;
+        }
 
         // **Two early outs, and they are the difference between this costing
         // nothing and costing two and a half milliseconds.** `core::lerp` on a
@@ -596,7 +619,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // nothing else, which is what a wire box can show of a material.
         const asset::ResolvedMaterial surface = world.surfaceOf(part);
         out.parts.push_back(RenderPart{
-            .cframe = at(id, part.cframe),
+            .cframe = at(id, part.cframe, teleportReach(part.size)),
             .size = part.size,
             .color = surface.properties.color,
             .transparency = surface.properties.transparency,
@@ -700,7 +723,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // written before this existed produces exactly the matrix it did then --
         // and the multiply is skipped outright when they match, which is every
         // part nobody has resized.
-        Mat4 transform = core::toRenderMatrix(at(id, part->cframe), origin);
+        Mat4 transform = core::toRenderMatrix(at(id, part->cframe, teleportReach(part->size)), origin);
         const Vec3 stretch{part->size.x / meshPart.meshSize.x, part->size.y / meshPart.meshSize.y,
                            part->size.z / meshPart.meshSize.z};
         if (stretch.x != 1.0f || stretch.y != 1.0f || stretch.z != 1.0f)
@@ -1205,7 +1228,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (opacity <= 0.0f)
             return;
 
-        const Mat4 transform = core::toRenderMatrix(at(id, part.cframe), origin) *
+        const Mat4 transform = core::toRenderMatrix(at(id, part.cframe, teleportReach(part.size)), origin) *
                                core::scaling(primitiveScale(drawnShape(world, id, part), part.size));
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 

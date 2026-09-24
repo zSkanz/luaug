@@ -680,6 +680,9 @@ TEST_CASE("a frame between two ticks is drawn between two states")
     scene::PartComponent* component = fixture.world.parts().find(part);
     REQUIRE(component != nullptr);
     component->cframe.position = core::DVec3{0.0, 0.0, 0.0};
+    // Twenty metres long, so ten metres in a tick is a glide and not a
+    // teleport (see the case after this one).
+    component->size = core::Vec3{20.0f, 1.0f, 1.0f};
 
     // The tick boundary: capture where it is, then move it, exactly as the
     // frame loop does.
@@ -700,6 +703,37 @@ TEST_CASE("a frame between two ticks is drawn between two states")
     render::RenderWorld nextTick;
     render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 1.0f, &history, nextTick);
     CHECK(nearly(static_cast<core::f32>(nextTick.parts[0].cframe.position.x), 10.0f));
+}
+
+TEST_CASE("a part that jumped further than its own size in a tick is drawn where it landed")
+{
+    // **The owner's snake**: its tail is moved to the front of its head with
+    // one `CFrame` write, and the frames between two ticks drew it sliding
+    // through the body to get there. A move longer than the part's largest
+    // side is a teleport; one shorter still glides.
+    Fixture fixture;
+    const core::InstanceId root = fixture.world.create(fixture.folderClass);
+    const core::InstanceId part = fixture.part(root);
+    scene::PartComponent* component = fixture.world.parts().find(part);
+    REQUIRE(component != nullptr);
+    component->size = core::Vec3{1.0f, 1.0f, 1.0f};
+    component->cframe.position = core::DVec3{0.0, 0.0, 0.0};
+
+    render::TransformHistory history;
+    history.capture(fixture.world);
+    component->cframe.position = core::DVec3{3.0, 0.0, 0.0};
+
+    render::RenderWorld jumped;
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.5f, &history, jumped);
+    REQUIRE(jumped.parts.size() == 1);
+    CHECK(jumped.parts[0].cframe.position.x == 3.0);
+
+    // Under its own size, it glides.
+    history.capture(fixture.world);
+    component->cframe.position = core::DVec3{3.5, 0.0, 0.0};
+    render::RenderWorld glided;
+    render::extract(fixture.world, root, core::InstanceId{}, kNoMeshes, 1.0f, 0.0f, nullptr, 0.5f, &history, glided);
+    CHECK(nearly(static_cast<core::f32>(glided.parts[0].cframe.position.x), 3.25f));
 }
 
 TEST_CASE("no history is the world exactly as the last tick left it")
@@ -790,6 +824,11 @@ TEST_CASE("clearing the history is what makes a restored world stop interpolatin
     scene::PartComponent* component = fixture.world.parts().find(part);
     REQUIRE(component != nullptr);
     component->cframe.position = core::DVec3{40.0, 0.0, 0.0};
+    // A hundred metres long, so forty is within what the renderer treats as a
+    // glide: a smaller part would be taken for a teleport and drawn where it
+    // is, which hides the stale history this case is about rather than
+    // clearing it.
+    component->size = core::Vec3{100.0f, 1.0f, 1.0f};
 
     render::TransformHistory history;
     history.capture(fixture.world);

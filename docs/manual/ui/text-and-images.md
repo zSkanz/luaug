@@ -9,8 +9,8 @@ title.Size = UDim2.new(1, -32, 0, 48)
 title.Text = "Score: 0"
 title.TextSize = 40
 title.TextColor = Color3.fromRGB(240, 236, 224)
-title.HorizontalAlignment = Enum.HorizontalAlignment.Center
-title.VerticalAlignment = Enum.VerticalAlignment.Center
+title.TextXAlignment = Enum.HorizontalAlignment.Center
+title.TextYAlignment = Enum.VerticalAlignment.Center
 title.BackgroundTransparency = 1
 title.Parent = screen
 ```
@@ -19,17 +19,20 @@ title.Parent = screen
 |---|---|---|
 | `TextLabel.Text` | `""` | UTF-8. |
 | `TextLabel.TextColor` | black | **No `3` suffix.** |
+| `TextLabel.TextTransparency` | 0 | The words' own; the box has `BackgroundTransparency`. |
 | `TextLabel.TextSize` | 14 | The em size **in pixels**. |
 | `TextLabel.Font` | `""` | An `asset://` URI to a TrueType file. |
-| `TextLabel.HorizontalAlignment` | `Center` | |
-| `TextLabel.VerticalAlignment` | `Center` | |
+| `TextLabel.TextXAlignment` | `Center` | `Enum.HorizontalAlignment` |
+| `TextLabel.TextYAlignment` | `Center` | `Enum.VerticalAlignment` |
 | `TextLabel.TextWrapped` | `false` | |
 | `TextLabel.TextScaled` | `false` | |
 
-**The alignment properties are shared with layout.** They are
-`HorizontalAlignment` and `VerticalAlignment`, the same enums a `UIListLayout`
-uses — there is deliberately no `TextXAlignment` beside them, and no runtime
-alias for one.
+**The text's alignment is named for the text**: `TextXAlignment` and
+`TextYAlignment`, so a label's words and a layout's children are never
+confused. Their values are the enums a `UIListLayout` uses,
+`Enum.HorizontalAlignment` and `Enum.VerticalAlignment`. A scene saved when
+these were a label's `HorizontalAlignment` and `VerticalAlignment` opens with
+them read under the new names.
 
 A codepoint the font has no glyph for draws the font's undefined-character box
 rather than nothing: a label that silently drops characters is the failure mode

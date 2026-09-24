@@ -77,8 +77,8 @@ scores.BackgroundTransparency = 1
 scores.TextColor = Color3.fromRGB(210, 214, 222)
 scores.TextSize = 40
 scores.RichText = true
-scores.HorizontalAlignment = Enum.HorizontalAlignment.Left
-scores.VerticalAlignment = Enum.VerticalAlignment.Top
+scores.TextXAlignment = Enum.HorizontalAlignment.Left
+scores.TextYAlignment = Enum.VerticalAlignment.Top
 scores.Text = '<font color="#6ec6ff"><b>Blue</b></font>   12<br/>'
     .. '<font color="#ff6b6b"><b>Red</b></font>    9<br/>'
     .. '<i><font size="28" transparency="0.3">first to 15 wins</font></i>'

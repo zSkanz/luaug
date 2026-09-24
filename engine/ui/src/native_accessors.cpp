@@ -463,7 +463,7 @@ bool setTextLabelFont(scene::World& world, core::InstanceId id, const Value& val
     return true;
 }
 
-Value getTextLabelHorizontalAlignment(const scene::World& world, core::InstanceId id)
+Value getTextLabelTextXAlignment(const scene::World& world, core::InstanceId id)
 {
     const scene::TextLabelComponent* component = world.textLabels().find(id);
     return component == nullptr
@@ -471,7 +471,7 @@ Value getTextLabelHorizontalAlignment(const scene::World& world, core::InstanceI
                : Value{scene::EnumValue{generated::HorizontalAlignmentEnumId, component->horizontalAlignment}};
 }
 
-bool setTextLabelHorizontalAlignment(scene::World& world, core::InstanceId id, const Value& value)
+bool setTextLabelTextXAlignment(scene::World& world, core::InstanceId id, const Value& value)
 {
     scene::TextLabelComponent* component = world.textLabels().find(id);
     if (component == nullptr)
@@ -484,7 +484,7 @@ bool setTextLabelHorizontalAlignment(scene::World& world, core::InstanceId id, c
     return true;
 }
 
-Value getTextLabelVerticalAlignment(const scene::World& world, core::InstanceId id)
+Value getTextLabelTextYAlignment(const scene::World& world, core::InstanceId id)
 {
     const scene::TextLabelComponent* component = world.textLabels().find(id);
     return component == nullptr
@@ -492,7 +492,7 @@ Value getTextLabelVerticalAlignment(const scene::World& world, core::InstanceId 
                : Value{scene::EnumValue{generated::VerticalAlignmentEnumId, component->verticalAlignment}};
 }
 
-bool setTextLabelVerticalAlignment(scene::World& world, core::InstanceId id, const Value& value)
+bool setTextLabelTextYAlignment(scene::World& world, core::InstanceId id, const Value& value)
 {
     scene::TextLabelComponent* component = world.textLabels().find(id);
     if (component == nullptr)

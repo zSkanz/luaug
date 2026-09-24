@@ -5646,3 +5646,36 @@ TEST_CASE("the 2D view pans with a drag, zooms about the pointer, and gives the 
     CHECK(rig.editor.cameraCFrame().position.x == doctest::Approx(before.position.x));
     CHECK(rig.editor.cameraCFrame().position.z == doctest::Approx(before.position.z));
 }
+
+TEST_CASE("a scene saved with a label's old alignment names opens with them under the new ones")
+{
+    // `TextLabel.HorizontalAlignment` became `TextXAlignment` at the owner's
+    // word; a scene written before must not lose where its text sat.
+    BrushRig rig;
+    luaug::ui::generated::registerClasses(rig.classes, rig.atoms);
+    const core::InstanceId ui = rig.world.create(rig.classes.findId(rig.atoms.intern("UIService")));
+    rig.world.setName(ui, rig.atoms.intern("UIService"));
+    REQUIRE_FALSE(rig.world.setParent(ui, rig.root).has_value());
+    const core::InstanceId label = rig.world.create(rig.classes.findId(rig.atoms.intern("TextLabel")));
+    rig.world.setName(label, rig.atoms.intern("Title"));
+    REQUIRE_FALSE(rig.world.setParent(label, ui).has_value());
+    rig.world.textLabels().find(label)->horizontalAlignment = 0;
+    rig.world.textLabels().find(label)->verticalAlignment = 2;
+
+    std::string text = scene::writeScene(rig.world);
+    REQUIRE(text.find("\"TextXAlignment\"") != std::string::npos);
+    // Written the way a scene from before the rename was.
+    for (const auto& [now, before] :
+         {std::pair<std::string, std::string>{"\"TextXAlignment\"", "\"HorizontalAlignment\""},
+          std::pair<std::string, std::string>{"\"TextYAlignment\"", "\"VerticalAlignment\""}}) {
+        const std::size_t at = text.find(now);
+        REQUIRE(at != std::string::npos);
+        text.replace(at, now.size(), before);
+    }
+
+    REQUIRE_FALSE(scene::readScene(rig.world, text).has_value());
+    const core::InstanceId again = rig.world.findFirstChild(ui, rig.atoms.intern("Title"));
+    REQUIRE(again.valid());
+    CHECK(rig.world.textLabels().find(again)->horizontalAlignment == 0);
+    CHECK(rig.world.textLabels().find(again)->verticalAlignment == 2);
+}

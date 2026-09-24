@@ -55,7 +55,7 @@ for index = 1, 3 do
     row.Text = `Row {index}`
     row.TextColor = Ink
     row.TextSize = 16
-    row.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    row.TextXAlignment = Enum.HorizontalAlignment.Left
     row.Parent = sidebar
 end
 

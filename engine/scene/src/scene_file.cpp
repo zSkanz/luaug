@@ -986,6 +986,12 @@ constexpr core::u64 kReferenceSeed = 0x5245'4645u;
 // Split out of `applyNode` because a stamped instance's OVERRIDES are exactly
 // this shape at a path inside it (ADR 0051) -- and two copies of "how a
 // property is read back" would disagree the first time either moved.
+// Properties renamed since a scene may have been written, old name first.
+constexpr std::pair<std::string_view, std::string_view> kRenamedProperties[]{
+    {"HorizontalAlignment", "TextXAlignment"},
+    {"VerticalAlignment", "TextYAlignment"},
+};
+
 void applyProperties(World& world, core::InstanceId id, const JsonValue& properties,
                      std::vector<PendingReference>& pending, SceneIoReport& report)
 {
@@ -995,8 +1001,20 @@ void applyProperties(World& world, core::InstanceId id, const JsonValue& propert
             const std::string_view name = properties.keyAt(index);
             if (convertVersion1(world, id, name, properties[name], report))
                 continue;
-            const core::NameAtom atom = world.atoms().intern(name);
+            core::NameAtom atom = world.atoms().intern(name);
             const PropertyDesc* property = world.classes().findProperty(classId, atom);
+            // **A property that was renamed reads under its new name.** Only
+            // when the class no longer has the old one: a `UIListLayout` still
+            // has `HorizontalAlignment`, and a `TextLabel` now calls its own
+            // `TextXAlignment`.
+            if (property == nullptr) {
+                for (const auto& [before, after] : kRenamedProperties) {
+                    if (name != before)
+                        continue;
+                    atom = world.atoms().intern(after);
+                    property = world.classes().findProperty(classId, atom);
+                }
+            }
             if (property == nullptr || property->set == nullptr) {
                 // A scene written by a newer build should still open here, minus
                 // what this one cannot express. Counted, never fatal.

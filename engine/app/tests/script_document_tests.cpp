@@ -662,3 +662,34 @@ TEST_CASE("the line edits every code editor has are one undo step each")
     ScriptDocument flat("x");
     CHECK_FALSE(flat.indentLines(0, 0, true));
 }
+
+TEST_CASE("a colour written in code is found, and written back in its own form")
+{
+    // **The swatch and picker beside a colour in the code** (the owner: "the
+    // same colour picker the Properties has").
+    using app::ColorLiteralKind;
+    const std::optional<app::ColorLiteral> made = app::findColorLiteral("local c = Color3.new(1, 0.5, 0)", 3);
+    REQUIRE(made.has_value());
+    CHECK(made->kind == ColorLiteralKind::New);
+    CHECK(made->args.begin == Position{3, 21});
+    CHECK(made->args.end == Position{3, 30});
+    CHECK(static_cast<double>(made->color.g) == doctest::Approx(0.5));
+
+    const std::optional<app::ColorLiteral> rgb = app::findColorLiteral("x = Color3.fromRGB(255, 128, 0)", 0);
+    REQUIRE(rgb.has_value());
+    CHECK(rgb->kind == ColorLiteralKind::FromRgb);
+    CHECK(static_cast<double>(rgb->color.r) == doctest::Approx(1.0));
+
+    const std::optional<app::ColorLiteral> hex = app::findColorLiteral("Color3.fromHex(\"#FF8000\")", 0);
+    REQUIRE(hex.has_value());
+    CHECK(hex->kind == ColorLiteralKind::FromHex);
+    CHECK(static_cast<double>(hex->color.r) == doctest::Approx(1.0));
+
+    // Built from variables is not a colour a picker can rewrite.
+    CHECK_FALSE(app::findColorLiteral("Color3.new(r, g, b)", 0).has_value());
+    CHECK_FALSE(app::findColorLiteral("Color3.new(math.random(), 0, 0)", 0).has_value());
+
+    CHECK(app::formatColorLiteral(ColorLiteralKind::New, core::Color3{1.0f, 0.5f, 0.25f}) == "1, 0.5, 0.25");
+    CHECK(app::formatColorLiteral(ColorLiteralKind::FromRgb, core::Color3{1.0f, 0.5f, 0.0f}) == "255, 128, 0");
+    CHECK(app::formatColorLiteral(ColorLiteralKind::FromHex, core::Color3{1.0f, 0.5f, 0.0f}) == "\"#FF8000\"");
+}

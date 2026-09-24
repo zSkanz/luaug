@@ -2,11 +2,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <utility>
 
 namespace luaug::app {
 namespace {
 
+using core::f32;
 using core::u32;
 
 [[nodiscard]] bool isWordByte(char c) noexcept
@@ -182,6 +187,150 @@ Position ScriptDocument::prevColumn(Position at) const noexcept
     while (from.column > 0 && isContinuation(text[from.column]))
         --from.column;
     return from;
+}
+
+namespace {
+
+[[nodiscard]] std::string_view trimmed(std::string_view text) noexcept
+{
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+        text.remove_prefix(1);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+        text.remove_suffix(1);
+    return text;
+}
+
+// A literal number and nothing else, or nothing.
+[[nodiscard]] std::optional<double> literalNumber(std::string_view text)
+{
+    text = trimmed(text);
+    if (text.empty() || text.size() > 32)
+        return std::nullopt;
+    const std::string copy(text);
+    char* end = nullptr;
+    const double value = std::strtod(copy.c_str(), &end);
+    if (end != copy.c_str() + copy.size() || !std::isfinite(value))
+        return std::nullopt;
+    return value;
+}
+
+[[nodiscard]] int hexDigit(char c) noexcept
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+} // namespace
+
+std::optional<ColorLiteral> findColorLiteral(std::string_view line, u32 lineIndex)
+{
+    struct Method
+    {
+        std::string_view name;
+        ColorLiteralKind kind;
+    };
+    constexpr Method kMethods[]{{"Color3.new(", ColorLiteralKind::New},
+                                {"Color3.fromRGB(", ColorLiteralKind::FromRgb},
+                                {"Color3.fromHex(", ColorLiteralKind::FromHex}};
+    std::size_t from = 0;
+    while (from < line.size()) {
+        std::size_t best = std::string_view::npos;
+        const Method* found = nullptr;
+        for (const Method& method : kMethods) {
+            const std::size_t at = line.find(method.name, from);
+            if (at != std::string_view::npos && at < best) {
+                best = at;
+                found = &method;
+            }
+        }
+        if (found == nullptr)
+            return std::nullopt;
+        const std::size_t open = best + found->name.size();
+        const std::size_t close = line.find(')', open);
+        from = open;
+        if (close == std::string_view::npos)
+            return std::nullopt;
+        const std::string_view inside = line.substr(open, close - open);
+        if (inside.find('(') != std::string_view::npos)
+            continue;
+
+        ColorLiteral literal;
+        literal.kind = found->kind;
+        literal.args = Range{Position{lineIndex, static_cast<u32>(open)}, Position{lineIndex, static_cast<u32>(close)}};
+        if (found->kind == ColorLiteralKind::FromHex) {
+            std::string_view text = trimmed(inside);
+            if (text.size() < 2 || (text.front() != '"' && text.front() != '\'') || text.back() != text.front())
+                continue;
+            text = text.substr(1, text.size() - 2);
+            if (!text.empty() && text.front() == '#')
+                text.remove_prefix(1);
+            if (text.size() != 6)
+                continue;
+            int channels[3]{};
+            bool ok = true;
+            for (int channel = 0; channel < 3; ++channel) {
+                const int high = hexDigit(text[static_cast<std::size_t>(channel) * 2]);
+                const int low = hexDigit(text[static_cast<std::size_t>(channel) * 2 + 1]);
+                ok = ok && high >= 0 && low >= 0;
+                channels[channel] = high * 16 + low;
+            }
+            if (!ok)
+                continue;
+            literal.color = core::Color3{static_cast<f32>(channels[0]) / 255.0f, static_cast<f32>(channels[1]) / 255.0f,
+                                         static_cast<f32>(channels[2]) / 255.0f};
+            return literal;
+        }
+
+        const std::size_t firstComma = inside.find(',');
+        const std::size_t secondComma =
+            firstComma == std::string_view::npos ? firstComma : inside.find(',', firstComma + 1);
+        if (secondComma == std::string_view::npos || inside.find(',', secondComma + 1) != std::string_view::npos)
+            continue;
+        const std::optional<double> r = literalNumber(inside.substr(0, firstComma));
+        const std::optional<double> g = literalNumber(inside.substr(firstComma + 1, secondComma - firstComma - 1));
+        const std::optional<double> b = literalNumber(inside.substr(secondComma + 1));
+        if (!r || !g || !b)
+            continue;
+        const double scale = found->kind == ColorLiteralKind::FromRgb ? 1.0 / 255.0 : 1.0;
+        literal.color =
+            core::Color3{static_cast<f32>(*r * scale), static_cast<f32>(*g * scale), static_cast<f32>(*b * scale)};
+        return literal;
+    }
+    return std::nullopt;
+}
+
+std::string formatColorLiteral(ColorLiteralKind kind, core::Color3 color)
+{
+    const auto clamp01 = [](f32 value) { return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value); };
+    const auto byte = [&clamp01](f32 value) { return static_cast<int>(std::lround(clamp01(value) * 255.0f)); };
+    char buffer[64]{};
+    switch (kind) {
+    case ColorLiteralKind::FromRgb:
+        (void)std::snprintf(buffer, sizeof(buffer), "%d, %d, %d", byte(color.r), byte(color.g), byte(color.b));
+        return buffer;
+    case ColorLiteralKind::FromHex:
+        (void)std::snprintf(buffer, sizeof(buffer), "\"#%02X%02X%02X\"", byte(color.r), byte(color.g), byte(color.b));
+        return buffer;
+    case ColorLiteralKind::New:
+        break;
+    }
+    // Three decimals at most, and no trailing zeros: `0.5`, not `0.500`.
+    const auto decimal = [&clamp01](f32 value) {
+        char text[16]{};
+        (void)std::snprintf(text, sizeof(text), "%.3f", static_cast<double>(clamp01(value)));
+        std::string out(text);
+        while (out.size() > 1 && out.back() == '0')
+            out.pop_back();
+        if (!out.empty() && out.back() == '.')
+            out.pop_back();
+        return out;
+    };
+    return decimal(color.r) + ", " + decimal(color.g) + ", " + decimal(color.b);
 }
 
 bool ScriptDocument::indentLines(u32 first, u32 last, bool outdent)

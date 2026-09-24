@@ -118,7 +118,7 @@ Which way a `UIListLayout` stacks its siblings (§2.2).
 
 ## Enum.HorizontalAlignment
 
-Alignment along the X axis. One vocabulary for two jobs (§2.5, divergence #23): a `TextLabel` aligns its text with it and a `UIListLayout` aligns its children with it, and there is deliberately no `TextXAlignment` beside it.
+Alignment along the X axis. One set of values for two jobs: a `TextLabel`'s `TextXAlignment` places its words with it and a `UIListLayout`'s `HorizontalAlignment` places its children with it.
 
 | Item | Value | Description |
 |---|---|---|
@@ -426,7 +426,7 @@ The mouse buttons are separate items rather than one `Mouse` item plus a `KeyCod
 
 ## Enum.VerticalAlignment
 
-Alignment along the Y axis, and the same one vocabulary as `HorizontalAlignment`.
+Alignment along the Y axis: a `TextLabel`'s `TextYAlignment` and a layout's `VerticalAlignment`.
 
 | Item | Value | Description |
 |---|---|---|

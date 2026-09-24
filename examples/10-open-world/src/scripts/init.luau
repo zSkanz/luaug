@@ -382,7 +382,7 @@ local function readout(name: string): TextLabel
     label.BackgroundTransparency = 1
     label.TextColor = Color3.fromRGB(232, 238, 246)
     label.TextSize = 15
-    label.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    label.TextXAlignment = Enum.HorizontalAlignment.Left
     label.Text = ""
     label.Parent = panel
     return label
