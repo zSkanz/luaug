@@ -52,22 +52,23 @@ one included -- then a push, then CI read. Nothing lands on a red `main`.
 
 ## Stage 1 — The format and the library
 
-- [ ] `engine/asset/include/luaug/asset/material.h` + `src/material.cpp`: the
+- [x] `engine/asset/include/luaug/asset/material.h` + `src/material.cpp`: the
       `MaterialAsset` struct (every field `MaterialComponent` has today, with the
       same defaults, plus `parent` and `instanceParameters`), a reader, and a
       writer through `core::JsonWriter` in fixed key order. A base writes every
       field and a variant writes only its overrides.
-- [ ] Variant resolution: parent-first into one flat description. A cycle
+- [x] Variant resolution: parent-first into one flat description. A cycle
       resolves to the engine default and is reported once, naming the file that
       closed it.
-- [ ] The engine default material, built in (not a file): white, `Metalness` 0,
+- [x] The engine default material, built in (not a file): white, `Metalness` 0,
       `Roughness` 0.7, declaring `Color` and `Transparency`.
-- [ ] A `MaterialLibrary` the host owns, keyed by URN, that loads through
+- [~] A `MaterialLibrary` the host owns, keyed by URN, that loads through
       `ContentMounts` (compiled first, loose second) and reloads a changed file
       (ADR 0062). `scene` is L3 and has no filesystem: it holds a handle, and the
       host answers what the handle means. `tools/repo/checklayers.luau` has to
-      stay green.
-- [ ] Tests: round trip is byte-identical, key order is fixed, a variant
+      stay green. *Built and tested in `asset` (`75231147`); the host takes
+      ownership in Stage 2, when a world has something to ask it.*
+- [x] Tests: round trip is byte-identical, key order is fixed, a variant
       inherits and overrides, a cycle is refused, an unknown field is reported
       and not fatal, a missing parent is reported.
 
