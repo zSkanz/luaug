@@ -12,7 +12,9 @@ log entries to `docs/progress-archive/YYYY-MM.md`.
   is multiplayer/replication, whose shape was designed and approved on
   2026-08-21 and is inherited rather than re-decided; what its milestone owes is
   the part that section deliberately did not commit — replication semantics.
-  Phase 3 and phase 5 stay closed.
+  **Phase 3 (the 2D layer and navmesh) opened 2026-09-23 and is built**: see
+  the mandate ledger, [`docs/briefs/mandate-2026-09-23.md`](docs/briefs/mandate-2026-09-23.md),
+  whose S1 to S7 are all done. Phase 5 (mobile) stays closed.
 
 - **Phase 1, the editor (E1–E9), is complete and every milestone is tagged.**
   E1, E2, E3, E4 and E6 were signed off by the owner; **E5, E7, E8 and E9 were
@@ -81,8 +83,9 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
   2026-08-27 in one instruction — *"terrain editor multiplayer voxels etc."* —
   which also answers the terrain's one recorded open question: **voxel, not
   height field, so caves and overhangs are possible.** Phase 3 (2D layer,
-  navmesh) and phase 5 (mobile) were skipped over rather than dropped and stay
-  closed; the roadmap's numbering is intent, not a queue. R15 is not a permanent
+  navmesh) was skipped over rather than dropped, and the owner opened it on
+  2026-09-23; it is built. Phase 5 (mobile) stays closed. The roadmap's
+  numbering is intent, not a queue. R15 is not a permanent
   ban and never was — it says v1's scope is closed and that a scope change is an
   escalation item, and the post-v1 phase list is that escalation.
 
@@ -351,6 +354,28 @@ and a block world -- went to
 [`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
 2026-09-23.
 
+- **Session 33 — the 2D layer and navigation, 2026-09-23 to 09-24.** The
+  mandate's S6 and S7, and with them phase 3.
+  - **2D**: `Part2D` and `Tilemap2D` simulated by Box2D beside Jolt, an
+    orthographic camera, an instanced sprite pass, the editor's 2D view and
+    Tiles tool, `examples/20-platformer`, and `Part2D` on protocol 11
+    (ADR 0088). A tilemap collides as the outline of its tiles, so nothing
+    catches on seams.
+  - **Navigation**: `NavigationService` over Recast/Detour (ADR 0089), with
+    tiles built where queries go and rebuilt when what stands in them
+    changes. `examples/21-navigation` is gated on its walker arriving.
+  - **What reality corrected**: the survey found six places that assumed a
+    perspective projection, and there were ten. The first 2D frame showed a
+    bloom that wrapped round the screen, D181, fixed. A tilemap's revision
+    lied after an undo, and `World::restores` now counts. A navigation cache
+    kept per tick missed a wall a script built in the same tick, and
+    `World::mutations` now counts. Each is written up in its brief's or its
+    ADR's findings.
+  - **The owner's uncommitted editor-shell work stayed untouched.** Where a
+    commit needed a file both of us had changed, the commit took HEAD plus this
+    session's lines, compiled in isolation against HEAD's headers, and went
+    in through the index.
+
 - **Session 32 — terrain becomes a grid of voxels, 2026-09-23.** The owner
   asked for the reference platform's terrain after D161 to D163 and a dig that
   lagged. ADR 0082 records what that platform does and what was taken from it.
@@ -370,26 +395,3 @@ and a block world -- went to
   A dig now rebuilds one mesh (2.2 ms) and one collider. Each is keyed on only
   the two layers of each neighbour it reads.
 
-- **Session 31 — releases, a cave you can dig and see, and a benchmark decided
-  by measurement, 2026-09-23.** The owner delegated the sign-offs, the tags and
-  the benchmark questions, and reported two terrain defects by playing the
-  package.
-
-  **"Sculpting past the edge of the terrain is deformed."** Reproduced
-  headlessly with a flat square and no brush at all: a vertex past the edge of
-  the ground stopped being a hole once it had morphed more than halfway onto a
-  neighbour that was ground, and kept the height of an empty column. Each end of
-  the morph now borrows the other's height when it has none.
-
-  **"Digging sideways does not go."** It could not: a dig was a height brush,
-  and a stroke aims at the field as it was when it began. A dig aimed at a wall
-  now carves volume and bores at a speed, and the flow the owner tried -- flat
-  ground, down, then out -- is a test. Making the result worth looking at took
-  four renderer changes, and one of them was a defect this session made and
-  caught: the colour pass and the depth prepass compiled the same vertex maths
-  differently once the shaders changed, and the ground showed the sky in
-  specks. `precise` fixes it and the comment says why.
-
-  **Jolt's cross-platform switch was decided by running it**, after finding
-  that the audit's experiment could not answer: its scenario simulated nothing.
-  ADR 0074 has the table.
