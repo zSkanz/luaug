@@ -2758,7 +2758,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // wireframe of a world with no bodies is an empty picture that looks
             // exactly like a working one. `mirror` creates and retires them
             // without advancing anything.
-            if (host->world().engineState().paused)
+            //
+            // **Editing is the other world that does not tick** (the owner's
+            // report: every View switch but the grid did nothing while editing).
+            // `paused` is the SCRIPT's pause; the editor holds its world still by
+            // allowing no ticks, so `paused` stayed false and the wireframe of the
+            // world being built was always empty.
+            if (host->world().engineState().paused || (options.editor && editing(editor.runState())))
                 physics->mirror();
             PhysicsWireframe sink(debugDraw);
             physics->backend().debugDraw(physics->worldHandle(), sink);
@@ -2767,9 +2773,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // The rig, behind the View menu's `Skeletons` for the same reason: a
         // line per joint for every skinned mesh in the world. Drawn after the
         // ticks, because the pose it reads is the one this frame will show.
-        if (const render::AnimationSystem* animation = host->animation();
-            animation != nullptr && overlay.has_value() && overlay->panels().showSkeletons) {
-            drawSkeletons(host->world(), *animation, debugDraw);
+        //
+        // The rigs load at the top of a tick, and an editor that is editing runs
+        // none -- so a character placed in the editor had no skeleton to draw
+        // until play. Loaded here instead, which costs a set lookup per
+        // `MeshPart` once they are all in.
+        if (overlay.has_value() && overlay->panels().showSkeletons) {
+            host->loadSkeletons();
+            if (const render::AnimationSystem* animation = host->animation(); animation != nullptr)
+                drawSkeletons(host->world(), *animation, debugDraw);
         }
 
         // **What is not a part, drawn** (S5.1). A `Camera`, a `PointLight`, an
@@ -2805,11 +2817,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             const bool wireframe = terrainPanel || (overlay.has_value() && overlay->panels().showTerrainWireframe);
             const bool normals = terrainPanel || (overlay.has_value() && overlay->panels().showTerrainNormals);
             if (wireframe || normals) {
-                core::DVec3 eye = editor.cameraCFrame().position;
+                core::CFrameD eye = editor.cameraCFrame();
                 if (const scene::CameraComponent* camera = host->world().cameras().find(listener);
                     camera != nullptr && !listenWithEditor)
-                    eye = camera->cframe.position;
-                drawTerrainDebug(host->world(), eye, wireframe, normals, debugDraw);
+                    eye = camera->cframe;
+                // Forward is the negated third column (`math.h`).
+                const core::Mat3& basis = eye.rotation;
+                const core::Vec3 forward{-basis.m[2][0], -basis.m[2][1], -basis.m[2][2]};
+                drawTerrainDebug(host->world(), eye.position, forward, wireframe, normals, debugDraw);
             }
         }
 

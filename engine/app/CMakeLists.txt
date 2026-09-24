@@ -243,6 +243,7 @@ luaug_add_module_tests(app
         tests/reference_grid_tests.cpp
         tests/brush_overlay_tests.cpp
         tests/skeleton_overlay_tests.cpp
+        tests/terrain_overlay_tests.cpp
         tests/editor_tests.cpp
         tests/content_tree_tests.cpp
         tests/content_import_tests.cpp

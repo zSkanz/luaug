@@ -5,14 +5,17 @@
 #include "luaug/scene/world.h"
 
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace luaug::app {
 
 namespace {
 
-// How far out from the camera's voxel the cube reaches on each axis.
+// How far out from the looked-at voxel the cube reaches on each axis.
 constexpr core::i32 HalfExtent = 16;
+// How far along the look the ground is searched for, in metres.
+constexpr double LookReach = 1000.0;
 
 // How long a normal is drawn, in voxels: long enough to read its direction,
 // short enough not to cross the next vertex's.
@@ -22,6 +25,9 @@ constexpr float NormalLength = 0.6f;
 // cell changes.
 struct Cached
 {
+    // Which world, as well as which terrain: an id means one thing per world,
+    // and the editor draws a stamp's stage and the scene in turn.
+    const scene::World* world = nullptr;
     core::InstanceId terrain;
     core::u64 revision = ~core::u64{0};
     core::i32 x = 0;
@@ -32,7 +38,8 @@ struct Cached
 
 } // namespace
 
-void drawTerrainDebug(const scene::World& world, core::DVec3 eye, bool wireframe, bool normals, render::DebugDraw& draw)
+void drawTerrainDebug(const scene::World& world, core::DVec3 eye, core::Vec3 forward, bool wireframe, bool normals,
+                      render::DebugDraw& draw)
 {
     if (!wireframe && !normals)
         return;
@@ -46,21 +53,35 @@ void drawTerrainDebug(const scene::World& world, core::DVec3 eye, bool wireframe
 
     world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
         const double voxel = static_cast<double>(terrain.field.settings().voxelSize);
+        // **Around the ground being looked at, not around the camera** (the
+        // owner's report: the switch showed nothing while editing). A cube of
+        // thirty-two voxels round the eye holds no surface once the camera is
+        // more than sixteen voxels up, which is where an editor's camera
+        // usually is -- so the overlay only ever appeared flying at the grass.
+        core::DVec3 focus = eye;
+        const core::DVec3 local{eye.x - terrain.origin.x, eye.y - terrain.origin.y, eye.z - terrain.origin.z};
+        if (const std::optional<asset::TerrainHit> hit =
+                asset::raycastField(terrain.field, local, core::normalize(forward), LookReach);
+            hit.has_value()) {
+            focus = core::DVec3{terrain.origin.x + hit->position.x, terrain.origin.y + hit->position.y,
+                                terrain.origin.z + hit->position.z};
+        }
         const auto cell = [&](double world, double origin) {
             return static_cast<core::i32>(std::floor((world - origin) / voxel)) - HalfExtent;
         };
-        const core::i32 x = cell(eye.x, terrain.origin.x);
-        const core::i32 y = cell(eye.y, terrain.origin.y);
-        const core::i32 z = cell(eye.z, terrain.origin.z);
+        const core::i32 x = cell(focus.x, terrain.origin.x);
+        const core::i32 y = cell(focus.y, terrain.origin.y);
+        const core::i32 z = cell(focus.z, terrain.origin.z);
 
         Cached* entry = nullptr;
         for (Cached& candidate : cache) {
-            if (candidate.terrain == id)
+            if (candidate.world == &world && candidate.terrain == id)
                 entry = &candidate;
         }
         if (entry == nullptr) {
             cache.push_back(Cached{});
             entry = &cache.back();
+            entry->world = &world;
             entry->terrain = id;
         }
         if (entry->revision != terrain.fieldRevision || entry->x != x || entry->y != y || entry->z != z) {

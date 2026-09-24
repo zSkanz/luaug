@@ -333,6 +333,11 @@ public:
         return m_animation ? &*m_animation : nullptr;
     }
 
+    // **The rigs every `MeshPart` names, loaded now** rather than at the top of
+    // the next tick -- which, while the editor is editing, never comes. The
+    // skeleton overlay reads through this; a tick still does it for itself.
+    void loadSkeletons() { syncSkeletons(); }
+
     [[nodiscard]] scene::PhysicsSync* physics() noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] const scene::PhysicsSync* physics() const noexcept { return m_physics ? &*m_physics : nullptr; }
     [[nodiscard]] scene::PhysicsSync2D* physics2d() noexcept { return m_physics2d ? &*m_physics2d : nullptr; }
