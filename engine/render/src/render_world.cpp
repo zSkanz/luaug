@@ -75,6 +75,17 @@ constexpr f32 kDegreesToRadians = kPi / 180.0f;
 //   total height 2), so Y is halved. Its caps still stretch away from
 //   `Size.y == 2 * max(Size.x, Size.z)`; primitives.h records why and what the
 //   fix would be.
+// **The shape a part is DRAWN as**: its own, except a `CharacterBody`, which
+// is the capsule the physics sweeps whatever its `Shape` says -- it has no
+// `Shape` of its own, so it read as the default block and a character was a
+// box on screen and a capsule in the world (the owner's report).
+[[nodiscard]] core::i32 drawnShape(const scene::World& world, core::InstanceId id,
+                                   const scene::PartComponent& part) noexcept
+{
+    constexpr core::i32 Capsule = 3;
+    return world.characterBodies().find(id) != nullptr ? Capsule : part.shape;
+}
+
 [[nodiscard]] Vec3 primitiveScale(core::i32 shape, Vec3 size) noexcept
 {
     switch (shape) {
@@ -578,7 +589,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // host draws with the debug path instead of with the renderer
         // (`engine.cpp`'s `useRenderer`). Without that guard `examples/00-clear`
         // went from three wire cubes to an empty screen.
-        else if (out.camera.valid && primitiveEntry(world, meshes, part.shape) != nullptr) {
+        else if (out.camera.valid && primitiveEntry(world, meshes, drawnShape(world, id, part)) != nullptr) {
             return;
         }
         // The debug path draws the surface's colour and see-through and
@@ -589,7 +600,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             .size = part.size,
             .color = surface.properties.color,
             .transparency = surface.properties.transparency,
-            .shape = part.shape,
+            .shape = drawnShape(world, id, part),
         });
     });
 
@@ -1185,7 +1196,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (world.meshParts().find(id) != nullptr)
             return;
 
-        const MeshLibrary::Entry* entry = primitiveEntry(world, meshes, part.shape);
+        const MeshLibrary::Entry* entry = primitiveEntry(world, meshes, drawnShape(world, id, part));
         if (entry == nullptr)
             return;
 
@@ -1194,8 +1205,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (opacity <= 0.0f)
             return;
 
-        const Mat4 transform =
-            core::toRenderMatrix(at(id, part.cframe), origin) * core::scaling(primitiveScale(part.shape, part.size));
+        const Mat4 transform = core::toRenderMatrix(at(id, part.cframe), origin) *
+                               core::scaling(primitiveScale(drawnShape(world, id, part), part.size));
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
         ++out.candidateDraws;

@@ -2459,6 +2459,11 @@ private:
         // dragging a bone whose part is itself being dragged would otherwise
         // divide by a frame that has already moved this tick.
         std::vector<core::CFrameD> parents;
+        // For a model, every part inside it and where it was at the START --
+        // what each frame's delta is applied to. Applying it to where the part
+        // already was summed the drag once per frame (the owner's "a light drag
+        // moved it a lot"). Empty for every other kind.
+        std::vector<std::vector<std::pair<core::InstanceId, core::CFrameD>>> inside;
         core::u64 gesture = 0;
     };
 

@@ -1482,3 +1482,34 @@ TEST_CASE("terrain outside the root is not in the world")
     // is not -- and terrain is not an exception to that.
     CHECK(snapshot.draws.empty());
 }
+
+TEST_CASE("a character is drawn as the capsule it moves as, not as a block")
+{
+    // **The owner's report**: a `CharacterBody` has no `Shape` of its own, so
+    // it drew as the default block while the physics swept a capsule.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    render::MeshLibrary meshes;
+    registerBlock(fixture, meshes);
+    render::MeshLibrary::Entry capsule;
+    capsule.mesh = render::MeshHandle{7, 1};
+    capsule.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 2.0f, 1.0f});
+    capsule.sectionCount = 1;
+    meshes.set(fixture.atoms.intern(render::primitiveContent(3)), capsule);
+
+    const core::InstanceId block = blockAt(fixture, workspace, -2.0);
+    const core::InstanceId character = blockAt(fixture, workspace, 2.0);
+    (void)fixture.world.characterBodies().add(character, scene::CharacterBodyComponent{});
+
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
+    REQUIRE(snapshot.draws.size() == 2);
+    int capsules = 0;
+    for (const render::DrawItem& draw : snapshot.draws)
+        capsules += draw.mesh == capsule.mesh ? 1 : 0;
+    CHECK(capsules == 1);
+    (void)block;
+}

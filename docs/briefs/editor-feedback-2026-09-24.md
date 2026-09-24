@@ -15,6 +15,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 - [x] **A drag on an arrow moves as far as the pointer, never to infinity.**
       Reported mid-pass: a small mouse movement sent the part away forever.
+- [x] **A model or stamp moves as far as the pointer.** Reported again after
+      the arrow fix: "a light drag moved it a lot" -- on a model.
+- [x] **A CharacterBody is drawn as the capsule it moves as**, not as a box.
 - [x] **WASD flies without a held mouse button.** While the viewport has focus
       and no text field does, W/A/S/D/Q/E move the camera; the right button
       still looks around.
@@ -142,3 +145,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
     highlighter marks names where the grammar puts a type -- after a binding's
     `:`, after `::` and `->`, on the right of `type X =`, and in a generic
     list -- one line at a time, like the lexer it follows.
+13. **The model drag summed itself once per frame.** A model has no
+    transform, so a drag writes its parts; each frame applied the whole delta
+    since the press to where the parts ALREADY were, so a four-metre drag over
+    thirty frames put the model at sixty-two (the test that found it). The
+    arrow fix was real and separate -- a part never showed this, because a
+    part's drag writes an absolute frame. The parts' starting frames are kept
+    with the drag now.
+14. **A CharacterBody has no Shape**, being a `BasePart` and not a `Part`, so
+    the renderer drew the default block around a capsule the physics swept.
+    The renderer asks what a part is drawn as (`drawnShape`).

@@ -2165,6 +2165,40 @@ TEST_CASE("a drag over a multi-selection moves each instance by the same delta")
     CHECK(a->cframe.position.z == doctest::Approx(-30.0).epsilon(0.001));
 }
 
+TEST_CASE("a model dragged over many frames moves as far as the pointer, not that far per frame")
+{
+    // **The owner's report, twice**: "a light drag moved it a lot", on a model
+    // and on a stamp. A model has no transform, so a drag moves its parts; each
+    // frame wrote the WHOLE delta since the press onto where the parts already
+    // were -- so thirty frames of a four-metre drag was the delta summed thirty
+    // times over.
+    DragRig rig;
+    rig.look({0.0, 0.0, 0.0});
+    const core::InstanceId model = rig.world.create(rig.classes.findId(rig.atoms.intern("Model")));
+    REQUIRE_FALSE(rig.world.setParent(model, rig.root).has_value());
+    const core::InstanceId left = rig.part({-1.0, 0.0, -30.0});
+    const core::InstanceId right = rig.part({1.0, 0.0, -30.0});
+    REQUIRE_FALSE(rig.world.setParent(left, model).has_value());
+    REQUIRE_FALSE(rig.world.setParent(right, model).has_value());
+    rig.inspector.select(model);
+    rig.editor.setSnap(false);
+
+    const std::optional<GizmoFrame> frame = rig.editor.gizmoFrame(rig.world, rig.inspector);
+    REQUIRE(frame.has_value());
+    const core::DVec3 grab =
+        frame->transform.position + core::DVec3{static_cast<core::f64>(frame->size) * 0.7, 0.0, 0.0};
+    rig.frame(rig.pixelOf(grab), true, true);
+    REQUIRE(rig.editor.gizmoDragging());
+    for (int step = 1; step <= 30; ++step) {
+        const core::DVec3 to = grab + core::DVec3{static_cast<core::f64>(step) * (4.0 / 30.0), 0.0, 0.0};
+        rig.frame(rig.pixelOf(to), false, true);
+    }
+    rig.frame(rig.pixelOf(grab + core::DVec3{4.0, 0.0, 0.0}), false, false);
+
+    CHECK(rig.world.parts().find(left)->cframe.position.x == doctest::Approx(3.0).epsilon(0.01));
+    CHECK(rig.world.parts().find(right)->cframe.position.x == doctest::Approx(5.0).epsilon(0.01));
+}
+
 TEST_CASE("a drag on an arm stays on that arm, in world space and in the part's own")
 {
     // **The reported defect**: a block dragged by an arm "não segue exatamente a

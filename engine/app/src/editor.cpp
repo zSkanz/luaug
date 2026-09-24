@@ -3081,14 +3081,14 @@ void Editor::applyDragTransform(scene::World& world, Inspector& inspector, core:
         // A `Model` has no transform, so moving it is moving everything under
         // it by the same delta -- which is exactly what `PivotTo` means and the
         // only thing that keeps the parts' relative layout.
+        //
+        // **From where each part was when the drag began**, never from where it
+        // is now: the delta is the whole drag so far, and applying it to parts
+        // the previous frames already moved sums it once per frame.
         const core::CFrameD delta = after * core::inverse(drag.before[index]);
-        std::vector<core::InstanceId> descendants;
-        world.collectDescendants(id, descendants);
-        for (const core::InstanceId descendant : descendants) {
-            const scene::PartComponent* part = world.parts().find(descendant);
-            if (part == nullptr)
-                continue;
-            inspector.enqueue(descendant, cframeName, scene::Value{delta * part->cframe});
+        for (const auto& [descendant, start] : drag.inside[index]) {
+            if (world.alive(descendant))
+                inspector.enqueue(descendant, cframeName, scene::Value{delta * start});
         }
         return;
     }
@@ -4243,6 +4243,16 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
                                                      : core::Vec3{1.0f, 1.0f, 1.0f});
             drag.kinds.push_back(kind);
             drag.parents.push_back(parent);
+            std::vector<std::pair<core::InstanceId, core::CFrameD>> inside;
+            if (kind == DragKind::Model) {
+                std::vector<core::InstanceId> descendants;
+                world.collectDescendants(id, descendants);
+                for (const core::InstanceId descendant : descendants) {
+                    if (const scene::PartComponent* held = world.parts().find(descendant); held != nullptr)
+                        inside.emplace_back(descendant, held->cframe);
+                }
+            }
+            drag.inside.push_back(std::move(inside));
         }
         if (drag.targets.empty())
             return false;
