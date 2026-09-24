@@ -8,6 +8,8 @@
 
 export type Content = string
 
+export type MaterialParameters = { [string]: Color3 | number }
+
 export type Connection = {
     Connected: boolean,
     Disconnect: (self: Connection) -> (),
@@ -448,6 +450,47 @@ declare extern type AnimationTrack with
     function Stop(self, fadeTime: number?): ()
 end
 
+declare extern type Material with
+    --- The material asset this handle is, or the asset a clone was copied from -- a clone of a clone
+    --- included. Always an asset's `Content`: a clone has nothing else to be named by.
+    read Source: Content
+    --- The base tint, multiplied into `ColorMap` if there is one. White with no map is a plain white
+    --- surface.
+    Color: Color3
+    --- How see-through the surface is, 0 opaque and 1 invisible.
+    Transparency: number
+    --- The base-colour image, sampled and multiplied by `Color`. Colour data, encoded through the sRGB
+    --- curve -- unlike the maps below, which are numbers.
+    ColorMap: Content
+    --- A tangent-space normal map. Linear data, not colour.
+    NormalMap: Content
+    --- Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one property
+    --- because they are one file. Linear data, not colour.
+    MetallicRoughnessMap: Content
+    --- Light the surface gives off on its own. It lights nothing else -- that is a `PointLight` -- it
+    --- only makes this surface bright.
+    Emissive: Color3
+    --- What the surface glows with, multiplied by `Emissive`. Colour data.
+    EmissiveMap: Content
+    --- 0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal.
+    Metalness: number
+    --- 0 is a mirror and 1 is chalk. The default is 0.7, what an untextured building block looks like.
+    Roughness: number
+    --- Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.
+    NormalScale: number
+    --- How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against `AlphaCutoff`, and
+    --- `Blend` blends.
+    AlphaMode: EnumAlphaMode
+    --- What `Mask` tests against. Read only in that mode.
+    AlphaCutoff: number
+    --- Whether the back faces are drawn. Leaves and cloth want this; anything solid does not.
+    DoubleSided: boolean
+    --- A writable runtime copy: the same properties, the same `Source`, owned by nobody and never
+    --- saved. Put it on a part with `part.Material = copy`, then change it -- every part wearing this
+    --- copy changes with it, and nothing else does.
+    function Clone(self): Material
+end
+
 declare extern type Instance with
     --- This instance's name; siblings may share one, and renaming into an awaited name satisfies a
     --- WaitForChild waiter exactly as parenting a new child does.
@@ -621,23 +664,25 @@ declare extern type BasePart extends PVInstance with
     Orientation: vector
     --- This part's dimensions in metres along its own axes.
     Size: vector
-    --- This part's color; channels are not clamped to 0-1, so a value above one is a legal tint rather
-    --- than an error.
-    Color: Color3
-    --- How see-through this part is, 0 fully opaque and 1 fully invisible.
-    Transparency: number
-    --- The `Material` instance this part's surface is described by, or nothing. **`Color` multiplies
-    --- it.** A part with no material has a white base, so white times `Color` is `Color` -- which is
-    --- what a plain part has always looked like. A part WITH one takes that material's colour, its
-    --- maps, its metalness and its roughness, and tints the result by `Color`. Leaving `Color` white is
-    --- therefore how to see a material exactly as it was authored, and it is what an import writes on
-    --- every part it creates. The fourth channel already worked this way: `Transparency` and the
-    --- material's own have always been multiplied together, and doing the same to the other three
-    --- removes an inconsistency rather than adding a rule. **There is no texture property on a part,
-    --- and there will not be one.** A texture reaches a surface through a material or not at all, so
-    --- that two parts can share one and changing it changes both. A `MeshPart` with no material draws
-    --- the one its own file described, which is what an unimported mesh looks like.
+    --- The material this part wears: a handle to a material asset (`Material.load`), a runtime copy of
+    --- one (`material:Clone()`), or nothing -- which is the engine default material, white, dielectric
+    --- and fairly rough, and exactly what a plain part has always looked like. **A part has no colour
+    --- of its own** (ADR 0090). Its look is its material's, and what it may change about that is what
+    --- the material lets it: the parameters the material declares, set with `SetMaterialParameter`. The
+    --- engine default declares `Color` and `Transparency`, so a part wearing nothing is still tinted
+    --- and faded. **Reading it never copies.** It returns the handle the part wears; `material:Clone()`
+    --- is how to get one to change. In a scene file it is written as the asset's `Content`. A
+    --- `MeshPart` with no material draws what its own file described, and a `Color` it overrides tints
+    --- that -- which is what an unimported mesh has always looked like.
     Material: Material?
+    --- The parameters this part overrides, by name -- a fresh table on every read, holding only what is
+    --- overridden. The names are the closed set a material may declare: `Color`, `Transparency`,
+    --- `Emissive`, `Metalness`, `Roughness`, `NormalScale` and `AlphaCutoff`. **An override the current
+    --- material does not declare is kept and ignored**, so a part that changes material and changes
+    --- back looks as it did. `SetMaterialParameter` is the checked way to write one; assigning this
+    --- property replaces the whole set and checks only that every entry is a parameter with a value of
+    --- its kind.
+    MaterialParameters: MaterialParameters
     --- Whether the simulation moves this part. An anchored part is immovable scenery that other parts
     --- collide with and gravity ignores -- not a very heavy part, a different kind of body -- so
     --- writing this rebuilds it in the simulation and keeps its transform.
@@ -687,6 +732,17 @@ declare extern type BasePart extends PVInstance with
     --- contacts: the instance is gone, and a signal on an instance nobody can reach is a signal nobody
     --- can handle.
     read TouchEnded: Signal<BasePart>
+    --- Overrides one parameter of the material this part wears, for this part alone. **Raises for a
+    --- parameter the material does not declare**: a material decides what a part may change about it,
+    --- and a tint written to one that did not allow it would be a surface that silently ignores its
+    --- script. `Color` and `Emissive` take a `Color3`; the rest take a number.
+    function SetMaterialParameter(self, name: string, value: Color3 | number): ()
+    --- The value this part draws with for one parameter: its override when it has one the material
+    --- declares, and the material's own value otherwise.
+    function GetMaterialParameter(self, name: string): Color3 | number
+    --- Removes this part's override of one parameter, so it draws with the material's value again.
+    --- Clearing one that is not overridden does nothing.
+    function ClearMaterialParameter(self, name: string): ()
     --- Adds an instantaneous change of momentum at the part's centre of mass, in kilogram-metres per
     --- second. Applied at the next simulation tick and ignored by an anchored part, which has no
     --- momentum to change.
@@ -706,46 +762,6 @@ declare extern type Part extends BasePart with
     --- oval. A `Wedge` is a ramp with its tall face towards -Z, so an unrotated one is walked UP as you
     --- walk towards -Z. Its collider is deliberately the whole box (§2.2's physics notes).
     Shape: EnumPartShape
-end
-
-declare extern type Material extends Instance with
-    --- The base tint, multiplied into `ColorMap` if there is one. White with no map is a plain white
-    --- surface.
-    Color: Color3
-    --- How see-through the surface is. Multiplied with the part's own `Transparency`, because both are
-    --- real sources of it and honouring one leaves the other rendering wrong.
-    Transparency: number
-    --- The base-colour image, sampled and multiplied by `Color`. Colour data, so it is encoded through
-    --- the sRGB curve -- unlike the maps below, which are numbers.
-    ColorMap: Content
-    --- A tangent-space normal map. Linear data, not colour.
-    NormalMap: Content
-    --- Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one property
-    --- because they are one file. Linear data, not colour.
-    MetallicRoughnessMap: Content
-    --- What the surface glows with, multiplied by `Emissive`. Colour data.
-    EmissiveMap: Content
-    --- 0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal. The values between are for a
-    --- surface that is partly one and partly the other across its map, not for a material that is a bit
-    --- metallic.
-    Metalness: number
-    --- 0 is a mirror and 1 is chalk. The default is what an untextured building block looks like;
-    --- glTF's own default is 1, which is right for a file that forgot to say and wrong for a material
-    --- somebody is about to author.
-    Roughness: number
-    --- Light the surface gives off on its own. It does not light anything else -- that is a
-    --- `PointLight` -- it only makes this surface bright.
-    Emissive: Color3
-    --- Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.
-    NormalScale: number
-    --- How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against `AlphaCutoff`, and
-    --- `Blend` blends.
-    AlphaMode: EnumAlphaMode
-    --- What `Mask` tests against. Read only in that mode.
-    AlphaCutoff: number
-    --- Whether the back faces are drawn. Leaves and cloth want this; anything solid does not, and
-    --- turning it on there doubles what the rasteriser does for nothing.
-    DoubleSided: boolean
 end
 
 declare extern type MeshPart extends BasePart with
@@ -2707,6 +2723,10 @@ declare TweenInfo: {
     new: ((time: number?, easingStyle: EnumEasingStyle?, easingDirection: EnumEasingDirection?, repeatCount: number?, reverses: boolean?, delayTime: number?) -> TweenInfo),
 }
 
+declare Material: {
+    load: ((content: Content) -> Material),
+}
+
 declare task: {
     spawn: (<T...>(fn: (T...) -> (), T...) -> thread),
     defer: (<T...>(fn: (T...) -> (), T...) -> thread),
@@ -2723,7 +2743,6 @@ declare Instance: {
         & (("Script") -> Script)
         & (("ModuleScript") -> ModuleScript)
         & (("Part") -> Part)
-        & (("Material") -> Material)
         & (("MeshPart") -> MeshPart)
         & (("Attachment") -> Attachment)
         & (("Bone") -> Bone)

@@ -12,6 +12,7 @@
 // that lets the frame finish first, because a person is watching.
 #include "luaug/asset/content.h"
 #include "luaug/asset/gltf.h"
+#include "luaug/asset/material.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/core/content_hash.h"
 #include "luaug/core/i18n.h"
@@ -44,35 +45,50 @@ struct Fixture
     core::AtomTable atoms;
     scene::ClassRegistry classes;
     scene::EnumRegistry enums;
-    scene::ClassId materialClass = scene::InvalidClass;
+    scene::ClassId partClass = scene::InvalidClass;
+    // Where the materials the parts wear come from (ADR 0090): one per map, so
+    // a test that names a map twice names two materials sharing it.
+    asset::MaterialLibrary materials;
+    core::usize materialCount = 0;
 
     rhi::DeviceResult device = rhi::createNullDevice({.backend = rhi::BackendId::Null});
     rhi::ICmdList* cmd = nullptr;
 
     Fixture()
     {
-        materialClass = classes.registerClass({
-            .name = atoms.intern("Material"),
-            .defaultName = atoms.intern("Material"),
-            .attachComponents = [](scene::World& w,
-                                   core::InstanceId id) { w.materials().add(id, scene::MaterialComponent{}); },
-            .detachComponents = [](scene::World& w, core::InstanceId id) { w.materials().remove(id); },
+        partClass = classes.registerClass({
+            .name = atoms.intern("Part"),
+            .defaultName = atoms.intern("Part"),
+            .attachComponents = [](scene::World& w, core::InstanceId id) { w.parts().add(id, scene::PartComponent{}); },
+            .detachComponents = [](scene::World& w, core::InstanceId id) { w.parts().remove(id); },
         });
         REQUIRE(device != nullptr);
         cmd = device->beginFrame();
         REQUIRE(cmd != nullptr);
     }
 
-    // A world holding one material that names `image` as its base colour. The
-    // URN is the path itself, which is what `resolve` falls back to when no
-    // mount answers -- exactly the dev-mode path ADR 0010 keeps forever.
+    // Makes the part `id` wear a new material whose base colour is `image`. The
+    // map's URN is the path itself, which is what `resolve` falls back to when
+    // no mount answers -- exactly the dev-mode path ADR 0010 keeps forever.
+    void wearMap(scene::World& world, core::InstanceId id, const std::filesystem::path& image)
+    {
+        const std::string urn = "asset://tests/" + std::to_string(++materialCount) + ".material.json";
+        asset::MaterialAsset material;
+        material.properties.colorMap = image.generic_string();
+        material.written = asset::AllMaterialFields;
+        materials.put(urn, material);
+        world.setMaterialLibrary(&materials);
+        scene::PartComponent* part = world.parts().find(id);
+        REQUIRE(part != nullptr);
+        part->material = world.atoms().intern(urn);
+    }
+
+    // A world holding one part wearing a material that names `image`.
     [[nodiscard]] scene::World worldNaming(const std::filesystem::path& image)
     {
         scene::World world(classes, enums, atoms, 1234u);
-        const core::InstanceId id = world.create(materialClass);
-        scene::MaterialComponent* material = world.materials().find(id);
-        REQUIRE(material != nullptr);
-        material->colorMap = world.atoms().intern(image.generic_string());
+        const core::InstanceId id = world.create(partClass);
+        wearMap(world, id, image);
         return world;
     }
 };
@@ -179,8 +195,8 @@ TEST_CASE("a world naming more maps than the pipeline holds still loads them all
     for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(folder)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".png")
             continue;
-        const core::InstanceId id = world.create(fixture.materialClass);
-        world.materials().find(id)->colorMap = world.atoms().intern(entry.path().generic_string());
+        const core::InstanceId id = world.create(fixture.partClass);
+        fixture.wearMap(world, id, entry.path());
         ++named;
     }
     REQUIRE(named > 0);
@@ -277,8 +293,8 @@ TEST_CASE("the pipeline works with real threads, and with the queue growing unde
     core::usize named = 0;
     for (int frame = 0; frame < 4000; ++frame) {
         if (named < images.size() * 4) {
-            const core::InstanceId id = world.create(fixture.materialClass);
-            world.materials().find(id)->colorMap = world.atoms().intern(images[named % images.size()].generic_string());
+            const core::InstanceId id = world.create(fixture.partClass);
+            fixture.wearMap(world, id, images[named % images.size()]);
             ++named;
         }
         (void)loader.syncTextures(*fixture.device, *fixture.cmd, world, library);

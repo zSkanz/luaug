@@ -198,6 +198,25 @@ struct WorldHostLoader
 WorldHost::WorldHost() = default;
 WorldHost::~WorldHost() = default;
 
+void WorldHost::setContentMounts(const asset::ContentMounts* mounts)
+{
+    m_mounts = mounts;
+    // The host's own materials read through the same mounts, compiled first
+    // and loose second, so a material and the maps it names are found the
+    // same way.
+    if (mounts != nullptr)
+        m_ownMaterials.setSource(asset::mountedMaterials(*mounts));
+    else
+        m_ownMaterials.setSource({});
+}
+
+void WorldHost::setMaterialLibrary(asset::MaterialLibrary* library) noexcept
+{
+    m_materials = library != nullptr ? library : &m_ownMaterials;
+    if (m_world.has_value())
+        m_world->setMaterialLibrary(m_materials);
+}
+
 std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options)
 {
     // The order is load-bearing, not incidental. `scene` owns the registry and
@@ -219,6 +238,7 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
     scene::generated::registerEnums(m_enums, m_atoms);
 
     m_world.emplace(m_classes, m_enums, m_atoms, options.seed);
+    m_world->setMaterialLibrary(m_materials);
     m_world->engineState().engineVersion = LUAUG_VERSION_STRING;
     m_world->engineState().luauVersion = LUAUG_LUAU_VERSION;
     m_world->engineState().networkTopology = options.networkTopology;

@@ -13,6 +13,7 @@
 
 #include "luaug/app/preserved.h"
 #include "luaug/asset/content.h"
+#include "luaug/asset/material.h"
 #include "luaug/audio/audio.h"
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
@@ -292,7 +293,22 @@ public:
     // `boot`, because `syncSkeletons` runs at the top of the FIRST tick and a
     // rig that arrived one tick late would be a character that starts a replay
     // in its bind pose.
-    void setContentMounts(const asset::ContentMounts* mounts) noexcept { m_mounts = mounts; }
+    void setContentMounts(const asset::ContentMounts* mounts);
+    [[nodiscard]] const asset::ContentMounts* contentMounts() const noexcept { return m_mounts; }
+
+    // **What a URN a part wears means** (ADR 0090). The host's own library,
+    // reading through the mounts, unless the process lends it one -- the
+    // editor does, so the game's world, a stamp's stage and the material
+    // panel's preview all resolve one URN to one material. Set before `boot`:
+    // a script's file scope can call `Material.load`.
+    void setMaterialLibrary(asset::MaterialLibrary* library) noexcept;
+    [[nodiscard]] asset::MaterialLibrary& materials() noexcept { return *m_materials; }
+    // The library this host was LENT, or null for its own -- what a reload
+    // hands the host that replaces this one.
+    [[nodiscard]] asset::MaterialLibrary* lentMaterials() const noexcept
+    {
+        return m_materials == &m_ownMaterials ? nullptr : m_materials;
+    }
 
     // `Workspace.CurrentCamera`, which is the audio listener (§2.1). Resolved
     // per call rather than cached: it is a property a script may reassign, and a
@@ -457,6 +473,8 @@ private:
     // consequence is that a `MeshPart` naming a rig has no skeleton, which is
     // already true of one naming a file that does not exist.
     const asset::ContentMounts* m_mounts = nullptr;
+    asset::MaterialLibrary m_ownMaterials;
+    asset::MaterialLibrary* m_materials = &m_ownMaterials;
     // Content atoms already attempted, so a file with no skeleton is parsed once
     // rather than once a tick forever.
     // **A set rather than a list**, because `syncSkeletons` asks about every

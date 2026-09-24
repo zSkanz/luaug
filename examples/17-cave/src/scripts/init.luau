@@ -83,7 +83,7 @@ local function lamp(name: string, at: vector, color: Color3, brightness: number,
     stone.Anchored = true
     stone.Size = vector.create(0.6, 1.4, 0.6)
     stone.Position = at
-    stone.Color = color
+    stone:SetMaterialParameter("Color", color)
     stone.Parent = Workspace
     local light = Instance.new("PointLight")
     light.Color = color

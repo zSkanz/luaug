@@ -29,6 +29,28 @@
 
 namespace luaug::scene::testing {
 
+// **The fixture's `Transparency`**: the engine default material's parameter
+// (ADR 0090), which is where a part's see-through lives now. A number property
+// on a part is what these tests need to exercise the world's machinery, and
+// this one keeps its old meaning.
+[[nodiscard]] inline f32 transparencyOf(const PartComponent& part) noexcept
+{
+    return part.materialParameters.has(asset::MaterialField::Transparency) ? part.materialParameters.transparency
+                                                                           : 0.0f;
+}
+
+// Zero is the default and not an override, as a scene file would say it.
+inline void setTransparencyOf(PartComponent& part, f32 transparency) noexcept
+{
+    if (transparency == 0.0f) {
+        asset::clearOverride(part.materialParameters, asset::MaterialField::Transparency);
+        return;
+    }
+    asset::MaterialProperties values;
+    values.transparency = transparency;
+    (void)asset::setOverride(part.materialParameters, asset::MaterialField::Transparency, values);
+}
+
 struct Hierarchy
 {
     core::AtomTable atoms;

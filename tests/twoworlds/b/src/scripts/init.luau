@@ -16,7 +16,7 @@ for index = 0, 7 do
     -- A ring, so the silhouette is nothing A's row of blocks could produce even
     -- if the two scenes were somehow blended.
     sphere.CFrame = CFrame.new(math.cos(index * 0.785) * 5.0, 1.4, math.sin(index * 0.785) * 5.0)
-    sphere.Color = Color3.fromRGB(48, 120, 220)
+    sphere:SetMaterialParameter("Color", Color3.fromRGB(48, 120, 220))
     sphere.Anchored = true
     sphere.Parent = workspace
 end
@@ -25,7 +25,7 @@ local floor = Instance.new("Part")
 floor.Name = "FloorB"
 floor.Size = Vector3.new(40, 0.5, 40)
 floor.CFrame = CFrame.new(0, -0.25, 0)
-floor.Color = Color3.fromRGB(40, 52, 68)
+floor:SetMaterialParameter("Color", Color3.fromRGB(40, 52, 68))
 floor.Anchored = true
 floor.Parent = workspace
 

@@ -87,7 +87,7 @@ local crate = Instance.new("Part")
 crate.Name = "Crate"
 crate.Size = vector.create(2, 2, 2)
 crate.Position = vector.create(0, 20, 0)
-crate.Color = Color3.fromRGB(200, 120, 60)
+crate:SetMaterialParameter("Color", Color3.fromRGB(200, 120, 60))
 crate.Parent = Workspace
 
 local camera = Instance.new("Camera")

@@ -22,7 +22,7 @@ ground.Name = "Ground"
 ground.Anchored = true
 ground.Size = vector.create(40, 1, 40)
 ground.Position = vector.create(0, -0.5, 0)
-ground.Color = Color3.fromRGB(70, 74, 68)
+ground:SetMaterialParameter("Color", Color3.fromRGB(70, 74, 68))
 ground.Parent = Workspace
 
 local function block(name: string, at: vector, size: vector, color: Color3): Part
@@ -31,7 +31,7 @@ local function block(name: string, at: vector, size: vector, color: Color3): Par
     part.Anchored = true
     part.Size = size
     part.Position = at
-    part.Color = color
+    part:SetMaterialParameter("Color", color)
     part.Parent = Workspace
     return part
 end

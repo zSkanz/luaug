@@ -27,7 +27,7 @@ local floor = Instance.new("Part")
 floor.Name = "Floor"
 floor.Size = Vector3.new(40, 1, 40)
 floor.CFrame = CFrame.new(0, -0.5, 0)
-floor.Color = Color3.fromRGB(96, 104, 92)
+floor:SetMaterialParameter("Color", Color3.fromRGB(96, 104, 92))
 floor.Anchored = true
 floor.Parent = workspace
 
@@ -38,7 +38,7 @@ capsule.Name = "Capsule"
 capsule.Shape = Enum.PartShape.Capsule
 capsule.Size = Vector3.new(1.4, 3.2, 1.4)
 capsule.CFrame = CFrame.new(-1.6, 1.6, 0)
-capsule.Color = Color3.fromRGB(224, 208, 170)
+capsule:SetMaterialParameter("Color", Color3.fromRGB(224, 208, 170))
 capsule.Anchored = true
 capsule.Parent = workspace
 
@@ -47,7 +47,7 @@ ball.Name = "Ball"
 ball.Shape = Enum.PartShape.Ball
 ball.Size = Vector3.new(2.4, 2.4, 2.4)
 ball.CFrame = CFrame.new(1.8, 1.2, -1.2)
-ball.Color = Color3.fromRGB(120, 122, 148)
+ball:SetMaterialParameter("Color", Color3.fromRGB(120, 122, 148))
 ball.Anchored = true
 ball.Parent = workspace
 
@@ -58,7 +58,7 @@ local block = Instance.new("Part")
 block.Name = "Block"
 block.Size = Vector3.new(2, 1.6, 2)
 block.CFrame = CFrame.new(0.4, 0.8, 3)
-block.Color = Color3.fromRGB(150, 132, 110)
+block:SetMaterialParameter("Color", Color3.fromRGB(150, 132, 110))
 block.Anchored = true
 block.Parent = workspace
 

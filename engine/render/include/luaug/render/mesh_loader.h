@@ -89,16 +89,15 @@ public:
     // Loads every texture the world's `Material` instances name and the library
     // does not yet hold. Same safe point, same rules, same return as `sync`.
     //
-    // Over the MATERIAL pool rather than over the parts: two parts sharing a
-    // material would otherwise be asked about twice, and a material nothing
-    // points at yet -- one somebody is building -- would never load its maps and
-    // would look broken in the property panel that is showing it.
+    // Over the materials the parts WEAR (ADR 0090), each resolved once however
+    // many parts wear it: a material is an asset now, and one nothing wears is
+    // one nothing draws. The material editor's preview wears the material it
+    // shows, which is how an asset being authored gets its maps.
     //
     // **The URNs name SOURCE images** -- the `.png` the artist shipped -- and
     // this decodes and uploads them. That is the dev-mode path ADR 0010 keeps
     // forever; a shipped game's textures arrive compiled and named by hash.
-    core::u32 syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
-                           TextureLibrary& library);
+    core::u32 syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, scene::World& world, TextureLibrary& library);
 
     // **Forgets what a URN loaded, so the next sync reads it again** (S6.4).
     //

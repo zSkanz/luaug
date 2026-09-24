@@ -1101,46 +1101,12 @@ bool setBasePartSize(World& world, core::InstanceId id, const Value& value)
     return true;
 }
 
-Value getBasePartColor(const World& world, core::InstanceId id)
-{
-    const PartComponent* part = readPart(world, id);
-    return part == nullptr ? Value{} : Value{part->color};
-}
-
-bool setBasePartColor(World& world, core::InstanceId id, const Value& value)
-{
-    const auto* color = std::get_if<core::Color3>(&value);
-    PartComponent* part = writePart(world, id);
-    if (color == nullptr || part == nullptr)
-        return false;
-    // Not clamped: api-design.md §2.3 leaves the range open so an HDR value
-    // survives a round trip through a property.
-    part->color = *color;
-    return true;
-}
-
-Value getBasePartTransparency(const World& world, core::InstanceId id)
-{
-    const PartComponent* part = readPart(world, id);
-    return part == nullptr ? Value{} : Value{static_cast<f64>(part->transparency)};
-}
-
-bool setBasePartTransparency(World& world, core::InstanceId id, const Value& value)
-{
-    const auto* number = std::get_if<f64>(&value);
-    PartComponent* part = writePart(world, id);
-    if (number == nullptr || part == nullptr)
-        return false;
-    part->transparency = static_cast<f32>(*number);
-    return true;
-}
-
 Value getBasePartMaterial(const World& world, core::InstanceId id)
 {
     const PartComponent* part = readPart(world, id);
     if (part == nullptr || !part->material.valid())
         return Value{};
-    return Value{part->material};
+    return Value{MaterialRef{std::string(world.atoms().text(part->material)), part->materialClone}};
 }
 
 bool setBasePartMaterial(World& world, core::InstanceId id, const Value& value)
@@ -1148,18 +1114,65 @@ bool setBasePartMaterial(World& world, core::InstanceId id, const Value& value)
     PartComponent* part = writePart(world, id);
     if (part == nullptr)
         return false;
-    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
-        // **A `Material` and nothing else.** The type says so, and a runtime
-        // write can still name anything -- a part pointed at a `Folder` would
-        // draw untextured with nothing saying why.
-        if (!world.alive(*reference) || world.materials().find(*reference) == nullptr)
+    if (const auto* material = std::get_if<MaterialRef>(&value); material != nullptr) {
+        // **A material file and nothing else**, by its compound suffix -- the
+        // rule a stamp is known by (ADR 0049). A part pointed at a texture
+        // would draw the default with nothing saying why.
+        if (!asset::isMaterialPath(material->source))
             return false;
-        part->material = *reference;
+        // A clone of THIS world, and of the asset the handle says: an id means
+        // something only where it was made.
+        if (material->clone != 0) {
+            const MaterialClone* clone = world.materialClone(material->clone);
+            if (clone == nullptr || world.atoms().text(clone->source) != material->source)
+                return false;
+        }
+        // A clone this part stops wearing may have had no other wearer.
+        if (part->materialClone != 0 && part->materialClone != material->clone)
+            world.requestMaterialSweep();
+        part->material = world.atoms().intern(material->source);
+        part->materialClone = material->clone;
         return true;
     }
     if (valueType(value) != ValueType::Nil)
         return false;
-    part->material = core::InstanceId{};
+    if (part->materialClone != 0)
+        world.requestMaterialSweep();
+    part->material = core::NameAtom{};
+    part->materialClone = 0;
+    return true;
+}
+
+Value getBasePartMaterialParameters(const World& world, core::InstanceId id)
+{
+    const PartComponent* part = readPart(world, id);
+    return part == nullptr ? Value{} : Value{part->materialParameters};
+}
+
+bool setBasePartMaterialParameters(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* overrides = std::get_if<asset::MaterialOverrides>(&value);
+    PartComponent* part = writePart(world, id);
+    if (overrides == nullptr || part == nullptr)
+        return false;
+    // Rebuilt field by field rather than copied, so what is stored is only
+    // what is set -- two parts holding the same overrides compare equal
+    // whatever the value they were handed carried in its unset slots.
+    asset::MaterialOverrides clean;
+    const asset::MaterialProperties values = asset::overrideValues(*overrides);
+    for (usize index = 0; index < asset::MaterialFieldCount; ++index) {
+        const auto field = static_cast<asset::MaterialField>(index);
+        if (!overrides->has(field))
+            continue;
+        if (!asset::setOverride(clean, field, values))
+            return false;
+    }
+    const auto finite = [](core::Color3 c) { return std::isfinite(c.r) && std::isfinite(c.g) && std::isfinite(c.b); };
+    if (!finite(clean.color) || !finite(clean.emissive) || !std::isfinite(clean.transparency) ||
+        !std::isfinite(clean.metalness) || !std::isfinite(clean.roughness) || !std::isfinite(clean.normalScale) ||
+        !std::isfinite(clean.alphaCutoff))
+        return false;
+    part->materialParameters = clean;
     return true;
 }
 

@@ -79,7 +79,9 @@ TEST_CASE("extracting a part reads every field it declares")
     scene::PartComponent* part = rig.world().parts().find(id);
     REQUIRE(part != nullptr);
     part->size = {2.0f, 3.0f, 4.0f};
-    part->transparency = 0.25f;
+    asset::MaterialProperties faded;
+    faded.transparency = 0.25f;
+    (void)asset::setOverride(part->materialParameters, asset::MaterialField::Transparency, faded);
 
     const generated::ClassDesc* desc = schemaFor(rig.world(), id);
     REQUIRE(desc != nullptr);

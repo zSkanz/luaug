@@ -144,6 +144,12 @@ enum class UserdataTag : int
     // that one has a `BasePart` -- a tilemap is hit as often as a part.
     RaycastResult2D = 20,
 
+    // A surface (ADR 0090): a HANDLE to a material asset or to a runtime clone
+    // of one, like `AnimationTrack` a handle rather than an Instance. Its
+    // payload owns the asset's URN, so it has a destructor -- which is also
+    // where a clone's hold is given back.
+    Material = 21,
+
     // Not a tag. The count exists so a registration loop can assert it covered
     // everything, and so the budget remaining is a number someone can read.
     Count,

@@ -269,6 +269,10 @@ int tweenCancel(lua_State* L)
     case scene::ValueType::String:
     case scene::ValueType::Instance:
     case scene::ValueType::EnumItem:
+    // A material is a handle and its overrides a set; a tween moves one
+    // parameter through the object that owns it, not the set around it.
+    case scene::ValueType::Material:
+    case scene::ValueType::MaterialParameters:
         return false;
     }
     return false;

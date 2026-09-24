@@ -145,7 +145,7 @@ ground.Name = "Ground"
 ground.Anchored = true
 ground.Size = vector.create(40, 1, 40)
 ground.Position = vector.create(0, -0.5, 0)
-ground.Color = Color3.fromRGB(96, 110, 96)
+ground:SetMaterialParameter("Color", Color3.fromRGB(96, 110, 96))
 ground.Parent = Workspace
 
 local ring = Instance.new("Folder")
@@ -157,7 +157,7 @@ for index = 1, RingCount do
     crate.Name = `Crate{index}`
     crate.Size = vector.create(1.5, 1.5, 1.5)
     crate.Position = vector.create(math.cos(angle) * RingRadius, 4 + index * 0.5, math.sin(angle) * RingRadius)
-    crate.Color = Color3.fromHSV(index / RingCount, 0.7, 0.9)
+    crate:SetMaterialParameter("Color", Color3.fromHSV(index / RingCount, 0.7, 0.9))
     crate.Parent = ring
 end
 
@@ -168,7 +168,7 @@ local spinner = Instance.new("Part")
 spinner.Name = "Spinner"
 spinner.Anchored = true
 spinner.Size = vector.create(12, 0.6, 1)
-spinner.Color = Color3.fromRGB(230, 170, 40)
+spinner:SetMaterialParameter("Color", Color3.fromRGB(230, 170, 40))
 spinner.Parent = Workspace
 
 -- **One racer per player**, made when they join and gone when they leave.
@@ -181,7 +181,7 @@ local function addRacer(player: Player)
     racer.Name = `Racer{player.UserId}`
     racer.Anchored = true
     racer.Size = vector.create(1.2, 1.2, 1.2)
-    racer.Color = Color3.fromHSV((player.UserId * 0.37) % 1, 0.8, 1)
+    racer:SetMaterialParameter("Color", Color3.fromHSV((player.UserId * 0.37) % 1, 0.8, 1))
     racer.Position = vector.create((player.UserId - 1) * 3, 0.6, 4)
     racer.Parent = Workspace
     racers[player] = racer

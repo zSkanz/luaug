@@ -11,6 +11,7 @@
 // value happens in `script`, which is the only module allowed to know both.
 #pragma once
 
+#include "luaug/asset/material.h"
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
@@ -32,6 +33,23 @@ struct EnumValue
     [[nodiscard]] constexpr bool operator==(const EnumValue&) const noexcept = default;
 };
 
+// What `BasePart.Material` holds (ADR 0090): a material asset, or a runtime
+// clone of one. Nil -- the engine default -- is the variant's `monostate`, so a
+// `MaterialRef` always names an asset.
+//
+// **A clone is named by the order it was created in**, which is an id in the
+// world that made it: two clones of one asset are two materials, and the run
+// that made them made them in the same order every time (R10). `source` is the
+// asset either kind came from, a clone of a clone included.
+struct MaterialRef
+{
+    std::string source;
+    // Zero for the shared asset itself; otherwise the clone's id in its world.
+    u32 clone = 0;
+
+    [[nodiscard]] bool operator==(const MaterialRef&) const = default;
+};
+
 // Order matters: the index into the variant IS the wire tag, so it is written
 // into snapshots and compared by the world hash. Appending is safe; reordering
 // is a format break.
@@ -40,7 +58,9 @@ using Value = std::variant<std::monostate, // absent -- an unset attribute, or a
                            // M6's screen-space four, appended in the order api-design.md
                            // §2.3 lists them. Appended rather than grouped with the other
                            // geometry, because the index IS the wire tag.
-                           core::Vec2, core::UDim, core::UDim2, core::Rect>;
+                           core::Vec2, core::UDim, core::UDim2, core::Rect,
+                           // ADR 0090: a part wears a material and overrides what it declares.
+                           MaterialRef, asset::MaterialOverrides>;
 
 enum class ValueType : u8
 {
@@ -57,6 +77,8 @@ enum class ValueType : u8
     UDim = 10,
     UDim2 = 11,
     Rect = 12,
+    Material = 13,
+    MaterialParameters = 14,
 };
 
 [[nodiscard]] constexpr ValueType valueType(const Value& value) noexcept

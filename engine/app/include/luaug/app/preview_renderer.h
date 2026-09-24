@@ -23,6 +23,7 @@
 
 #include "luaug/app/thumbnails.h"
 #include "luaug/asset/content.h"
+#include "luaug/asset/material.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/mesh_loader.h"
 #include "luaug/render/render_world.h"
@@ -48,6 +49,10 @@ public:
                         render::IRenderer& renderer);
     ~HostPreviewRenderer() override;
 
+    // The library the swatches resolve materials through; null for this
+    // renderer's own (ADR 0090).
+    void setMaterialLibrary(asset::MaterialLibrary* library) noexcept;
+
     [[nodiscard]] bool drawPreview(rhi::IDevice& device, rhi::ICmdList& cmd, const PreviewJob& job,
                                    PreviewResult& out) override;
 
@@ -65,6 +70,8 @@ private:
     // and leaves a subtree that has geometry alone. False only when the world
     // refused to build one, which is not recoverable.
     [[nodiscard]] bool swatchIfMaterial();
+    // A ball of one metre wearing a material asset, for a material's own row.
+    [[nodiscard]] bool swatchOf(const std::string& material);
 
     scene::ClassRegistry& classes_;
     scene::EnumRegistry& enums_;
@@ -75,6 +82,7 @@ private:
     // A world of its own rather than the game's: a preview must not be able to
     // change what is on screen, and a scene read into the live world to draw a
     // thumbnail of it would do exactly that.
+    asset::MaterialLibrary ownMaterials_;
     std::unique_ptr<scene::World> scratch_;
     core::InstanceId workspace_;
 

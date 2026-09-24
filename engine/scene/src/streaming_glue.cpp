@@ -99,8 +99,15 @@ core::f64 StreamingGlue::materialize(asset::ChunkId id, const asset::Chunk& chun
         if (PartComponent* part = m_world.parts().find(id2); part != nullptr) {
             part->cframe = source.cframe;
             part->size = source.size;
-            part->color = source.color;
-            part->transparency = source.transparency;
+            // The record's colour and transparency are the default material's
+            // two parameters; the defaults are not overrides.
+            asset::MaterialProperties values;
+            values.color = source.color;
+            values.transparency = source.transparency;
+            if (!(source.color == core::Color3{1.0f, 1.0f, 1.0f}))
+                (void)asset::setOverride(part->materialParameters, asset::MaterialField::Color, values);
+            if (source.transparency != 0.0f)
+                (void)asset::setOverride(part->materialParameters, asset::MaterialField::Transparency, values);
             part->shape = static_cast<core::i32>(source.shape);
         }
         if (isMesh) {

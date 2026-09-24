@@ -73,7 +73,7 @@ for modelIndex = 1, ModelCount do
         local cube = Instance.new("Part")
         cube.Name = `Cube{index}`
         cube.Size = CubeSize
-        cube.Color = ModelColors[modelIndex]
+        cube:SetMaterialParameter("Color", ModelColors[modelIndex])
         -- Anchored, from M5 on. These cubes are moved by the script below, not
         -- by the simulation, and an unanchored part is a rigid body that falls
         -- out from under whatever the script was doing to it.
@@ -133,7 +133,7 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
         for index, cube in children do
             local part = cube :: Part
             part.Position = Ring.slotPosition(modelIndex, index, #children, Phase)
-            part.Color = ModelColors[modelIndex]:Lerp(Color3.new(1, 1, 1), Flash - 0.35)
+            part:SetMaterialParameter("Color", ModelColors[modelIndex]:Lerp(Color3.new(1, 1, 1), Flash - 0.35))
         end
     end
 

@@ -31,6 +31,7 @@
 // still the answer for the day a module ABOVE scene brings a third batch.
 #pragma once
 
+#include "luaug/asset/material.h"
 #include "luaug/asset/terrain.h"
 #include "luaug/asset/voxel.h"
 #include "luaug/core/id.h"
@@ -57,19 +58,23 @@ struct PartComponent
 {
     core::CFrameD cframe;
     core::Vec3 size{1.0f, 1.0f, 1.0f};
-    // **A multiplier on whatever the surface's base is**, and white by default so
-    // that a part nobody has coloured shows its material exactly as authored.
-    core::Color3 color{1.0f, 1.0f, 1.0f};
-    f32 transparency = 0.0f;
 
-    // `BasePart.Material`: the `Material` INSTANCE this surface is described by,
-    // or invalid for none.
+    // `BasePart.Material` (ADR 0090): the material asset this part wears, as its
+    // URN interned, or invalid for the engine default. **A part has no colour of
+    // its own**; its look is this material's, changed only where
+    // `materialParameters` overrides what the material declares.
     //
-    // An instance rather than a content URN, which is what it was for one
-    // release: a material is a thing in the tree now, and what a project keeps
-    // on disk is a stamp of one. A reference stays trivially copyable, so
-    // `World::snapshot` is still a per-pool memcpy.
-    core::InstanceId material;
+    // A URN rather than an instance, which is what it was for one release: an
+    // instance reference means something only inside one world, and a surface
+    // is not a thing in any world. Interned so the component stays trivially
+    // copyable and `World::snapshot` a per-pool copy.
+    core::NameAtom material;
+    // Nonzero when the part wears a runtime CLONE of that asset: the clone's id
+    // in `World::materialClones`.
+    u32 materialClone = 0;
+    // `BasePart.MaterialParameters`: what this part overrides. An override the
+    // current material does not declare is kept here and ignored when drawn.
+    asset::MaterialOverrides materialParameters;
     // `Enum.PartShape`'s value. Stored as the raw item value rather than as an
     // enum class so that the generated accessor needs no per-enum C++ type.
     i32 shape = 0;
@@ -286,50 +291,6 @@ struct ConstraintComponent
     // ragdoll needs**: an upper arm and a lower arm overlap at the elbow by
     // construction, and left colliding they shove each other apart every step.
     bool collideConnected = true;
-};
-
-// `Material`: a surface, as an INSTANCE.
-//
-// **Not a file format, and that is the decision this replaced.** A material was
-// a bespoke `.material.json` for one release; it is an instance now, which means
-// it is created in the tree, edited in the Properties panel, and stored on disk
-// as a STAMP -- and that last part is the whole reason. Everything a stamp
-// already does is what a material wants: one file, many instances, edit the file
-// and every instance follows, override one of them and only that one differs.
-// A second format would have been a second answer to all of it.
-//
-// Maps are `Content` URNs and not instances: a texture is a file, and a class
-// whose only content is "which file" would be an instance standing in for a
-// string.
-struct MaterialComponent
-{
-    // **A tint, multiplied into the maps.** White is the identity, which is why
-    // a material nobody has touched draws exactly as no material at all does.
-    core::Color3 color{1.0f, 1.0f, 1.0f};
-    f32 transparency = 0.0f;
-
-    core::NameAtom colorMap;
-    core::NameAtom normalMap;
-    // Occlusion, roughness and metalness in one image's R, G and B -- glTF's
-    // packing, and one field because they are one file.
-    core::NameAtom metallicRoughnessMap;
-    core::NameAtom emissiveMap;
-
-    f32 metalness = 0.0f;
-    // Fairly rough, which is what an untextured surface looks like. The glTF
-    // default is 1 and 1, which is right for a file that forgot to say and wrong
-    // for a material somebody is about to author by hand.
-    f32 roughness = 0.7f;
-    core::Color3 emissive{0.0f, 0.0f, 0.0f};
-
-    // Scales the sampled tangent-space normal's XY. One is "as authored".
-    f32 normalScale = 1.0f;
-
-    // `Enum.AlphaMode`'s value, stored raw for the reason `PartComponent` stores
-    // a shape that way.
-    i32 alphaMode = 0;
-    f32 alphaCutoff = 0.5f;
-    bool doubleSided = false;
 };
 
 // `Ragdoll`: the switch that makes a character's pose come from the simulation

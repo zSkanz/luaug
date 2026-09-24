@@ -175,7 +175,9 @@ struct PartRow
         row.name = std::string(world.atoms().text(world.name(id)));
         row.position = part->cframe.position;
         row.size = part->size;
-        row.color = part->color;
+        // The surface as the grid carries it: the default material's colour.
+        row.color = part->materialParameters.has(asset::MaterialField::Color) ? part->materialParameters.color
+                                                                              : core::Color3{1.0f, 1.0f, 1.0f};
         if (const scene::RigidBodyComponent* body = world.rigidBodies().find(id); body != nullptr) {
             row.anchored = body->anchored;
             row.canCollide = body->canCollide;

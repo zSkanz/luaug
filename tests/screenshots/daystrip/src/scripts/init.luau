@@ -89,7 +89,7 @@ local tick = 0
 
 local function apply()
     Lighting.ClockTime = (StartHour + math.floor(tick / FramesPerHour) * HoursPerFrame) % 24
-    pane.Transparency = 0.15 + 0.35 * (1 + math.cos((Lighting.ClockTime / 24) * math.pi * 2))
+    pane:SetMaterialParameter("Transparency", 0.15 + 0.35 * (1 + math.cos((Lighting.ClockTime / 24) * math.pi * 2)))
 end
 
 -- On the boot drain, so a one-frame run renders hour six rather than the

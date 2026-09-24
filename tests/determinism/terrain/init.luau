@@ -98,7 +98,7 @@ for row = 0, 3 do
         crate.Name = string.format("Crate_%d_%d", row, column)
         crate.Size = vector.create(2, 2, 2)
         crate.Position = vector.create(-20 + row * 14, 30 + column * 3, -14 + column * 14)
-        crate.Color = Color3.fromRGB(200, 120, 60)
+        crate:SetMaterialParameter("Color", Color3.fromRGB(200, 120, 60))
         crate.Parent = workspace
     end
 end

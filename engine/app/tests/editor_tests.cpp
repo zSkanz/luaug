@@ -2988,247 +2988,218 @@ TEST_CASE("the reported sequence, driven the way the frame loop drives it")
     std::filesystem::remove_all(scratch, ec);
 }
 
-// --- The material preview -----------------------------------------------------
+// --- Materials (ADR 0090) -----------------------------------------------------
 
-TEST_CASE("selecting a material in a stamp builds a preview, and deselecting takes it away")
+namespace {
+
+// A world with a Workspace, an editor whose content root is a fresh folder, and
+// a library the editor lends its edits to -- the shape `engine.cpp` builds.
+struct MaterialDesk
 {
-    // **A material is a thing you look AT.** Roughness, metalness and a normal
-    // map are all about how light moves across a curvature, so a flat swatch
-    // shows the base colour and nothing else -- which is why every engine with a
-    // material preview draws a sphere, and why this does.
     app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
-
-    const std::filesystem::path scratch =
-        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "material-preview";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
-
+    scene::World world{fixture.classes, fixture.enums, fixture.atoms, 1234u};
+    core::InstanceId workspace;
+    std::filesystem::path content;
+    asset::MaterialLibrary library;
     Editor editor;
     Inspector inspector;
-    editor.openContent(scratch);
 
-    // A stamp of a `Material`, made the way the browser makes one.
-    const scene::ClassId materialClass = fixture.classes.findId(fixture.atoms.intern("Material"));
-    REQUIRE(materialClass != scene::InvalidClass);
-    REQUIRE_FALSE(editor.createStampOfClass(world, workspace, materialClass, "stone").empty());
+    explicit MaterialDesk(std::string_view name)
+    {
+        workspace = world.create(fixture.workspaceClass);
+        world.setName(workspace, fixture.atoms.intern("Workspace"));
+        world.workspaces().add(workspace, scene::WorkspaceComponent{});
 
-    REQUIRE(editor.openStamp("stone", fixture.classes, fixture.enums, fixture.atoms, inspector));
-    REQUIRE(editor.stage() != nullptr);
-    const core::InstanceId root = editor.stampSession().root;
-    REQUIRE(editor.stage()->world().materials().find(root) != nullptr);
+        content = std::filesystem::temp_directory_path() / "luaug-editor-tests" / std::string(name);
+        std::error_code ec;
+        std::filesystem::remove_all(content, ec);
+        std::filesystem::create_directories(content, ec);
+        editor.openContent(content);
 
-    // Opening a stamp selects its root, which here is the material.
-    editor.syncMaterialPreview(inspector);
+        const std::filesystem::path root = content;
+        library.setSource([root](std::string_view urn, asset::MaterialReadNotes& notes) {
+            std::string text;
+            const std::string_view relative = urn.substr(asset::AssetScheme.size());
+            if (!platform::readTextFile(root / std::filesystem::path(relative), text))
+                return std::optional<asset::MaterialAsset>{};
+            return asset::readMaterialAsset(text, &notes);
+        });
+        world.setMaterialLibrary(&library);
+        editor.setMaterialLibrary(&library);
+    }
 
-    const auto findByName = [&](std::string_view name) {
-        return editor.stage()->world().findFirstChild(editor.stage()->workspace(),
-                                                      editor.stage()->world().atoms().intern(name));
-    };
-    const core::InstanceId sphere = findByName("Preview");
-    REQUIRE(sphere.valid());
-    // A ball, pointed at the material being edited.
-    CHECK(editor.stage()->world().parts().find(sphere)->shape == 1);
-    CHECK(editor.stage()->world().parts().find(sphere)->material == root);
-    // **A floor under it**, because a metal sphere in an empty room is a black
-    // circle: metal shows what is around it, and there is nothing around it.
-    CHECK(findByName("PreviewFloor").valid());
+    [[nodiscard]] core::InstanceId part(std::string_view name)
+    {
+        const core::InstanceId id = world.create(fixture.partClass);
+        world.setName(id, fixture.atoms.intern(name));
+        REQUIRE(world.setParent(id, workspace) == std::nullopt);
+        return id;
+    }
 
-    // **Generated, which is what keeps it out of the file.** A stamp is written
-    // from its root down and these are siblings of it -- but a person looking at
-    // the Explorer should still be told these are not theirs.
-    CHECK(editor.stage()->world().generated(sphere));
+    [[nodiscard]] std::string wears(core::InstanceId id) const
+    {
+        const scene::PartComponent* part = world.parts().find(id);
+        return part == nullptr || !part->material.valid() ? std::string{}
+                                                          : std::string(world.atoms().text(part->material));
+    }
+};
 
-    // Selecting something that is not a material takes it away: the preview
-    // answers "what does this material look like", and that is a question about
-    // a material.
-    inspector.select(core::InstanceId{});
-    editor.syncMaterialPreview(inspector);
-    CHECK_FALSE(findByName("Preview").valid());
-    CHECK_FALSE(findByName("PreviewFloor").valid());
+} // namespace
 
-    std::filesystem::remove_all(scratch, ec);
-}
-
-TEST_CASE("the preview never reaches the stamp file")
+TEST_CASE("a new material is a file with the engine default's values, declaring nothing")
 {
-    // The thing that would be worst: a sphere and a floor written into every
-    // material somebody edited, appearing in the world wherever it was placed.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
-
-    const std::filesystem::path scratch =
-        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "material-preview-file";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
-
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
-    const scene::ClassId materialClass = fixture.classes.findId(fixture.atoms.intern("Material"));
-    REQUIRE_FALSE(editor.createStampOfClass(world, workspace, materialClass, "stone").empty());
-    REQUIRE(editor.openStamp("stone", fixture.classes, fixture.enums, fixture.atoms, inspector));
-    editor.syncMaterialPreview(inspector);
-    REQUIRE(editor.stage()
-                ->world()
-                .findFirstChild(editor.stage()->workspace(), editor.stage()->world().atoms().intern("Preview"))
-                .valid());
-
-    REQUIRE(editor.saveStamp(world, workspace));
+    MaterialDesk desk("material-new");
+    const std::string made = desk.editor.createMaterial("stone");
+    CHECK(made == "materials/stone.material.json");
 
     std::string text;
-    REQUIRE(platform::readTextFile(scratch / "stamps" / "stone.stamp.json", text));
-    CHECK(text.find("Preview") == std::string::npos);
-    CHECK(text.find("PreviewFloor") == std::string::npos);
+    REQUIRE(platform::readTextFile(desk.content / "materials" / "stone.material.json", text));
+    const std::optional<asset::MaterialAsset> read = asset::readMaterialAsset(text);
+    REQUIRE(read.has_value());
+    // Looks like a plain part, and lets a part change nothing about it until
+    // its author opts a parameter in (ADR 0090).
+    CHECK(read->properties == asset::MaterialProperties{});
+    CHECK(read->instanceParameters == 0);
+    CHECK(read->parent.empty());
+
+    // A name that is taken is refused rather than overwritten.
+    CHECK(desk.editor.createMaterial("stone").empty());
 }
 
-// --- Dropping a material onto a part -----------------------------------------
-
-TEST_CASE("a material dropped on a part is placed once and shared by everything after")
+TEST_CASE("a variant names its parent, overrides nothing, and follows it")
 {
-    // Reported as "I have an ordinary part and there is no way to give it a
-    // material". Half of the answer is the property grid; this is the other
-    // half, and the half with a decision in it: a reference needs an INSTANCE
-    // and what the browser holds is a file, so something has to put one in the
-    // world -- and it must not put a second one there next time.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    MaterialDesk desk("material-variant");
+    REQUIRE_FALSE(desk.editor.createMaterial("stone").empty());
+    const std::string variant = desk.editor.createMaterialVariant("stone", "mossy");
+    CHECK(variant == "materials/mossy.material.json");
 
-    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
+    std::string text;
+    REQUIRE(platform::readTextFile(desk.content / "materials" / "mossy.material.json", text));
+    const std::optional<asset::MaterialAsset> read = asset::readMaterialAsset(text);
+    REQUIRE(read.has_value());
+    CHECK(read->parent == "asset://materials/stone.material.json");
+    CHECK(read->written == 0);
 
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
+    // The parent changes; the variant follows the field it did not override.
+    REQUIRE(desk.editor.openMaterial("stone"));
+    asset::MaterialAsset rough = desk.editor.materialSession().asset;
+    rough.properties.roughness = 0.2f;
+    desk.editor.editMaterial(rough);
+    REQUIRE(desk.editor.saveMaterial());
+    CHECK(desk.library.resolve("asset://materials/mossy.material.json").properties.roughness == 0.2f);
 
-    // A material in the world, stamped -- which is what "a material in the
-    // content browser" means.
-    const core::InstanceId authored = world.create(fixture.materialClass);
-    world.setName(authored, fixture.atoms.intern("Wooden"));
-    world.materials().add(authored, scene::MaterialComponent{});
-    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
-    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
-
-    const core::InstanceId one = world.create(fixture.partClass);
-    world.setName(one, fixture.atoms.intern("One"));
-    world.parts().add(one, scene::PartComponent{});
-    REQUIRE(world.setParent(one, workspace) == std::nullopt);
-
-    const core::InstanceId two = world.create(fixture.partClass);
-    world.setName(two, fixture.atoms.intern("Two"));
-    world.parts().add(two, scene::PartComponent{});
-    REQUIRE(world.setParent(two, workspace) == std::nullopt);
-
-    const core::InstanceId targetsOne[] = {one};
-    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targetsOne));
-
-    const scene::PartComponent* first = world.parts().find(one);
-    REQUIRE(first != nullptr);
-    CHECK(first->material == authored);
-
-    // **The second drop reuses the first material rather than placing another.**
-    // Two materials that merely look alike stop looking alike the first time
-    // anybody edits one, and nobody dropping the same file twice meant that.
-    const core::InstanceId targetsTwo[] = {two};
-    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targetsTwo));
-    CHECK(world.parts().find(two)->material == authored);
-
-    core::usize materials = 0;
-    world.materials().forEach([&](core::InstanceId, const scene::MaterialComponent&) { ++materials; });
-    CHECK(materials == 1);
+    // A variant of something that is not a material is refused.
+    CHECK(desk.editor.createMaterialVariant("nothing", "orphan").empty());
 }
 
-TEST_CASE("a material dropped where the world has none places one")
+TEST_CASE("a material dropped on parts makes them wear it, as one undo step")
 {
-    // The other order, and the one somebody hits first: the file exists because
-    // they imported it, and nothing in this scene has ever used it.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    MaterialDesk desk("material-assign");
+    REQUIRE_FALSE(desk.editor.createMaterial("wooden").empty());
+    const core::InstanceId one = desk.part("One");
+    const core::InstanceId two = desk.part("Two");
 
-    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-new";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
+    const core::usize before = desk.editor.history().depth();
+    const core::InstanceId targets[] = {one, two};
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "wooden", targets));
+    CHECK(desk.wears(one) == "asset://materials/wooden.material.json");
+    CHECK(desk.wears(two) == "asset://materials/wooden.material.json");
+    CHECK(desk.editor.history().depth() == before + 1);
 
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
+    // **Nothing is placed in the world**: a material is not an instance, so
+    // there is no second thing to share and no reference for a boundary to
+    // lose.
+    core::usize instances = 0;
+    for (core::InstanceId child = desk.world.firstChild(desk.workspace); child.valid();
+         child = desk.world.nextSibling(child))
+        ++instances;
+    CHECK(instances == 2);
 
-    const core::InstanceId authored = world.create(fixture.materialClass);
-    world.setName(authored, fixture.atoms.intern("Wooden"));
-    world.materials().add(authored, scene::MaterialComponent{});
-    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
-    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
-    // Taken back out, so the file is all that is left -- a project reopened.
-    REQUIRE(world.destroy(authored));
-    world.retireDestroyed();
+    // One undo takes both back.
+    REQUIRE(desk.editor.history().undo(desk.world));
+    CHECK(desk.wears(one).empty());
+    CHECK(desk.wears(two).empty());
+}
 
-    const core::InstanceId part = world.create(fixture.partClass);
-    world.setName(part, fixture.atoms.intern("One"));
-    world.parts().add(part, scene::PartComponent{});
-    REQUIRE(world.setParent(part, workspace) == std::nullopt);
+TEST_CASE("dropping the same material twice does not eat a press of ctrl-Z")
+{
+    // **A step that undoes nothing eats a press of ctrl-Z** (D134), and a drop
+    // onto a part that already wears what was dropped is exactly that.
+    MaterialDesk desk("material-assign-twice");
+    REQUIRE_FALSE(desk.editor.createMaterial("wooden").empty());
+    const core::InstanceId crate = desk.part("Crate");
 
-    const core::InstanceId targets[] = {part};
-    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
-
-    const scene::PartComponent* stored = world.parts().find(part);
-    REQUIRE(stored != nullptr);
-    REQUIRE(stored->material.valid());
-    // Placed, linked, and pointed at -- and still an instance of the file, so
-    // editing the file reaches it.
-    CHECK(world.alive(stored->material));
-    CHECK(world.stampOf(stored->material).valid());
+    const core::InstanceId targets[] = {crate};
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "wooden", targets));
+    const core::usize afterFirst = desk.editor.history().depth();
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "wooden", targets));
+    CHECK(desk.editor.history().depth() == afterFirst);
+    CHECK(desk.wears(crate) == "asset://materials/wooden.material.json");
 }
 
 TEST_CASE("a drop the world refuses leaves no undo step behind")
 {
-    // A step that undoes nothing eats a press of ctrl-Z, which is worse than
-    // the refusal it was covering for. The `Thing` class has no `Material`, so
-    // every write is refused and the placement has to come back out with them.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    // The `Widget` class has no `Material`, so every write is refused.
+    MaterialDesk desk("material-assign-no");
+    REQUIRE_FALSE(desk.editor.createMaterial("wooden").empty());
+    const core::InstanceId nothing = desk.fixture.widget(desk.world, "NotAPart");
+    REQUIRE(desk.world.setParent(nothing, desk.workspace) == std::nullopt);
 
-    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-no";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
-
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
-
-    const core::InstanceId authored = world.create(fixture.materialClass);
-    world.setName(authored, fixture.atoms.intern("Wooden"));
-    world.materials().add(authored, scene::MaterialComponent{});
-    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
-    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
-
-    const core::InstanceId nothing = fixture.widget(world, "NotAPart");
-    REQUIRE(world.setParent(nothing, workspace) == std::nullopt);
-
-    const core::usize before = editor.history().depth();
+    const core::usize before = desk.editor.history().depth();
     const core::InstanceId targets[] = {nothing};
-    CHECK_FALSE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
-    CHECK(editor.history().depth() == before);
+    CHECK_FALSE(desk.editor.assignMaterialTo(desk.world, "wooden", targets));
+    CHECK(desk.editor.history().depth() == before);
+}
+
+TEST_CASE("the material panel edits a file with its own undo, shows edits at once, and saves")
+{
+    MaterialDesk desk("material-panel");
+    REQUIRE_FALSE(desk.editor.createMaterial("glass").empty());
+    const core::InstanceId pane = desk.part("Pane");
+    const core::InstanceId targets[] = {pane};
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "glass", targets));
+    const core::usize worldSteps = desk.editor.history().depth();
+
+    REQUIRE(desk.editor.openMaterial("glass"));
+    CHECK_FALSE(desk.editor.materialSession().dirty());
+
+    asset::MaterialAsset clear = desk.editor.materialSession().asset;
+    clear.properties.transparency = 0.8f;
+    desk.editor.editMaterial(clear);
+    CHECK(desk.editor.materialSession().dirty());
+    // **Every world shows the edit as it is made**, before any save.
+    CHECK(desk.world.surfaceOf(*desk.world.parts().find(pane)).properties.transparency == 0.8f);
+    // And it is not a step in the world's history.
+    CHECK(desk.editor.history().depth() == worldSteps);
+
+    REQUIRE(desk.editor.undoMaterial());
+    CHECK(desk.world.surfaceOf(*desk.world.parts().find(pane)).properties.transparency == 0.0f);
+    REQUIRE(desk.editor.redoMaterial());
+    REQUIRE(desk.editor.saveMaterial());
+    CHECK_FALSE(desk.editor.materialSession().dirty());
+
+    std::string text;
+    REQUIRE(platform::readTextFile(desk.content / "materials" / "glass.material.json", text));
+    CHECK(text == asset::writeMaterialAsset(clear));
+}
+
+TEST_CASE("closing the material panel without saving puts the file's look back")
+{
+    MaterialDesk desk("material-panel-revert");
+    REQUIRE_FALSE(desk.editor.createMaterial("paint").empty());
+    const core::InstanceId wall = desk.part("Wall");
+    const core::InstanceId targets[] = {wall};
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "paint", targets));
+
+    REQUIRE(desk.editor.openMaterial("paint"));
+    asset::MaterialAsset red = desk.editor.materialSession().asset;
+    red.properties.color = core::Color3{1.0f, 0.0f, 0.0f};
+    desk.editor.editMaterial(red);
+    CHECK(desk.world.surfaceOf(*desk.world.parts().find(wall)).properties.color == core::Color3{1.0f, 0.0f, 0.0f});
+
+    desk.editor.closeMaterial();
+    CHECK_FALSE(desk.editor.materialSession().open());
+    CHECK(desk.world.surfaceOf(*desk.world.parts().find(wall)).properties.color == core::Color3{1.0f, 1.0f, 1.0f});
 }
 
 TEST_CASE("picking in the viewport asks the tree to show the row")
@@ -3306,205 +3277,76 @@ TEST_CASE("clicking nothing asks for no row")
 // the design.
 TEST_CASE("the whole material workflow survives a save and a reopen")
 {
-    // **One case over every piece this session touched**, because they were
-    // changed separately and are used together: make a material as a stamp,
-    // point a part at it by dropping the file, save the scene, open it again in
-    // a fresh world, and expect the part to still be wearing the material with
-    // its maps intact.
-    //
-    // Each half is covered on its own above and none of that says the halves
-    // meet. A reference that serialises as a path, a stamp that serialises as a
-    // mark plus what differs, and a material whose maps are `Content` strings
-    // are three different serialisers agreeing about one instance.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    // **One case over every piece**, because they are used together: make a
+    // material, give it maps in the panel, drop it on a part, save the scene,
+    // open it again in a fresh world, and expect the part to be wearing the
+    // material with its maps.
+    MaterialDesk desk("material-flow");
+    REQUIRE_FALSE(desk.editor.createMaterial("wooden").empty());
+    REQUIRE(desk.editor.openMaterial("wooden"));
+    asset::MaterialAsset wood = desk.editor.materialSession().asset;
+    wood.properties.colorMap = "asset://textures/wood_diff.png";
+    wood.properties.roughness = 0.6f;
+    desk.editor.editMaterial(wood);
+    REQUIRE(desk.editor.saveMaterial());
 
-    const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "luaug-editor-tests" / "mat-flow";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
-
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
-
-    // Made the way the browser makes one: an instance in the world and a file to
-    // reuse it from, in one step.
-    const std::string stamp = editor.createStampOfClass(world, workspace, fixture.materialClass, "wooden");
-    REQUIRE_FALSE(stamp.empty());
-
-    // Found through the pool rather than by name: what `createStampOfClass`
-    // calls the instance is the class's default name, and this case is about the
-    // material rather than about what it is called.
-    core::InstanceId authored;
-    world.materials().forEach([&](core::InstanceId id, const scene::MaterialComponent&) {
-        if (!authored.valid())
-            authored = id;
-    });
-    REQUIRE(authored.valid());
-    world.setName(authored, fixture.atoms.intern("Wooden"));
-    scene::MaterialComponent* block = world.materials().find(authored);
-    REQUIRE(block != nullptr);
-    block->colorMap = world.atoms().intern("asset://textures/wood_diff.png");
-    block->roughness = 0.7f;
-
-    const core::InstanceId part = world.create(fixture.partClass);
-    world.setName(part, fixture.atoms.intern("Crate"));
-    world.parts().add(part, scene::PartComponent{});
-    REQUIRE(world.setParent(part, workspace) == std::nullopt);
-
-    // Dropped on the part's `Material` field, which is the gesture the report
-    // asked for: "I have an ordinary part and there is no way to give it a
-    // material".
-    const core::InstanceId targets[] = {part};
-    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
-    REQUIRE(world.parts().find(part)->material == authored);
-
-    REQUIRE(editor.save(world, scratch / "main.scene.json"));
-
-    // A fresh world, exactly as reopening the project builds one.
-    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
-    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
-    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
-    REQUIRE(editor.load(reopened, scratch / "main.scene.json", inspector));
-
-    const core::InstanceId loadedPart = reopened.findFirstChild(reopenedWorkspace, fixture.atoms.intern("Crate"));
-    REQUIRE(loadedPart.valid());
-    const scene::PartComponent* stored = reopened.parts().find(loadedPart);
-    REQUIRE(stored != nullptr);
-
-    // **Still pointing at a material**, and at one that is really there. A
-    // reference that came back as a dead id is the shape of D100, and it draws
-    // as an untextured part rather than as an error.
-    REQUIRE(stored->material.valid());
-    REQUIRE(reopened.alive(stored->material));
-    const scene::MaterialComponent* loadedBlock = reopened.materials().find(stored->material);
-    REQUIRE(loadedBlock != nullptr);
-
-    // And still carrying its maps, which is the half a `Content` property owns.
-    CHECK(reopened.atoms().text(loadedBlock->colorMap) == "asset://textures/wood_diff.png");
-    CHECK(loadedBlock->roughness == doctest::Approx(0.7));
-
-    // Still an instance of the file, so editing the stamp reaches it.
-    CHECK(reopened.stampOf(stored->material).valid());
-}
-
-TEST_CASE("dropping the same material twice does not eat a press of ctrl-Z")
-{
-    // The file's own invariant, from the case above: **a step that undoes
-    // nothing eats a press of ctrl-Z.** A drop onto a part that already wears
-    // what was dropped is exactly that, and it was the hole left in it --
-    // `UndoStack::record` clears the redo stack, so a step taken back afterwards
-    // has already destroyed a real redo future and leaves a junk one behind.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
-
-    const std::filesystem::path scratch =
-        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-twice";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
-
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
-
-    const core::InstanceId authored = world.create(fixture.materialClass);
-    world.setName(authored, fixture.atoms.intern("Wooden"));
-    world.materials().add(authored, scene::MaterialComponent{});
-    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
-    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
-
-    const core::InstanceId part = world.create(fixture.partClass);
-    world.setName(part, fixture.atoms.intern("Crate"));
-    world.parts().add(part, scene::PartComponent{});
-    REQUIRE(world.setParent(part, workspace) == std::nullopt);
-
-    const core::InstanceId targets[] = {part};
-    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
-    const core::usize afterFirst = editor.history().depth();
-
-    // The same drop again. It succeeds -- the part is wearing what was dropped
-    // on it, which is what was asked for -- and it records nothing.
-    REQUIRE(editor.assignStampTo(world, workspace, workspace, "wooden", "Material", targets));
-    CHECK(editor.history().depth() == afterFirst);
-    CHECK(world.parts().find(part)->material == authored);
-}
-
-TEST_CASE("a material assigned inside an open stamp survives the stamp's own save")
-{
-    // **A stamp is written from its root DOWN**, so a reference to anything
-    // beside the stamp rather than under it is one the file cannot carry: the
-    // save drops it to null, the next open shows an untextured part, and
-    // `restamp` pushes that null into every instance in the world. Silently, in
-    // every direction.
-    app::testing::Fixture fixture;
-    scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId workspace = world.create(fixture.workspaceClass);
-    world.setName(workspace, fixture.atoms.intern("Workspace"));
-    world.workspaces().add(workspace, scene::WorkspaceComponent{});
-
-    const std::filesystem::path scratch =
-        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "assign-inside";
-    std::error_code ec;
-    std::filesystem::remove_all(scratch, ec);
-    std::filesystem::create_directories(scratch, ec);
-
-    Editor editor;
-    Inspector inspector;
-    editor.openContent(scratch);
-
-    // A material stamp to drop, and a part-with-a-child stamp to drop it into.
-    const core::InstanceId authored = world.create(fixture.materialClass);
-    world.setName(authored, fixture.atoms.intern("Wooden"));
-    world.materials().add(authored, scene::MaterialComponent{});
-    REQUIRE(world.setParent(authored, workspace) == std::nullopt);
-    REQUIRE(editor.createStamp(world, authored, workspace, "wooden"));
-    REQUIRE(world.destroy(authored));
-    world.retireDestroyed();
-
-    const core::InstanceId crate = world.create(fixture.partClass);
-    world.setName(crate, fixture.atoms.intern("Crate"));
-    world.parts().add(crate, scene::PartComponent{});
-    REQUIRE(world.setParent(crate, workspace) == std::nullopt);
-
-    // Placed UNDER the subtree that is about to be written, which is the whole
-    // of the fix: the parent is the stamp's root and not the workspace beside it.
+    const core::InstanceId crate = desk.part("Crate");
     const core::InstanceId targets[] = {crate};
-    REQUIRE(editor.assignStampTo(world, workspace, crate, "wooden", "Material", targets));
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "wooden", targets));
+    REQUIRE(desk.editor.save(desk.world, desk.content / "main.scene.json"));
 
-    const scene::PartComponent* before = world.parts().find(crate);
-    REQUIRE(before != nullptr);
-    REQUIRE(before->material.valid());
-    // Under the part, not beside it.
-    CHECK(world.parentOf(before->material) == crate);
-
-    // Written as a stamp would be, and read back into a fresh world.
-    scene::SceneIoReport wrote;
-    const std::string text = scene::writeStamp(world, crate, &wrote);
-    CHECK(wrote.droppedReferences == 0);
-
-    scene::World reopened(fixture.classes, fixture.enums, fixture.atoms, 1234u);
-    const core::InstanceId reopenedWorkspace = reopened.create(fixture.workspaceClass);
-    reopened.setName(reopenedWorkspace, fixture.atoms.intern("Workspace"));
+    scene::World reopened(desk.fixture.classes, desk.fixture.enums, desk.fixture.atoms, 1234u);
+    reopened.setMaterialLibrary(&desk.library);
+    const core::InstanceId reopenedWorkspace = reopened.create(desk.fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, desk.fixture.atoms.intern("Workspace"));
     reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
-    const core::InstanceId placed = scene::readStamp(reopened, text, reopenedWorkspace, "crate");
-    REQUIRE(placed.valid());
+    REQUIRE(desk.editor.load(reopened, desk.content / "main.scene.json", desk.inspector));
 
-    const scene::PartComponent* after = reopened.parts().find(placed);
-    REQUIRE(after != nullptr);
-    // **Still wearing it.** This is the assertion the defect was: it came back
-    // as a null reference, and nothing said so.
-    REQUIRE(after->material.valid());
-    CHECK(reopened.alive(after->material));
-    CHECK(reopened.materials().find(after->material) != nullptr);
+    const core::InstanceId loaded = reopened.findFirstChild(reopenedWorkspace, desk.fixture.atoms.intern("Crate"));
+    REQUIRE(loaded.valid());
+    const scene::PartComponent* stored = reopened.parts().find(loaded);
+    REQUIRE(stored != nullptr);
+    // **Still wearing it**, by URN -- nothing for a load to fail to resolve.
+    CHECK(reopened.atoms().text(stored->material) == "asset://materials/wooden.material.json");
+    const asset::ResolvedMaterial drawn = reopened.surfaceOf(*stored);
+    CHECK(drawn.properties.colorMap == "asset://textures/wood_diff.png");
+    CHECK(drawn.properties.roughness == 0.6f);
+}
+
+TEST_CASE("a material dropped on a part inside a placed stamp is an override that survives save and reopen")
+{
+    // **The D142 scenario, which the old design lost**: a material reference
+    // set inside a PLACED stamp was dropped on save, because an instance-valued
+    // property is never an override. A URN is an ordinary value, so it is an
+    // ordinary override (ADR 0051), and the defect has nothing left to happen to.
+    MaterialDesk desk("material-in-stamp");
+    REQUIRE_FALSE(desk.editor.createMaterial("wooden").empty());
+
+    const core::InstanceId crate = desk.part("Crate");
+    REQUIRE(desk.editor.createStamp(desk.world, crate, desk.workspace, "crate"));
+    REQUIRE(desk.world.stampOf(crate).valid());
+
+    const core::InstanceId targets[] = {crate};
+    REQUIRE(desk.editor.assignMaterialTo(desk.world, "wooden", targets));
+    REQUIRE(desk.editor.save(desk.world, desk.content / "main.scene.json"));
+
+    std::string text;
+    REQUIRE(platform::readTextFile(desk.content / "main.scene.json", text));
+    // Written as the mark plus what differs, and what differs is the material.
+    CHECK(text.find("\"stamp\"") != std::string::npos);
+    CHECK(text.find("asset://materials/wooden.material.json") != std::string::npos);
+
+    scene::World reopened(desk.fixture.classes, desk.fixture.enums, desk.fixture.atoms, 1234u);
+    reopened.setMaterialLibrary(&desk.library);
+    const core::InstanceId reopenedWorkspace = reopened.create(desk.fixture.workspaceClass);
+    reopened.setName(reopenedWorkspace, desk.fixture.atoms.intern("Workspace"));
+    reopened.workspaces().add(reopenedWorkspace, scene::WorkspaceComponent{});
+    REQUIRE(desk.editor.load(reopened, desk.content / "main.scene.json", desk.inspector));
+
+    const core::InstanceId loaded = reopened.findFirstChild(reopenedWorkspace, desk.fixture.atoms.intern("Crate"));
+    REQUIRE(loaded.valid());
+    CHECK(reopened.stampOf(loaded).valid());
+    CHECK(reopened.atoms().text(reopened.parts().find(loaded)->material) == "asset://materials/wooden.material.json");
 }
 
 TEST_CASE("what one edit costs, in snapshots" * doctest::skip())
@@ -4115,7 +3957,7 @@ struct OverrideRig
     StampRig rig;
     core::InstanceId first;
     core::InstanceId second;
-    core::NameAtom transparency;
+    core::NameAtom friction;
 
     explicit OverrideRig(const StampProject& project) : rig(project)
     {
@@ -4131,12 +3973,12 @@ struct OverrideRig
         REQUIRE(second.valid());
         CHECK(first != second);
 
-        transparency = rig.atoms.intern("Transparency");
+        friction = rig.atoms.intern("Friction");
     }
 
-    [[nodiscard]] core::f64 transparencyOf(core::InstanceId id)
+    [[nodiscard]] core::f64 frictionOf(core::InstanceId id)
     {
-        const scene::PropertyDesc* descriptor = rig.world.classes().findProperty(rig.world.classOf(id), transparency);
+        const scene::PropertyDesc* descriptor = rig.world.classes().findProperty(rig.world.classOf(id), friction);
         REQUIRE(descriptor != nullptr);
         REQUIRE(descriptor->get != nullptr);
         const std::optional<scene::Value> value = descriptor->get(rig.world, id);
@@ -4146,9 +3988,9 @@ struct OverrideRig
         return *held;
     }
 
-    void setTransparency(core::InstanceId id, core::f64 value)
+    void setFriction(core::InstanceId id, core::f64 value)
     {
-        REQUIRE(rig.world.setProperty(id, transparency, scene::Value{value}) == scene::World::SetResult::Changed);
+        REQUIRE(rig.world.setProperty(id, friction, scene::Value{value}) == scene::World::SetResult::Changed);
     }
 };
 
@@ -4163,10 +4005,10 @@ TEST_CASE("a freshly placed stamp has no overrides, and an edit gives it exactly
     // in a world would come up marked and the mark would mean nothing.
     CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first).empty());
 
-    fixture.setTransparency(fixture.first, 0.75);
+    fixture.setFriction(fixture.first, 0.75);
     const std::vector<core::NameAtom> overrides = fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first);
     REQUIRE(overrides.size() == 1);
-    CHECK(overrides.front() == fixture.transparency);
+    CHECK(overrides.front() == fixture.friction);
     // And it is this instance's own, not the stamp's.
     CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).empty());
 }
@@ -4176,11 +4018,11 @@ TEST_CASE("reverting puts the stamp's value back on this instance and leaves the
     StampProject project("override-revert");
     OverrideRig fixture(project);
 
-    const core::f64 original = fixture.transparencyOf(fixture.first);
-    fixture.setTransparency(fixture.first, 0.75);
+    const core::f64 original = fixture.frictionOf(fixture.first);
+    fixture.setFriction(fixture.first, 0.75);
 
-    CHECK(fixture.rig.editor.revertOverride(fixture.rig.world, fixture.first, fixture.transparency));
-    CHECK(fixture.transparencyOf(fixture.first) == doctest::Approx(original));
+    CHECK(fixture.rig.editor.revertOverride(fixture.rig.world, fixture.first, fixture.friction));
+    CHECK(fixture.frictionOf(fixture.first) == doctest::Approx(original));
     CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.first).empty());
 
     // One instance, not a reload of the stamp.
@@ -4188,7 +4030,7 @@ TEST_CASE("reverting puts the stamp's value back on this instance and leaves the
 
     // And it is ONE undo step, which puts the edit back.
     REQUIRE(fixture.rig.editor.undo(fixture.rig.world, fixture.rig.inspector));
-    CHECK(fixture.transparencyOf(fixture.first) == doctest::Approx(0.75));
+    CHECK(fixture.frictionOf(fixture.first) == doctest::Approx(0.75));
 }
 
 TEST_CASE("reverting something that already matches the stamp records no undo step")
@@ -4200,7 +4042,7 @@ TEST_CASE("reverting something that already matches the stamp records no undo st
     // so a step that changes nothing has already destroyed a real redo future by
     // the time somebody presses ctrl-Z and watches nothing happen.
     const core::usize before = fixture.rig.editor.history().depth();
-    CHECK(fixture.rig.editor.revertOverride(fixture.rig.world, fixture.first, fixture.transparency));
+    CHECK(fixture.rig.editor.revertOverride(fixture.rig.world, fixture.first, fixture.friction));
     CHECK(fixture.rig.editor.history().depth() == before);
 }
 
@@ -4212,7 +4054,7 @@ TEST_CASE("reverting is refused on an instance that is not part of a stamp")
     const core::InstanceId loose = fixture.rig.part("Loose", fixture.rig.root, {0.0, 0.0, 0.0});
     const core::usize before = fixture.rig.editor.history().depth();
 
-    CHECK_FALSE(fixture.rig.editor.revertOverride(fixture.rig.world, loose, fixture.transparency));
+    CHECK_FALSE(fixture.rig.editor.revertOverride(fixture.rig.world, loose, fixture.friction));
     CHECK(fixture.rig.editor.status().failed);
     // A refusal must not eat a press of ctrl-Z either.
     CHECK(fixture.rig.editor.history().depth() == before);
@@ -4223,8 +4065,8 @@ TEST_CASE("applying writes the file, and the instance that did not override it f
     StampProject project("override-apply");
     OverrideRig fixture(project);
 
-    fixture.setTransparency(fixture.first, 0.75);
-    CHECK(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, fixture.first, fixture.transparency));
+    fixture.setFriction(fixture.first, 0.75);
+    CHECK(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, fixture.first, fixture.friction));
 
     // **The instance stops being overridden as a consequence, not as a step**:
     // once the file says what the instance says, there is nothing left to differ.
@@ -4232,7 +4074,7 @@ TEST_CASE("applying writes the file, and the instance that did not override it f
 
     // And the sibling followed, which is the whole point of applying rather than
     // editing each one by hand.
-    CHECK(fixture.transparencyOf(fixture.second) == doctest::Approx(0.75));
+    CHECK(fixture.frictionOf(fixture.second) == doctest::Approx(0.75));
     CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).empty());
 }
 
@@ -4241,15 +4083,15 @@ TEST_CASE("applying leaves another instance's own override of the same property 
     StampProject project("override-apply-keep");
     OverrideRig fixture(project);
 
-    fixture.setTransparency(fixture.first, 0.75);
-    fixture.setTransparency(fixture.second, 0.25);
+    fixture.setFriction(fixture.first, 0.75);
+    fixture.setFriction(fixture.second, 0.25);
 
-    CHECK(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, fixture.first, fixture.transparency));
+    CHECK(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, fixture.first, fixture.friction));
 
     // **Applying is not a way to overwrite other people's edits.** `restamp`
     // measures each instance against the file's PREVIOUS text, so one that had
     // its own value for this property keeps it.
-    CHECK(fixture.transparencyOf(fixture.second) == doctest::Approx(0.25));
+    CHECK(fixture.frictionOf(fixture.second) == doctest::Approx(0.25));
     CHECK(fixture.rig.editor.overridesOf(fixture.rig.world, fixture.second).size() == 1);
 }
 
@@ -4259,7 +4101,7 @@ TEST_CASE("applying is refused on an instance that is not part of a stamp")
     OverrideRig fixture(project);
 
     const core::InstanceId loose = fixture.rig.part("Loose", fixture.rig.root, {0.0, 0.0, 0.0});
-    CHECK_FALSE(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, loose, fixture.transparency));
+    CHECK_FALSE(fixture.rig.editor.applyOverride(fixture.rig.world, fixture.rig.root, loose, fixture.friction));
     CHECK(fixture.rig.editor.status().failed);
 }
 

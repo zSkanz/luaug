@@ -346,7 +346,10 @@ TEST_CASE("a transparent part is pickable, because an editor must be able to sel
     scene::PartComponent part;
     part.cframe = boxAt({0.0, 0.0, -5.0});
     part.size = {2.0f, 2.0f, 2.0f};
-    part.transparency = 1.0f;
+    // Invisible: the default material's Transparency, overridden to one.
+    asset::MaterialProperties invisible;
+    invisible.transparency = 1.0f;
+    (void)asset::setOverride(part.materialParameters, asset::MaterialField::Transparency, invisible);
     world.parts().add(ghost, part);
 
     const PickRay forward{{0.0, 0.0, 0.0}, {0.0f, 0.0f, -1.0f}};

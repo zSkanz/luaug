@@ -19,6 +19,7 @@ luaug_add_module(script
         src/binding.cpp
         src/datatypes.cpp
         src/instance_binding.cpp
+        src/materials.cpp
         src/modules.cpp
         src/debugger.cpp
         src/net_module.cpp

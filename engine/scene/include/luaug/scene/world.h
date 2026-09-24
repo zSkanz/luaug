@@ -14,6 +14,7 @@
 // without anyone thinking about it.
 #pragma once
 
+#include "luaug/asset/material.h"
 #include "luaug/core/id.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/random.h"
@@ -28,6 +29,7 @@
 #include "luaug/scene/types.h"
 #include "luaug/scene/value.h"
 
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -272,7 +274,6 @@ struct NameIndex
     X(AttachmentComponent, attachments)                                                                                \
     X(ConstraintComponent, constraints)                                                                                \
     X(RagdollComponent, ragdolls)                                                                                      \
-    X(MaterialComponent, materials)                                                                                    \
     X(WorkspaceComponent, workspaces)                                                                                  \
     X(TerrainComponent, terrains)                                                                                      \
     X(VoxelComponent, voxels)                                                                                          \
@@ -308,6 +309,25 @@ struct NameIndex
     X(NameIndex, nameIndices)                                                                                          \
     X(AttributeMap, attributes)                                                                                        \
     X(TagSet, tags)
+
+// A runtime copy of a material asset (ADR 0090): made by `material:Clone()`,
+// owned by nobody, never saved, and released when nothing points at it.
+//
+// **What it holds is what the run changed**, over the asset it came from: a
+// field whose bit is not in `set` reads through to the asset, so a clone of a
+// material whose file is edited follows the edit everywhere the clone did not.
+// That is also exactly what the world hash and the wire need to carry -- the
+// source is an input, and the changes are state the run produced.
+struct MaterialClone
+{
+    core::NameAtom source;
+    asset::MaterialFieldMask set = 0;
+    asset::MaterialProperties values;
+};
+
+// By id, which is creation order: an ordered map, so a walk over it is in the
+// order the run made them (R10).
+using MaterialClones = std::map<u32, MaterialClone>;
 
 // A whole world's state, held in memory (ADR 0016's "snapshottable POD ECS
 // pools" -- foundations, not rollback).
@@ -348,6 +368,8 @@ struct WorldSnapshot
     // same `setState` a `Random:Clone` performs (core/random.h).
     u64 rngState = 0;
     u64 rngIncrement = 1;
+    MaterialClones materialClones;
+    u32 lastMaterialClone = 0;
 };
 
 class World
@@ -570,6 +592,47 @@ public:
     void collectTagged(core::NameAtom tag, std::vector<core::InstanceId>& out) const;
     void collectAllTags(TagSet& out) const;
 
+    // --- Materials (ADR 0090) ------------------------------------------------
+
+    // **What a URN a part wears means**: the host's library, borrowed. `scene`
+    // has no filesystem; it holds a URN, and this answers what the URN is. A
+    // world with none resolves every material to the engine default, which is
+    // what a headless world with no content should draw.
+    void setMaterialLibrary(asset::MaterialLibrary* library) noexcept { m_materialLibrary = library; }
+    [[nodiscard]] asset::MaterialLibrary* materialLibrary() const noexcept { return m_materialLibrary; }
+
+    // The asset behind a URN, folded flat; the engine default for an invalid
+    // atom, a missing file or no library. A reference into the library's cache,
+    // valid until the library forgets something.
+    [[nodiscard]] const asset::ResolvedMaterial& resolveMaterialAsset(core::NameAtom urn) const;
+    // What a material handle describes: its asset, and a clone's own changes
+    // over it.
+    [[nodiscard]] asset::ResolvedMaterial resolveMaterial(core::NameAtom urn, u32 clone) const;
+    // **What a part draws with**: its material, then the overrides that
+    // material declares. `instanceParameters` is what it declares, so a caller
+    // can tell a kept-and-ignored override from an applied one.
+    [[nodiscard]] asset::ResolvedMaterial surfaceOf(const PartComponent& part) const;
+
+    // A new runtime clone of `source` (an asset URN) carrying `set` changes.
+    // Its id is the next in creation order, which is part of world state.
+    [[nodiscard]] u32 cloneMaterial(core::NameAtom source, asset::MaterialFieldMask set,
+                                    const asset::MaterialProperties& values);
+    [[nodiscard]] const MaterialClone* materialClone(u32 id) const noexcept;
+    // Counted as a mutation: every part wearing the clone changes with it.
+    [[nodiscard]] MaterialClone* writeMaterialClone(u32 id) noexcept;
+    [[nodiscard]] const MaterialClones& materialClones() const noexcept { return m_materialClones; }
+
+    // **A script's handle keeps a clone alive**; a part wearing it does too,
+    // and the sweep asks the parts. Holds are not world state -- they are the
+    // VM's, and a restore does not touch them.
+    void holdMaterialClone(u32 id);
+    void releaseMaterialClone(u32 id);
+    // Drops every clone nothing holds and no part wears. Cheap when nothing was
+    // released; run by `retireDestroyed`, which every drain ends with.
+    void sweepMaterialClones();
+    // Says a part stopped wearing a clone, so the next sweep asks.
+    void requestMaterialSweep() noexcept { m_sweepMaterials = true; }
+
     // --- Snapshot and restore ------------------------------------------------
 
     // Everything `worldHash` calls observable -- the instance records, the
@@ -729,8 +792,6 @@ public:
     [[nodiscard]] const ComponentPool<ConstraintComponent>& constraints() const noexcept { return m_constraints; }
     [[nodiscard]] ComponentPool<RagdollComponent>& ragdolls() noexcept { return m_ragdolls; }
     [[nodiscard]] const ComponentPool<RagdollComponent>& ragdolls() const noexcept { return m_ragdolls; }
-    [[nodiscard]] ComponentPool<MaterialComponent>& materials() noexcept { return m_materials; }
-    [[nodiscard]] const ComponentPool<MaterialComponent>& materials() const noexcept { return m_materials; }
     [[nodiscard]] ComponentPool<CharacterBodyComponent>& characterBodies() noexcept { return m_characterBodies; }
     [[nodiscard]] const ComponentPool<CharacterBodyComponent>& characterBodies() const noexcept
     {
@@ -873,6 +934,12 @@ private:
     ChangeQueue m_changes;
     core::u64 m_restores = 0;
     core::u64 m_mutations = 0;
+
+    asset::MaterialLibrary* m_materialLibrary = nullptr;
+    MaterialClones m_materialClones;
+    u32 m_lastMaterialClone = 0;
+    std::map<u32, u32> m_materialHolds;
+    bool m_sweepMaterials = false;
 };
 
 } // namespace luaug::scene

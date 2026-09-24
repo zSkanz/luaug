@@ -208,7 +208,7 @@ for row = 0, GridSide - 1 do
         -- Wider than the spacing, because a TILTED plate covers less ground
         -- than a level one and the corners would otherwise open into gaps.
         tile.Size = vector.create(TileSize * 1.22, TileThickness, TileSize * 1.22)
-        tile.Color = Trough
+        tile:SetMaterialParameter("Color", Trough)
         tile.Anchored = true
         -- The water is scenery for the eye and nothing else: the cargo is
         -- floated by the wave function, not by touching a box. Turning both of
@@ -232,7 +232,7 @@ end
 local helm = Instance.new("Part")
 helm.Name = "Helm"
 helm.Size = vector.create(0.5, 0.5, 0.5)
-helm.Transparency = 1
+helm:SetMaterialParameter("Transparency", 1)
 helm.Anchored = true
 helm.CanCollide = false
 helm.CanQuery = false
@@ -251,7 +251,7 @@ local function boatPiece(name: string, offset: CFrame, size: vector, color: Colo
     part.Name = name
     part.Shape = shape
     part.Size = size
-    part.Color = color
+    part:SetMaterialParameter("Color", color)
     part.CFrame = offset
     part.Parent = workspace
 
@@ -325,7 +325,7 @@ local function addFloater(
     part.Name = name
     part.Shape = shape
     part.Size = size
-    part.Color = color
+    part:SetMaterialParameter("Color", color)
     part.Density = density
     part.CFrame = CFrame.new(position)
     part.Parent = flotsam
@@ -584,7 +584,7 @@ RunService.Heartbeat:Connect(function(dt: number)
             local level = math.clamp(math.floor((height / ceiling * 0.5 + 0.5) * levels) + 1, 1, levels)
             if TileLevel[slot] ~= level then
                 TileLevel[slot] = level
-                tile.Color = Palette[level]
+                tile:SetMaterialParameter("Color", Palette[level])
             end
         end
     end

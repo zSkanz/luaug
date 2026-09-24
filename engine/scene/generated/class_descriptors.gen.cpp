@@ -432,7 +432,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(moduleScriptDesc);
 
     // --- BasePart ---
-    static std::array<PropertyDesc, 17> basePartProperties;
+    static std::array<PropertyDesc, 16> basePartProperties;
     basePartProperties = {{
         PropertyDesc{
             .name = atoms.intern("CFrame"),
@@ -479,38 +479,26 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = native::setBasePartSize,
         },
         PropertyDesc{
-            .name = atoms.intern("Color"),
-            .type = ValueType::Color3,
-            .threadSafety = ThreadSafety::Unsafe,
-            .readOnly = false,
-            .inert = false,
-            .doc = "This part's color; channels are not clamped to 0-1, so a value above one is a legal tint rather than an error.",
-            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
-            .get = native::getBasePartColor,
-            .set = native::setBasePartColor,
-        },
-        PropertyDesc{
-            .name = atoms.intern("Transparency"),
-            .type = ValueType::Number,
-            .threadSafety = ThreadSafety::Unsafe,
-            .readOnly = false,
-            .inert = false,
-            .doc = "How see-through this part is, 0 fully opaque and 1 fully invisible.",
-            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
-            .get = native::getBasePartTransparency,
-            .set = native::setBasePartTransparency,
-        },
-        PropertyDesc{
             .name = atoms.intern("Material"),
-            .type = ValueType::Instance,
-            .instanceClass = atoms.intern("Material"),
+            .type = ValueType::Material,
             .threadSafety = ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "The `Material` instance this part's surface is described by, or nothing.\012\012**`Color` multiplies it.** A part with no material has a white base, so white times `Color` is `Color` -- which is what a plain part has always looked like. A part WITH one takes that material's colour, its maps, its metalness and its roughness, and tints the result by `Color`. Leaving `Color` white is therefore how to see a material exactly as it was authored, and it is what an import writes on every part it creates.\012\012The fourth channel already worked this way: `Transparency` and the material's own have always been multiplied together, and doing the same to the other three removes an inconsistency rather than adding a rule.\012\012**There is no texture property on a part, and there will not be one.** A texture reaches a surface through a material or not at all, so that two parts can share one and changing it changes both.\012\012A `MeshPart` with no material draws the one its own file described, which is what an unimported mesh looks like.",
-            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .doc = "The material this part wears: a handle to a material asset (`Material.load`), a runtime copy of one (`material:Clone()`), or nothing -- which is the engine default material, white, dielectric and fairly rough, and exactly what a plain part has always looked like.\012\012**A part has no colour of its own** (ADR 0090). Its look is its material's, and what it may change about that is what the material lets it: the parameters the material declares, set with `SetMaterialParameter`. The engine default declares `Color` and `Transparency`, so a part wearing nothing is still tinted and faded.\012\012**Reading it never copies.** It returns the handle the part wears; `material:Clone()` is how to get one to change. In a scene file it is written as the asset's `Content`.\012\012A `MeshPart` with no material draws what its own file described, and a `Color` it overrides tints that -- which is what an unimported mesh has always looked like.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_material"),
             .get = native::getBasePartMaterial,
             .set = native::setBasePartMaterial,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MaterialParameters"),
+            .type = ValueType::MaterialParameters,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The parameters this part overrides, by name -- a fresh table on every read, holding only what is overridden. The names are the closed set a material may declare: `Color`, `Transparency`, `Emissive`, `Metalness`, `Roughness`, `NormalScale` and `AlphaCutoff`.\012\012**An override the current material does not declare is kept and ignored**, so a part that changes material and changes back looks as it did. `SetMaterialParameter` is the checked way to write one; assigning this property replaces the whole set and checks only that every entry is a parameter with a value of its kind.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_material_parameters"),
+            .get = native::getBasePartMaterialParameters,
+            .set = native::setBasePartMaterialParameters,
         },
         PropertyDesc{
             .name = atoms.intern("Anchored"),
@@ -623,8 +611,26 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 1> basePartMethods;
+    static std::array<MethodDesc, 4> basePartMethods;
     basePartMethods = {{
+        MethodDesc{
+            .name = atoms.intern("SetMaterialParameter"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Overrides one parameter of the material this part wears, for this part alone. **Raises for a parameter the material does not declare**: a material decides what a part may change about it, and a tint written to one that did not allow it would be a surface that silently ignores its script. `Color` and `Emissive` take a `Color3`; the rest take a number.",
+        },
+        MethodDesc{
+            .name = atoms.intern("GetMaterialParameter"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The value this part draws with for one parameter: its override when it has one the material declares, and the material's own value otherwise.",
+        },
+        MethodDesc{
+            .name = atoms.intern("ClearMaterialParameter"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Removes this part's override of one parameter, so it draws with the material's value again. Clearing one that is not overridden does nothing.",
+        },
         MethodDesc{
             .name = atoms.intern("ApplyImpulse"),
             .yields = false,

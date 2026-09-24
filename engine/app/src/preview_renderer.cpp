@@ -66,6 +66,10 @@ HostPreviewRenderer::HostPreviewRenderer(scene::ClassRegistry& classes, scene::E
     // world is never hashed. Named rather than zero so it does not read as a
     // forgotten argument.
     scratch_ = std::make_unique<scene::World>(classes_, enums_, atoms_, 1u);
+    // Its own materials through the same mounts, until the host lends the one
+    // its worlds use -- which is what lets a swatch show an unsaved edit.
+    ownMaterials_.setSource(asset::mountedMaterials(mounts));
+    scratch_->setMaterialLibrary(&ownMaterials_);
 
     meshPartClass_ = classes_.findId(atoms_.intern("MeshPart"));
     folderClass_ = classes_.findId(atoms_.intern("Folder"));
@@ -91,6 +95,11 @@ HostPreviewRenderer::HostPreviewRenderer(scene::ClassRegistry& classes, scene::E
 }
 
 HostPreviewRenderer::~HostPreviewRenderer() = default;
+
+void HostPreviewRenderer::setMaterialLibrary(asset::MaterialLibrary* library) noexcept
+{
+    scratch_->setMaterialLibrary(library != nullptr ? library : &ownMaterials_);
+}
 
 void HostPreviewRenderer::resetScratch()
 {
@@ -240,21 +249,13 @@ bool HostPreviewRenderer::swatchIfMaterial()
     if (scene::worldExtents(*scratch_, workspace_, min, max))
         return true;
 
-    // The material to wear: the first one anywhere under the root, which for a
-    // material stamp is its own root.
-    core::InstanceId material;
-    std::vector<core::InstanceId> subtree;
-    subtree.push_back(workspace_);
-    scratch_->collectDescendants(workspace_, subtree);
-    for (const core::InstanceId id : subtree) {
-        if (scratch_->materials().find(id) != nullptr) {
-            material = id;
-            break;
-        }
-    }
-    if (!material.valid())
-        return true; // Nothing to look at and no material either: a picture of nothing.
+    // A material is not an instance any more (ADR 0090), so a subtree with no
+    // geometry has nothing to wear either: a picture of nothing.
+    return true;
+}
 
+bool HostPreviewRenderer::swatchOf(const std::string& material)
+{
     if (partClass_ == scene::InvalidClass)
         return true;
     const core::InstanceId ball = scratch_->create(partClass_);
@@ -269,7 +270,7 @@ bool HostPreviewRenderer::swatchIfMaterial()
     // number keeps the picture the same if somebody changes the view later.
     (void)scratch_->setProperty(ball, shapeProperty_, scene::Value{scene::EnumValue{partShapeEnum_, 1}});
     (void)scratch_->setProperty(ball, sizeProperty_, scene::Value{core::Vec3{1.0f, 1.0f, 1.0f}});
-    (void)scratch_->setProperty(ball, materialProperty_, scene::Value{material});
+    (void)scratch_->setProperty(ball, materialProperty_, scene::Value{scene::MaterialRef{material, 0}});
     return true;
 }
 

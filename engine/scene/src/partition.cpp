@@ -596,12 +596,26 @@ Leaf Partitioner::readLeaf(std::string_view node)
         return leaf;
     }
 
+    // **A surface a record cannot carry**, for the same reason (ADR 0090). A
+    // record has a colour and a transparency, which are exactly the two
+    // parameters the engine default material declares -- so a part wearing the
+    // default and overriding nothing else goes through the grid unchanged, and
+    // a part wearing any other material stays a whole instance.
+    if (const PartComponent* part = m_scratch.world().parts().find(id);
+        part != nullptr &&
+        (part->material.valid() || (part->materialParameters.set & ~asset::DefaultMaterialParameters) != 0)) {
+        m_scratch.drop(id);
+        return leaf;
+    }
+
     leaf.record.kind = isMesh ? asset::ChunkInstance::Kind::MeshPart : asset::ChunkInstance::Kind::Part;
     if (const PartComponent* part = m_scratch.world().parts().find(id); part != nullptr) {
         leaf.record.cframe = part->cframe;
         leaf.record.size = part->size;
-        leaf.record.color = part->color;
-        leaf.record.transparency = part->transparency;
+        const asset::MaterialOverrides& overrides = part->materialParameters;
+        leaf.record.color =
+            overrides.has(asset::MaterialField::Color) ? overrides.color : core::Color3{1.0f, 1.0f, 1.0f};
+        leaf.record.transparency = overrides.has(asset::MaterialField::Transparency) ? overrides.transparency : 0.0f;
         leaf.record.shape = static_cast<core::u8>(part->shape);
         leaf.box = boxOf(part->cframe, part->size);
     }

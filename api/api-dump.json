@@ -143,10 +143,6 @@
           "Default": "\"Default\""
         },
         {
-          "Name": "Color",
-          "Type": "Color3"
-        },
-        {
           "Name": "Density",
           "Type": "number",
           "Default": "1"
@@ -166,6 +162,10 @@
           "Type": "Material?"
         },
         {
+          "Name": "MaterialParameters",
+          "Type": "MaterialParameters"
+        },
+        {
           "Name": "Orientation",
           "Type": "vector"
         },
@@ -181,10 +181,6 @@
         {
           "Name": "Size",
           "Type": "vector"
-        },
-        {
-          "Name": "Transparency",
-          "Type": "number"
         }
       ],
       "Methods": [
@@ -194,6 +190,43 @@
             {
               "Name": "impulse",
               "Type": "vector"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "ClearMaterialParameter",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetMaterialParameter",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            }
+          ],
+          "Returns": ["Color3 | number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SetMaterialParameter",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            },
+            {
+              "Name": "value",
+              "Type": "Color3 | number"
             }
           ],
           "Returns": [],
@@ -1376,73 +1409,6 @@
           "Type": "vector",
           "ReadOnly": true,
           "ThreadSafety": "ReadParallel"
-        }
-      ],
-      "Methods": [],
-      "Events": []
-    },
-    {
-      "Name": "Material",
-      "Extends": "Instance",
-      "Tags": [],
-      "Properties": [
-        {
-          "Name": "AlphaCutoff",
-          "Type": "number",
-          "Default": "0.5"
-        },
-        {
-          "Name": "AlphaMode",
-          "Type": "Enum.AlphaMode"
-        },
-        {
-          "Name": "Color",
-          "Type": "Color3"
-        },
-        {
-          "Name": "ColorMap",
-          "Type": "Content"
-        },
-        {
-          "Name": "DoubleSided",
-          "Type": "boolean",
-          "Default": "false"
-        },
-        {
-          "Name": "Emissive",
-          "Type": "Color3"
-        },
-        {
-          "Name": "EmissiveMap",
-          "Type": "Content"
-        },
-        {
-          "Name": "MetallicRoughnessMap",
-          "Type": "Content"
-        },
-        {
-          "Name": "Metalness",
-          "Type": "number",
-          "Default": "0"
-        },
-        {
-          "Name": "NormalMap",
-          "Type": "Content"
-        },
-        {
-          "Name": "NormalScale",
-          "Type": "number",
-          "Default": "1"
-        },
-        {
-          "Name": "Roughness",
-          "Type": "number",
-          "Default": "0.7"
-        },
-        {
-          "Name": "Transparency",
-          "Type": "number",
-          "Default": "0"
         }
       ],
       "Methods": [],
@@ -4466,6 +4432,105 @@
         }
       ],
       "Methods": [],
+      "Operators": []
+    },
+    {
+      "Name": "Material",
+      "Constructors": [
+        {
+          "Name": "load",
+          "Parameters": [
+            {
+              "Name": "content",
+              "Type": "Content"
+            }
+          ],
+          "Returns": ["Material"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [
+        {
+          "Name": "AlphaCutoff",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "AlphaMode",
+          "Type": "Enum.AlphaMode",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "ColorMap",
+          "Type": "Content",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "DoubleSided",
+          "Type": "boolean",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Emissive",
+          "Type": "Color3",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "EmissiveMap",
+          "Type": "Content",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "MetallicRoughnessMap",
+          "Type": "Content",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Metalness",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "NormalMap",
+          "Type": "Content",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "NormalScale",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Roughness",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Source",
+          "Type": "Content",
+          "ReadOnly": true,
+          "ThreadSafety": "Safe"
+        },
+        {
+          "Name": "Transparency",
+          "Type": "number",
+          "ThreadSafety": "Safe"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "Clone",
+          "Parameters": [],
+          "Returns": ["Material"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
       "Operators": []
     },
     {

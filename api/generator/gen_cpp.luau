@@ -119,6 +119,11 @@ local ScalarValueTypes: { [string]: string } = {
     ["UDim"] = "UDim",
     ["UDim2"] = "UDim2",
     ["Rect"] = "Rect",
+    -- ADR 0090: a material is a handle to an asset or a runtime clone, and a
+    -- part's overrides of it are one value. Neither is an instance or a string,
+    -- so each is its own `ValueType`.
+    ["Material"] = "Material",
+    ["MaterialParameters"] = "MaterialParameters",
 }
 
 --- `PropertyDesc::errKeyOnInvalidSet`, keyed by `ValueType`. One key per type
@@ -137,6 +142,8 @@ local InvalidSetKeys: { [string]: string } = {
     UDim = "scene.err.expected_udim",
     UDim2 = "scene.err.expected_udim2",
     Rect = "scene.err.expected_rect",
+    Material = "scene.err.expected_material",
+    MaterialParameters = "scene.err.expected_material_parameters",
 }
 
 --- `Schema.ClassTag` -> `scene::ClassFlags`. The two lists are the same set
@@ -229,7 +236,7 @@ end
 
 --- The class an instance-reference type names, or `nil` when it names none.
 ---
---- `"Material?"` answers `Material`; a bare `"Instance"` answers `nil`, because
+--- `"BasePart?"` answers `BasePart`; a bare `"Instance"` answers `nil`, because
 --- "any instance" is not a constraint and a picker that filtered by it would
 --- offer the same list with an extra step. Anything that is not a reference
 --- answers `nil` too.

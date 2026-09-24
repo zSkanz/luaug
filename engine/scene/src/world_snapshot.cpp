@@ -25,6 +25,8 @@ WorldSnapshot World::snapshot() const
     out.engineState = m_engineState;
     out.rngState = m_rng.state();
     out.rngIncrement = m_rng.increment();
+    out.materialClones = m_materialClones;
+    out.lastMaterialClone = m_lastMaterialClone;
 
     // The change queue is deliberately absent. A snapshot is taken at a frame
     // boundary where the queue is empty, and a queue captured anywhere else
@@ -47,6 +49,11 @@ void World::restore(const WorldSnapshot& snapshot)
     m_collisionGroups = snapshot.collisionGroups;
     m_engineState = snapshot.engineState;
     m_rng.setState(snapshot.rngState, snapshot.rngIncrement);
+    // The clones the restored parts wear come back with them. The holds do
+    // not: they are the VM's, and the caller rebuilds the VM.
+    m_materialClones = snapshot.materialClones;
+    m_lastMaterialClone = snapshot.lastMaterialClone;
+    m_sweepMaterials = true;
 
     // Cleared rather than restored, and cleared rather than left alone: the
     // entries describe instances that may no longer exist, and the only thing

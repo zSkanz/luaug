@@ -398,10 +398,9 @@ local Classes: { Schema.Class } = {
     },
     {
         -- The structural half arrived at M2 and the physical half at M5, when
-        -- there was a simulation to mean something by it. `Material` is still
-        -- absent: it is a surface look rather than rigidbody state, nothing
-        -- reads it, and a type-checked no-op looks more like a working API than
-        -- a missing member does (m2-kickoff Decision 6, still the rule).
+        -- there was a simulation to mean something by it. The surface is a
+        -- material the part WEARS (ADR 0090): no colour of its own, only the
+        -- parameters its material lets it override.
         Name = "BasePart",
         Extends = "PVInstance",
         Module = "scene",
@@ -433,32 +432,30 @@ local Classes: { Schema.Class } = {
                 Doc = "This part's dimensions in metres along its own axes.",
             },
             {
-                Name = "Color",
-                Type = "Color3",
-                Doc = "This part's color; channels are not clamped to 0-1, so a value above one is a legal tint rather than an error.",
-            },
-            {
-                Name = "Transparency",
-                Type = "number",
-                Doc = "How see-through this part is, 0 fully opaque and 1 fully invisible.",
-            },
-            {
                 Name = "Material",
                 Type = "Material?",
-                Doc = "The `Material` instance this part's surface is described by, or nothing.\n\n"
-                    .. "**`Color` multiplies it.** A part with no material has a white base, so white times "
-                    .. "`Color` is `Color` -- which is what a plain part has always looked like. A part WITH "
-                    .. "one takes that material's colour, its maps, its metalness and its roughness, and "
-                    .. "tints the result by `Color`. Leaving `Color` white is therefore how to see a "
-                    .. "material exactly as it was authored, and it is what an import writes on every part "
-                    .. "it creates.\n\nThe fourth channel already worked this way: "
-                    .. "`Transparency` and the material's own have always been multiplied together, and "
-                    .. "doing the same to the other three removes an inconsistency rather than adding a "
-                    .. "rule.\n\n**There is no texture property on a part, and there will not "
-                    .. "be one.** A texture reaches a surface through a material or not at all, so that two "
-                    .. "parts can share one and changing it changes both.\n\nA `MeshPart` with "
-                    .. "no material draws the one its own file described, which is what an unimported mesh "
-                    .. "looks like.",
+                Doc = "The material this part wears: a handle to a material asset (`Material.load`), a runtime "
+                    .. "copy of one (`material:Clone()`), or nothing -- which is the engine default material, "
+                    .. "white, dielectric and fairly rough, and exactly what a plain part has always looked "
+                    .. "like.\n\n**A part has no colour of its own** (ADR 0090). Its look is its material's, "
+                    .. "and what it may change about that is what the material lets it: the parameters the "
+                    .. "material declares, set with `SetMaterialParameter`. The engine default declares `Color` "
+                    .. "and `Transparency`, so a part wearing nothing is still tinted and faded.\n\n**Reading "
+                    .. "it never copies.** It returns the handle the part wears; `material:Clone()` is how to get "
+                    .. "one to change. In a scene file it is written as the asset's `Content`.\n\nA `MeshPart` "
+                    .. "with no material draws what its own file described, and a `Color` it overrides tints "
+                    .. "that -- which is what an unimported mesh has always looked like.",
+            },
+            {
+                Name = "MaterialParameters",
+                Type = "MaterialParameters",
+                Doc = "The parameters this part overrides, by name -- a fresh table on every read, holding only "
+                    .. "what is overridden. The names are the closed set a material may declare: `Color`, "
+                    .. "`Transparency`, `Emissive`, `Metalness`, `Roughness`, `NormalScale` and `AlphaCutoff`."
+                    .. "\n\n**An override the current material does not declare is kept and ignored**, so a "
+                    .. "part that changes material and changes back looks as it did. `SetMaterialParameter` is "
+                    .. "the checked way to write one; assigning this property replaces the whole set and checks "
+                    .. "only that every entry is a parameter with a value of its kind.",
             },
             {
                 Name = "Anchored",
@@ -547,6 +544,33 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Property },
         Methods = {
             {
+                Name = "SetMaterialParameter",
+                Parameters = { { Name = "name", Type = "string" }, { Name = "value", Type = "Color3 | number" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Overrides one parameter of the material this part wears, for this part alone. **Raises "
+                    .. "for a parameter the material does not declare**: a material decides what a part may "
+                    .. "change about it, and a tint written to one that did not allow it would be a surface "
+                    .. "that silently ignores its script. `Color` and `Emissive` take a `Color3`; the rest take "
+                    .. "a number.",
+            },
+            {
+                Name = "GetMaterialParameter",
+                Parameters = { { Name = "name", Type = "string" } },
+                Returns = { "Color3 | number" },
+                ThreadSafety = "Unsafe",
+                Doc = "The value this part draws with for one parameter: its override when it has one the "
+                    .. "material declares, and the material's own value otherwise.",
+            },
+            {
+                Name = "ClearMaterialParameter",
+                Parameters = { { Name = "name", Type = "string" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Removes this part's override of one parameter, so it draws with the material's value "
+                    .. "again. Clearing one that is not overridden does nothing.",
+            },
+            {
                 Name = "ApplyImpulse",
                 Parameters = { { Name = "impulse", Type = "vector" } },
                 Returns = {},
@@ -597,112 +621,6 @@ local Classes: { Schema.Class } = {
                     .. "towards -Z. Its collider is deliberately the whole box (§2.2's physics notes).",
             },
         },
-    },
-    {
-        Name = "Material",
-        Extends = "Instance",
-        Module = "render",
-        Storage = "Material",
-        Doc = "A surface: a colour, a set of maps, and how rough and metallic it is. Point a `BasePart` at one "
-            .. "with its `Material` property and the part is drawn with it.\n\n**It is an "
-            .. "instance, and what a project keeps in `content/` is a STAMP of one.** That is not a detail: "
-            .. "everything a stamp already does is what a material wants -- one file, many instances, edit the "
-            .. "file and every instance follows, override one and only that one differs. A format of its own "
-            .. "would have been a second answer to all of it.\n\nSo a material is made the way "
-            .. "anything is made: create it in the world, set its fields, and stamp it into the content "
-            .. "browser when you want to reuse it. A part may be pointed at either -- an instance you keep "
-            .. "beside it, or an instance placed from a stamp, which is the same thing with a file behind "
-            .. "it.\n\n**`BasePart.Color` multiplies this material's `Color`.** White on either "
-            .. "side is the identity, so a plain part with no material and a white part with a white material "
-            .. "look the same, and tinting one instance of a shared material does not tint the others.",
-        Properties = {
-            {
-                Name = "Color",
-                Type = "Color3",
-                Doc = "The base tint, multiplied into `ColorMap` if there is one. White with no map is a "
-                    .. "plain white surface.",
-            },
-            {
-                Name = "Transparency",
-                Type = "number",
-                Default = "0",
-                Doc = "How see-through the surface is. Multiplied with the part's own `Transparency`, because "
-                    .. "both are real sources of it and honouring one leaves the other rendering wrong.",
-            },
-            {
-                Name = "ColorMap",
-                Type = "Content",
-                ContentKind = "Texture",
-                Doc = "The base-colour image, sampled and multiplied by `Color`. Colour data, so it is "
-                    .. "encoded through the sRGB curve -- unlike the maps below, which are numbers.",
-            },
-            {
-                Name = "NormalMap",
-                Type = "Content",
-                ContentKind = "Texture",
-                Doc = "A tangent-space normal map. Linear data, not colour.",
-            },
-            {
-                Name = "MetallicRoughnessMap",
-                Type = "Content",
-                ContentKind = "Texture",
-                Doc = "Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one "
-                    .. "property because they are one file. Linear data, not colour.",
-            },
-            {
-                Name = "EmissiveMap",
-                Type = "Content",
-                ContentKind = "Texture",
-                Doc = "What the surface glows with, multiplied by `Emissive`. Colour data.",
-            },
-            {
-                Name = "Metalness",
-                Type = "number",
-                Default = "0",
-                Doc = "0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal. The values between "
-                    .. "are for a surface that is partly one and partly the other across its map, not for a "
-                    .. "material that is a bit metallic.",
-            },
-            {
-                Name = "Roughness",
-                Type = "number",
-                Default = "0.7",
-                Doc = "0 is a mirror and 1 is chalk. The default is what an untextured building block looks "
-                    .. "like; glTF's own default is 1, which is right for a file that forgot to say and wrong "
-                    .. "for a material somebody is about to author.",
-            },
-            {
-                Name = "Emissive",
-                Type = "Color3",
-                Doc = "Light the surface gives off on its own. It does not light anything else -- that is a "
-                    .. "`PointLight` -- it only makes this surface bright.",
-            },
-            {
-                Name = "NormalScale",
-                Type = "number",
-                Default = "1",
-                Doc = "Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.",
-            },
-            {
-                Name = "AlphaMode",
-                Type = "Enum.AlphaMode",
-                Doc = "How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against "
-                    .. "`AlphaCutoff`, and `Blend` blends.",
-            },
-            {
-                Name = "AlphaCutoff",
-                Type = "number",
-                Default = "0.5",
-                Doc = "What `Mask` tests against. Read only in that mode.",
-            },
-            {
-                Name = "DoubleSided",
-                Type = "boolean",
-                Default = "false",
-                Doc = "Whether the back faces are drawn. Leaves and cloth want this; anything solid does not, "
-                    .. "and turning it on there doubles what the rasteriser does for nothing.",
-            },
-        } :: { Schema.Property },
     },
     {
         Name = "MeshPart",

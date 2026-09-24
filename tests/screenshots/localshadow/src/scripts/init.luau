@@ -27,7 +27,7 @@ local floor = Instance.new("Part")
 floor.Name = "Floor"
 floor.Size = Vector3.new(30, 1, 30)
 floor.CFrame = CFrame.new(0, -0.5, 0)
-floor.Color = Color3.fromRGB(180, 178, 172)
+floor:SetMaterialParameter("Color", Color3.fromRGB(180, 178, 172))
 floor.Anchored = true
 floor.Parent = workspace
 
@@ -38,7 +38,7 @@ local blocker = Instance.new("Part")
 blocker.Name = "Blocker"
 blocker.Size = Vector3.new(3, 0.4, 3)
 blocker.CFrame = CFrame.new(-3, 3.4, 0)
-blocker.Color = Color3.fromRGB(90, 92, 104)
+blocker:SetMaterialParameter("Color", Color3.fromRGB(90, 92, 104))
 blocker.Anchored = true
 blocker.Parent = workspace
 
@@ -49,7 +49,7 @@ local pointBlocker = Instance.new("Part")
 pointBlocker.Name = "PointBlocker"
 pointBlocker.Size = Vector3.new(2.4, 0.4, 2.4)
 pointBlocker.CFrame = CFrame.new(4, 3.0, 0)
-pointBlocker.Color = Color3.fromRGB(104, 96, 88)
+pointBlocker:SetMaterialParameter("Color", Color3.fromRGB(104, 96, 88))
 pointBlocker.Anchored = true
 pointBlocker.Parent = workspace
 
@@ -61,7 +61,7 @@ spotHost.Size = Vector3.new(0.2, 0.2, 0.2)
 -- which is how the first version of this scene produced two identical pictures
 -- and looked like a feature that did not work.
 spotHost.CFrame = CFrame.lookAt(Vector3.new(-3, 8, 0), Vector3.new(-3, 0, 0))
-spotHost.Transparency = 1
+spotHost:SetMaterialParameter("Transparency", 1)
 spotHost.Anchored = true
 spotHost.Parent = workspace
 
@@ -77,7 +77,7 @@ local pointHost = Instance.new("Part")
 pointHost.Name = "PointHost"
 pointHost.Size = Vector3.new(0.2, 0.2, 0.2)
 pointHost.CFrame = CFrame.new(4, 7, 0)
-pointHost.Transparency = 1
+pointHost:SetMaterialParameter("Transparency", 1)
 pointHost.Anchored = true
 pointHost.Parent = workspace
 

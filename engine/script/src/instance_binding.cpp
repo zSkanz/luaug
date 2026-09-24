@@ -5,6 +5,7 @@
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
 #include "luaug/script/datatypes.h"
+#include "luaug/script/materials.h"
 #include "luaug/script/remote.h"
 #include "luaug/script/services.h"
 #include "luaug/script/signals.h"
@@ -831,6 +832,94 @@ int methodApplyImpulse(lua_State* L)
     return 0;
 }
 
+// --- Materials (ADR 0090) -----------------------------------------------------
+
+// The parameter a method names: one of the closed set a material may declare,
+// or a raise naming what was asked for.
+[[nodiscard]] asset::MaterialField checkParameter(lua_State* L, int index)
+{
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, index, &length);
+    const std::string_view name{text, length};
+    const std::optional<asset::MaterialField> field = asset::materialFieldNamed(name);
+    if (!field.has_value() || (asset::fieldBit(*field) & asset::DeclarableParameters) == 0) {
+        const core::I18nArg args[] = {{"name", name}};
+        raise(L, LUAUG_TR("script.err.material_parameter_unknown"), args);
+    }
+    return *field;
+}
+
+// Written through the property rather than into the component, so a `Changed`
+// on `MaterialParameters` fires for a method call as it does for an assignment.
+void writeParameters(lua_State* L, core::InstanceId id, const asset::MaterialOverrides& overrides)
+{
+    World& w = world(L);
+    (void)w.setProperty(id, w.atoms().intern("MaterialParameters"), scene::Value{overrides});
+}
+
+int methodSetMaterialParameter(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const asset::MaterialField field = checkParameter(L, 2);
+    World& w = world(L);
+    const scene::PartComponent* part = w.parts().find(id);
+    if (part == nullptr)
+        return 0;
+
+    // **Raises for a parameter the material does not declare** (ADR 0090): a
+    // material decides what a part may change about it, and a write it would
+    // silently ignore is a script that looks like it works.
+    const asset::ResolvedMaterial material = w.resolveMaterial(part->material, part->materialClone);
+    const std::string_view name = asset::materialFieldName(field);
+    if ((material.instanceParameters & asset::fieldBit(field)) == 0) {
+        if (!part->material.valid()) {
+            const core::I18nArg args[] = {{"name", name}};
+            raise(L, LUAUG_TR("script.err.material_parameter_undeclared_default"), args);
+        }
+        const core::I18nArg args[] = {{"name", name}, {"content", w.atoms().text(part->material)}};
+        raise(L, LUAUG_TR("script.err.material_parameter_undeclared"), args);
+    }
+
+    asset::MaterialProperties values;
+    if (!readMaterialParameter(L, 3, field, values)) {
+        const core::I18nArg args[] = {{"name", name}};
+        raise(L, LUAUG_TR("script.err.material_parameter_type"), args);
+    }
+    asset::MaterialOverrides overrides = part->materialParameters;
+    (void)asset::setOverride(overrides, field, values);
+    writeParameters(L, id, overrides);
+    return 0;
+}
+
+int methodGetMaterialParameter(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const asset::MaterialField field = checkParameter(L, 2);
+    World& w = world(L);
+    const scene::PartComponent* part = w.parts().find(id);
+    if (part == nullptr) {
+        lua_pushnil(L);
+        return 1;
+    }
+    // What the part draws with: its override where the material declares it,
+    // and the material's own value everywhere else.
+    pushMaterialField(L, field, w.surfaceOf(*part).properties);
+    return 1;
+}
+
+int methodClearMaterialParameter(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const asset::MaterialField field = checkParameter(L, 2);
+    const scene::PartComponent* part = world(L).parts().find(id);
+    if (part == nullptr || !part->materialParameters.has(field))
+        return 0;
+    asset::MaterialOverrides overrides = part->materialParameters;
+    asset::clearOverride(overrides, field);
+    writeParameters(L, id, overrides);
+    return 0;
+}
+
 // --- The 2D layer (post-v1 phase 3) -------------------------------------------
 
 int methodPart2DApplyImpulse(lua_State* L)
@@ -1573,6 +1662,9 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"PVInstance", "PivotTo", methodPivotTo},
     {"Model", "GetExtentsSize", methodGetExtentsSize},
     {"BasePart", "ApplyImpulse", methodApplyImpulse},
+    {"BasePart", "SetMaterialParameter", methodSetMaterialParameter},
+    {"BasePart", "GetMaterialParameter", methodGetMaterialParameter},
+    {"BasePart", "ClearMaterialParameter", methodClearMaterialParameter},
     {"Part2D", "ApplyImpulse", methodPart2DApplyImpulse},
     {"Tilemap2D", "SetCell", methodTilemapSetCell},
     {"Tilemap2D", "GetCell", methodTilemapGetCell},

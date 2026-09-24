@@ -25,7 +25,7 @@ bool setName(World& world, core::InstanceId id, const Value& value)
 Value getTransparency(const World& world, core::InstanceId id)
 {
     const PartComponent* part = world.parts().find(id);
-    return part == nullptr ? Value{} : Value{static_cast<f64>(part->transparency)};
+    return part == nullptr ? Value{} : Value{static_cast<f64>(transparencyOf(*part))};
 }
 
 bool setTransparency(World& world, core::InstanceId id, const Value& value)
@@ -34,7 +34,7 @@ bool setTransparency(World& world, core::InstanceId id, const Value& value)
     PartComponent* part = world.parts().find(id);
     if (number == nullptr || part == nullptr)
         return false;
-    part->transparency = static_cast<f32>(*number);
+    setTransparencyOf(*part, static_cast<f32>(*number));
     return true;
 }
 

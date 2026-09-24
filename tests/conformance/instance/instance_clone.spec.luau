@@ -72,8 +72,8 @@ describe("Instance Clone", function()
         it("copies structural property values", function()
             local source = namedPart("Crate", root)
             source.Size = Vector3.new(2, 4, 6)
-            source.Transparency = 0.5
-            source.Color = Color3.new(1, 0, 0)
+            source:SetMaterialParameter("Transparency", 0.5)
+            source:SetMaterialParameter("Color", Color3.new(1, 0, 0))
 
             -- `Clone` is declared as returning `Instance`, because an
             -- `extern type` cannot carry a per-instance generic at this pin.
@@ -83,10 +83,12 @@ describe("Instance Clone", function()
             expect(clone.Size.x):ToBeCloseTo(2)
             expect(clone.Size.y):ToBeCloseTo(4)
             expect(clone.Size.z):ToBeCloseTo(6)
-            expect(clone.Transparency):ToBeCloseTo(0.5)
-            expect(clone.Color.R):ToBeCloseTo(1)
-            expect(clone.Color.G):ToBeCloseTo(0)
-            expect(clone.Color.B):ToBeCloseTo(0)
+            -- The surface overrides are a property like any other (ADR 0090).
+            expect(clone:GetMaterialParameter("Transparency") :: number):ToBeCloseTo(0.5)
+            local colour = clone:GetMaterialParameter("Color") :: Color3
+            expect(colour.R):ToBeCloseTo(1)
+            expect(colour.G):ToBeCloseTo(0)
+            expect(colour.B):ToBeCloseTo(0)
         end)
 
         it("clones an unparented template", function()

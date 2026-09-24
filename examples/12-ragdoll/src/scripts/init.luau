@@ -66,7 +66,7 @@ local ground = Instance.new("Part")
 ground.Name = "Ground"
 ground.Size = vector.create(60, 1, 60)
 ground.CFrame = CFrame.new(0, -0.5, 0)
-ground.Color = Color3.fromRGB(96, 102, 96)
+ground:SetMaterialParameter("Color", Color3.fromRGB(96, 102, 96))
 ground.Anchored = true
 ground.Parent = workspace
 
@@ -76,7 +76,7 @@ local wall = Instance.new("Part")
 wall.Name = "Wall"
 wall.Size = vector.create(14, 1.2, 0.6)
 wall.CFrame = CFrame.new(0, 0.6, -4.2)
-wall.Color = Color3.fromRGB(132, 124, 112)
+wall:SetMaterialParameter("Color", Color3.fromRGB(132, 124, 112))
 wall.Anchored = true
 wall.Parent = workspace
 
@@ -179,7 +179,7 @@ local function build(index: number, made: Figure): boolean
             -- having when a ragdoll is behaving strangely -- a limb through the
             -- floor or a joint pulled apart is obvious there and invisible in
             -- the mesh.
-            limb.Transparency = 1
+            limb:SetMaterialParameter("Transparency", 1)
             table.insert(made.Limbs, limb)
         end
     end
@@ -328,7 +328,7 @@ RunService.Heartbeat:Connect(function(delta: number)
         showProxy = not showProxy
         for _, made in Figures do
             for _, limb in made.Limbs do
-                limb.Transparency = if showProxy then 0.35 else 1
+                limb:SetMaterialParameter("Transparency", if showProxy then 0.35 else 1)
             end
         end
     end

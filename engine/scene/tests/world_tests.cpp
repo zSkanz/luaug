@@ -924,7 +924,10 @@ TEST_CASE("the world hash reflects observable state and nothing else")
 // an arm that hashes nothing.
 TEST_CASE("every Value alternative reaches the hasher")
 {
-    static_assert(std::variant_size_v<Value> == 13, "a new Value alternative needs a row below");
+    // The two material alternatives (ADR 0090) are not attribute values, so
+    // they cannot be reached through one; `material_world_tests.cpp` hashes
+    // them through `BasePart.Material` and `BasePart.MaterialParameters`.
+    static_assert(std::variant_size_v<Value> == 15, "a new Value alternative needs a row below");
 
     // Two distinct values per alternative, chosen to differ in every field so
     // that a partial hash -- one that reads `min` and forgets `max` -- fails

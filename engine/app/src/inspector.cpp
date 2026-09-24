@@ -7,8 +7,10 @@
 #include <cmath>
 #include <cstdio>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace luaug::app {
 namespace {
@@ -104,6 +106,35 @@ struct ValueFormatter
         return std::string(buffer);
     }
 
+    // The asset's URN, and the clone's number when it is one: a clone is the
+    // same asset changed at runtime, and the panel says which.
+    [[nodiscard]] std::string operator()(const scene::MaterialRef& value) const
+    {
+        if (value.clone == 0)
+            return value.source;
+        return value.source + " (clone " + std::to_string(value.clone) + ")";
+    }
+
+    // The overridden parameters by name, in name order -- the order a scene
+    // file writes them in.
+    [[nodiscard]] std::string operator()(const asset::MaterialOverrides& value) const
+    {
+        std::vector<std::string_view> names;
+        for (core::usize index = 0; index < asset::MaterialFieldCount; ++index) {
+            const auto field = static_cast<asset::MaterialField>(index);
+            if (value.has(field))
+                names.push_back(asset::materialFieldName(field));
+        }
+        std::sort(names.begin(), names.end());
+        std::string out;
+        for (const std::string_view name : names) {
+            if (!out.empty())
+                out += ", ";
+            out += name;
+        }
+        return out.empty() ? std::string("none") : out;
+    }
+
     [[nodiscard]] std::string operator()(core::InstanceId value) const
     {
         if (!value.valid())
@@ -174,6 +205,11 @@ EditorKind editorFor(scene::ValueType type) noexcept
         return EditorKind::UDim2;
     case scene::ValueType::Rect:
         return EditorKind::Rect;
+    // Shown and not edited in the grid: a material is picked from the content
+    // browser and its parameters have a section of their own (ADR 0090).
+    case scene::ValueType::Material:
+    case scene::ValueType::MaterialParameters:
+        break;
     }
 
     // `Nil` is a property holding nothing, and so is anything the switch above

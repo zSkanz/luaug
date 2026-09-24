@@ -23,22 +23,33 @@ offers is on the base's page, which is what keeps one added member on
 | `CanQuery` | `boolean` | `true` | read/write | Whether raycasts, shapecasts and box queries can see this part. Independent of CanCollide, because a part that blocks movement and a part a camera ray should ignore are different questions. |
 | `CanTouch` | `boolean` | `true` | read/write | Whether this part takes part in touch reporting at all. **It gates the PAIR**: a part with this off is silent, and so is whatever touches it -- because a signal naming a part that said not to report touches would be that part reporting one on somebody else's handler. That is the difference from CanQuery, which is about one part being found and is therefore one part's decision. Off is what a world full of scenery wants: contacts are still solved, and nothing is queued for scripts that were never going to listen. |
 | `CollisionGroup` | `string` | `"Default"` | read/write | The named group deciding which other parts this one collides with, registered through `PhysicsService:RegisterCollisionGroup`. An unregistered name is an error rather than a silent fallback to Default: the failure mode of a typo here is a wall players walk through, which is expensive to find and cheap to refuse. |
-| `Color` | `Color3` | — | read/write | This part's color; channels are not clamped to 0-1, so a value above one is a legal tint rather than an error. |
 | `Density` | `number` | `1` | read/write | Mass per cubic metre. Mass is this times the volume the Size and Shape describe, and there is no Mass property precisely so that the two cannot be set to contradict each other. |
 | `Friction` | `number` | `0.3` | read/write | How much this surface resists sliding, 0 frictionless and 1 very grippy. The value the solver uses for a contact combines both surfaces' -- one slippery part is enough to make a pair slide. |
 | `LinearVelocity` | `vector` | — | read-only | How fast this part is moving, in metres per second, as of the last simulation tick. Read-only: a velocity assignment is an impulse with the mass divided out, and `ApplyImpulse` is that operation under a name that says what it does. |
-| `Material` | `Material?` | — | read/write | The `Material` instance this part's surface is described by, or nothing.<br><br>**`Color` multiplies it.** A part with no material has a white base, so white times `Color` is `Color` -- which is what a plain part has always looked like. A part WITH one takes that material's colour, its maps, its metalness and its roughness, and tints the result by `Color`. Leaving `Color` white is therefore how to see a material exactly as it was authored, and it is what an import writes on every part it creates.<br><br>The fourth channel already worked this way: `Transparency` and the material's own have always been multiplied together, and doing the same to the other three removes an inconsistency rather than adding a rule.<br><br>**There is no texture property on a part, and there will not be one.** A texture reaches a surface through a material or not at all, so that two parts can share one and changing it changes both.<br><br>A `MeshPart` with no material draws the one its own file described, which is what an unimported mesh looks like. |
+| `Material` | `Material?` | — | read/write | The material this part wears: a handle to a material asset (`Material.load`), a runtime copy of one (`material:Clone()`), or nothing -- which is the engine default material, white, dielectric and fairly rough, and exactly what a plain part has always looked like.<br><br>**A part has no colour of its own** (ADR 0090). Its look is its material's, and what it may change about that is what the material lets it: the parameters the material declares, set with `SetMaterialParameter`. The engine default declares `Color` and `Transparency`, so a part wearing nothing is still tinted and faded.<br><br>**Reading it never copies.** It returns the handle the part wears; `material:Clone()` is how to get one to change. In a scene file it is written as the asset's `Content`.<br><br>A `MeshPart` with no material draws what its own file described, and a `Color` it overrides tints that -- which is what an unimported mesh has always looked like. |
+| `MaterialParameters` | `MaterialParameters` | — | read/write | The parameters this part overrides, by name -- a fresh table on every read, holding only what is overridden. The names are the closed set a material may declare: `Color`, `Transparency`, `Emissive`, `Metalness`, `Roughness`, `NormalScale` and `AlphaCutoff`.<br><br>**An override the current material does not declare is kept and ignored**, so a part that changes material and changes back looks as it did. `SetMaterialParameter` is the checked way to write one; assigning this property replaces the whole set and checks only that every entry is a parameter with a value of its kind. |
 | `Orientation` | `vector` | — | read/write | This part's world rotation as intrinsic YXZ euler angles in degrees. |
 | `Position` | `vector` | — | read/write | This part's world position, the f32 rounding of the CFrame translation; gameplay math past a few kilometres from the origin belongs on CFrame instead. |
 | `Restitution` | `number` | `0` | read/write | How much of an impact this surface gives back, 0 a dead stop and 1 a perfect bounce. Combined across a contact pair the same way Friction is. |
 | `Size` | `vector` | — | read/write | This part's dimensions in metres along its own axes. |
-| `Transparency` | `number` | — | read/write | How see-through this part is, 0 fully opaque and 1 fully invisible. |
 
 ## Methods
 
 ### `ApplyImpulse(impulse: vector)`
 
 Adds an instantaneous change of momentum at the part's centre of mass, in kilogram-metres per second. Applied at the next simulation tick and ignored by an anchored part, which has no momentum to change.
+
+### `ClearMaterialParameter(name: string)`
+
+Removes this part's override of one parameter, so it draws with the material's value again. Clearing one that is not overridden does nothing.
+
+### `GetMaterialParameter(name: string): Color3 | number`
+
+The value this part draws with for one parameter: its override when it has one the material declares, and the material's own value otherwise.
+
+### `SetMaterialParameter(name: string, value: Color3 | number)`
+
+Overrides one parameter of the material this part wears, for this part alone. **Raises for a parameter the material does not declare**: a material decides what a part may change about it, and a tint written to one that did not allow it would be a surface that silently ignores its script. `Color` and `Emissive` take a `Color3`; the rest take a number.
 
 ## Events
 

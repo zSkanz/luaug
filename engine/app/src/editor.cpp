@@ -1296,6 +1296,8 @@ bool Editor::openStamp(std::string_view path, scene::ClassRegistry& classes, sce
     // game world half-cleared for a stamp that would not load is the mess the
     // first cut of this had to unwind with a snapshot.
     auto stage = std::make_unique<Stage>(classes, enums, atoms, kStageSeed);
+    // The stage resolves materials where the game does (ADR 0090).
+    stage->world().setMaterialLibrary(m_materials);
     if (!stage->workspace().valid()) {
         m_status = EditorStatus{"could not build a stage for that stamp", true};
         return false;
@@ -1324,96 +1326,242 @@ bool Editor::openStamp(std::string_view path, scene::ClassRegistry& classes, sce
     return true;
 }
 
-void Editor::syncMaterialPreview(const Inspector& inspector)
+// --- Materials (ADR 0090) ---------------------------------------------------
+
+std::string Editor::normalizeMaterialPath(std::string_view typed)
 {
-    if (m_stage == nullptr) {
-        // The stage went away and took its world with it, so there is nothing to
-        // take down -- the ids named instances in a `World` that no longer
-        // exists, and forgetting them IS the cleanup.
-        m_previewSphere = {};
-        m_previewFloor = {};
-        m_previewLight = {};
-        m_previewOf = {};
+    std::string path(typed);
+    for (char& c : path) {
+        if (c == '\\')
+            c = '/';
+    }
+    while (!path.empty() && path.front() == '/')
+        path.erase(path.begin());
+    constexpr std::string_view ContentPrefix = "content/";
+    while (path.compare(0, ContentPrefix.size(), ContentPrefix) == 0)
+        path.erase(0, ContentPrefix.size());
+    if (path.empty())
+        return path;
+
+    // A bare name lands in `content/materials/`, the convention and not a rule
+    // -- the kind is in the compound suffix, as a stamp's is (ADR 0049).
+    if (path.find('/') == std::string::npos)
+        path = "materials/" + path;
+    if (!asset::isMaterialPath(path))
+        path += asset::MaterialSuffix;
+    return path;
+}
+
+std::string Editor::contentUrn(std::string_view relative)
+{
+    return std::string(asset::AssetScheme) + normalizeMaterialPath(relative);
+}
+
+namespace {
+
+// Writes one material file under the content root. The text is ADR 0090's:
+// fixed key order, one field per line, a pure function of what it holds.
+[[nodiscard]] bool writeMaterialFile(const std::filesystem::path& absolute, const asset::MaterialAsset& material)
+{
+    return platform::createDirectories(absolute.parent_path()) &&
+           platform::writeTextFile(absolute, asset::writeMaterialAsset(material));
+}
+
+} // namespace
+
+std::string Editor::createMaterial(std::string_view name)
+{
+    const std::string relative = normalizeMaterialPath(name);
+    if (relative.empty() || !sceneNameIsUsable(relative)) {
+        m_status = EditorStatus{"that is not a name a material can have", true};
+        return {};
+    }
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(relative);
+    std::error_code ec;
+    if (std::filesystem::exists(absolute, ec)) {
+        m_status = EditorStatus{"something is already called that", true};
+        return {};
+    }
+    // **The engine default's values, declaring nothing** (ADR 0090): a new
+    // material looks like a plain part, and it is exactly what its author makes
+    // it until they opt a parameter in.
+    asset::MaterialAsset material;
+    material.written = asset::AllMaterialFields;
+    if (!writeMaterialFile(absolute, material)) {
+        m_status = EditorStatus{"could not write " + relative, true};
+        return {};
+    }
+    (void)m_content.refresh();
+    m_status = EditorStatus{"created " + relative, false};
+    return relative;
+}
+
+std::string Editor::createMaterialVariant(std::string_view parent, std::string_view name)
+{
+    const std::string parentPath = normalizeMaterialPath(parent);
+    std::string text;
+    if (parentPath.empty() || !platform::readTextFile(m_content.root() / std::filesystem::path(parentPath), text) ||
+        !asset::readMaterialAsset(text).has_value()) {
+        m_status = EditorStatus{"there is no material to make a variant of", true};
+        return {};
+    }
+    const std::string relative = normalizeMaterialPath(name);
+    if (relative.empty() || !sceneNameIsUsable(relative) || relative == parentPath) {
+        m_status = EditorStatus{"that is not a name a material can have", true};
+        return {};
+    }
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(relative);
+    std::error_code ec;
+    if (std::filesystem::exists(absolute, ec)) {
+        m_status = EditorStatus{"something is already called that", true};
+        return {};
+    }
+    // A parent and nothing of its own: it looks exactly like the parent until
+    // one field is changed, and follows every field it has not changed.
+    asset::MaterialAsset variant;
+    variant.parent = contentUrn(parentPath);
+    if (!writeMaterialFile(absolute, variant)) {
+        m_status = EditorStatus{"could not write " + relative, true};
+        return {};
+    }
+    (void)m_content.refresh();
+    m_status = EditorStatus{"created " + relative + ", a variant of " + parentPath, false};
+    return relative;
+}
+
+bool Editor::assignMaterialTo(scene::World& world, std::string_view path, std::span<const core::InstanceId> targets)
+{
+    const std::string relative = normalizeMaterialPath(path);
+    if (targets.empty() || relative.empty())
+        return false;
+    const scene::Value worn{scene::MaterialRef{contentUrn(relative), 0}};
+    const core::NameAtom property = world.atoms().intern("Material");
+
+    // **Nothing recorded when there is nothing to do** (D134): a drop onto
+    // parts that all already wear this is a success with no step, because a
+    // step that undoes nothing eats a press of ctrl-Z.
+    core::usize live = 0;
+    bool everyTargetAlready = true;
+    for (const core::InstanceId target : targets) {
+        if (!world.alive(target) || world.destroyed(target))
+            continue;
+        ++live;
+        const std::optional<scene::Value> held = world.getProperty(target, property);
+        if (!held.has_value() || !(*held == worn))
+            everyTargetAlready = false;
+    }
+    if (live > 0 && everyTargetAlready) {
+        m_status = EditorStatus{"already " + relative, false};
+        return true;
+    }
+
+    m_history.record(world, "Assign Material");
+    core::usize written = 0;
+    for (const core::InstanceId target : targets) {
+        if (!world.alive(target) || world.destroyed(target))
+            continue;
+        const scene::World::SetResult wrote = world.setProperty(target, property, worn);
+        if (wrote == scene::World::SetResult::Changed || wrote == scene::World::SetResult::Unchanged)
+            ++written;
+    }
+    if (written == 0) {
+        // Nothing selected is a part, so nothing changed and nothing is left
+        // on the stack.
+        (void)m_history.undo(world);
+        m_status = EditorStatus{"nothing selected takes that", true};
+        return false;
+    }
+    touch();
+    m_status = EditorStatus{"assigned " + relative, false};
+    return true;
+}
+
+bool Editor::openMaterial(std::string_view path)
+{
+    const std::string relative = normalizeMaterialPath(path);
+    std::string text;
+    if (relative.empty() || !platform::readTextFile(m_content.root() / std::filesystem::path(relative), text)) {
+        m_status = EditorStatus{"could not read " + relative, true};
+        return false;
+    }
+    std::string error;
+    std::optional<asset::MaterialAsset> read = asset::readMaterialAsset(text, nullptr, &error);
+    if (!read.has_value()) {
+        m_status = EditorStatus{relative + " is not a material: " + error, true};
+        return false;
+    }
+    closeMaterial();
+    m_material.path = relative;
+    m_material.asset = *read;
+    m_material.saved = *read;
+    m_status = EditorStatus{"editing " + relative, false};
+    return true;
+}
+
+void Editor::closeMaterial()
+{
+    if (!m_material.open())
         return;
-    }
+    // Whatever the panel put in the library goes, so the next frame reads the
+    // file as it stands -- which, for a session that was never saved, is the
+    // material as it was before it was opened.
+    if (m_materials != nullptr)
+        m_materials->forget(contentUrn(m_material.path));
+    m_material = MaterialSession{};
+}
 
-    scene::World& world = m_stage->world();
-
-    // What is selected, and only if it is a material. Selecting a `Part` inside
-    // a stamp that also contains a material should show the part being edited,
-    // not a sphere -- the preview answers "what does this material look like",
-    // and that is a question about a material.
-    core::InstanceId subject = inspector.selection();
-    if (subject.valid() && world.materials().find(subject) == nullptr)
-        subject = {};
-
-    if (subject == m_previewOf)
+void Editor::editMaterial(const asset::MaterialAsset& next)
+{
+    if (!m_material.open() || next == m_material.asset)
         return;
+    m_material.undo.push_back(m_material.asset);
+    m_material.redo.clear();
+    m_material.asset = next;
+    if (m_materials != nullptr)
+        m_materials->put(contentUrn(m_material.path), m_material.asset);
+}
 
-    // Taken down rather than hidden: a stage with a preview in it that nobody
-    // asked for is a stage with something in it nobody put there.
-    for (core::InstanceId* held : {&m_previewSphere, &m_previewFloor, &m_previewLight}) {
-        if (held->valid())
-            (void)world.destroy(*held);
-        *held = {};
+bool Editor::undoMaterial()
+{
+    if (!m_material.open() || m_material.undo.empty())
+        return false;
+    m_material.redo.push_back(m_material.asset);
+    m_material.asset = m_material.undo.back();
+    m_material.undo.pop_back();
+    if (m_materials != nullptr)
+        m_materials->put(contentUrn(m_material.path), m_material.asset);
+    return true;
+}
+
+bool Editor::redoMaterial()
+{
+    if (!m_material.open() || m_material.redo.empty())
+        return false;
+    m_material.undo.push_back(m_material.asset);
+    m_material.asset = m_material.redo.back();
+    m_material.redo.pop_back();
+    if (m_materials != nullptr)
+        m_materials->put(contentUrn(m_material.path), m_material.asset);
+    return true;
+}
+
+bool Editor::saveMaterial()
+{
+    if (!m_material.open())
+        return false;
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(m_material.path);
+    if (!writeMaterialFile(absolute, m_material.asset)) {
+        m_status = EditorStatus{"could not write " + m_material.path, true};
+        return false;
     }
-    // The stage runs no drains, exactly as the editor's own world does not --
-    // see `Editor::load`. Without this the taken-down preview would keep
-    // resolving, and rebuilding it would leave the old sphere in the pools.
-    world.retireDestroyed();
-
-    m_previewOf = subject;
-    if (!subject.valid())
-        return;
-
-    const scene::ClassId partClass = world.classes().findId(world.atoms().intern("Part"));
-    if (partClass == scene::InvalidClass)
-        return;
-
-    // **A sphere, because a flat swatch shows none of what a material is.**
-    // Roughness, metalness and a normal map are all about how light moves across
-    // a curvature; a square of colour shows the base colour and nothing else.
-    // Every engine with a material preview draws a curved surface for this
-    // reason and not as a house style.
-    m_previewSphere = world.create(partClass);
-    world.setName(m_previewSphere, world.atoms().intern("Preview"));
-    (void)world.setParent(m_previewSphere, m_stage->workspace());
-    world.setGenerated(m_previewSphere, true);
-    if (scene::PartComponent* sphere = world.parts().find(m_previewSphere); sphere != nullptr) {
-        sphere->shape = 1; // Ball
-        sphere->size = core::Vec3{2.0f, 2.0f, 2.0f};
-        sphere->cframe.position = core::DVec3{0.0, 1.2, 0.0};
-        sphere->material = subject;
-    }
-
-    // **A floor under it**, which is not decoration: a metal sphere in an empty
-    // room is a black circle, because metal shows what is around it and there is
-    // nothing around it. The floor is what a rough metal reads as metal against.
-    m_previewFloor = world.create(partClass);
-    world.setName(m_previewFloor, world.atoms().intern("PreviewFloor"));
-    (void)world.setParent(m_previewFloor, m_stage->workspace());
-    world.setGenerated(m_previewFloor, true);
-    if (scene::PartComponent* floor = world.parts().find(m_previewFloor); floor != nullptr) {
-        floor->size = core::Vec3{12.0f, 0.4f, 12.0f};
-        floor->cframe.position = core::DVec3{0.0, -0.2, 0.0};
-        floor->color = core::Color3{0.35f, 0.35f, 0.38f};
-    }
-
-    // And a light off to one side rather than straight on. A light behind the
-    // camera flattens everything it touches -- the highlight lands in the middle
-    // of the sphere and roughness stops being readable, which is the one thing
-    // somebody is squinting at.
-    const scene::ClassId lightClass = world.classes().findId(world.atoms().intern("PointLight"));
-    if (lightClass != scene::InvalidClass) {
-        m_previewLight = world.create(lightClass);
-        world.setName(m_previewLight, world.atoms().intern("PreviewLight"));
-        (void)world.setParent(m_previewLight, m_previewSphere);
-        world.setGenerated(m_previewLight, true);
-        if (scene::PointLightComponent* light = world.pointLights().find(m_previewLight); light != nullptr) {
-            light->brightness = 6.0f;
-            light->range = 20.0f;
-        }
-    }
+    m_material.saved = m_material.asset;
+    // **Every open world updates on save** (ADR 0062): the library forgets
+    // the file and reads it back, which is what a watcher's report would do a
+    // moment later anyway -- and a variant of this material follows with it.
+    if (m_materials != nullptr)
+        m_materials->forget(contentUrn(m_material.path));
+    m_status = EditorStatus{"saved " + m_material.path, false};
+    return true;
 }
 
 std::vector<core::NameAtom> Editor::overridesOf(const scene::World& world, core::InstanceId id)
@@ -1649,11 +1797,10 @@ bool Editor::saveStamp(scene::World& game, core::InstanceId gameRoot)
         message += ", " + std::to_string(moved.unlinkedStamps) + " left alone (changed structurally)";
     // **Counted rather than swallowed**, exactly as `save` counts a scene's
     // (D133). A stamp is written from its root DOWN, so a reference pointing at
-    // anything outside that subtree cannot be carried -- and pointing a part
-    // inside a stamp at a `Material` that sits beside the stamp rather than
-    // under it is the ordinary way to arrive here. It came back as `null` on the
-    // next open, silently, and `restamp` then pushed that null into every
-    // instance in the world.
+    // anything outside that subtree cannot be carried: it came back as `null`
+    // on the next open, silently, and `restamp` then pushed that null into
+    // every instance in the world. A material is a URN now (ADR 0090) and never
+    // arrives here; a constraint's attachment still can.
     if (report.droppedReferences > 0) {
         message += ", " + std::to_string(report.droppedReferences) +
                    " reference(s) outside the stamp were dropped -- put what they name INSIDE it";
@@ -1696,7 +1843,7 @@ std::string Editor::createStampOfClass(scene::World& world, core::InstanceId roo
     }
 
     // Refused before anything is made, so a name that is taken does not leave an
-    // orphan `Material` in the world with no file behind it.
+    // orphan instance in the world with no file behind it.
     const std::string relative = normalizeStampPath(name);
     std::error_code ec;
     if (std::filesystem::exists(m_content.root() / std::filesystem::path(relative), ec)) {

@@ -3,6 +3,7 @@
 #include <luaug/app/content_tree.h>
 #include <luaug/app/inspector.h>
 #include <luaug/app/picking.h>
+#include <luaug/asset/material.h>
 #include <luaug/asset/terrain.h>
 #include <luaug/asset/voxel.h>
 #include <luaug/core/id.h>
@@ -1045,13 +1046,6 @@ public:
         core::InstanceId m_lighting;
     };
 
-    // The preview sphere and its stage dressing, or invalid when nothing is
-    // being previewed. Rebuilt when the selection moves to a different material.
-    core::InstanceId m_previewSphere;
-    core::InstanceId m_previewFloor;
-    core::InstanceId m_previewLight;
-    core::InstanceId m_previewOf;
-
     // The stage, or nullptr when no stamp is open. The frame loop points the
     // panels, the picker and the renderer at this world instead of the game's
     // while it exists -- which is the whole of "a separate environment".
@@ -1098,24 +1092,79 @@ public:
 
     [[nodiscard]] const StampSession& stampSession() const noexcept { return m_stamp; }
 
-    // Keeps the stage's material preview pointed at whatever the person has
-    // selected, and takes it away when nothing they have selected is a material.
+    // --- Materials (ADR 0090) -----------------------------------------------
     //
-    // **A sphere, a floor and a light -- built out of ordinary instances.** A
-    // material is a thing you look AT, and every engine that has one shows it on
-    // a curved surface for the reason a flat swatch cannot: roughness,
-    // metalness and a normal map are all about how light moves ACROSS a
-    // curvature, and a square of colour shows none of them.
-    //
-    // Ordinary instances rather than a preview render path, because the stage
-    // already has a world, a camera and a renderer: a second path would be a
-    // second set of lighting rules that drift from the ones a game sees, and
-    // then the preview stops predicting what the material looks like -- which is
-    // the only thing it is for.
-    //
-    // They are marked GENERATED, which is what keeps them out of the file: a
-    // stamp is written from its root down, and these are siblings of it.
-    void syncMaterialPreview(const Inspector& inspector);
+    // **A material is a file under `content/`, and never an instance.** It has
+    // no transform and no parent that means anything, and putting it in the
+    // tree made every boundary of the tree a place it could be lost -- D115,
+    // D133 and D142 were that one fact paid three times. So the editor makes
+    // files, points parts at them by URN, and edits a file in a panel of its
+    // own, with its own undo.
+
+    // The library every world the editor draws resolves materials through --
+    // the host's, borrowed. An edit to the open material is put in it at once,
+    // so every part wearing that material shows the edit as it is made.
+    void setMaterialLibrary(asset::MaterialLibrary* library) noexcept { m_materials = library; }
+    [[nodiscard]] asset::MaterialLibrary* materialLibrary() const noexcept { return m_materials; }
+
+    // What `createMaterial` will write for what somebody typed: under
+    // `materials/`, with the compound suffix, content-relative. Public and pure
+    // so a dialog can show the resolved path while it is typed.
+    [[nodiscard]] static std::string normalizeMaterialPath(std::string_view typed);
+    // `asset://` and the content-relative path: what a part wears.
+    [[nodiscard]] static std::string contentUrn(std::string_view relative);
+
+    // **Writes a new base material** -- the engine default's values, declaring
+    // no parameters, so it is exactly what its author makes it (ADR 0090) --
+    // and returns its content-relative path, or empty with `status()` saying
+    // why. Refused over an existing file.
+    [[nodiscard]] std::string createMaterial(std::string_view name);
+    // Writes a VARIANT of the material at `parent` (content-relative): a file
+    // that names it and overrides nothing yet, so it looks exactly like its
+    // parent until somebody changes one field.
+    [[nodiscard]] std::string createMaterialVariant(std::string_view parent, std::string_view name);
+
+    // **Makes every instance in `targets` wear the material at `path`**, as one
+    // undo step. The gesture is a drop of a material row onto a part, or onto
+    // a part's `Material` field. A part that already wears it is not a
+    // failure, and a drop onto parts that all already wear it records nothing
+    // -- a step that undoes nothing eats a press of ctrl-Z (D134).
+    bool assignMaterialTo(scene::World& world, std::string_view path, std::span<const core::InstanceId> targets);
+
+    // The material open in the material panel.
+    struct MaterialSession
+    {
+        // Content-relative, and empty when none is open.
+        std::string path;
+        // What the panel shows and edits, and what the file held when it was
+        // opened or last saved.
+        asset::MaterialAsset asset;
+        asset::MaterialAsset saved;
+        // **The panel's own undo**, separate from the world's: an edit to a
+        // file is not an edit to the scene, and one ctrl-Z must not reach
+        // across the two.
+        std::vector<asset::MaterialAsset> undo;
+        std::vector<asset::MaterialAsset> redo;
+
+        [[nodiscard]] bool open() const noexcept { return !path.empty(); }
+        [[nodiscard]] bool dirty() const noexcept { return open() && !(asset == saved); }
+    };
+
+    [[nodiscard]] const MaterialSession& materialSession() const noexcept { return m_material; }
+
+    // Opens the material file at `path` in the panel. A file that cannot be
+    // read is refused with the reason in `status()`.
+    bool openMaterial(std::string_view path);
+    // Closes it. **Unsaved edits are taken back out of the library**, so every
+    // world draws the file as it stands on disk again.
+    void closeMaterial();
+    // One edit to the open material, recorded for the panel's undo and shown
+    // in every open world at once.
+    void editMaterial(const asset::MaterialAsset& next);
+    bool undoMaterial();
+    bool redoMaterial();
+    // Writes the file (ADR 0090's fixed key order) and keeps it open.
+    bool saveMaterial();
 
     // Opens a stamp onto a stage of its own. Refused while playing: a stamp is
     // authored, and a world that is ticking is not one somebody is authoring.
@@ -1249,15 +1298,15 @@ public:
     // `path`, placing one under `parent` if the world has none yet. One undo
     // step for the whole gesture.
     //
-    // **A reference needs an instance and a file is not one.** Dragging
-    // `Wooden.stamp` onto a part's `Material` means "this part looks like that
-    // file", and the only thing a part can point at is a `Material` in the
-    // world -- so one has to be there before the write can happen.
+    // **A reference needs an instance and a file is not one.** Dragging a stamp
+    // onto an instance-valued field means "point at one of those", so one has
+    // to be in the world before the write can happen. (It was built for
+    // `BasePart.Material`, which is a URN now -- `assignMaterialTo` -- and it
+    // stays for the properties that are still instance-valued.)
     //
-    // **The one already in the world wins, and that is the whole point.**
-    // Placing a fresh copy per drop would give ten parts ten materials that
-    // merely look alike, and they would stop looking alike the first time
-    // anybody edited one. Sharing is what a material IS.
+    // **The one already in the world wins.** Placing a fresh copy per drop
+    // would give ten instances ten targets that merely look alike, and they
+    // would stop looking alike the first time anybody edited one.
     //
     // False when the file is unreadable or nothing accepted the write, with
     // `status()` saying which; the undo step is taken back rather than left,
@@ -2289,6 +2338,8 @@ private:
     std::vector<std::string> m_clipboard;
 
     StampSession m_stamp;
+    MaterialSession m_material;
+    asset::MaterialLibrary* m_materials = nullptr;
     // The world a stamp is edited in, or nothing. Built on open and dropped on
     // close, so an editor with no stamp open carries no stage at all.
     std::unique_ptr<Stage> m_stage;

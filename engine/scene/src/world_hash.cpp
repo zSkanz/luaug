@@ -30,6 +30,9 @@
 // buys nothing at level B.
 #include "luaug/scene/world.h"
 
+#include <algorithm>
+#include <array>
+
 // Header-only: everything xxHash needs is inlined into this translation unit,
 // so there is no library to build, link or explain in a preset.
 #define XXH_INLINE_ALL
@@ -119,7 +122,73 @@ private:
     XXH3_state_t m_state{};
 };
 
-void hashValue(Hasher& hasher, const Value& value)
+// The fields `set` names, each as its name and its value, in NAME order: the
+// order a scene file writes them in and a reader sees them, rather than the
+// order an enum happens to declare them.
+void hashMaterialFields(Hasher& hasher, asset::MaterialFieldMask set, const asset::MaterialProperties& values)
+{
+    std::array<asset::MaterialField, asset::MaterialFieldCount> fields{};
+    usize count = 0;
+    for (usize index = 0; index < asset::MaterialFieldCount; ++index) {
+        const auto field = static_cast<asset::MaterialField>(index);
+        if ((set & asset::fieldBit(field)) != 0)
+            fields[count++] = field;
+    }
+    std::sort(fields.begin(), fields.begin() + static_cast<std::ptrdiff_t>(count),
+              [](asset::MaterialField a, asset::MaterialField b) {
+                  return asset::materialFieldName(a) < asset::materialFieldName(b);
+              });
+    hasher.pod(static_cast<u64>(count));
+    for (usize index = 0; index < count; ++index) {
+        const asset::MaterialField field = fields[index];
+        hasher.text(asset::materialFieldName(field));
+        switch (field) {
+        case asset::MaterialField::Color:
+            hasher.color3(values.color);
+            break;
+        case asset::MaterialField::Emissive:
+            hasher.color3(values.emissive);
+            break;
+        case asset::MaterialField::Transparency:
+            hasher.number(values.transparency);
+            break;
+        case asset::MaterialField::Metalness:
+            hasher.number(values.metalness);
+            break;
+        case asset::MaterialField::Roughness:
+            hasher.number(values.roughness);
+            break;
+        case asset::MaterialField::NormalScale:
+            hasher.number(values.normalScale);
+            break;
+        case asset::MaterialField::AlphaCutoff:
+            hasher.number(values.alphaCutoff);
+            break;
+        case asset::MaterialField::ColorMap:
+            hasher.text(values.colorMap);
+            break;
+        case asset::MaterialField::NormalMap:
+            hasher.text(values.normalMap);
+            break;
+        case asset::MaterialField::MetallicRoughnessMap:
+            hasher.text(values.metallicRoughnessMap);
+            break;
+        case asset::MaterialField::EmissiveMap:
+            hasher.text(values.emissiveMap);
+            break;
+        case asset::MaterialField::AlphaMode:
+            hasher.pod(values.alphaMode);
+            break;
+        case asset::MaterialField::DoubleSided:
+            hasher.flag(values.doubleSided);
+            break;
+        case asset::MaterialField::Count:
+            break;
+        }
+    }
+}
+
+void hashValue(Hasher& hasher, const Value& value, const World& world)
 {
     const auto tag = static_cast<u8>(valueType(value));
     hasher.pod(tag);
@@ -174,6 +243,26 @@ void hashValue(Hasher& hasher, const Value& value)
         hasher.vec2(rect.max);
         break;
     }
+    case ValueType::Material: {
+        // **The asset as its URN, and never its contents** (ADR 0090): a
+        // material file is an input the run was given, as a script's source
+        // is, not state the run produced. A clone IS state the run produced --
+        // its creation order and what it changed, which a script can read back
+        // and branch on.
+        const MaterialRef& material = std::get<MaterialRef>(value);
+        hasher.text(material.source);
+        hasher.pod(material.clone);
+        if (const MaterialClone* clone = material.clone != 0 ? world.materialClone(material.clone) : nullptr;
+            clone != nullptr) {
+            hashMaterialFields(hasher, clone->set, clone->values);
+        }
+        break;
+    }
+    case ValueType::MaterialParameters: {
+        const asset::MaterialOverrides& overrides = std::get<asset::MaterialOverrides>(value);
+        hashMaterialFields(hasher, overrides.set, asset::overrideValues(overrides));
+        break;
+    }
     }
 }
 
@@ -212,7 +301,7 @@ u64 World::worldHash() const
             hasher.pod(static_cast<u64>(attributes->size()));
             for (const auto& entry : *attributes) {
                 hasher.text(m_atoms.text(entry.first));
-                hashValue(hasher, entry.second);
+                hashValue(hasher, entry.second, *this);
             }
         }
         else {
@@ -408,7 +497,7 @@ u64 World::worldHash() const
                     if (property.hostFact)
                         continue;
                     hasher.text(m_atoms.text(property.name));
-                    hashValue(hasher, property.get(*this, id));
+                    hashValue(hasher, property.get(*this, id), *this);
                 }
             }
         }

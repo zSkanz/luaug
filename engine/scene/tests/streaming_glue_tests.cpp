@@ -82,8 +82,12 @@ TEST_CASE("every property the chunk carries reaches the instance")
     REQUIRE(component != nullptr);
     CHECK(component->cframe.position == core::DVec3{0.0, 1.0, 0.0});
     CHECK(component->size == core::Vec3{2.0f, 3.0f, 4.0f});
-    CHECK(component->color == core::Color3{0.25f, 0.5f, 0.75f});
-    CHECK(component->transparency == 0.5f);
+    // A record's colour and transparency arrive as the default material's two
+    // overrides (ADR 0090).
+    CHECK(component->materialParameters.has(asset::MaterialField::Color));
+    CHECK(component->materialParameters.color == core::Color3{0.25f, 0.5f, 0.75f});
+    CHECK(component->materialParameters.has(asset::MaterialField::Transparency));
+    CHECK(component->materialParameters.transparency == 0.5f);
     CHECK(component->shape == 1);
 
     // `anchored` is not asserted here, and the reason is the fixture rather

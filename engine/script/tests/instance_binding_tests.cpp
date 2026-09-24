@@ -93,11 +93,12 @@ TEST_CASE("properties round-trip through their real storage")
         part.Size = Vector3.new(4, 1, 8)
         assert(part.Size == Vector3.new(4, 1, 8))
 
-        part.Transparency = 0.25
-        assert(part.Transparency == 0.25)
+        part.Restitution = 0.25
+        assert(part.Restitution == 0.25)
 
-        part.Color = Color3.new(0.25, 0.5, 0.75)
-        assert(part.Color == Color3.new(0.25, 0.5, 0.75))
+        -- A part's colour is its material's parameter (ADR 0090).
+        part:SetMaterialParameter("Color", Color3.new(0.25, 0.5, 0.75))
+        assert(part:GetMaterialParameter("Color") == Color3.new(0.25, 0.5, 0.75))
 
         part.CFrame = CFrame.new(1, 2, 3)
         assert(part.CFrame.Position == Vector3.new(1, 2, 3))
@@ -134,9 +135,14 @@ TEST_CASE("a property write is type-checked, and the refusal names the type it w
     // Strict rather than truthy or coercing: `part.Name = 3` would otherwise
     // store the coercion's answer rather than the caller's intent.
     CHECK(fixture.raises("Instance.new('Part').Name = 3", "scene.err.expected_string"));
-    CHECK(fixture.raises("Instance.new('Part').Transparency = 'half'", "scene.err.expected_number"));
+    CHECK(fixture.raises("Instance.new('Model').Scale = 'half'", "scene.err.expected_number"));
     CHECK(fixture.raises("Instance.new('Part').Size = 4", "scene.err.expected_vector"));
-    CHECK(fixture.raises("Instance.new('Part').Color = Vector3.new(1, 1, 1)", "scene.err.expected_color3"));
+    CHECK(fixture.raises("Instance.new('PointLight').Color = Vector3.new(1, 1, 1)", "scene.err.expected_color3"));
+    // And the two a part's surface is made of.
+    CHECK(fixture.raises("Instance.new('Part').Material = 'asset://materials/brick.material.json'",
+                         "scene.err.expected_material"));
+    CHECK(fixture.raises("Instance.new('Part').MaterialParameters = { Sparkle = 1 }",
+                         "scene.err.expected_material_parameters"));
     CHECK(fixture.raises("Instance.new('Part').CFrame = Vector3.new(1, 1, 1)", "scene.err.expected_cframe"));
     CHECK(fixture.raises("Instance.new('Model').PrimaryPart = 1", "scene.err.expected_instance"));
     // `scene.err.expected_boolean` has no creatable class to be raised from in
@@ -549,15 +555,17 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `Part2D:ApplyImpulse`, `Tilemap2D`'s `SetCell`, `GetCell`, `FillRect` and
     // `Clear`, and `Workspace:Raycast2D`; and 118 with navigation (ADR 0089):
     // `NavigationService`'s `FindPath`, `NearestPoint`, `Raycast` and
-    // `BuildRegion`. This number is what makes a
+    // `BuildRegion`; and 121 when a part came to wear a material (ADR 0090):
+    // `BasePart`'s `SetMaterialParameter`, `GetMaterialParameter` and
+    // `ClearMaterialParameter`. This number is what makes a
     // DECLARED-but-unbound method impossible to ship: the IDL would count it and the binding table would not, which is
     // `Inert` for a method.
     //
     // **It earned its keep at F1.** Five methods were declared in the IDL in one
     // commit and this failed on the next build, before anything could reach a
     // script and find a name that answered nothing.
-    CHECK(coverage.declared == 118);
-    CHECK(coverage.bound == 118);
+    CHECK(coverage.declared == 121);
+    CHECK(coverage.bound == 121);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

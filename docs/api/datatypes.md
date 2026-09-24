@@ -228,6 +228,45 @@ One raw input, as `InputService.InputBegan`, `InputChanged` and `InputEnded` car
 | `Position` | `vector` | — | read-only | Where the pointer is, in window pixels with the origin at the top left, with `z` carrying the accumulated wheel. For a gamepad axis it is the deflection instead: `x` and `y` for a stick, `x` alone for a trigger.<br><br>A three-wide vector rather than a `Vector2` because `vector` is this engine's native primitive (ADR 0013) -- it costs no userdata and no allocation, which matters on a value produced several times a tick. |
 | `UserInputType` | `Enum.UserInputType` | — | read-only | What kind of input this is. The coarse question, for a handler that does not care which key. |
 
+## Material
+
+A surface: a colour, a set of maps, and how rough and metallic it is (ADR 0090). **Not an `Instance`** -- nothing parents one, and nothing finds one in a `Workspace`. A project keeps a material as a `.material.json` asset under `content/`, and a part wears one through `BasePart.Material`.
+
+There are two kinds of handle. `Material.load` gives the shared handle for an asset, and it is **read-only**: writing a property raises, because one write would change every part wearing that asset, in every scene that uses it. `material:Clone()` gives a runtime copy -- the same properties, owned by nobody, writable, never saved, and released when nothing points at it.
+
+**Nothing clones implicitly.** Reading `part.Material` returns the handle the part wears, and changing a clone changes every part that wears that clone.
+
+## Material — constructors
+
+### `load(content: Content): Material`
+
+The shared, read-only handle for a material asset: `Material.load("asset://materials/brick.material.json")`. Raises for a `Content` that names no material, because a typo that quietly drew the default would be found by looking at the screen.
+
+## Material — properties
+
+| Name | Type | Default | Access | Description |
+|---|---|---|---|---|
+| `AlphaCutoff` | `number` | — | read/write | What `Mask` tests against. Read only in that mode. |
+| `AlphaMode` | `Enum.AlphaMode` | — | read/write | How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against `AlphaCutoff`, and `Blend` blends. |
+| `Color` | `Color3` | — | read/write | The base tint, multiplied into `ColorMap` if there is one. White with no map is a plain white surface. |
+| `ColorMap` | `Content` | — | read/write | The base-colour image, sampled and multiplied by `Color`. Colour data, encoded through the sRGB curve -- unlike the maps below, which are numbers. |
+| `DoubleSided` | `boolean` | — | read/write | Whether the back faces are drawn. Leaves and cloth want this; anything solid does not. |
+| `Emissive` | `Color3` | — | read/write | Light the surface gives off on its own. It lights nothing else -- that is a `PointLight` -- it only makes this surface bright. |
+| `EmissiveMap` | `Content` | — | read/write | What the surface glows with, multiplied by `Emissive`. Colour data. |
+| `MetallicRoughnessMap` | `Content` | — | read/write | Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one property because they are one file. Linear data, not colour. |
+| `Metalness` | `number` | — | read/write | 0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal. |
+| `NormalMap` | `Content` | — | read/write | A tangent-space normal map. Linear data, not colour. |
+| `NormalScale` | `number` | — | read/write | Scales the sampled normal's XY. One is the map as authored; zero is a flat surface. |
+| `Roughness` | `number` | — | read/write | 0 is a mirror and 1 is chalk. The default is 0.7, what an untextured building block looks like. |
+| `Source` | `Content` | — | read-only | The material asset this handle is, or the asset a clone was copied from -- a clone of a clone included. Always an asset's `Content`: a clone has nothing else to be named by. |
+| `Transparency` | `number` | — | read/write | How see-through the surface is, 0 opaque and 1 invisible. |
+
+## Material — methods
+
+### `Clone(): Material`
+
+A writable runtime copy: the same properties, the same `Source`, owned by nobody and never saved. Put it on a part with `part.Material = copy`, then change it -- every part wearing this copy changes with it, and nothing else does.
+
 ## Random
 
 A seeded pseudorandom generator, and the only sanctioned source of randomness in simulation code. A seeded stream is reproducible: the same seed yields the same sequence for the same engine build on the same platform, which is the level-B guarantee recorded replays rest on -- replays store seeds, not draws (ADR 0025).

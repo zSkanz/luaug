@@ -10,6 +10,7 @@
 // no shipped class uses is the one the panel is likeliest to forget.
 #pragma once
 
+#include "luaug/asset/material.h"
 #include "luaug/core/id.h"
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
@@ -34,7 +35,7 @@ namespace scene = luaug::scene;
 // say so at build time: the list of types the panel must render is exactly the
 // list of alternatives, and a new one that nothing here names is the silent
 // gap risk 6 describes.
-static_assert(std::variant_size_v<scene::Value> == 13, "every Value alternative needs an editor and a test row");
+static_assert(std::variant_size_v<scene::Value> == 15, "every Value alternative needs an editor and a test row");
 
 // Where the fixture's properties actually live. Generated accessors are plain
 // function pointers with no place to put state, so the real ones write into
@@ -85,16 +86,20 @@ inline scene::Value getNilReference(const scene::World&, core::InstanceId)
     return scene::Value{};
 }
 
-// `BasePart.Material`, over the real component -- the same field the shipped
-// accessor writes, so what a test asserts here is what a part actually carries.
+// `BasePart.Material` and `BasePart.MaterialParameters` (ADR 0090), over the
+// real component -- the same fields the shipped accessors write, so what a test
+// asserts here is what a part actually carries. They are also the fixture's
+// rows for the `Material` and `MaterialParameters` value types.
 //
-// **The class check is the setter and not the picker.** A list that offers only
-// materials is a convenience; refusing a `Part` where a `Material` belongs is
+// **The file check is the setter and not the picker.** A list that offers only
+// materials is a convenience; refusing a texture where a material belongs is
 // the rule, and a UI is not where a rule lives.
 inline scene::Value getPartMaterial(const scene::World& world, core::InstanceId id)
 {
     const scene::PartComponent* part = world.parts().find(id);
-    return part != nullptr && part->material.valid() ? scene::Value{part->material} : scene::Value{};
+    if (part == nullptr || !part->material.valid())
+        return scene::Value{};
+    return scene::Value{scene::MaterialRef{std::string(world.atoms().text(part->material)), part->materialClone}};
 }
 
 inline bool setPartMaterial(scene::World& world, core::InstanceId id, const scene::Value& value)
@@ -103,54 +108,31 @@ inline bool setPartMaterial(scene::World& world, core::InstanceId id, const scen
     if (part == nullptr)
         return false;
     if (std::holds_alternative<std::monostate>(value)) {
-        part->material = core::InstanceId{};
+        part->material = core::NameAtom{};
+        part->materialClone = 0;
         return true;
     }
-    const core::InstanceId* named = std::get_if<core::InstanceId>(&value);
-    if (named == nullptr)
+    const auto* named = std::get_if<scene::MaterialRef>(&value);
+    if (named == nullptr || !asset::isMaterialPath(named->source))
         return false;
-    if (named->valid() && world.materials().find(*named) == nullptr)
-        return false;
-    part->material = *named;
+    part->material = world.atoms().intern(named->source);
+    part->materialClone = named->clone;
     return true;
 }
 
-// `Material.ColorMap` and `Material.Roughness`, over the real component.
-//
-// **A fixture class with a component and no properties can be pointed at and
-// cannot be SAVED**, because a serialiser walks descriptors and not fields --
-// which is a thing a test can only find out by round-tripping one. These two are
-// enough to make that round trip mean something: one `Content` string and one
-// number, which is the shape every other field on a material has.
-inline scene::Value getMaterialColorMap(const scene::World& world, core::InstanceId id)
+inline scene::Value getPartMaterialParameters(const scene::World& world, core::InstanceId id)
 {
-    const scene::MaterialComponent* material = world.materials().find(id);
-    return scene::Value{std::string(material != nullptr ? world.atoms().text(material->colorMap) : std::string_view{})};
+    const scene::PartComponent* part = world.parts().find(id);
+    return part == nullptr ? scene::Value{} : scene::Value{part->materialParameters};
 }
 
-inline bool setMaterialColorMap(scene::World& world, core::InstanceId id, const scene::Value& value)
+inline bool setPartMaterialParameters(scene::World& world, core::InstanceId id, const scene::Value& value)
 {
-    scene::MaterialComponent* material = world.materials().find(id);
-    const auto* text = std::get_if<std::string>(&value);
-    if (material == nullptr || text == nullptr)
+    scene::PartComponent* part = world.parts().find(id);
+    const auto* overrides = std::get_if<asset::MaterialOverrides>(&value);
+    if (part == nullptr || overrides == nullptr)
         return false;
-    material->colorMap = text->empty() ? core::NameAtom{} : world.atoms().intern(*text);
-    return true;
-}
-
-inline scene::Value getMaterialRoughness(const scene::World& world, core::InstanceId id)
-{
-    const scene::MaterialComponent* material = world.materials().find(id);
-    return scene::Value{material != nullptr ? static_cast<core::f64>(material->roughness) : 0.0};
-}
-
-inline bool setMaterialRoughness(scene::World& world, core::InstanceId id, const scene::Value& value)
-{
-    scene::MaterialComponent* material = world.materials().find(id);
-    const auto* number = std::get_if<core::f64>(&value);
-    if (material == nullptr || number == nullptr)
-        return false;
-    material->roughness = static_cast<core::f32>(*number);
+    part->materialParameters = *overrides;
     return true;
 }
 
@@ -391,7 +373,6 @@ struct Fixture
     // marker sweep and the manipulator both locate one through its own pool, and
     // a fixture with no such class would let both pass while finding nothing.
     scene::ClassId attachmentClass = scene::InvalidClass;
-    scene::ClassId materialClass = scene::InvalidClass;
     scene::ClassId cameraClass = scene::InvalidClass;
     scene::ClassId pointLightClass = scene::InvalidClass;
     scene::ClassId lightingClass = scene::InvalidClass;
@@ -572,21 +553,22 @@ struct Fixture
             .name = atoms.intern("Workspace"),
             .defaultName = atoms.intern("Workspace"),
         });
-        // The three the material preview is built out of. Registered here rather
-        // than invented per case, because a preview that could not find `Part`
-        // silently builds nothing -- which reads as "the feature is off" and is
-        // exactly what a test must be able to tell apart.
-        // **`Material` is declared here, with the class it may name**, because
-        // the property is what the reference picker and the material drop are
-        // about -- and a fixture `Part` that merely has a component but no
-        // property would let both pass while the real class refused every write.
+        // **`Material` and `MaterialParameters` are declared here** (ADR
+        // 0090), because they are what the material drop writes -- and a
+        // fixture `Part` that merely had a component but no property would let
+        // a drop pass while the real class refused every write.
         partProperties = {
             scene::PropertyDesc{
                 .name = atoms.intern("Material"),
-                .type = scene::ValueType::Instance,
-                .instanceClass = atoms.intern("Material"),
+                .type = scene::ValueType::Material,
                 .get = &getPartMaterial,
                 .set = &setPartMaterial,
+            },
+            scene::PropertyDesc{
+                .name = atoms.intern("MaterialParameters"),
+                .type = scene::ValueType::MaterialParameters,
+                .get = &getPartMaterialParameters,
+                .set = &setPartMaterialParameters,
             },
         };
         partClass = classes.registerClass({
@@ -609,29 +591,6 @@ struct Fixture
             .attachComponents = [](scene::World& w,
                                    core::InstanceId id) { w.attachments().add(id, scene::AttachmentComponent{}); },
             .detachComponents = [](scene::World& w, core::InstanceId id) { w.attachments().remove(id); },
-        });
-        materialProperties = {
-            scene::PropertyDesc{
-                .name = atoms.intern("ColorMap"),
-                .type = scene::ValueType::String,
-                .contentKind = atoms.intern("Texture"),
-                .get = &getMaterialColorMap,
-                .set = &setMaterialColorMap,
-            },
-            scene::PropertyDesc{
-                .name = atoms.intern("Roughness"),
-                .type = scene::ValueType::Number,
-                .get = &getMaterialRoughness,
-                .set = &setMaterialRoughness,
-            },
-        };
-        materialClass = classes.registerClass({
-            .name = atoms.intern("Material"),
-            .defaultName = atoms.intern("Material"),
-            .properties = materialProperties,
-            .attachComponents = [](scene::World& w,
-                                   core::InstanceId id) { w.materials().add(id, scene::MaterialComponent{}); },
-            .detachComponents = [](scene::World& w, core::InstanceId id) { w.materials().remove(id); },
         });
         // The world is watched from a camera when nothing else registers a
         // focus (D098), so a fixture that cannot make one cannot assert it.
@@ -684,7 +643,6 @@ private:
     std::vector<scene::PropertyDesc> widgetProperties;
     std::vector<scene::PropertyDesc> gadgetProperties;
     std::vector<scene::PropertyDesc> partProperties;
-    std::vector<scene::PropertyDesc> materialProperties;
 };
 
 } // namespace luaug::app::testing

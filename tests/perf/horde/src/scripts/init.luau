@@ -60,7 +60,7 @@ local ground = Instance.new("Part")
 ground.Name = "Ground"
 ground.Size = Vector3.new(160, 1, 160)
 ground.CFrame = CFrame.new(0, -0.5, 0)
-ground.Color = Color3.fromRGB(96, 104, 92)
+ground:SetMaterialParameter("Color", Color3.fromRGB(96, 104, 92))
 ground.Anchored = true
 ground.Parent = workspace
 
@@ -68,7 +68,7 @@ local player = Instance.new("Part")
 player.Name = "Player"
 player.Size = Vector3.new(1, 2, 1)
 player.CFrame = CFrame.new(PlayerOrbitRadius, 1, 0)
-player.Color = Color3.fromRGB(240, 240, 240)
+player:SetMaterialParameter("Color", Color3.fromRGB(240, 240, 240))
 player.Anchored = true
 player.Parent = workspace
 

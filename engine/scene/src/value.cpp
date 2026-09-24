@@ -40,6 +40,10 @@ const char* valueTypeName(ValueType type) noexcept
         return "UDim2";
     case ValueType::Rect:
         return "Rect";
+    case ValueType::Material:
+        return "Material";
+    case ValueType::MaterialParameters:
+        return "MaterialParameters";
     }
     return "nil";
 }

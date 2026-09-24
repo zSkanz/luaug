@@ -118,7 +118,7 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- nearly solid at noon. Every value in between is rendered, which is the
     -- whole difference from an alpha cutout -- at a 0.5 cutoff 0.4 is fully
     -- opaque and 0.6 is gone, and nothing fades.
-    pane.Transparency = 0.15 + 0.35 * (1 + math.cos((Lighting.ClockTime / 24) * math.pi * 2))
+    pane:SetMaterialParameter("Transparency", 0.15 + 0.35 * (1 + math.cos((Lighting.ClockTime / 24) * math.pi * 2)))
 
     local angle = (elapsed / OrbitPeriodSeconds) * math.pi * 2
     local eye = Vector3.new(math.cos(angle) * OrbitRadius, OrbitHeight, math.sin(angle) * OrbitRadius)

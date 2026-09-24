@@ -672,6 +672,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // path is not a fallback here, it is the dev-mode path ADR 0010 keeps
     // forever.
     asset::ContentMounts contentMounts;
+    // **The process's materials** (ADR 0090), read through those mounts and
+    // lent to every world this process draws -- the game's, a stamp's stage,
+    // and whatever replaces the game's on a reload -- so one URN is one
+    // material everywhere, and an edit in the material panel shows everywhere
+    // at once. Declared after the mounts it reads through, so it goes first.
+    asset::MaterialLibrary materialLibrary(asset::mountedMaterials(contentMounts));
 
     // The streamed world, if the project has one. Inactive and free for every
     // project that does not, which is every example before this milestone.
@@ -942,6 +948,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             sceneRelative.clear();
     }
 
+    // **A conformance run's own content**, when the suite ships some: the specs
+    // that load a material asset (ADR 0090) need a file to load, and a spec
+    // tree is not a project, so nothing above mounted it.
+    if (!options.conformanceRoot.empty()) {
+        std::error_code specContentError;
+        const std::filesystem::path specContent = options.conformanceRoot / "content";
+        if (std::filesystem::is_directory(specContent, specContentError))
+            contentMounts.mountDirectory(specContent);
+    }
+
     WorldHostOptions worldOptions{
         .projectPath = options.scriptPath,
         .seed = options.worldSeed,
@@ -1004,6 +1020,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // character that starts a replay in its bind pose -- which a determinism
     // trace would record as a different world.
     host->setContentMounts(&contentMounts);
+    host->setMaterialLibrary(&materialLibrary);
+    editor.setMaterialLibrary(&materialLibrary);
     if (std::optional<core::EngineError> bootError = host->boot(worldOptions); bootError.has_value())
         return bootError;
 
@@ -1922,14 +1940,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.assignStampPath.empty()) {
                     // **Inside the stamp when a stamp is open** (D133). A stamp
-                    // is written from its root DOWN, so a `Material` placed
+                    // is written from its root DOWN, so an instance placed
                     // beside it is a reference the file cannot carry: the save
-                    // drops it to `null`, the next open shows an untextured
-                    // part, and `restamp` pushes that null into every instance
-                    // of the stamp in the world. Under the workspace otherwise,
-                    // because a `Material` is not scenery and has nowhere else
-                    // obvious to live -- and whoever dropped it will want to
-                    // find it again to edit it.
+                    // drops it to `null`, and `restamp` pushes that null into
+                    // every instance of the stamp in the world. Under the
+                    // workspace otherwise. (A material never comes this way any
+                    // more: it is an asset a part names by URN, ADR 0090.)
                     //
                     // The SEARCH root stays the whole authored tree either way.
                     // Narrowing it to the stamp would stop the search finding a
@@ -2181,13 +2197,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 overlay->setInspectionTarget(&shown, shownRoot, &inspector);
             }
 
-            // **The material preview follows the selection**, and it is kept
-            // here rather than inside a verb because selecting is not a verb:
-            // it happens by clicking a row, by clicking the viewport, by
-            // opening a stamp, and by an undo. One place that asks "what is
-            // selected now" beats four that remember to say.
-            editor.syncMaterialPreview(inspector);
-
             // **The brush gets the pointer before the manipulator does**, and
             // before the pick. A tool is what a click MEANS, so while a brush is
             // selected a click on the ground is a stamp -- not a stamp AND a
@@ -2436,8 +2445,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         urns.push_back(host->world().atoms().intern("asset://" + relative));
                     }
 
-                    const core::u32 dropped =
+                    core::u32 dropped =
                         urns.empty() ? 0u : meshLoader.forget(*device, urns, textureLibrary, meshLibrary, meshCache);
+                    // A changed material file is forgotten too, and every
+                    // variant with it -- the library re-reads what anything
+                    // asks for next (ADR 0062, ADR 0090).
+                    for (const core::NameAtom urn : urns) {
+                        const std::string_view text = host->world().atoms().text(urn);
+                        if (asset::isMaterialPath(text)) {
+                            materialLibrary.forget(text);
+                            ++dropped;
+                        }
+                    }
                     const core::I18nArg args[] = {{"count", static_cast<core::i64>(dropped)}};
                     core::log(core::LogLevel::Info, LUAUG_TR("engine.dev.info.assets_reloaded"), args);
                     replyOk("asset-changed", command.id, [dropped](core::JsonWriter& writer) {
@@ -3497,6 +3516,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     previewRenderer = std::make_unique<HostPreviewRenderer>(
                         host->world().classes(), host->world().enums(), host->world().atoms(), contentRoot,
                         contentMounts, *renderer);
+                    previewRenderer->setMaterialLibrary(&materialLibrary);
                     thumbnails.setPreviewRenderer(previewRenderer.get());
                 }
             thumbnails.flush(*device, *cmd);

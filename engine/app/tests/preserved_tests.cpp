@@ -82,7 +82,7 @@ TEST_CASE("a tagged instance comes back where it was, with what it had")
         local part = Instance.new("Part")
         part.Name = "Torso"
         part.Position = vector.create(1, 2, 3)
-        part.Transparency = 0.5
+        part:SetMaterialParameter("Transparency", 0.5)
         part.Parent = model
     )");
 
@@ -108,7 +108,14 @@ TEST_CASE("a tagged instance comes back where it was, with what it had")
 
     const core::InstanceId torso = childNamed(*session.host, model, "Torso");
     REQUIRE(torso.valid());
-    CHECK(world.getProperty(torso, world.atoms().lookup("Transparency")) == scene::Value{0.5});
+    // A part's see-through is its default material's parameter (ADR 0090), and
+    // the override set is an ordinary property a reload carries.
+    const std::optional<scene::Value> parameters = world.getProperty(torso, world.atoms().lookup("MaterialParameters"));
+    REQUIRE(parameters.has_value());
+    const auto* overrides = std::get_if<asset::MaterialOverrides>(&*parameters);
+    REQUIRE(overrides != nullptr);
+    CHECK(overrides->has(asset::MaterialField::Transparency));
+    CHECK(overrides->transparency == 0.5f);
     CHECK(world.getProperty(torso, world.atoms().lookup("Position")) == scene::Value{core::Vec3{1.0f, 2.0f, 3.0f}});
 }
 

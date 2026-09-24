@@ -20,7 +20,7 @@ for index = 0, 5 do
     block.Shape = Enum.PartShape.Block
     block.Size = Vector3.new(1.6, 1.6 + index * 0.6, 1.6)
     block.CFrame = CFrame.new(-4.5 + index * 1.8, 0.8 + index * 0.3, 0)
-    block.Color = Color3.fromRGB(214, 96, 42)
+    block:SetMaterialParameter("Color", Color3.fromRGB(214, 96, 42))
     block.Anchored = true
     block.Parent = workspace
 end
@@ -29,7 +29,7 @@ local floor = Instance.new("Part")
 floor.Name = "FloorA"
 floor.Size = Vector3.new(40, 0.5, 40)
 floor.CFrame = CFrame.new(0, -0.25, 0)
-floor.Color = Color3.fromRGB(72, 60, 48)
+floor:SetMaterialParameter("Color", Color3.fromRGB(72, 60, 48))
 floor.Anchored = true
 floor.Parent = workspace
 

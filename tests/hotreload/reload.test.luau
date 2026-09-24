@@ -97,7 +97,7 @@ for modelIndex = 1, ModelCount do
         local cube = Instance.new("Part")
         cube.Name = `Cube{cubeIndex}`
         cube.Size = vector.create(0.13, 0.13, 0.13)
-        cube.Color = Color3.fromRGB(40 * modelIndex % 255, 90, 200)
+        cube:SetMaterialParameter("Color", Color3.fromRGB(40 * modelIndex % 255, 90, 200))
         -- **Where the Heartbeat would put it, given from the start.** The
         -- comment above this template has always said "each with a name, a
         -- colour and a position" and the position was the one it did not give:

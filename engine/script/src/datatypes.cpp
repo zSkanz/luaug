@@ -5,6 +5,7 @@
 #include "luaug/script/animation.h"
 #include "luaug/script/input_events.h"
 #include "luaug/script/instance_binding.h"
+#include "luaug/script/materials.h"
 #include "luaug/script/tweens.h"
 
 #include <lua.h>
@@ -1779,6 +1780,7 @@ void registerDatatypes(lua_State* L)
     registerTweenTypes(L);
     registerAnimationTypes(L);
     registerInputTypes(L);
+    registerMaterialTypes(L);
     registerVector(L);
 }
 
@@ -1885,6 +1887,12 @@ void pushValue(lua_State* L, const scene::Value& value)
     case scene::ValueType::EnumItem:
         pushEnumItemImpl(L, std::get<scene::EnumValue>(value));
         return;
+    case scene::ValueType::Material:
+        pushMaterial(L, std::get<scene::MaterialRef>(value));
+        return;
+    case scene::ValueType::MaterialParameters:
+        pushMaterialParameters(L, std::get<asset::MaterialOverrides>(value));
+        return;
     }
     lua_pushnil(L);
 }
@@ -1972,6 +1980,19 @@ std::optional<scene::Value> toValue(lua_State* L, int index, scene::ValueType ex
             return std::nullopt;
         return scene::Value{*value};
     }
+    case scene::ValueType::Material: {
+        // nil is the engine default, which is what a part wearing nothing
+        // reads as and what clearing its material writes.
+        if (lua_isnoneornil(L, index))
+            return scene::Value{};
+        if (const std::optional<scene::MaterialRef> material = toMaterial(L, index))
+            return scene::Value{*material};
+        return std::nullopt;
+    }
+    case scene::ValueType::MaterialParameters:
+        if (const std::optional<asset::MaterialOverrides> overrides = toMaterialParameters(L, index))
+            return scene::Value{*overrides};
+        return std::nullopt;
     }
     return std::nullopt;
 }

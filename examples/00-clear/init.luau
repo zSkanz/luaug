@@ -35,7 +35,7 @@ for index, color in CubeColors do
     local cube = Instance.new("Part")
     cube.Name = "Cube" .. index
     cube.Size = CubeSize
-    cube.Color = color
+    cube:SetMaterialParameter("Color", color)
     cube.Parent = workspace
     cubes[index] = cube
 end

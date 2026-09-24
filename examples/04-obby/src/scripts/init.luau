@@ -58,7 +58,7 @@ local function block(name: string, position: vector, size: vector, color: Color3
     part.Name = name
     part.Size = size
     part.Position = position
-    part.Color = color
+    part:SetMaterialParameter("Color", color)
     part.Anchored = true
     part.Parent = workspace
     return part
@@ -228,7 +228,7 @@ local character = Instance.new("CharacterBody")
 character.Name = "Player"
 character.Size = vector.create(2, 4, 2)
 character.Position = respawn
-character.Color = Color3.fromRGB(96, 172, 220)
+character:SetMaterialParameter("Color", Color3.fromRGB(96, 172, 220))
 character.WalkSpeed = 5
 -- Gravity is 9.81 m/s^2 and this engine's units are METRES (divergence 15), so a
 -- jump speed of 5.5 is a rise of 1.5 m and about 1.1 s in the air. The number that

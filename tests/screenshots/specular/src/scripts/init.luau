@@ -56,7 +56,7 @@ local floor = Instance.new("Part")
 floor.Name = "Floor"
 floor.Size = Vector3.new(80, 0.5, 120)
 floor.CFrame = CFrame.new(0, 0.35, -21)
-floor.Color = Color3.fromRGB(38, 42, 50)
+floor:SetMaterialParameter("Color", Color3.fromRGB(38, 42, 50))
 floor.Anchored = true
 floor.Parent = workspace
 

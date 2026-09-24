@@ -34,7 +34,36 @@ using core::JsonValue;
 using core::JsonWriter;
 
 constexpr std::string_view kFormat = "luaug-scene";
-constexpr core::i64 kVersion = 1;
+// **2 since ADR 0090**: a part's `Material` is an asset URN and its surface
+// overrides are `MaterialParameters`, where version 1 wrote a `Color`, a
+// `Transparency` and an instance path to a `Material`.
+constexpr core::i64 kVersion = 2;
+// The oldest version this reader converts. What changed is narrow enough that
+// converting it costs a few lines, and a project written last week must open.
+constexpr core::i64 kOldestVersion = 1;
+
+[[nodiscard]] bool readableVersion(core::i64 version) noexcept
+{
+    return version >= kOldestVersion && version <= kVersion;
+}
+
+// The version of the file being read right now. A stamp placed while a scene is
+// read is a file of its own with a version of its own, so this is set for the
+// span of each file's read and put back after -- a scope, not a parameter
+// threaded through every reader for the one property conversion that asks.
+thread_local core::i64 t_readVersion = kVersion;
+
+class ReadingVersion
+{
+public:
+    explicit ReadingVersion(core::i64 version) noexcept : m_outer(t_readVersion) { t_readVersion = version; }
+    ~ReadingVersion() { t_readVersion = m_outer; }
+    ReadingVersion(const ReadingVersion&) = delete;
+    ReadingVersion& operator=(const ReadingVersion&) = delete;
+
+private:
+    core::i64 m_outer;
+};
 
 // Written as fields of their own, so writing them again as properties would be
 // two spellings of one fact -- and `Parent` in particular would fight the
@@ -87,6 +116,101 @@ constexpr std::array<std::string_view, 2> StorageServices{"ReplicatedStorage", "
 }
 
 // --- writing ---------------------------------------------------------------
+
+// The fields an override set holds, in NAME order (ADR 0090) -- the order a
+// person reads them in, whatever order the engine declares them.
+[[nodiscard]] core::usize overriddenFields(const asset::MaterialOverrides& overrides,
+                                           std::array<asset::MaterialField, asset::MaterialFieldCount>& out)
+{
+    core::usize count = 0;
+    for (core::usize index = 0; index < asset::MaterialFieldCount; ++index) {
+        const auto field = static_cast<asset::MaterialField>(index);
+        if (overrides.has(field))
+            out[count++] = field;
+    }
+    std::sort(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(count),
+              [](asset::MaterialField a, asset::MaterialField b) {
+                  return asset::materialFieldName(a) < asset::materialFieldName(b);
+              });
+    return count;
+}
+
+// A number-valued parameter's slot in a description.
+[[nodiscard]] core::f32* parameterNumber(asset::MaterialField field, asset::MaterialProperties& values) noexcept
+{
+    switch (field) {
+    case asset::MaterialField::Transparency:
+        return &values.transparency;
+    case asset::MaterialField::Metalness:
+        return &values.metalness;
+    case asset::MaterialField::Roughness:
+        return &values.roughness;
+    case asset::MaterialField::NormalScale:
+        return &values.normalScale;
+    case asset::MaterialField::AlphaCutoff:
+        return &values.alphaCutoff;
+    default:
+        return nullptr;
+    }
+}
+
+// A part's overrides as an object keyed by parameter name, in name order.
+void writeMaterialParameters(JsonWriter& out, const asset::MaterialOverrides& overrides)
+{
+    std::array<asset::MaterialField, asset::MaterialFieldCount> fields{};
+    const core::usize count = overriddenFields(overrides, fields);
+    asset::MaterialProperties values = asset::overrideValues(overrides);
+    out.beginObject();
+    for (core::usize index = 0; index < count; ++index) {
+        const asset::MaterialField field = fields[index];
+        out.key(asset::materialFieldName(field));
+        if (field == asset::MaterialField::Color || field == asset::MaterialField::Emissive) {
+            const core::Color3 colour = field == asset::MaterialField::Color ? values.color : values.emissive;
+            out.beginArray();
+            out.value(static_cast<core::f64>(colour.r));
+            out.value(static_cast<core::f64>(colour.g));
+            out.value(static_cast<core::f64>(colour.b));
+            out.endArray();
+            continue;
+        }
+        const core::f32* number = parameterNumber(field, values);
+        out.value(static_cast<core::f64>(number != nullptr ? *number : 0.0f));
+    }
+    out.endObject();
+}
+
+// The reverse: an object of parameters, or nothing for one that is not.
+[[nodiscard]] std::optional<asset::MaterialOverrides> readMaterialParameters(const JsonValue& json)
+{
+    if (json.type() != core::JsonType::Object)
+        return std::nullopt;
+    asset::MaterialOverrides out;
+    asset::MaterialProperties values;
+    for (core::usize index = 0; index < json.size(); ++index) {
+        const std::string_view name = json.keyAt(index);
+        const std::optional<asset::MaterialField> field = asset::materialFieldNamed(name);
+        if (!field.has_value())
+            return std::nullopt;
+        const JsonValue entry = json[name];
+        if (*field == asset::MaterialField::Color || *field == asset::MaterialField::Emissive) {
+            if (entry.type() != core::JsonType::Array || entry.size() < 3)
+                return std::nullopt;
+            const core::Color3 colour{static_cast<core::f32>(entry.at(0).asNumber()),
+                                      static_cast<core::f32>(entry.at(1).asNumber()),
+                                      static_cast<core::f32>(entry.at(2).asNumber())};
+            (*field == asset::MaterialField::Color ? values.color : values.emissive) = colour;
+        }
+        else {
+            core::f32* number = parameterNumber(*field, values);
+            if (number == nullptr || entry.type() != core::JsonType::Number)
+                return std::nullopt;
+            *number = static_cast<core::f32>(entry.asNumber());
+        }
+        if (!asset::setOverride(out, *field, values))
+            return std::nullopt;
+    }
+    return out;
+}
 
 void writeValue(JsonWriter& out, const World& world, const Value& value,
                 const std::unordered_map<core::u32, std::string>& paths, SceneIoReport& report)
@@ -206,6 +330,14 @@ void writeValue(JsonWriter& out, const World& world, const Value& value,
         out.endArray();
         break;
     }
+    case ValueType::Material:
+        // The asset's URN. A clone is never saved (ADR 0090): what a file can
+        // say about one is the asset it came from.
+        out.value(std::get<MaterialRef>(value).source);
+        break;
+    case ValueType::MaterialParameters:
+        writeMaterialParameters(out, std::get<asset::MaterialOverrides>(value));
+        break;
     }
 }
 
@@ -703,8 +835,69 @@ struct PendingReference
             return std::nullopt;
         return Value{
             core::Rect{core::Vec2{f32At(json, 0), f32At(json, 1)}, core::Vec2{f32At(json, 2), f32At(json, 3)}}};
+    case ValueType::Material:
+        if (json.isNull())
+            return Value{};
+        if (json.type() != core::JsonType::String)
+            return std::nullopt;
+        return Value{MaterialRef{std::string(json.asString()), 0}};
+    case ValueType::MaterialParameters:
+        if (const std::optional<asset::MaterialOverrides> overrides = readMaterialParameters(json))
+            return Value{*overrides};
+        return std::nullopt;
     }
     return std::nullopt;
+}
+
+// **Version 1's surface, as version 2 says it** (ADR 0090). A part's `Color`
+// and `Transparency` become overrides on the default material when they are
+// not the default -- which is lossless for every part that wore no material,
+// because the default material's white times a colour IS that colour. A
+// `Material` named an instance by path, and an instance is not a material any
+// more: dropped, and counted as the reference it was.
+//
+// Answers whether it consumed the property.
+[[nodiscard]] bool convertVersion1(World& world, core::InstanceId id, std::string_view name, const JsonValue& json,
+                                   SceneIoReport& report)
+{
+    if (t_readVersion >= 2 || world.parts().find(id) == nullptr)
+        return false;
+    if (name == "Material") {
+        if (!json.isNull())
+            ++report.droppedReferences;
+        return true;
+    }
+    if (name != "Color" && name != "Transparency")
+        return false;
+
+    const core::NameAtom parameters = world.atoms().intern("MaterialParameters");
+    const std::optional<Value> current = world.getProperty(id, parameters);
+    const auto* held = current.has_value() ? std::get_if<asset::MaterialOverrides>(&*current) : nullptr;
+    asset::MaterialOverrides overrides = held != nullptr ? *held : asset::MaterialOverrides{};
+    asset::MaterialProperties values;
+    if (name == "Color") {
+        if (json.type() != core::JsonType::Array || json.size() < 3) {
+            ++report.refusedProperties;
+            return true;
+        }
+        values.color =
+            core::Color3{static_cast<core::f32>(json.at(0).asNumber()), static_cast<core::f32>(json.at(1).asNumber()),
+                         static_cast<core::f32>(json.at(2).asNumber())};
+        if (values.color == core::Color3{1.0f, 1.0f, 1.0f})
+            return true;
+        (void)asset::setOverride(overrides, asset::MaterialField::Color, values);
+    }
+    else {
+        values.transparency = static_cast<core::f32>(json.asNumber());
+        if (values.transparency == 0.0f)
+            return true;
+        (void)asset::setOverride(overrides, asset::MaterialField::Transparency, values);
+    }
+    if (world.setProperty(id, parameters, Value{overrides}) == World::SetResult::InvalidValue)
+        ++report.refusedProperties;
+    else
+        ++report.properties;
+    return true;
 }
 
 core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonValue& json,
@@ -747,6 +940,8 @@ void applyProperties(World& world, core::InstanceId id, const JsonValue& propert
     if (properties.type() == core::JsonType::Object) {
         for (core::usize index = 0; index < properties.size(); ++index) {
             const std::string_view name = properties.keyAt(index);
+            if (convertVersion1(world, id, name, properties[name], report))
+                continue;
             const core::NameAtom atom = world.atoms().intern(name);
             const PropertyDesc* property = world.classes().findProperty(classId, atom);
             if (property == nullptr || property->set == nullptr) {
@@ -1068,8 +1263,9 @@ core::InstanceId placeStamp(World& world, core::InstanceId parent, std::string_v
         return {};
 
     const JsonValue root = document.root();
-    if (root["format"].asString() != kFormat || root["version"].asInteger() != kVersion)
+    if (root["format"].asString() != kFormat || !readableVersion(root["version"].asInteger()))
         return {};
+    const ReadingVersion reading(root["version"].asInteger());
 
     const JsonValue rootNode = root["root"];
     if (rootNode.type() != core::JsonType::Object)
@@ -1410,8 +1606,9 @@ std::optional<core::EngineError> readScene(World& world, std::string_view json, 
     const JsonValue root = document.root();
     if (root["format"].asString() != kFormat)
         return core::makeError(LUAUG_TR("scene.err.scene_format"));
-    if (root["version"].asInteger() != kVersion)
+    if (!readableVersion(root["version"].asInteger()))
         return core::makeError(LUAUG_TR("scene.err.scene_version"));
+    const ReadingVersion reading(root["version"].asInteger());
 
     const core::InstanceId workspace = workspaceOf(world);
     if (!workspace.valid())
@@ -1565,9 +1762,10 @@ core::u32 restamp(World& world, core::InstanceId root, std::string_view stamp, s
         return 0;
     const JsonValue file = document.root();
     const JsonValue rootNode = file["root"];
-    if (file["format"].asString() != kFormat || file["version"].asInteger() != kVersion ||
+    if (file["format"].asString() != kFormat || !readableVersion(file["version"].asInteger()) ||
         rootNode.type() != core::JsonType::Object)
         return 0;
+    const ReadingVersion reading(file["version"].asInteger());
 
     // **The file as the live instances were built from it**, in a world of its
     // own. "What has this one got of its own" is a question about two trees and

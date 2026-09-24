@@ -1617,6 +1617,136 @@ local Datatypes: { Schema.Datatype } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "Material",
+        Module = "script",
+        Doc = "A surface: a colour, a set of maps, and how rough and metallic it is (ADR 0090). **Not an "
+            .. "`Instance`** -- nothing parents one, and nothing finds one in a `Workspace`. A project keeps "
+            .. "a material as a `.material.json` asset under `content/`, and a part wears one through "
+            .. "`BasePart.Material`.\n\nThere are two kinds of handle. `Material.load` gives the shared "
+            .. "handle for an asset, and it is **read-only**: writing a property raises, because one write "
+            .. "would change every part wearing that asset, in every scene that uses it. `material:Clone()` "
+            .. "gives a runtime copy -- the same properties, owned by nobody, writable, never saved, and "
+            .. "released when nothing points at it.\n\n**Nothing clones implicitly.** Reading "
+            .. "`part.Material` returns the handle the part wears, and changing a clone changes every part "
+            .. "that wears that clone.",
+        Constructors = {
+            {
+                Name = "load",
+                Parameters = { { Name = "content", Type = "Content" } },
+                Returns = { "Material" },
+                ThreadSafety = "Unsafe",
+                Doc = 'The shared, read-only handle for a material asset: `Material.load("asset://materials/'
+                    .. 'brick.material.json")`. Raises for a `Content` that names no material, because a typo '
+                    .. "that quietly drew the default would be found by looking at the screen.",
+            },
+        } :: { Schema.Method },
+        Properties = {
+            {
+                Name = "Source",
+                Type = "Content",
+                ReadOnly = true,
+                ThreadSafety = "Safe",
+                Doc = "The material asset this handle is, or the asset a clone was copied from -- a clone of a "
+                    .. "clone included. Always an asset's `Content`: a clone has nothing else to be named by.",
+            },
+            {
+                Name = "Color",
+                Type = "Color3",
+                ThreadSafety = "Safe",
+                Doc = "The base tint, multiplied into `ColorMap` if there is one. White with no map is a plain "
+                    .. "white surface.",
+            },
+            {
+                Name = "Transparency",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "How see-through the surface is, 0 opaque and 1 invisible.",
+            },
+            {
+                Name = "ColorMap",
+                Type = "Content",
+                ThreadSafety = "Safe",
+                Doc = "The base-colour image, sampled and multiplied by `Color`. Colour data, encoded through "
+                    .. "the sRGB curve -- unlike the maps below, which are numbers.",
+            },
+            {
+                Name = "NormalMap",
+                Type = "Content",
+                ThreadSafety = "Safe",
+                Doc = "A tangent-space normal map. Linear data, not colour.",
+            },
+            {
+                Name = "MetallicRoughnessMap",
+                Type = "Content",
+                ThreadSafety = "Safe",
+                Doc = "Occlusion, roughness and metalness in one image's R, G and B -- glTF's packing, and one "
+                    .. "property because they are one file. Linear data, not colour.",
+            },
+            {
+                Name = "Emissive",
+                Type = "Color3",
+                ThreadSafety = "Safe",
+                Doc = "Light the surface gives off on its own. It lights nothing else -- that is a `PointLight` "
+                    .. "-- it only makes this surface bright.",
+            },
+            {
+                Name = "EmissiveMap",
+                Type = "Content",
+                ThreadSafety = "Safe",
+                Doc = "What the surface glows with, multiplied by `Emissive`. Colour data.",
+            },
+            {
+                Name = "Metalness",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "0 is a dielectric -- plastic, stone, wood -- and 1 is bare metal.",
+            },
+            {
+                Name = "Roughness",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "0 is a mirror and 1 is chalk. The default is 0.7, what an untextured building block looks "
+                    .. "like.",
+            },
+            {
+                Name = "NormalScale",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "Scales the sampled normal's XY. One is the map as authored; zero is a flat surface.",
+            },
+            {
+                Name = "AlphaMode",
+                Type = "Enum.AlphaMode",
+                ThreadSafety = "Safe",
+                Doc = "How alpha is read: `Opaque` ignores it, `Mask` is a coverage test against `AlphaCutoff`, "
+                    .. "and `Blend` blends.",
+            },
+            {
+                Name = "AlphaCutoff",
+                Type = "number",
+                ThreadSafety = "Safe",
+                Doc = "What `Mask` tests against. Read only in that mode.",
+            },
+            {
+                Name = "DoubleSided",
+                Type = "boolean",
+                ThreadSafety = "Safe",
+                Doc = "Whether the back faces are drawn. Leaves and cloth want this; anything solid does not.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "Clone",
+                Parameters = {},
+                Returns = { "Material" },
+                ThreadSafety = "Unsafe",
+                Doc = "A writable runtime copy: the same properties, the same `Source`, owned by nobody and "
+                    .. "never saved. Put it on a part with `part.Material = copy`, then change it -- every part "
+                    .. "wearing this copy changes with it, and nothing else does.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

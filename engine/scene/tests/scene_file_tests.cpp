@@ -50,7 +50,9 @@ core::InstanceId partUnder(Fixture& fixture, core::InstanceId parent, std::strin
     scene::PartComponent part;
     part.cframe.position = position;
     part.size = {2.0f, 4.0f, 6.0f};
-    part.color = {0.25f, 0.5f, 0.75f};
+    asset::MaterialProperties tint;
+    tint.color = {0.25f, 0.5f, 0.75f};
+    (void)asset::setOverride(part.materialParameters, asset::MaterialField::Color, tint);
     fixture.world.parts().add(id, part);
     return id;
 }
@@ -502,7 +504,7 @@ TEST_CASE("an instance keeps its stamp through an edit, and the edit is an overr
     // is the same rule the rest of the serializer follows.
     scene::PartComponent* body = fixture.world.parts().find(lantern);
     REQUIRE(body != nullptr);
-    body->transparency = 0.5f;
+    scene::testing::setTransparencyOf(*body, 0.5f);
 
     const auto source = [&stampText](std::string_view) -> std::optional<std::string> { return stampText; };
     scene::StampLibrary library(fixture.world, source);
@@ -536,7 +538,7 @@ TEST_CASE("an instance keeps its stamp through an edit, and the edit is an overr
     REQUIRE(placedLantern.valid());
     const scene::PartComponent* restored = other.world.parts().find(placedLantern);
     REQUIRE(restored != nullptr);
-    CHECK(static_cast<double>(restored->transparency) == doctest::Approx(0.5));
+    CHECK(static_cast<double>(scene::testing::transparencyOf(*restored)) == doctest::Approx(0.5));
 }
 
 TEST_CASE("changing the stamp changes every instance, except where one has its own")
@@ -551,7 +553,7 @@ TEST_CASE("changing the stamp changes every instance, except where one has its o
 
     scene::PartComponent* body = fixture.world.parts().find(lantern);
     REQUIRE(body != nullptr);
-    body->transparency = 0.5f;
+    scene::testing::setTransparencyOf(*body, 0.5f);
 
     const auto original = [&stampText](std::string_view) -> std::optional<std::string> { return stampText; };
     scene::StampLibrary library(fixture.world, original);
@@ -566,7 +568,7 @@ TEST_CASE("changing the stamp changes every instance, except where one has its o
     scene::PartComponent* sourceLantern = edited.world.parts().find(edited.world.firstChild(reopened));
     REQUIRE(sourceLantern != nullptr);
     sourceLantern->size = {9.0f, 9.0f, 9.0f};
-    sourceLantern->transparency = 0.0f;
+    scene::testing::setTransparencyOf(*sourceLantern, 0.0f);
     const std::string changedStamp = scene::writeStamp(edited.world, reopened);
 
     Fixture other;
@@ -586,7 +588,7 @@ TEST_CASE("changing the stamp changes every instance, except where one has its o
     CHECK(static_cast<double>(restored->size.x) == doctest::Approx(9.0));
     // The transparency did NOT: this instance said otherwise, and an override
     // is what "sem influenciar o anterior" means from the other side.
-    CHECK(static_cast<double>(restored->transparency) == doctest::Approx(0.5));
+    CHECK(static_cast<double>(scene::testing::transparencyOf(*restored)) == doctest::Approx(0.5));
 }
 
 TEST_CASE("a structural change is not an override, so the instance is written in full")
@@ -661,7 +663,7 @@ TEST_CASE("restamp moves every live instance of a stamp, in place, keeping its o
     body->cframe.position = core::DVec3{5.0, 0.0, 0.0};
     scene::PartComponent* inner = fixture.world.parts().find(fixture.world.firstChild(second));
     REQUIRE(inner != nullptr);
-    inner->transparency = 0.5f;
+    scene::testing::setTransparencyOf(*inner, 0.5f);
 
     // **The file moves on structurally**: a child added and a child taken away,
     // which is exactly what was reported and what a load-time refresh would
@@ -707,7 +709,7 @@ TEST_CASE("restamp moves every live instance of a stamp, in place, keeping its o
     CHECK(moved.refusedProperties > 0);
     const scene::PartComponent* replaced = fixture.world.parts().find(fixture.world.firstChild(second));
     REQUIRE(replaced != nullptr);
-    CHECK(static_cast<double>(replaced->transparency) == doctest::Approx(0.0));
+    CHECK(static_cast<double>(scene::testing::transparencyOf(*replaced)) == doctest::Approx(0.0));
 }
 
 TEST_CASE("restamp leaves an instance whose shape has moved on, and counts it")

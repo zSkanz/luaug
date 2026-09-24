@@ -45,7 +45,7 @@ local floor = Instance.new("Part")
 floor.Name = "Floor"
 floor.Size = vector.create(#Maze[1] * Cell, 1, #Maze * Cell)
 floor.Position = vector.create(#Maze[1] * Cell / 2, -0.5, #Maze * Cell / 2)
-floor.Color = Color3.fromRGB(196, 190, 176)
+floor:SetMaterialParameter("Color", Color3.fromRGB(196, 190, 176))
 floor.Anchored = true
 floor.Parent = workspace
 
@@ -59,7 +59,7 @@ for row = 1, #Maze do
             wall.Name = "Wall"
             wall.Size = vector.create(Cell, WallHeight, Cell)
             wall.Position = cellCentre(column, row) + vector.create(0, WallHeight / 2, 0)
-            wall.Color = Color3.fromRGB(70, 84, 110)
+            wall:SetMaterialParameter("Color", Color3.fromRGB(70, 84, 110))
             wall.Anchored = true
             wall.Parent = workspace
         else
@@ -77,7 +77,7 @@ local walker = Instance.new("CharacterBody")
 walker.Name = "Walker"
 walker.Size = vector.create(1, 2, 1)
 walker.Position = start + vector.create(0, 1.1, 0)
-walker.Color = Color3.fromRGB(230, 120, 60)
+walker:SetMaterialParameter("Color", Color3.fromRGB(230, 120, 60))
 walker.WalkSpeed = 7
 walker.Parent = workspace
 
@@ -85,7 +85,7 @@ local goal = Instance.new("Part")
 goal.Name = "Goal"
 goal.Shape = Enum.PartShape.Cylinder
 goal.Size = vector.create(0.2, 2.2, 2.2)
-goal.Color = Color3.fromRGB(90, 220, 120)
+goal:SetMaterialParameter("Color", Color3.fromRGB(90, 220, 120))
 goal.Anchored = true
 goal.CanCollide = false
 goal.Parent = workspace
@@ -109,7 +109,7 @@ local function showPath()
         crumb.Name = `Corner{index}`
         crumb.Size = vector.create(0.4, 0.1, 0.4)
         crumb.Position = point + vector.create(0, 0.05, 0)
-        crumb.Color = Color3.fromRGB(250, 220, 90)
+        crumb:SetMaterialParameter("Color", Color3.fromRGB(250, 220, 90))
         crumb.Anchored = true
         crumb.CanCollide = false
         crumb.Parent = crumbs
@@ -174,7 +174,7 @@ InputService.InputBegan:Connect(function(input: InputObject, consumed: boolean)
             block.Name = "Dropped"
             block.Size = vector.create(Cell, WallHeight, Cell)
             block.Position = vector.create(ahead.x, WallHeight / 2, ahead.z)
-            block.Color = Color3.fromRGB(160, 60, 60)
+            block:SetMaterialParameter("Color", Color3.fromRGB(160, 60, 60))
             block.Anchored = true
             block.Parent = workspace
             plan()

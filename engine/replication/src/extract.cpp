@@ -51,12 +51,19 @@ using generated::Source;
             setVec3(out, part->size);
             return true;
         }
+        // The engine default material's two parameters (ADR 0090): what a part
+        // overrides, or the default's own white and zero. The material a part
+        // wears and its other parameters are not on this protocol.
         if (field.name == "Color") {
-            setVec3(out, core::Vec3{part->color.r, part->color.g, part->color.b});
+            const asset::MaterialOverrides& overrides = part->materialParameters;
+            const core::Color3 colour =
+                overrides.has(asset::MaterialField::Color) ? overrides.color : core::Color3{1.0f, 1.0f, 1.0f};
+            setVec3(out, core::Vec3{colour.r, colour.g, colour.b});
             return true;
         }
         if (field.name == "Transparency") {
-            setF32(out, part->transparency);
+            const asset::MaterialOverrides& overrides = part->materialParameters;
+            setF32(out, overrides.has(asset::MaterialField::Transparency) ? overrides.transparency : 0.0f);
             return true;
         }
         return false;
@@ -325,13 +332,25 @@ using generated::Source;
             part->size = asVec3(value);
             return true;
         }
+        // The default is not an override, so a white or opaque part on the
+        // authority is one with nothing overridden here too.
         if (field.name == "Color") {
             const core::Vec3 colour = asVec3(value);
-            part->color = core::Color3{colour.x, colour.y, colour.z};
+            asset::MaterialProperties values;
+            values.color = core::Color3{colour.x, colour.y, colour.z};
+            if (values.color == core::Color3{1.0f, 1.0f, 1.0f})
+                asset::clearOverride(part->materialParameters, asset::MaterialField::Color);
+            else
+                (void)asset::setOverride(part->materialParameters, asset::MaterialField::Color, values);
             return true;
         }
         if (field.name == "Transparency") {
-            part->transparency = asF32(value);
+            asset::MaterialProperties values;
+            values.transparency = asF32(value);
+            if (values.transparency == 0.0f)
+                asset::clearOverride(part->materialParameters, asset::MaterialField::Transparency);
+            else
+                (void)asset::setOverride(part->materialParameters, asset::MaterialField::Transparency, values);
             return true;
         }
         return false;

@@ -46,7 +46,7 @@ local function sign(x: number, height: number, text: string)
     local post = Instance.new("Part")
     post.Name = "Sign " .. text
     post.Anchored = true
-    post.Transparency = 1
+    post:SetMaterialParameter("Transparency", 1)
     post.CanCollide = false
     post.Size = vector.create(0.2, 0.2, 0.2)
     post.Position = vector.create(x, height, -BlockSize / 2 - 2)

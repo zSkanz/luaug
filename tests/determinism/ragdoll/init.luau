@@ -79,7 +79,7 @@ local function block(name: string, cframe: CFrame, size: vector, anchored: boole
     part.Name = name
     part.Size = size
     part.CFrame = cframe
-    part.Color = anchored and Ground or Limb
+    part:SetMaterialParameter("Color", anchored and Ground or Limb)
     part.Anchored = anchored
     part.Parent = workspace
     return part

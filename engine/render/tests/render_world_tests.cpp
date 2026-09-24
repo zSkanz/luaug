@@ -1,3 +1,4 @@
+#include "luaug/asset/material.h"
 #include "luaug/core/types.h"
 #include "luaug/render/render_world.h"
 #include "luaug/render/terrain_loader.h"
@@ -11,6 +12,8 @@
 #include <cmath>
 #include <doctest/doctest.h>
 #include <ostream>
+#include <string>
+#include <string_view>
 
 #include "luaug_test_nearly.h"
 
@@ -23,6 +26,25 @@ namespace {
 const render::MeshLibrary kNoMeshes;
 
 using luaug::testing::nearly;
+
+// **A part's colour and see-through are the engine default material's two
+// parameters** (ADR 0090): these write them as overrides, which is what a part
+// with no material has instead of `BasePart.Color` and `BasePart.Transparency`.
+void setColorOverride(scene::World& world, core::InstanceId id, core::Color3 colour)
+{
+    asset::MaterialProperties values;
+    values.color = colour;
+    REQUIRE(world.parts().find(id) != nullptr);
+    (void)asset::setOverride(world.parts().find(id)->materialParameters, asset::MaterialField::Color, values);
+}
+
+void setTransparencyOverride(scene::World& world, core::InstanceId id, core::f32 transparency)
+{
+    asset::MaterialProperties values;
+    values.transparency = transparency;
+    REQUIRE(world.parts().find(id) != nullptr);
+    (void)asset::setOverride(world.parts().find(id)->materialParameters, asset::MaterialField::Transparency, values);
+}
 
 // A hierarchy with just enough in it to have a root and a part. Hand-built
 // rather than generated, because `render` must not depend on the API definition
@@ -37,6 +59,8 @@ struct Fixture
     scene::ClassId instanceClass = scene::InvalidClass;
     scene::ClassId folderClass = scene::InvalidClass;
     scene::ClassId partClass = scene::InvalidClass;
+    // The materials the world's parts wear (ADR 0090), borrowed by the world.
+    asset::MaterialLibrary materials;
 
     Fixture()
     {
@@ -162,8 +186,8 @@ TEST_CASE("extraction copies what rendering needs and nothing that can go stale"
     REQUIRE(component != nullptr);
     component->cframe.position = core::DVec3{1.0, 2.0, 3.0};
     component->size = core::Vec3{4.0f, 5.0f, 6.0f};
-    component->color = core::Color3{0.25f, 0.5f, 0.75f};
-    component->transparency = 0.5f;
+    setColorOverride(fixture.world, part, core::Color3{0.25f, 0.5f, 0.75f});
+    setTransparencyOverride(fixture.world, part, 0.5f);
     component->shape = 2;
 
     render::RenderWorld snapshot;
@@ -470,7 +494,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
     SUBCASE("Transparency reaches the draw as one minus itself")
     {
         const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
-        fixture.world.parts().find(id)->transparency = 0.25f;
+        setTransparencyOverride(fixture.world, id, 0.25f);
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         REQUIRE(snapshot.draws.size() == 1);
@@ -490,7 +514,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
         library.set(content, translucent);
 
         const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
-        fixture.world.parts().find(id)->transparency = 0.5f;
+        setTransparencyOverride(fixture.world, id, 0.5f);
         render::extract(fixture.world, workspace, core::InstanceId{}, library, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         REQUIRE(snapshot.draws.size() == 1);
@@ -504,7 +528,7 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
     SUBCASE("a fully transparent part is not drawn at all")
     {
         const core::InstanceId id = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
-        fixture.world.parts().find(id)->transparency = 1.0f;
+        setTransparencyOverride(fixture.world, id, 1.0f);
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         // Neither pass, and the debug path's existing rule: `submitWorld` skips
@@ -518,8 +542,8 @@ TEST_CASE("Transparency reaches the draw, picks the pass, and reverses the sort"
         (void)fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -40.0}, content);
         const core::InstanceId near = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
         const core::InstanceId far = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -30.0}, content);
-        fixture.world.parts().find(near)->transparency = 0.4f;
-        fixture.world.parts().find(far)->transparency = 0.6f;
+        setTransparencyOverride(fixture.world, near, 0.4f);
+        setTransparencyOverride(fixture.world, far, 0.6f);
 
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
@@ -881,22 +905,34 @@ TEST_CASE("a disabled light contributes nothing, and does not spend a budget slo
     CHECK(off.lights.empty());
 }
 
-// --- BasePart.Material -------------------------------------------------------
+// --- BasePart.Material (ADR 0090) -------------------------------------------
 
 namespace {
 
-// A `Material` instance with a half-grey base and a green glow, so a tint
-// multiplying it produces a number nothing else in this file would.
-[[nodiscard]] core::InstanceId halfGreyMaterial(Fixture& fixture)
+constexpr std::string_view HalfGrey = "asset://materials/half-grey.material.json";
+
+// A material asset with a half-grey base, a green glow and bare metal, so a
+// value from it is a number nothing else in this file would produce. It lets a
+// part override its `Color` and nothing else.
+void putHalfGrey(Fixture& fixture, asset::MaterialFieldMask declares = asset::fieldBit(asset::MaterialField::Color),
+                 std::string colorMap = {})
 {
-    const core::InstanceId id = fixture.world.create(fixture.instanceClass);
-    scene::MaterialComponent material;
-    material.color = core::Color3{0.5f, 0.5f, 0.5f};
-    material.emissive = core::Color3{0.0f, 0.8f, 0.0f};
-    material.metalness = 1.0f;
-    material.roughness = 0.2f;
-    fixture.world.materials().add(id, material);
-    return id;
+    asset::MaterialAsset material;
+    material.properties.color = core::Color3{0.5f, 0.5f, 0.5f};
+    material.properties.emissive = core::Color3{0.0f, 0.8f, 0.0f};
+    material.properties.metalness = 1.0f;
+    material.properties.roughness = 0.2f;
+    material.properties.colorMap = std::move(colorMap);
+    material.instanceParameters = declares;
+    material.written = asset::AllMaterialFields;
+    fixture.materials.put(HalfGrey, material);
+    fixture.world.setMaterialLibrary(&fixture.materials);
+}
+
+void wear(Fixture& fixture, core::InstanceId id, std::string_view urn)
+{
+    REQUIRE(fixture.world.parts().find(id) != nullptr);
+    fixture.world.parts().find(id)->material = fixture.atoms.intern(urn);
 }
 
 [[nodiscard]] bool nearF(core::f32 value, core::f32 expected) noexcept
@@ -917,19 +953,25 @@ void registerBlock(Fixture& fixture, render::MeshLibrary& meshes)
     meshes.set(fixture.atoms.intern(render::primitiveContent(0)), entry);
 }
 
+[[nodiscard]] core::InstanceId blockAt(Fixture& fixture, core::InstanceId workspace, core::f64 x = 0.0)
+{
+    const core::InstanceId id = fixture.world.create(fixture.partClass);
+    (void)fixture.world.setParent(id, workspace);
+    fixture.world.parts().find(id)->cframe.position = core::DVec3{x, 0.0, -10.0};
+    return id;
+}
+
 } // namespace
 
-TEST_CASE("a Part with no material draws its own Color, exactly as it always has")
+TEST_CASE("a Part with no material draws its Color override, exactly as BasePart.Color always drew")
 {
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::InstanceId id = fixture.world.create(fixture.partClass);
-    (void)fixture.world.setParent(id, workspace);
-    fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
-    fixture.world.parts().find(id)->color = core::Color3{0.25f, 0.5f, 0.75f};
+    const core::InstanceId id = blockAt(fixture, workspace);
+    setColorOverride(fixture.world, id, core::Color3{0.25f, 0.5f, 0.75f});
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
@@ -938,60 +980,70 @@ TEST_CASE("a Part with no material draws its own Color, exactly as it always has
     render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
 
     REQUIRE(snapshot.materials.size() == 1);
-    // White base times the colour IS the colour, which is the identity this
-    // whole design rests on.
+    // The default's white times the colour IS the colour, which is what makes
+    // every scene written before ADR 0090 draw the same pixels.
     CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.25f));
     CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.5f));
     CHECK(nearF(snapshot.materials[0].uniforms.baseColor[2], 0.75f));
+    CHECK(nearF(snapshot.materials[0].uniforms.metallicRoughnessNormalCutoff[1], 0.7f));
 }
 
-TEST_CASE("a Material instance is tinted by the part's Color")
+TEST_CASE("a part wearing a material draws it as authored, and a declared override replaces one value")
 {
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::InstanceId material = halfGreyMaterial(fixture);
-    const core::InstanceId id = fixture.world.create(fixture.partClass);
-    (void)fixture.world.setParent(id, workspace);
-    fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
-    fixture.world.parts().find(id)->material = material;
+    putHalfGrey(fixture);
+    const core::InstanceId id = blockAt(fixture, workspace);
+    wear(fixture, id, HalfGrey);
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
     render::RenderWorld snapshot;
 
-    SUBCASE("a white part shows the material exactly as authored")
+    SUBCASE("worn as authored")
     {
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         REQUIRE(snapshot.materials.size() == 1);
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.5f));
         CHECK(nearF(snapshot.materials[0].uniforms.emissive[1], 0.8f));
-        // And its own metalness and roughness came with it, rather than the
-        // dielectric defaults an untextured part gets.
+        // Its own metalness and roughness, rather than the dielectric defaults
+        // an untextured part gets.
         CHECK(nearF(snapshot.materials[0].uniforms.metallicRoughnessNormalCutoff[0], 1.0f));
         CHECK(nearF(snapshot.materials[0].uniforms.metallicRoughnessNormalCutoff[1], 0.2f));
     }
 
-    SUBCASE("a coloured part multiplies it")
+    SUBCASE("a declared Color override replaces the colour, and only the colour")
     {
-        fixture.world.parts().find(id)->color = core::Color3{1.0f, 0.5f, 0.0f};
+        setColorOverride(fixture.world, id, core::Color3{1.0f, 0.5f, 0.0f});
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         REQUIRE(snapshot.materials.size() == 1);
-        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.5f));
-        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.25f));
+        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 1.0f));
+        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.5f));
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[2], 0.0f));
-        // The glow is tinted too: a red lamp made from a white glowing material
-        // is what somebody expects `Color` to do.
-        CHECK(nearF(snapshot.materials[0].uniforms.emissive[1], 0.4f));
+        // An override is the value, not a multiplier: the glow is the
+        // material's, because the material did not let the part change it.
+        CHECK(nearF(snapshot.materials[0].uniforms.emissive[1], 0.8f));
+    }
+
+    SUBCASE("an override the material does not declare is kept and ignored")
+    {
+        putHalfGrey(fixture, 0);
+        setColorOverride(fixture.world, id, core::Color3{1.0f, 0.0f, 0.0f});
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
+                        snapshot);
+        REQUIRE(snapshot.materials.size() == 1);
+        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.5f));
+        CHECK(fixture.world.parts().find(id)->materialParameters.has(asset::MaterialField::Color));
     }
 
     SUBCASE("a material whose maps have not loaded still draws its numbers")
     {
-        fixture.world.materials().find(material)->colorMap = fixture.atoms.intern("asset://t.png");
+        putHalfGrey(fixture, asset::fieldBit(asset::MaterialField::Color), "asset://t.png");
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot, nullptr, {}, nullptr);
         REQUIRE(snapshot.materials.size() == 1);
@@ -1002,23 +1054,48 @@ TEST_CASE("a Material instance is tinted by the part's Color")
     }
 }
 
-TEST_CASE("two parts differing only in tint are two bind sets")
+TEST_CASE("a material's Transparency fades the draw and puts it in the blended pass")
 {
-    // The dedupe key has to carry the part's colour and its material, or the
-    // second part draws in the first one's colour.
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::InstanceId material = halfGreyMaterial(fixture);
+    asset::MaterialAsset glass;
+    glass.properties.transparency = 0.5f;
+    glass.written = asset::AllMaterialFields;
+    fixture.materials.put("asset://materials/glass.material.json", glass);
+    fixture.world.setMaterialLibrary(&fixture.materials);
+    const core::InstanceId id = blockAt(fixture, workspace);
+    wear(fixture, id, "asset://materials/glass.material.json");
+
+    render::MeshLibrary meshes;
+    registerBlock(fixture, meshes);
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
+
+    REQUIRE(snapshot.draws.size() == 1);
+    CHECK(snapshot.draws[0].transparent);
+    CHECK(nearly(snapshot.draws[0].alpha, 0.5f));
+    // In the draw, not twice: the block's own alpha stays one.
+    CHECK(nearF(snapshot.materials[0].uniforms.baseColor[3], 1.0f));
+}
+
+TEST_CASE("two parts differing only in an override are two bind sets")
+{
+    // The dedupe key has to carry what reaches the block, or the second part
+    // draws in the first one's colour.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    putHalfGrey(fixture);
     for (int index = 0; index < 2; ++index) {
-        const core::InstanceId id = fixture.world.create(fixture.partClass);
-        (void)fixture.world.setParent(id, workspace);
-        fixture.world.parts().find(id)->cframe.position = core::DVec3{static_cast<core::f64>(index), 0.0, -10.0};
-        fixture.world.parts().find(id)->material = material;
-        fixture.world.parts().find(id)->color =
-            index == 0 ? core::Color3{1.0f, 1.0f, 1.0f} : core::Color3{1.0f, 0.0f, 0.0f};
+        const core::InstanceId id = blockAt(fixture, workspace, static_cast<core::f64>(index));
+        wear(fixture, id, HalfGrey);
+        if (index == 1)
+            setColorOverride(fixture.world, id, core::Color3{1.0f, 0.0f, 0.0f});
     }
 
     render::MeshLibrary meshes;
@@ -1031,50 +1108,46 @@ TEST_CASE("two parts differing only in tint are two bind sets")
     CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.5f));
     CHECK(nearF(snapshot.materials[1].uniforms.baseColor[1], 0.0f));
 
-    // And two parts that agree on both ARE one bind set, which is the half of
-    // the rule that makes a wall of a hundred bricks one material.
-    fixture.world.parts().forEach(
-        [&](core::InstanceId id, scene::PartComponent&) { fixture.world.parts().find(id)->color = core::Color3{}; });
+    // And two parts that agree ARE one bind set, which is the half of the rule
+    // that makes a wall of a hundred bricks one material. An override equal to
+    // the material's own value is the same look as none.
+    fixture.world.parts().forEach([&](core::InstanceId id, scene::PartComponent&) {
+        setColorOverride(fixture.world, id, core::Color3{0.5f, 0.5f, 0.5f});
+    });
     render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
     CHECK(snapshot.materials.size() == 1);
 }
 
-TEST_CASE("a Material instance actually uses the maps it was given")
+TEST_CASE("a material actually uses the maps it was given")
 {
-    // **The case whose absence let a whole feature be dead.** Every material
-    // test above checks a NUMBER -- a base colour, a tint, a metalness -- and a
-    // number arrives through the uniforms whether or not the texture flags say
-    // anything. So `materialOf` could assign four handles, leave all four flags
-    // at zero, and pass every one of them, while the shader multiplied each
-    // sample by zero and drew the factor alone.
-    //
-    // From the outside that is a material that ignores its diffuse map, which is
-    // exactly how it was reported.
+    // **The case whose absence let a whole feature be dead.** A number arrives
+    // through the uniforms whether or not the texture flags say anything, so a
+    // material could bind four handles, leave all four flags at zero, and pass
+    // every test that checked a number -- while the shader multiplied each
+    // sample by zero. From the outside that is a material that ignores its
+    // diffuse map, which is exactly how it was reported.
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::NameAtom diffuse = fixture.atoms.intern("asset://textures/wood.png");
-    const core::NameAtom rough = fixture.atoms.intern("asset://textures/wood_arm.png");
+    asset::MaterialAsset wood;
+    wood.properties.colorMap = "asset://textures/wood.png";
+    wood.properties.metallicRoughnessMap = "asset://textures/wood_arm.png";
+    wood.written = asset::AllMaterialFields;
+    fixture.materials.put("asset://materials/wood.material.json", wood);
+    fixture.world.setMaterialLibrary(&fixture.materials);
 
-    const core::InstanceId material = fixture.world.create(fixture.instanceClass);
-    scene::MaterialComponent block;
-    block.colorMap = diffuse;
-    block.metallicRoughnessMap = rough;
-    fixture.world.materials().add(material, block);
-
-    const core::InstanceId id = fixture.world.create(fixture.partClass);
-    (void)fixture.world.setParent(id, workspace);
-    fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
-    fixture.world.parts().find(id)->material = material;
+    const core::InstanceId id = blockAt(fixture, workspace);
+    wear(fixture, id, "asset://materials/wood.material.json");
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
 
+    // Keyed by the atom `MeshLoader::syncTextures` interns each map as.
     render::TextureLibrary textures;
-    textures.set(diffuse, rhi::TextureHandle{7});
-    textures.set(rough, rhi::TextureHandle{8});
+    textures.set(fixture.atoms.intern("asset://textures/wood.png"), rhi::TextureHandle{7});
+    textures.set(fixture.atoms.intern("asset://textures/wood_arm.png"), rhi::TextureHandle{8});
 
     render::RenderWorld snapshot;
     render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot,
@@ -1082,16 +1155,11 @@ TEST_CASE("a Material instance actually uses the maps it was given")
 
     REQUIRE(snapshot.materials.size() == 1);
     const render::RenderMaterial& drawn = snapshot.materials[0];
-
-    // Bound...
+    // Bound, and switched on -- the half that was missing.
     CHECK(drawn.baseColor.valid());
     CHECK(drawn.metallicRoughness.valid());
-    // ...and switched on, which is the half that was missing. The shader reads
-    // `lerp(factor, sample, flag)`, so a zero here is a bound texture nothing
-    // looks at.
     CHECK(nearF(drawn.uniforms.textureFlags[0], 1.0f));
     CHECK(nearF(drawn.uniforms.textureFlags[2], 1.0f));
-
     // And the two the material did not name stay off, because a stand-in
     // sampled at full strength would tint every surface by a 1x1 white.
     CHECK_FALSE(drawn.normal.valid());
@@ -1101,23 +1169,14 @@ TEST_CASE("a Material instance actually uses the maps it was given")
 
 TEST_CASE("a map the library has not loaded yet is off, not bound")
 {
-    // A texture still being read draws untextured rather than not at all, and
-    // "untextured" has to mean the flag is down: an invalid handle with the flag
-    // up would sample whatever stand-in the renderer binds and call it the map.
     Fixture fixture;
     fixture.registerRenderClasses();
     const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
     (void)fixture.cameraLookingDownNegativeZ(workspace);
 
-    const core::InstanceId material = fixture.world.create(fixture.instanceClass);
-    scene::MaterialComponent block;
-    block.colorMap = fixture.atoms.intern("asset://textures/not-loaded-yet.png");
-    fixture.world.materials().add(material, block);
-
-    const core::InstanceId id = fixture.world.create(fixture.partClass);
-    (void)fixture.world.setParent(id, workspace);
-    fixture.world.parts().find(id)->cframe.position = core::DVec3{0.0, 0.0, -10.0};
-    fixture.world.parts().find(id)->material = material;
+    putHalfGrey(fixture, 0, "asset://textures/not-loaded-yet.png");
+    const core::InstanceId id = blockAt(fixture, workspace);
+    wear(fixture, id, HalfGrey);
 
     render::MeshLibrary meshes;
     registerBlock(fixture, meshes);
@@ -1157,20 +1216,30 @@ TEST_CASE("a MeshPart's material replaces the block its file described")
 
     render::RenderWorld snapshot;
 
-    SUBCASE("with no material it keeps the file's block")
+    SUBCASE("wearing nothing it keeps the file's block")
     {
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         REQUIRE(snapshot.materials.size() == 1);
         // Red, from the file. This is what stops every existing mesh scene going
-        // white the moment this property exists.
+        // white the moment materials are assets.
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 1.0f));
         CHECK(nearF(snapshot.materials[0].uniforms.baseColor[1], 0.0f));
     }
 
-    SUBCASE("with one it replaces it whole")
+    SUBCASE("wearing nothing, a Color override tints the file's block, as BasePart.Color did")
     {
-        fixture.world.parts().find(id)->material = halfGreyMaterial(fixture);
+        setColorOverride(fixture.world, id, core::Color3{0.5f, 1.0f, 1.0f});
+        render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
+                        snapshot);
+        REQUIRE(snapshot.materials.size() == 1);
+        CHECK(nearF(snapshot.materials[0].uniforms.baseColor[0], 0.5f));
+    }
+
+    SUBCASE("wearing one it replaces it whole")
+    {
+        putHalfGrey(fixture);
+        wear(fixture, id, HalfGrey);
         render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr,
                         snapshot);
         REQUIRE(snapshot.materials.size() == 1);

@@ -67,7 +67,7 @@ local pane = Instance.new("MeshPart")
 pane.Name = "Pane"
 pane.MeshContent = "asset://models/pane.gltf" :: Content
 pane.CFrame = CFrame.new(-1.6, 1.4, 2.9)
-pane.Transparency = 0.45
+pane:SetMaterialParameter("Transparency", 0.45)
 pane.Anchored = true
 pane.Parent = workspace
 

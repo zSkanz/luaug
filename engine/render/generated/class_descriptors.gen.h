@@ -84,36 +84,6 @@ inline constexpr scene::EnumId CameraProjectionEnumId = 30;
 namespace native
 {
 
-// Material
-scene::Value getMaterialColor(const scene::World& world, core::InstanceId id);
-bool setMaterialColor(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialTransparency(const scene::World& world, core::InstanceId id);
-bool setMaterialTransparency(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialColorMap(const scene::World& world, core::InstanceId id);
-bool setMaterialColorMap(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialNormalMap(const scene::World& world, core::InstanceId id);
-bool setMaterialNormalMap(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialMetallicRoughnessMap(const scene::World& world, core::InstanceId id);
-bool setMaterialMetallicRoughnessMap(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialEmissiveMap(const scene::World& world, core::InstanceId id);
-bool setMaterialEmissiveMap(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialMetalness(const scene::World& world, core::InstanceId id);
-bool setMaterialMetalness(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialRoughness(const scene::World& world, core::InstanceId id);
-bool setMaterialRoughness(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialEmissive(const scene::World& world, core::InstanceId id);
-bool setMaterialEmissive(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialNormalScale(const scene::World& world, core::InstanceId id);
-bool setMaterialNormalScale(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialAlphaMode(const scene::World& world, core::InstanceId id);
-bool setMaterialAlphaMode(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialAlphaCutoff(const scene::World& world, core::InstanceId id);
-bool setMaterialAlphaCutoff(scene::World& world, core::InstanceId id, const scene::Value& value);
-scene::Value getMaterialDoubleSided(const scene::World& world, core::InstanceId id);
-bool setMaterialDoubleSided(scene::World& world, core::InstanceId id, const scene::Value& value);
-void attachMaterialComponents(scene::World& world, core::InstanceId id);
-void detachMaterialComponents(scene::World& world, core::InstanceId id);
-
 // MeshPart
 scene::Value getMeshPartMeshContent(const scene::World& world, core::InstanceId id);
 bool setMeshPartMeshContent(scene::World& world, core::InstanceId id, const scene::Value& value);

@@ -42,7 +42,10 @@ for i = 1, 24 do
     part.Name = `Part{i}`
     part.Size = vector.create(1 + Rng:NextNumber(), 1 + Rng:NextNumber(), 1 + Rng:NextNumber())
     part.CFrame = CFrame.new(vector.create(Rng:NextNumber(-8, 8), Rng:NextNumber(0, 4), Rng:NextNumber(-8, 8)))
-    part.Color = Color3.fromRGB(Rng:NextInteger(0, 255), Rng:NextInteger(0, 255), Rng:NextInteger(0, 255))
+    part:SetMaterialParameter(
+        "Color",
+        Color3.fromRGB(Rng:NextInteger(0, 255), Rng:NextInteger(0, 255), Rng:NextInteger(0, 255))
+    )
     -- Anchored, from M5 on, and for the same reason `churn10k` is: this
     -- scenario is about TREE and PROPERTY churn, and its committed trace is
     -- compared against a build made by a different compiler on CI. A falling

@@ -33,7 +33,10 @@ for group = 1, 10 do
         part.Name = `Part{index}`
         part.Size = vector.create(1, 1, 1)
         part.CFrame = CFrame.new(vector.create(Rng:NextNumber(-40, 40), Rng:NextNumber(0, 10), Rng:NextNumber(-40, 40)))
-        part.Color = Color3.fromRGB(Rng:NextInteger(0, 255), Rng:NextInteger(0, 255), Rng:NextInteger(0, 255))
+        part:SetMaterialParameter(
+            "Color",
+            Color3.fromRGB(Rng:NextInteger(0, 255), Rng:NextInteger(0, 255), Rng:NextInteger(0, 255))
+        )
         part.Parent = model
         table.insert(Parts, part)
     end

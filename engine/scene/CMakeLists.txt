@@ -72,6 +72,7 @@ luaug_add_module_tests(scene
         tests/enum_registry_tests.cpp
         tests/world_tests.cpp
         tests/world_snapshot_tests.cpp
+        tests/material_world_tests.cpp
         tests/scene_file_tests.cpp
         tests/partition_tests.cpp
         tests/physics_sync_tests.cpp

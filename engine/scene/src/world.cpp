@@ -30,6 +30,10 @@ namespace {
         return true;
     case ValueType::Instance:
     case ValueType::EnumItem:
+    // A surface is something a part wears, not a fact to hang on an instance:
+    // an attribute holding a clone would keep it alive where nothing draws it.
+    case ValueType::Material:
+    case ValueType::MaterialParameters:
         return false;
     }
     return false;
@@ -133,6 +137,9 @@ bool World::destroy(core::InstanceId id)
 
 void World::retireDestroyed()
 {
+    // A part that wore a clone may have been its last wearer.
+    if (!m_pendingRetire.empty() && !m_materialClones.empty())
+        m_sweepMaterials = true;
     for (const core::InstanceId id : m_pendingRetire) {
         const InstanceRecord* record = m_instances.find(id);
         if (record == nullptr)
@@ -155,6 +162,7 @@ void World::retireDestroyed()
         m_instances.erase(id);
     }
     m_pendingRetire.clear();
+    sweepMaterialClones();
 }
 
 bool World::alive(core::InstanceId id) const noexcept
@@ -937,6 +945,104 @@ void World::unindexName(core::InstanceId parentId, core::InstanceId childId)
     }
 
     child->nextSameName = core::InstanceId{};
+}
+
+// --- Materials (ADR 0090) ---------------------------------------------------
+
+const asset::ResolvedMaterial& World::resolveMaterialAsset(core::NameAtom urn) const
+{
+    if (!urn.valid() || m_materialLibrary == nullptr)
+        return asset::defaultMaterial();
+    return m_materialLibrary->resolve(m_atoms.text(urn));
+}
+
+asset::ResolvedMaterial World::resolveMaterial(core::NameAtom urn, u32 clone) const
+{
+    asset::ResolvedMaterial out = resolveMaterialAsset(urn);
+    if (const MaterialClone* copy = clone != 0 ? materialClone(clone) : nullptr; copy != nullptr) {
+        for (usize index = 0; index < asset::MaterialFieldCount; ++index) {
+            const auto field = static_cast<asset::MaterialField>(index);
+            if ((copy->set & asset::fieldBit(field)) != 0)
+                asset::copyMaterialField(field, copy->values, out.properties);
+        }
+    }
+    return out;
+}
+
+asset::ResolvedMaterial World::surfaceOf(const PartComponent& part) const
+{
+    asset::ResolvedMaterial out = resolveMaterial(part.material, part.materialClone);
+    asset::applyOverrides(part.materialParameters, out.instanceParameters, out.properties);
+    return out;
+}
+
+u32 World::cloneMaterial(core::NameAtom source, asset::MaterialFieldMask set, const asset::MaterialProperties& values)
+{
+    const u32 id = ++m_lastMaterialClone;
+    m_materialClones.emplace(id, MaterialClone{source, set, values});
+    // Nothing holds it yet. The caller that made it takes a hold at once; if
+    // it does not, the next sweep is right to drop it.
+    m_sweepMaterials = true;
+    ++m_mutations;
+    return id;
+}
+
+const MaterialClone* World::materialClone(u32 id) const noexcept
+{
+    const auto found = m_materialClones.find(id);
+    return found == m_materialClones.end() ? nullptr : &found->second;
+}
+
+MaterialClone* World::writeMaterialClone(u32 id) noexcept
+{
+    const auto found = m_materialClones.find(id);
+    if (found == m_materialClones.end())
+        return nullptr;
+    ++m_mutations;
+    return &found->second;
+}
+
+void World::holdMaterialClone(u32 id)
+{
+    if (id != 0)
+        ++m_materialHolds[id];
+}
+
+void World::releaseMaterialClone(u32 id)
+{
+    const auto found = m_materialHolds.find(id);
+    if (found == m_materialHolds.end())
+        return;
+    if (--found->second == 0) {
+        m_materialHolds.erase(found);
+        m_sweepMaterials = true;
+    }
+}
+
+void World::sweepMaterialClones()
+{
+    if (!m_sweepMaterials)
+        return;
+    m_sweepMaterials = false;
+    if (m_materialClones.empty())
+        return;
+
+    // **Held by a script or worn by a part**, and anything else is gone. The
+    // parts are asked rather than counted, so no write path -- a property set,
+    // a restore, a replica applying a snapshot -- has to remember to count.
+    std::vector<u32> worn;
+    m_parts.forEach([&](core::InstanceId, const PartComponent& part) {
+        if (part.materialClone != 0)
+            worn.push_back(part.materialClone);
+    });
+    std::sort(worn.begin(), worn.end());
+    for (auto at = m_materialClones.begin(); at != m_materialClones.end();) {
+        const bool held = m_materialHolds.contains(at->first);
+        if (!held && !std::binary_search(worn.begin(), worn.end(), at->first))
+            at = m_materialClones.erase(at);
+        else
+            ++at;
+    }
 }
 
 } // namespace luaug::scene

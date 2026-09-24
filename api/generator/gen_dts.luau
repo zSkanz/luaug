@@ -280,6 +280,11 @@ local Lines: { string } = {
     "",
     "export type Content = string",
     "",
+    -- A part's overrides of its material (ADR 0090), keyed by parameter name.
+    -- A table rather than an extern type, because it is read and written as
+    -- one: a fresh table out, a table in.
+    "export type MaterialParameters = { [string]: Color3 | number }",
+    "",
     -- `Signal` and `Connection` are hand-shaped here rather than emitted from
     -- their IDL entries, for a reason the pin forces: an `extern type` cannot
     -- take type parameters (Parser.cpp:1701 carries upstream's TODO for it), so

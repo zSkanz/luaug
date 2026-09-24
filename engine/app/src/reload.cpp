@@ -42,6 +42,11 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     freshOptions.preserved = &preserved;
 
     auto fresh = std::make_unique<WorldHost>();
+    // What the outgoing host read content through, before `boot`: a script's
+    // file scope may load a material, and the new world must mean by a URN
+    // what the old one did.
+    fresh->setContentMounts(host->contentMounts());
+    fresh->setMaterialLibrary(host->lentMaterials());
     if (std::optional<core::EngineError> error = fresh->boot(freshOptions); error.has_value()) {
         report.error = std::move(error);
         report.spanMs = elapsedMs(started);

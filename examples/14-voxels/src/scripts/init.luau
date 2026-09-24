@@ -102,7 +102,7 @@ local crate = Instance.new("Part")
 crate.Name = "Crate"
 crate.Size = vector.create(1, 1, 1)
 crate.Position = vector.create(0.5, 20, 0.5)
-crate.Color = Color3.fromRGB(200, 120, 60)
+crate:SetMaterialParameter("Color", Color3.fromRGB(200, 120, 60))
 crate.Parent = Workspace
 
 -- **Mining, as a pickaxe does it**: cast a ray, break the first block it enters.

@@ -30,7 +30,7 @@ local function block(name: string, at: vector, size: vector, color: Color3): Par
     part.Anchored = true
     part.Size = size
     part.Position = at
-    part.Color = color
+    part:SetMaterialParameter("Color", color)
     part.Parent = Workspace
     return part
 end

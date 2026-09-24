@@ -354,7 +354,7 @@ bool MeshLoader::textureInFlight(core::NameAtom urn) const noexcept
     return false;
 }
 
-core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::World& world,
+core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, scene::World& world,
                                    TextureLibrary& library)
 {
     // Completions first, so a read that finished during the frame is uploaded in
@@ -466,12 +466,29 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, con
         ++loaded;
     };
 
-    world.materials().forEach([&](core::InstanceId id, const scene::MaterialComponent& material) {
-        (void)id;
-        load(material.colorMap, true);
-        load(material.normalMap, false);
-        load(material.metallicRoughnessMap, false);
-        load(material.emissiveMap, true);
+    // **The maps of every material a part wears** (ADR 0090), each material
+    // resolved once however many parts wear it. A map is interned here because
+    // this is where it is keyed: the extraction finds it by the same atom.
+    // Colour maps are sRGB and data maps are linear -- `ColorMap` and
+    // `EmissiveMap` against `NormalMap` and `MetallicRoughnessMap`, the rule
+    // `assetc`'s `kMaterialMaps` states for the compiler.
+    std::vector<std::pair<core::NameAtom, u32>> visited;
+    world.parts().forEach([&](core::InstanceId, const scene::PartComponent& part) {
+        if (!part.material.valid())
+            return;
+        const std::pair<core::NameAtom, u32> key{part.material, part.materialClone};
+        if (std::find(visited.begin(), visited.end(), key) != visited.end())
+            return;
+        visited.push_back(key);
+        const asset::ResolvedMaterial material = world.resolveMaterial(part.material, part.materialClone);
+        const auto map = [&](const std::string& urn, bool srgb) {
+            if (!urn.empty())
+                load(world.atoms().intern(urn), srgb);
+        };
+        map(material.properties.colorMap, true);
+        map(material.properties.normalMap, false);
+        map(material.properties.metallicRoughnessMap, false);
+        map(material.properties.emissiveMap, true);
     });
     // Decal images (F2): colours, like base colours.
     world.decals().forEach([&](core::InstanceId, const scene::DecalComponent& decal) { load(decal.texture, true); });

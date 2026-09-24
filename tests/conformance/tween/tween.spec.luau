@@ -120,24 +120,24 @@ describe("Tween", function()
     end)
 
     it("is created stopped and writes nothing until it is played", function()
-        local tween = TweenService:Create(part, TweenInfo.new(1), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(1), { Restitution = 1 })
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Begin)
         step(10)
-        expect(part.Transparency):ToBe(0)
+        expect(part.Restitution):ToBe(0)
     end)
 
     it("reaches its goal EXACTLY, not approximately", function()
         -- A tween that stopped at 0.9999 of the way would leave a property
         -- somebody has to explain.
-        local tween = TweenService:Create(part, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { Restitution = 1 })
         tween:Play()
         step(12)
-        expect(part.Transparency):ToBe(1)
+        expect(part.Restitution):ToBe(1)
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Completed)
     end)
 
     it("fires Completed with the state that ended it", function()
-        local tween = TweenService:Create(part, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { Restitution = 1 })
         local seen: EnumItem = nil :: any
         tween.Completed:Connect(function(state: EnumItem)
             seen = state
@@ -148,70 +148,70 @@ describe("Tween", function()
     end)
 
     it("moves through the values in between", function()
-        local tween = TweenService:Create(part, TweenInfo.new(1, Enum.EasingStyle.Linear), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(1, Enum.EasingStyle.Linear), { Restitution = 1 })
         tween:Play()
         step(15)
         -- A quarter of a linear second, give or take the tick the check lands
         -- on. A window rather than a moment, which is M5's lesson about
         -- checking a moving thing.
-        expect(part.Transparency > 0.15):ToBe(true)
-        expect(part.Transparency < 0.4):ToBe(true)
+        expect(part.Restitution > 0.15):ToBe(true)
+        expect(part.Restitution < 0.4):ToBe(true)
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Playing)
     end)
 
     it("holds the property still during its delay", function()
         local info = TweenInfo.new(0.1, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, 0.2)
-        local tween = TweenService:Create(part, info, { Transparency = 1 })
+        local tween = TweenService:Create(part, info, { Restitution = 1 })
         tween:Play()
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Delayed)
         step(6)
-        expect(part.Transparency):ToBe(0)
+        expect(part.Restitution):ToBe(0)
         step(12)
-        expect(part.Transparency):ToBe(1)
+        expect(part.Restitution):ToBe(1)
     end)
 
     it("pauses where it is and resumes from there", function()
-        local tween = TweenService:Create(part, TweenInfo.new(1, Enum.EasingStyle.Linear), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(1, Enum.EasingStyle.Linear), { Restitution = 1 })
         tween:Play()
         step(20)
         tween:Pause()
-        local paused = part.Transparency
+        local paused = part.Restitution
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Paused)
         step(20)
-        expect(part.Transparency):ToBe(paused)
+        expect(part.Restitution):ToBe(paused)
         tween:Play()
         step(10)
-        expect(part.Transparency > paused):ToBe(true)
+        expect(part.Restitution > paused):ToBe(true)
     end)
 
     it("cancels without undoing", function()
         -- Cancelling is not undoing. A tween that snapped back would be
         -- impossible to interrupt gracefully, which is the one thing Cancel is
         -- for.
-        local tween = TweenService:Create(part, TweenInfo.new(1, Enum.EasingStyle.Linear), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(1, Enum.EasingStyle.Linear), { Restitution = 1 })
         tween:Play()
         step(20)
-        local reached = part.Transparency
+        local reached = part.Restitution
         expect(reached > 0):ToBe(true)
         tween:Cancel()
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Cancelled)
         step(20)
-        expect(part.Transparency):ToBe(reached)
+        expect(part.Restitution):ToBe(reached)
     end)
 
     it("returns to its start when it reverses", function()
         local info = TweenInfo.new(0.1, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, true)
-        local tween = TweenService:Create(part, info, { Transparency = 1 })
+        local tween = TweenService:Create(part, info, { Restitution = 1 })
         tween:Play()
         step(20)
-        expect(part.Transparency):ToBeCloseTo(0, 1e-5)
+        expect(part.Restitution):ToBeCloseTo(0, 1e-5)
         expect(tween.PlaybackState):ToBe(Enum.PlaybackState.Completed)
     end)
 
     it("reports the instance it animates, and nil once that is destroyed", function()
         local doomed = Instance.new("Part")
         doomed.Parent = workspace
-        local tween = TweenService:Create(doomed, TweenInfo.new(1), { Transparency = 1 })
+        local tween = TweenService:Create(doomed, TweenInfo.new(1), { Restitution = 1 })
         expect(tween.Instance):ToBe(doomed)
         tween:Play()
         doomed:Destroy()
@@ -224,14 +224,14 @@ describe("Tween", function()
 
     it("writes through the same path an assignment does", function()
         -- The property-changed signal fires for a tweened write exactly as it
-        -- does for `part.Transparency = x`. That is the point of not having a
+        -- does for `part.Restitution = x`. That is the point of not having a
         -- second write route: a tweened value and an assigned one MEAN the same
         -- thing.
         local fired = 0
-        part:GetPropertyChangedSignal("Transparency"):Connect(function()
+        part:GetPropertyChangedSignal("Restitution"):Connect(function()
             fired += 1
         end)
-        local tween = TweenService:Create(part, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { Transparency = 1 })
+        local tween = TweenService:Create(part, TweenInfo.new(0.1, Enum.EasingStyle.Linear), { Restitution = 1 })
         tween:Play()
         step(10)
         expect(fired > 0):ToBe(true)
@@ -263,7 +263,7 @@ describe("TweenService:Create", function()
         end):ToThrow("scene.err.read_only_property")
 
         expect(function()
-            return TweenService:Create(part, TweenInfo.new(), { Transparency = "half" })
+            return TweenService:Create(part, TweenInfo.new(), { Restitution = "half" })
         end):ToThrow()
     end)
 
@@ -278,16 +278,28 @@ describe("TweenService:Create", function()
 
     it("tweens every interpolable type the surface has", function()
         local tween = TweenService:Create(part, TweenInfo.new(0.05, Enum.EasingStyle.Linear), {
-            Transparency = 1,
+            Restitution = 1,
             Size = vector.create(4, 4, 4),
-            Color = Color3.new(1, 0, 0),
             CFrame = CFrame.new(10, 20, 30),
         })
+        -- A part has no colour of its own (ADR 0090); a light does.
+        local light = Instance.new("PointLight")
+        light.Parent = part
+        local glow = TweenService:Create(light, TweenInfo.new(0.05, Enum.EasingStyle.Linear), {
+            Color = Color3.new(1, 0, 0),
+        })
         tween:Play()
+        glow:Play()
         step(8)
-        expect(part.Transparency):ToBe(1)
+        expect(part.Restitution):ToBe(1)
         expect(part.Size):ToBe(vector.create(4, 4, 4))
-        expect(part.Color):ToBe(Color3.new(1, 0, 0))
+        expect(light.Color):ToBe(Color3.new(1, 0, 0))
         expect(part.CFrame.Position):ToBe(vector.create(10, 20, 30))
+    end)
+
+    it("refuses a material and its parameters, which have no halfway as one value", function()
+        expect(function()
+            return TweenService:Create(part, TweenInfo.new(), { MaterialParameters = {} })
+        end):ToThrow("script.err.tween_goal_type")
     end)
 end)

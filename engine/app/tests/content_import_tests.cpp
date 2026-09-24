@@ -13,6 +13,7 @@
 // rather than an asserted fact -- so it is asserted here, per URN and per blob.
 #include "luaug/app/content_import.h"
 #include "luaug/asset/content.h"
+#include "luaug/asset/material.h"
 #include "luaug/core/i18n.h"
 #include "luaug/platform/file.h"
 #include "luaug/render/mesh_cache.h"
@@ -94,7 +95,6 @@ struct Registries
     scene::ClassRegistry classes;
     scene::EnumRegistry enums;
     scene::ClassId meshPartClass = scene::InvalidClass;
-    scene::ClassId materialClass = scene::InvalidClass;
     scene::ClassId workspaceClass = scene::InvalidClass;
 
     Registries()
@@ -106,13 +106,6 @@ struct Registries
         workspaceClass = classes.registerClass({
             .name = atoms.intern("Workspace"),
             .defaultName = atoms.intern("Workspace"),
-        });
-        materialClass = classes.registerClass({
-            .name = atoms.intern("Material"),
-            .defaultName = atoms.intern("Material"),
-            .attachComponents = [](scene::World& w,
-                                   core::InstanceId id) { w.materials().add(id, scene::MaterialComponent{}); },
-            .detachComponents = [](scene::World& w, core::InstanceId id) { w.materials().remove(id); },
         });
     }
 };
@@ -200,10 +193,15 @@ TEST_CASE("the loader draws a compiled mesh and a compiled map, with no source f
     world.meshParts().add(part, meshPart);
     (void)world.setParent(part, workspace);
 
-    const core::InstanceId material = world.create(registries.materialClass);
-    scene::MaterialComponent* block = world.materials().find(material);
-    REQUIRE(block != nullptr);
-    block->colorMap = registries.atoms.intern("asset://textures/base.png");
+    // The part wears a material that names the map (ADR 0090); the loader
+    // loads the maps of what the parts wear.
+    asset::MaterialLibrary materials;
+    asset::MaterialAsset base;
+    base.properties.colorMap = "asset://textures/base.png";
+    base.written = asset::AllMaterialFields;
+    materials.put("asset://materials/base.material.json", base);
+    world.setMaterialLibrary(&materials);
+    world.parts().find(part)->material = registries.atoms.intern("asset://materials/base.material.json");
 
     rhi::DeviceResult device = rhi::createNullDevice({.backend = rhi::BackendId::Null});
     REQUIRE(device != nullptr);
@@ -225,7 +223,7 @@ TEST_CASE("the loader draws a compiled mesh and a compiled map, with no source f
     // being produced before this and read by nobody: `syncTextures` went to the
     // raw PNG beside it every time.
     CHECK(loader.syncTextures(*device, *cmd, world, textures) == 1u);
-    CHECK(textures.find(block->colorMap).valid());
+    CHECK(textures.find(registries.atoms.intern("asset://textures/base.png")).valid());
 
     loader.destroy(*device);
     cache.destroy(*device);
