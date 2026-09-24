@@ -100,7 +100,7 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0057](0057-a-script-is-an-instance-and-the-editor-edits-one-thing.md) | A script is an instance, and the editor edits one thing |
 | [0058](0058-a-script-runs-when-you-press-play.md) | A script runs when you press play, and not when you open the project |
 | [0059](0059-enabled-is-about-resumption-and-nothing-else.md) | `Enabled` is about resumption, and nothing else |
-| [0060](0060-a-material-is-an-instance-and-a-stamp-is-how-one-is-shared.md) | A material is an instance, a stamp is how one is shared, and a trace moves when the hash's inputs do |
+| [0060](0060-a-material-is-an-instance-and-a-stamp-is-how-one-is-shared.md) | ~~A material is an instance, a stamp is how one is shared~~ -- superseded by 0090; a trace moves when the hash's inputs do, and that part stands |
 | [0061](0061-a-child-is-not-a-member-and-the-refusal-says-so.md) | A child is not a member, and the refusal says so in three places |
 | [0062](0062-a-changed-asset-reloads-itself-and-eval-stays-reserved.md) | A changed asset reloads itself, and `eval` stays reserved |
 | [0063](0063-https-stays-refused-and-tls-comes-from-the-platform.md) | `https://` stays refused, and when TLS arrives it comes from the platform |
@@ -129,3 +129,4 @@ What becomes easier/harder; costs accepted; follow-ups.
 | [0087](0087-a-large-terrain-is-a-folder-of-cells-and-the-editor-pages-it.md) | A terrain of 256 cells or more is saved as a folder of cells beside its scene; the editor streams it around its camera, keeps unsaved edits, and a save writes only the cells that changed |
 | [0088](0088-2d-on-the-wire.md) | `Part2D` replicates on protocol 11, animation state included, a `Vector2` as a `Vector3` with a zero z; a replica drives it kinematically; `Tilemap2D` stays off the wire, as `Terrain` does |
 | [0089](0089-navigation-is-a-tiled-navmesh-built-where-it-is-asked-for.md) | `NavigationService` builds Recast tiles where queries go -- rebuilt when a fingerprint of what stands in them changes -- for one agent; walkable is anchored, colliding parts and terrain; paths are waypoints and a completeness flag |
+| [0090](0090-a-material-is-an-asset-a-part-wears-one-and-a-script-clones-one.md) | A material is a `.material.json` asset in `content/` and never an instance; a variant has a parent; a part wears one and has no `Color` or `Transparency` of its own, only the parameters its material declares; at runtime an asset is read-only and `Clone()` makes the copy a script changes (supersedes 0060) |

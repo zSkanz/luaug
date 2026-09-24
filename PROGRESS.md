@@ -305,6 +305,13 @@ What this section used to hold, resolved, for whoever remembers it:
 
 ## Decisions taken
 
+- **A material is an asset, not an instance** (the owner, 2026-09-24;
+  [ADR 0090](docs/decisions/0090-a-material-is-an-asset-a-part-wears-one-and-a-script-clones-one.md),
+  superseding 0060). `.material.json` in `content/`, variants by parent, a part
+  with no `Color` or `Transparency` of its own -- only the parameters its
+  material declares -- and `Clone()` for the copy a running script changes. It
+  is a breaking API change, so the release carrying it is a major version, and
+  tagging it is the owner's.
 - **`churn10k`'s 7.32 ms/tick is accepted** (the owner, 2026-09-24). Two
   thirds of its anchored parts are written every tick, so D031 makes them
   kinematic, and Jolt re-fits that broadphase layer every tick. That is the
@@ -324,6 +331,13 @@ navigation's crowds, links, costs, sizes and 2D; multiplayer's ownership, teams,
 a public protocol and rollback; 2D joints, sprite animation, and 2D on the wire;
 a post-processing API; the terrain's one-sided skirt. The ledger is
 [`docs/briefs/mandate-2026-09-24.md`](docs/briefs/mandate-2026-09-24.md).
+
+**Materials as assets (ADR 0090) go first**, ahead of the mandate's stages
+that have not started: it changes `BasePart`, the scene format and the wire
+schema, and the mandate's M4 (2D on the wire) and M6 (multiplayer) would
+otherwise be built against a protocol about to change. A mandate stage already
+in flight is finished first, so `main` is green when the switch happens. The
+ledger is [`docs/briefs/materials-kickoff.md`](docs/briefs/materials-kickoff.md).
 
 ## Session Log
 

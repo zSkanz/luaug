@@ -1,6 +1,8 @@
 # 0060 — A material is an instance, a stamp is how one is shared, and a trace moves when the hash's inputs do
 
-- Status: accepted
+- Status: superseded by [0090](0090-a-material-is-an-asset-a-part-wears-one-and-a-script-clones-one.md),
+  except its section *a plan states which traces it expects to move*, which
+  still holds
 - Date: 2026-08-26
 - Reverses: the material-as-asset design built during E9, which had no record of
   its own

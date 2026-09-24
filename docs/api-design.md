@@ -349,7 +349,8 @@ the count that exists.** Saying so here is cheaper than a reader finding out at
 `game:GetService`. `AssetService` was M7's Luau surface over the asset pipeline —
 `LoadModelAsync`, `PreloadAsync`, `Exists` — and the pipeline shipped without it:
 content reaches the world through a property that names it (`MeshPart.MeshContent`,
-`Material.ColorMap`), through a stamp (§2.6) and through the streaming manager, so
+`BasePart.Material`, a material asset's `ColorMap`), through a stamp (§2.6) and
+through the streaming manager, so
 nothing in v1 ever had to ask for a load. `LocalizationService` was §6's in-game
 half; the catalog format, the key discipline and the engine-side formatter all
 shipped, and nothing loads a *game's* catalog — §6 still describes the service and
@@ -396,16 +397,21 @@ Instance (abstract)
 ├─ PVInstance (abstract)       -- anything with a place in the world: PivotOffset: CFrame,
 │  │                           -- GetPivot() -> CFrame, PivotTo(cf)
 │  ├─ BasePart (abstract)      -- CFrame, Position, Orientation (degrees, YXZ), Size,
-│  │  │                        -- Anchored, CanCollide, CanQuery, Transparency, Color,
-│  │  │                        -- Material, CollisionGroup, Friction, Restitution, Density,
-│  │  │                        -- LinearVelocity/AngularVelocity (read), ApplyImpulse(v),
+│  │  │                        -- Anchored, CanCollide, CanQuery, Material,
+│  │  │                        -- MaterialParameters, CollisionGroup, Friction, Restitution,
+│  │  │                        -- Density, LinearVelocity/AngularVelocity (read),
+│  │  │                        -- ApplyImpulse(v), SetMaterialParameter(name, value),
+│  │  │                        -- GetMaterialParameter(name), ClearMaterialParameter(name),
 │  │  │                        -- Touched/TouchEnded signals
-│  │  │                        -- (`Material` was the one member of this list M5 did
-│  │  │                        --  not ship, on the rule that a type-checked no-op
-│  │  │                        --  looks more like a working API than a missing
-│  │  │                        --  member does. It ships now, and as a `Material?`
-│  │  │                        --  reference rather than the enum this line once
-│  │  │                        --  meant: `Enum.Material` does not exist)
+│  │  │                        -- (**No `Color` and no `Transparency`** -- ADR 0090. A
+│  │  │                        --  part's look is its material's, and it may override
+│  │  │                        --  only the parameters that material declares. The
+│  │  │                        --  engine default, which a part with no material
+│  │  │                        --  wears, declares Color and Transparency, so a
+│  │  │                        --  grey-box part is still tinted and faded the old way
+│  │  │                        --  through SetMaterialParameter. `Material` is a
+│  │  │                        --  `Material?` handle to an asset or a clone, and
+│  │  │                        --  `Enum.Material` does not exist)
 │  │  ├─ Part                  -- Shape: Enum.PartShape (Block/Ball/Cylinder/Capsule/Wedge)
 │  │  ├─ MeshPart              -- MeshContent: Content, CollisionFidelity: Enum.CollisionFidelity
 │  │  └─ CharacterBody         -- Jolt character controller (capsule): Move(direction: vector),
@@ -417,11 +423,6 @@ Instance (abstract)
 │  ├─ Model                    -- PrimaryPart, GetExtentsSize(), StreamingMode
 │  └─ Camera                   -- CFrame, FieldOfView, NearPlane, FarPlane, ViewportSize (read),
 │                              -- WorldToViewportPoint(), ViewportPointToRay(). No CameraType.
-├─ Material                    -- a surface: Color, Transparency, ColorMap, NormalMap,
-│                              -- MetallicRoughnessMap, Emissive/EmissiveMap, Metalness,
-│                              -- Roughness, NormalScale, AlphaMode, AlphaCutoff, DoubleSided.
-│                              -- Point a BasePart at one; BasePart.Color multiplies it, and
-│                              -- what a project keeps in content/ is a STAMP of one (§2.6)
 ├─ Attachment                  -- CFrame (relative to parent BasePart), WorldCFrame (read)
 │  └─ Bone                     -- a joint of a skinned mesh: JointName, JointIndex, Transform
 ├─ Constraint (abstract)       -- Attachment0, Attachment1, Enabled, CollideConnected
@@ -676,6 +677,7 @@ change how it falls.
 | `AnimationTrack` | The handle `AnimationPlayer:LoadAnimation` returns (§2.2). |
 | `InputObject` | The read-only snapshot `InputService`'s raw events carry (§2.1, ADR 0041): `UserInputType`, `KeyCode`, `Position`, `Delta`. A snapshot and not a live object, so holding one past its handler tells you what happened rather than what is happening. |
 | `Content` | A type alias of `string` in v1 (`asset://…`, `save://…` URIs); reserved to become opaque later. It is a real exported type name, generated into `engine.d.luau` (§5), so `local c: Content = "asset://models/tree.glb"` type-checks — which is what makes the alias worth having before it becomes opaque. |
+| `Material` | **A surface, and not an `Instance`** (ADR 0090): it cannot be parented, and a project keeps one as a `.material.json` asset in `content/`. `Material.load(content)` returns the shared handle for an asset, which is **read-only** -- writing a property raises. `material:Clone()` returns a runtime copy that is writable, never saved, and released when nothing points at it; nothing clones implicitly, and reading `part.Material` returns what the part wears. Props: `Source` (the asset `Content` it came from, a clone included), `Color`, `Transparency`, `ColorMap`, `NormalMap`, `MetallicRoughnessMap`, `Emissive`, `EmissiveMap`, `Metalness`, `Roughness`, `NormalScale`, `AlphaMode`, `AlphaCutoff`, `DoubleSided`. A material asset may name a `parent` and override only what differs (a variant), and declares `instanceParameters`: which of `Color`, `Transparency`, `Emissive`, `Metalness`, `Roughness`, `NormalScale`, `AlphaCutoff` a part wearing it may override. |
 | `Enum` | Global `Enum` namespace; `EnumItem` = `Name`, `Value`, `EnumType` — and `EnumType` is the enum **object**, not its name as a string, so `Enum.PartShape.Ball.EnumType == Enum.PartShape`. `Enum.X:GetEnumItems()` returns a **fresh** array on every call, in declaration order (fresh so a caller may sort it; ordered because R10 forbids container order reaching observable order). The declared enums, in full: `EasingStyle` (Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic), `EasingDirection`, `KeyCode` (keys + mouse + gamepad buttons), `InputActionType` (Bool, Direction1D, Direction2D, Direction3D, ViewportPosition), `InputDeviceType` (KeyboardMouse, Gamepad, Touch), `InputRate` (Simulation, Render — ADR 0039), `PartShape`, `CollisionFidelity` (Default, Hull, Box, Precise), `RotationOrder` (XYZ, XZY, YXZ, YZX, ZXY, ZYX — all six permutations; YXZ wherever an `order` parameter is omitted), `RaycastFilterType` (Include, Exclude), `StreamingMode` (Nonatomic, Atomic, Persistent), `PlaybackState`, `CharacterState` (Grounded, Airborne), `AutomaticSize`, `FillDirection`, `HorizontalAlignment`, `VerticalAlignment`, `SortOrder`, `ScaleType` (Stretch, Slice, Tile), `LogLevel` (Trace, Debug, Info, Warning, Error — ascending severity, and `Value` orders them), `RunContext` (Client, Server — declared and carrying both items in v1, but nothing reads them; §2.1), `AlphaMode` (Opaque, Mask, Blend — glTF's three, how a `Material` reads the alpha channel of its colour), `UserInputType` (the device an `InputObject` came from; §2.1). **Two names left this list rather than joining it**: `Material` is a class now and not an enum (§2.2), and `WindowMode` went with the `WindowService` that was never built (§2.1). |
 
 **What `typeof` returns.** `typeof(Vector3.new(1, 2, 3))` is **`"vector"`** —
@@ -875,6 +877,7 @@ save/load pair for bindings in v1.
 | 25 | A destroyed instance stays readable forever | Handles stop resolving at the end of the drain in which `Destroying` fired; using one raises `script.err.instance_dead` | The ECS reclaims the slot (architecture §4). Use-after-destroy becomes a keyed error instead of a silent read of a corpse |
 | 26 | Dot-access to children (`workspace.Baseplate`, `folder.ChildName`) | **No longer a divergence (ADR 0078).** A dot reads a member first and a child second, and the scene's tree is typed from the scene itself in `.luaug/types/scene.d.luau` | Superseded on the owner's word, 2026-09-23. The string indexer this row once priced is not available in the pinned Luau at all; a tree declared per project types the path and keeps typo detection |
 | 27 | `AnimationTrack.IsPlaying` | `AnimationTrack.Playing` | §9's own rule: a boolean PROPERTY carries no `Is` prefix and a boolean METHOD does. `Sound.Playing` was already spelled this way, and one engine cannot have both |
+| 28 | `BasePart.Color`, `BasePart.Transparency`, and `Material` as an enum of surface kinds | `BasePart.Material` names a `.material.json` asset (or a runtime clone of one); a part overrides only the parameters its material declares, through `SetMaterialParameter` | The owner's word, 2026-09-24 (ADR 0090): a surface is governed by its material, as in the engines this design follows. The engine default material declares `Color` and `Transparency`, so a grey-box part is still tinted -- through the method, not the property. **This is the one row that removes a member scripts write constantly**, and `luaug migrate materials` exists because of it |
 
 This rename list is **frozen**: no further renames without a new row here, and
 no runtime aliases, ever.

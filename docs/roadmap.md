@@ -2387,6 +2387,10 @@ off the plan:
   white on both sides is the identity and no existing scene changes. **Settled
   by ADR 0060**, written after the reversal had already shipped, which is the
   order this milestone has done everything in and the reason step 15 exists.
+  **Reversed again on 2026-09-24, on the owner's word** (ADR 0090): a material
+  is a `.material.json` asset once more -- with a parent, read-only at runtime
+  and cloned to change -- and a part loses `Color` and `Transparency` to the
+  parameters its material declares. Built per `docs/briefs/materials-kickoff.md`.
 - **Also in `main`, and each was the unbuilt half of a step the count said had
   landed** — which is the part a step count hides: `assetc::importOne`, so the
   editor's import and `assetc` are one call rather than two code paths; the
