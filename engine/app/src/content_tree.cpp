@@ -83,6 +83,8 @@ ContentKind contentKindOf(std::string_view fileName) noexcept
         return ContentKind::Scene;
     if (endsWith(name, ".chunk.json"))
         return ContentKind::Chunk;
+    if (endsWith(name, ".material.json"))
+        return ContentKind::Material;
 
     static constexpr std::array<std::string_view, 4> kMeshes{".glb", ".gltf", ".fbx", ".obj"};
     for (const std::string_view extension : kMeshes) {
@@ -278,6 +280,8 @@ namespace {
         return kStampExtension;
     case ContentKind::Chunk:
         return ".chunk.json";
+    case ContentKind::Material:
+        return ".material.json";
     case ContentKind::Folder:
     case ContentKind::Mesh:
     case ContentKind::Texture:

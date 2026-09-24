@@ -253,6 +253,11 @@ struct EditorDialogs
     // door a person already knows.
     std::string deleteContentPath;
 
+    // "New Material" and "New Variant" (ADR 0090): the name box, and the
+    // material a variant would be made of -- empty for a new base.
+    bool newMaterial = false;
+    std::string newMaterialParent;
+
     // **What is about to throw work away, waiting to be answered.**
     //
     // Every application with a document asks this, and it asks it in one place
@@ -614,6 +619,19 @@ struct EditorCommands
     std::string assignStampPath;
     std::string assignStampProperty;
 
+    // Materials (ADR 0090). A material row dropped on the selection's
+    // `Material` field, a row opened in the material panel, and the two ways a
+    // material file is made -- all content-relative paths.
+    std::string assignMaterialPath;
+    // Who wears it: an Explorer row it was dropped on, the part under a
+    // viewport pixel it was dropped at, or -- neither -- the selection.
+    core::InstanceId assignMaterialTarget;
+    std::optional<core::Vec2> assignMaterialPixel;
+    std::string openMaterial;
+    std::string newMaterial;
+    std::string newMaterialVariantOf;
+    std::string newMaterialVariantName;
+
     // Step back, or forward again.
     bool undo = false;
     bool redo = false;
@@ -640,7 +658,7 @@ struct EditorCommands
         return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || groupSelection ||
                ungroupSelection || reparentTo.valid() || reorderChild.valid() || renameInstance.valid() || paste ||
                pasteInto || cutSelection || !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo ||
-               redo || newScene;
+               redo || newScene || !assignMaterialPath.empty();
     }
 
     [[nodiscard]] bool any() const noexcept
@@ -653,7 +671,8 @@ struct EditorCommands
                renameInstance.valid() || !saveAs.empty() || !openScene.empty() || !createFolder.empty() ||
                !deleteContent.empty() || !duplicateContent.empty() || newStampClass != scene::InvalidClass ||
                !renameContent.empty() || !assignStampPath.empty() || importAssets || importParent.valid() ||
-               openScript.valid();
+               openScript.valid() || !assignMaterialPath.empty() || !openMaterial.empty() || !newMaterial.empty() ||
+               !newMaterialVariantOf.empty();
     }
 };
 
@@ -1159,8 +1178,9 @@ public:
     // world draws the file as it stands on disk again.
     void closeMaterial();
     // One edit to the open material, recorded for the panel's undo and shown
-    // in every open world at once.
-    void editMaterial(const asset::MaterialAsset& next);
+    // in every open world at once. `continuing` folds it into the step before
+    // -- a slider dragged across a hundred frames is one thing to undo.
+    void editMaterial(const asset::MaterialAsset& next, bool continuing = false);
     bool undoMaterial();
     bool redoMaterial();
     // Writes the file (ADR 0090's fixed key order) and keeps it open.

@@ -190,6 +190,15 @@ ThumbnailCache::Thumbnail ThumbnailCache::request(const std::filesystem::path& p
     return {};
 }
 
+void ThumbnailCache::refresh(const std::filesystem::path& path)
+{
+    Entry* found = find(path.string());
+    if (found == nullptr || found->stage == Stage::Reading || found->stage == Stage::Decoding)
+        return;
+    if (found->kind == PreviewKind::Material && previews_ != nullptr)
+        found->stage = Stage::Drawing;
+}
+
 void ThumbnailCache::setPreviewRenderer(IPreviewRenderer* renderer) noexcept
 {
     const bool gained = previews_ == nullptr && renderer != nullptr;
@@ -226,6 +235,13 @@ void ThumbnailCache::admit()
         }
         if (next == nullptr)
             return;
+
+        // Nothing to read: the preview renderer resolves a material by its
+        // name, so the job goes straight to the frame that can draw it.
+        if (next->kind == PreviewKind::Material) {
+            next->stage = Stage::Drawing;
+            continue;
+        }
 
         // `Low`, because a thumbnail is never what a frame is waiting for. A
         // streamed chunk the camera is about to reach is, and the two share this
@@ -395,6 +411,10 @@ void ThumbnailCache::collectDraws(rhi::IDevice& device, rhi::ICmdList& cmd)
         PreviewResult result;
         const bool ok = previews_->drawPreview(device, cmd, job, result) && result.texture.valid();
         if (ok) {
+            // A refreshed entry still holds its old picture; it goes now that
+            // the new one exists, never before.
+            if (next->texture.valid())
+                device.destroy(next->texture);
             next->texture = result.texture;
             next->width = result.width;
             next->height = result.height;
@@ -501,6 +521,8 @@ PreviewKind previewKindOf(const std::filesystem::path& path) noexcept
         return PreviewKind::Texture;
     case ContentKind::Mesh:
         return PreviewKind::Mesh;
+    case ContentKind::Material:
+        return PreviewKind::Material;
     case ContentKind::Scene:
     case ContentKind::Stamp:
         // Two kinds to the browser -- one is opened and the other placed -- and

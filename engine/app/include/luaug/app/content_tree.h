@@ -49,6 +49,10 @@ enum class ContentKind
     Audio,
     Font,
     Chunk,
+    // A `.material.json` (ADR 0090): a surface a part wears. A kind of its own
+    // because the browser does its own things with one -- it is OPENED in the
+    // material panel, dropped onto a part, and drawn as a ball wearing it.
+    Material,
     Other,
 };
 

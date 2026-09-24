@@ -40,6 +40,10 @@ enum class PreviewKind : core::u8
     Texture,
     // Geometry, drawn from `previewView`.
     Mesh,
+    // A ball wearing a material asset (ADR 0090). Nothing to read or parse:
+    // the renderer resolves the material through the library, which is also
+    // what lets it show an edit the panel has not saved yet.
+    Material,
     // A scene or a stamp: the same view over the whole subtree's bounds.
     Subtree,
 };
@@ -280,6 +284,11 @@ public:
     // icon in both cases -- which is why this never reports failure: there is
     // nothing different to do about it.
     [[nodiscard]] Thumbnail request(const std::filesystem::path& path);
+
+    // **Draws `path` again**, keeping the old picture until the new one is
+    // ready. What the material panel calls after an edit, so the ball it shows
+    // is the material as it now is rather than as it was when first drawn.
+    void refresh(const std::filesystem::path& path);
 
     // One frame of the pipeline: take what the IO service finished, upload what
     // the pool finished, draw what fits in the frame's preview budget, admit

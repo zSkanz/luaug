@@ -205,11 +205,10 @@ EditorKind editorFor(scene::ValueType type) noexcept
         return EditorKind::UDim2;
     case scene::ValueType::Rect:
         return EditorKind::Rect;
-    // Shown and not edited in the grid: a material is picked from the content
-    // browser and its parameters have a section of their own (ADR 0090).
     case scene::ValueType::Material:
+        return EditorKind::Material;
     case scene::ValueType::MaterialParameters:
-        break;
+        return EditorKind::MaterialParameters;
     }
 
     // `Nil` is a property holding nothing, and so is anything the switch above

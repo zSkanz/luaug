@@ -156,6 +156,18 @@ bool HostPreviewRenderer::drawPreview(rhi::IDevice& device, rhi::ICmdList& cmd, 
         if (scene::MeshPartComponent* mesh = scratch_->meshParts().find(part); mesh != nullptr)
             mesh->meshContent = urn;
     }
+    else if (job.kind == PreviewKind::Material) {
+        // `asset://` and the path under the content root, which is what a part
+        // wearing it would name.
+        std::error_code ec;
+        const std::filesystem::path relative = std::filesystem::relative(job.path, contentRoot_, ec);
+        if (ec || relative.empty())
+            return false;
+        if (!swatchOf(std::string(asset::AssetScheme) + relative.generic_string()))
+            return false;
+        (void)loader_.syncPrimitives(device, cmd, *scratch_, meshes_, library_);
+        (void)loader_.syncTextures(device, cmd, *scratch_, textures_);
+    }
     else if (job.kind == PreviewKind::Subtree) {
         if (job.text.empty())
             return false;
@@ -179,17 +191,6 @@ bool HostPreviewRenderer::drawPreview(rhi::IDevice& device, rhi::ICmdList& cmd, 
                 }
             }
         }
-
-        // **A material is shared as a stamp** (ADR 0060), so a `.stamp.json`
-        // holding one arrives here like any other subtree -- and a lone
-        // `Material` has no geometry, which would frame as an empty box and draw
-        // a picture of nothing. A swatch is what somebody wants instead: the
-        // material on a curved surface, because roughness, metalness and a
-        // normal map are all about how light moves ACROSS a curvature and a
-        // square of colour shows none of them. The stage's own material preview
-        // makes the same argument in the same words.
-        if (!swatchIfMaterial())
-            return false;
 
         // A subtree names its meshes by URN, and those have to be read. This is
         // the one place a preview touches the disk on the frame, and it is
@@ -236,21 +237,6 @@ bool HostPreviewRenderer::drawPreview(rhi::IDevice& device, rhi::ICmdList& cmd, 
     out.texture = target;
     out.width = job.edge;
     out.height = job.edge;
-    return true;
-}
-
-bool HostPreviewRenderer::swatchIfMaterial()
-{
-    // Only when there is nothing to look at. A stamp of a lamp post that happens
-    // to contain a material is a lamp post, and drawing a ball instead would be
-    // this function deciding what a file is.
-    core::DVec3 min;
-    core::DVec3 max;
-    if (scene::worldExtents(*scratch_, workspace_, min, max))
-        return true;
-
-    // A material is not an instance any more (ADR 0090), so a subtree with no
-    // geometry has nothing to wear either: a picture of nothing.
     return true;
 }
 

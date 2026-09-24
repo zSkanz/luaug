@@ -146,6 +146,12 @@ enum class EditorKind : core::u8
     // exactly how a feature ships inert.
     InstanceRef,
     EnumCombo,
+    // A part's material (ADR 0090): a file picked from the browser's materials
+    // or dropped from it, and `open` to edit it.
+    Material,
+    // What that material lets the part change, each parameter with its value
+    // and a revert -- and a kept override the material ignores, struck through.
+    MaterialParameters,
 };
 
 [[nodiscard]] EditorKind editorFor(scene::ValueType type) noexcept;

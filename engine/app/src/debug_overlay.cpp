@@ -808,6 +808,19 @@ struct ContentDrag
     char rootClass[48]{};
 };
 
+// Whether a browser drag is a material file (ADR 0090), by the compound suffix
+// every material carries wherever it sits.
+[[nodiscard]] bool isMaterialDrag(const ContentDrag& drag) noexcept
+{
+    return asset::isMaterialPath(std::string_view(drag.path));
+}
+
+// And a stamp, which is the one kind a drop PLACES.
+[[nodiscard]] bool isStampDrag(const ContentDrag& drag) noexcept
+{
+    return contentKindOf(std::filesystem::path(drag.path).filename().string()) == ContentKind::Stamp;
+}
+
 // The instance tree, virtualised.
 //
 // **Every row used to be drawn every frame**, which on the flagship is 4,300
@@ -1496,7 +1509,19 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // happens to be -- which is the whole reason a drop is worth
                 // having beside the menu item that does the same thing.
                 const bool fromBrowser = peek != nullptr && peek->IsDataType(kContentDragPayload);
-                if (fromBrowser && Editor::canParentInto(world, row.id, root)) {
+                // **A material dropped on a part is worn by it** (ADR 0090),
+                // and lights only rows that are parts.
+                const bool materialOnPart = fromBrowser &&
+                                            isMaterialDrag(*static_cast<const ContentDrag*>(peek->Data)) &&
+                                            world.parts().find(row.id) != nullptr;
+                if (materialOnPart) {
+                    if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr) {
+                        commands->assignMaterialPath = static_cast<const ContentDrag*>(took->Data)->path;
+                        commands->assignMaterialTarget = row.id;
+                    }
+                }
+                else if (fromBrowser && isStampDrag(*static_cast<const ContentDrag*>(peek->Data)) &&
+                         Editor::canParentInto(world, row.id, root)) {
                     if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr) {
                         commands->placeStamp = static_cast<const ContentDrag*>(took->Data)->path;
                         commands->placeStampLinked = true;
@@ -2219,6 +2244,479 @@ void drawInstanceRef(scene::World& world, core::InstanceId root, Inspector& insp
     ImGui::EndPopup();
 }
 
+// --- A part's material (ADR 0090) ----------------------------------------------
+
+// **What a part wears**: a material file, picked from the ones the project has
+// or dragged onto the field from the browser, and `open` to edit it. Nothing is
+// placed in the world -- a material is worn by name, so there is no instance
+// for a boundary to lose (D133, D142).
+void drawMaterialField(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
+                       const scene::PropertyDesc& descriptor, const SharedValue& shared, bool mixed, ContentTree* tree,
+                       EditorCommands* commands)
+{
+    std::string source;
+    core::u32 clone = 0;
+    if (!mixed) {
+        if (const auto* worn = std::get_if<scene::MaterialRef>(&shared.value); worn != nullptr) {
+            source = worn->source;
+            clone = worn->clone;
+        }
+    }
+    const std::string_view scheme = asset::AssetScheme;
+    const std::string relative = source.compare(0, scheme.size(), scheme) == 0 ? source.substr(scheme.size()) : source;
+    std::string shown = mixed ? std::string("mixed") : relative.empty() ? std::string("default") : relative;
+    if (const std::size_t slash = shown.rfind('/'); slash != std::string::npos && !mixed && !relative.empty())
+        shown = shown.substr(slash + 1);
+    if (asset::isMaterialPath(shown))
+        shown.resize(shown.size() - asset::MaterialSuffix.size());
+    // A clone is the same asset changed at runtime, and saying so is what stops
+    // somebody opening the file to find the colour the part is drawn in.
+    if (clone != 0)
+        shown += " (runtime copy)";
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const bool locked = !editable(descriptor) || commands == nullptr;
+    const bool openable = !mixed && !relative.empty() && commands != nullptr;
+    const float openWidth =
+        openable ? ImGui::CalcTextSize("open").x + style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x : 0.0f;
+
+    ImGui::BeginDisabled(locked);
+    if (ImGui::Button(shown.c_str(), ImVec2(-(openWidth + 1.0f), 0.0f)))
+        ImGui::OpenPopup("pick-material");
+    ImGui::EndDisabled();
+    if (!relative.empty() && ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", source.c_str());
+
+    // The field takes a material row from the browser, and lights only for
+    // one: a field that lit for a texture and then refused it is the broken
+    // promise every drop target here avoids.
+    if (!locked && ImGui::BeginDragDropTarget()) {
+        const ImGuiPayload* peek = ImGui::GetDragDropPayload();
+        if (peek != nullptr && peek->IsDataType(kContentDragPayload) &&
+            isMaterialDrag(*static_cast<const ContentDrag*>(peek->Data))) {
+            if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr)
+                commands->assignMaterialPath = static_cast<const ContentDrag*>(took->Data)->path;
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    if (openable) {
+        ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+        if (ImGui::SmallButton("open"))
+            commands->openMaterial = relative;
+    }
+
+    if (!ImGui::BeginPopup("pick-material"))
+        return;
+    static std::vector<std::string> candidates;
+    static std::array<char, 96> search{};
+    if (ImGui::IsWindowAppearing()) {
+        candidates = tree != nullptr ? tree->filesOfKind(ContentKind::Material) : std::vector<std::string>{};
+        search.fill(0);
+        ImGui::SetKeyboardFocusHere();
+    }
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
+    ImGui::InputTextWithHint("##material-search", "search", search.data(), search.size());
+    const std::string_view needle{search.data()};
+    ImGui::Separator();
+    if (ImGui::BeginChild("material-list", ImVec2(ImGui::GetFontSize() * 16.0f, ImGui::GetFontSize() * 12.0f))) {
+        // Wearing nothing is a real answer and the first one offered: it is
+        // the engine default, which is what a plain part is.
+        if (ImGui::Selectable("(default)")) {
+            for (const core::InstanceId target : targets) {
+                if (world.alive(target))
+                    inspector.enqueue(target, descriptor.name, scene::Value{});
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        std::size_t listed = 0;
+        for (const std::string& candidate : candidates) {
+            if (!needle.empty() && !containsFold(candidate, needle))
+                continue;
+            ++listed;
+            if (ImGui::Selectable(candidate.c_str())) {
+                commands->assignMaterialPath = candidate;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (candidates.empty())
+            ImGui::TextDisabled("No materials under content/ yet. Right-click in the browser: New Material.");
+        else if (listed == 0)
+            ImGui::TextDisabled("Nothing matches \"%s\".", search.data());
+    }
+    ImGui::EndChild();
+    ImGui::EndPopup();
+}
+
+// One parameter's widget: a colour for `Color` and `Emissive`, a drag for the
+// rest. True when it changed `values`.
+[[nodiscard]] bool drawParameterWidget(asset::MaterialField field, asset::MaterialProperties& values)
+{
+    switch (field) {
+    case asset::MaterialField::Color:
+        return ImGui::ColorEdit3("##value", &values.color.r, ImGuiColorEditFlags_Float);
+    case asset::MaterialField::Emissive:
+        return ImGui::ColorEdit3("##value", &values.emissive.r, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+    case asset::MaterialField::Transparency:
+        return ImGui::SliderFloat("##value", &values.transparency, 0.0f, 1.0f, "%.3f");
+    case asset::MaterialField::Metalness:
+        return ImGui::SliderFloat("##value", &values.metalness, 0.0f, 1.0f, "%.3f");
+    case asset::MaterialField::Roughness:
+        return ImGui::SliderFloat("##value", &values.roughness, 0.0f, 1.0f, "%.3f");
+    case asset::MaterialField::NormalScale:
+        return ImGui::DragFloat("##value", &values.normalScale, 0.01f, 0.0f, 4.0f, "%.3f");
+    case asset::MaterialField::AlphaCutoff:
+        return ImGui::SliderFloat("##value", &values.alphaCutoff, 0.0f, 1.0f, "%.3f");
+    default:
+        return false;
+    }
+}
+
+// Draws `text` struck through: an override the part keeps and its material
+// ignores (ADR 0090). Kept rather than dropped, so switching back to a material
+// that declares it restores the look -- and shown, so nobody wonders where it
+// went.
+void strikeText(const char* text)
+{
+    ImGui::TextDisabled("%s", text);
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const float y = (min.y + max.y) * 0.5f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(min.x, y), ImVec2(max.x, y), ImGui::GetColorU32(ImGuiCol_TextDisabled));
+}
+
+// **What a part may change about its material**: the parameters the material
+// declares, each with its value and a revert when this part overrides it, and
+// below them any override the part keeps that this material does not declare.
+void drawMaterialParameters(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
+                            const scene::PropertyDesc& descriptor, bool mixed)
+{
+    if (mixed || targets.size() != 1) {
+        ImGui::TextDisabled(mixed ? "mixed" : "select one part to edit its parameters");
+        return;
+    }
+    const scene::PartComponent* part = world.parts().find(targets.front());
+    if (part == nullptr) {
+        ImGui::TextDisabled("none");
+        return;
+    }
+    const asset::ResolvedMaterial material = world.resolveMaterial(part->material, part->materialClone);
+    const asset::MaterialOverrides overrides = part->materialParameters;
+    asset::MaterialProperties shown = material.properties;
+    asset::applyOverrides(overrides, material.instanceParameters, shown);
+
+    const auto write = [&](const asset::MaterialOverrides& next) {
+        inspector.enqueue(targets.front(), descriptor.name, scene::Value{next});
+    };
+
+    // Name order, which is the order a scene file writes them in.
+    std::array<asset::MaterialField, 7> fields{asset::MaterialField::AlphaCutoff, asset::MaterialField::Color,
+                                               asset::MaterialField::Emissive,    asset::MaterialField::Metalness,
+                                               asset::MaterialField::NormalScale, asset::MaterialField::Roughness,
+                                               asset::MaterialField::Transparency};
+    const bool locked = !editable(descriptor);
+    ImGui::BeginDisabled(locked);
+    bool any = false;
+    for (const asset::MaterialField field : fields) {
+        const bool declared = (material.instanceParameters & asset::fieldBit(field)) != 0;
+        const bool overridden = overrides.has(field);
+        if (!declared && !overridden)
+            continue;
+        any = true;
+        ImGui::PushID(static_cast<int>(field));
+        const std::string name(asset::materialFieldName(field));
+        if (!declared) {
+            strikeText(name.c_str());
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Kept on this part and ignored: its material does not let a part change %s.",
+                                  name.c_str());
+        }
+        else {
+            ImGui::TextUnformatted(name.c_str());
+            if (overridden) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "*");
+            }
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(-(overridden ? ImGui::CalcTextSize("revert").x + 16.0f : 1.0f));
+            asset::MaterialProperties values = shown;
+            if (drawParameterWidget(field, values)) {
+                asset::MaterialOverrides next = overrides;
+                (void)asset::setOverride(next, field, values);
+                write(next);
+            }
+        }
+        if (overridden) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("revert")) {
+                asset::MaterialOverrides next = overrides;
+                asset::clearOverride(next, field);
+                write(next);
+            }
+        }
+        ImGui::PopID();
+    }
+    if (!any)
+        ImGui::TextDisabled("this material lets a part change nothing about it");
+    ImGui::EndDisabled();
+}
+
+// --- The material panel (ADR 0090) ----------------------------------------------
+
+// One field of the open material. A variant shows its parent's value for what it
+// does not write, and editing one makes it the variant's own; `inherit` takes it
+// back. A base writes every field and has nothing to inherit.
+struct MaterialFieldRow
+{
+    asset::MaterialAsset& next;
+    const asset::MaterialProperties& inherited;
+    bool variant = false;
+    bool changed = false;
+    bool continuing = false;
+
+    // Draws the row's label and, for a variant, its inherit control; returns
+    // the values the widget should edit.
+    asset::MaterialProperties& begin(asset::MaterialField field)
+    {
+        ImGui::PushID(static_cast<int>(field));
+        const bool own = !variant || (next.written & asset::fieldBit(field)) != 0;
+        if (!own)
+            asset::copyMaterialField(field, inherited, next.properties);
+        ImGui::TextUnformatted(std::string(asset::materialFieldName(field)).c_str());
+        if (variant && own) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("inherit")) {
+                next.written = static_cast<asset::MaterialFieldMask>(next.written & ~asset::fieldBit(field));
+                asset::copyMaterialField(field, inherited, next.properties);
+                changed = true;
+            }
+        }
+        else if (variant) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("inherited");
+        }
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        return next.properties;
+    }
+
+    void end(asset::MaterialField field, bool edited)
+    {
+        if (edited) {
+            next.written |= asset::fieldBit(field);
+            changed = true;
+            // A drag that is still held is the same edit as last frame's: one
+            // step to undo for one gesture.
+            continuing = continuing || (ImGui::IsItemActive() && !ImGui::IsItemActivated());
+        }
+        ImGui::PopID();
+    }
+};
+
+// A map field: the texture's URN, a picker of the project's textures, and a drop
+// target for a texture row.
+[[nodiscard]] bool drawMapField(std::string& urn, ContentTree& tree)
+{
+    char buffer[256]{};
+    if (urn.size() + 1 <= sizeof(buffer))
+        std::snprintf(buffer, sizeof(buffer), "%s", urn.c_str());
+    bool changed = false;
+    const float pick = ImGui::GetFrameHeight();
+    ImGui::SetNextItemWidth(-(pick + ImGui::GetStyle().ItemInnerSpacing.x));
+    if (ImGui::InputTextWithHint("##map", "none", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        urn = buffer;
+        changed = true;
+    }
+    if (ImGui::BeginDragDropTarget()) {
+        const ImGuiPayload* peek = ImGui::GetDragDropPayload();
+        if (peek != nullptr && peek->IsDataType(kContentDragPayload) &&
+            contentKindOf(
+                std::filesystem::path(static_cast<const ContentDrag*>(peek->Data)->path).filename().string()) ==
+                ContentKind::Texture) {
+            if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr) {
+                urn = std::string(asset::AssetScheme) + static_cast<const ContentDrag*>(took->Data)->path;
+                changed = true;
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    if (ImGui::Button("...", ImVec2(pick, 0.0f)))
+        ImGui::OpenPopup("map-pick");
+    if (ImGui::BeginPopup("map-pick")) {
+        if (ImGui::Selectable("(none)")) {
+            urn.clear();
+            changed = true;
+        }
+        for (const std::string& texture : tree.filesOfKind(ContentKind::Texture)) {
+            if (ImGui::Selectable(texture.c_str())) {
+                urn = std::string(asset::AssetScheme) + texture;
+                changed = true;
+            }
+        }
+        ImGui::EndPopup();
+    }
+    return changed;
+}
+
+// **The material open in the editor**: a ball wearing it, every field of its
+// file, which parameters a part wearing it may change, and Save. Edits are shown
+// in every world as they are made and undone with the panel's own history -- an
+// edit to a file is not an edit to the scene. Closing without saving puts the
+// file's look back.
+void drawMaterialPanel(Editor& editor)
+{
+    const Editor::MaterialSession& session = editor.materialSession();
+    if (!session.open())
+        return;
+
+    bool keepOpen = true;
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 24.0f, ImGui::GetFontSize() * 36.0f),
+                             ImGuiCond_FirstUseEver);
+    const std::string title = std::string(session.dirty() ? "Material *" : "Material") + "###Material";
+    if (ImGui::Begin(title.c_str(), &keepOpen)) {
+        ImGui::TextUnformatted(session.path.c_str());
+        asset::MaterialProperties inherited;
+        const bool variant = !session.asset.parent.empty();
+        asset::MaterialFieldMask parentDeclares = 0;
+        if (variant) {
+            ImGui::TextDisabled("a variant of %s", session.asset.parent.c_str());
+            if (asset::MaterialLibrary* library = editor.materialLibrary(); library != nullptr) {
+                const asset::ResolvedMaterial& parent = library->resolve(session.asset.parent);
+                inherited = parent.properties;
+                parentDeclares = parent.instanceParameters;
+            }
+        }
+
+        // The ball, drawn by the renderer the browser's rows use and through the
+        // same library, so it shows an edit before the file has it.
+        const std::filesystem::path absolute = editor.content().root() / std::filesystem::path(session.path);
+        if (g_thumbnails != nullptr && g_device != nullptr) {
+            const ThumbnailCache::Thumbnail ball = g_thumbnails->request(absolute);
+            if (SDL_GPUTexture* native = ball.valid() ? rhi::nativeTexture(*g_device, ball.texture) : nullptr;
+                native != nullptr) {
+                const float edge = ImGui::GetFontSize() * 8.0f;
+                ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(edge, edge));
+            }
+        }
+
+        ImGui::BeginDisabled(!session.dirty());
+        if (ImGui::Button("Save"))
+            (void)editor.saveMaterial();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(session.undo.empty());
+        if (ImGui::Button("Undo") && editor.undoMaterial() && g_thumbnails != nullptr)
+            g_thumbnails->refresh(absolute);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(session.redo.empty());
+        if (ImGui::Button("Redo") && editor.redoMaterial() && g_thumbnails != nullptr)
+            g_thumbnails->refresh(absolute);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Close"))
+            keepOpen = false;
+        if (session.dirty() && ImGui::IsItemHovered())
+            ImGui::SetTooltip("Closing without saving puts the file's own look back in every world.");
+        ImGui::Separator();
+
+        asset::MaterialAsset next = session.asset;
+        MaterialFieldRow row{next, inherited, variant};
+        using F = asset::MaterialField;
+        {
+            asset::MaterialProperties& p = row.begin(F::Color);
+            row.end(F::Color, ImGui::ColorEdit3("##value", &p.color.r, ImGuiColorEditFlags_Float));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::Transparency);
+            row.end(F::Transparency, ImGui::SliderFloat("##value", &p.transparency, 0.0f, 1.0f, "%.3f"));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::ColorMap);
+            row.end(F::ColorMap, drawMapField(p.colorMap, editor.content()));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::NormalMap);
+            row.end(F::NormalMap, drawMapField(p.normalMap, editor.content()));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::MetallicRoughnessMap);
+            row.end(F::MetallicRoughnessMap, drawMapField(p.metallicRoughnessMap, editor.content()));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::Emissive);
+            row.end(F::Emissive,
+                    ImGui::ColorEdit3("##value", &p.emissive.r, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::EmissiveMap);
+            row.end(F::EmissiveMap, drawMapField(p.emissiveMap, editor.content()));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::Metalness);
+            row.end(F::Metalness, ImGui::SliderFloat("##value", &p.metalness, 0.0f, 1.0f, "%.3f"));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::Roughness);
+            row.end(F::Roughness, ImGui::SliderFloat("##value", &p.roughness, 0.0f, 1.0f, "%.3f"));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::NormalScale);
+            row.end(F::NormalScale, ImGui::DragFloat("##value", &p.normalScale, 0.01f, 0.0f, 4.0f, "%.3f"));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::AlphaMode);
+            constexpr std::array<const char*, 3> Modes{"Opaque", "Mask", "Blend"};
+            int mode = std::clamp(p.alphaMode, 0, 2);
+            const bool picked = ImGui::Combo("##value", &mode, Modes.data(), static_cast<int>(Modes.size()));
+            if (picked)
+                p.alphaMode = mode;
+            row.end(F::AlphaMode, picked);
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::AlphaCutoff);
+            row.end(F::AlphaCutoff, ImGui::SliderFloat("##value", &p.alphaCutoff, 0.0f, 1.0f, "%.3f"));
+        }
+        {
+            asset::MaterialProperties& p = row.begin(F::DoubleSided);
+            row.end(F::DoubleSided, ImGui::Checkbox("##value", &p.doubleSided));
+        }
+
+        // **What a part wearing this may change about it** (ADR 0090). Nothing
+        // by default, so an authored material is what its author made; a
+        // variant inherits its parent's list and may add to it.
+        ImGui::SeparatorText("a part may change");
+        for (const F field :
+             {F::Color, F::Transparency, F::Emissive, F::Metalness, F::Roughness, F::NormalScale, F::AlphaCutoff}) {
+            ImGui::PushID(100 + static_cast<int>(field));
+            const bool fromParent = (parentDeclares & asset::fieldBit(field)) != 0;
+            bool declared = fromParent || (next.instanceParameters & asset::fieldBit(field)) != 0;
+            ImGui::BeginDisabled(fromParent);
+            if (ImGui::Checkbox(std::string(asset::materialFieldName(field)).c_str(), &declared)) {
+                if (declared)
+                    next.instanceParameters |= asset::fieldBit(field);
+                else
+                    next.instanceParameters =
+                        static_cast<asset::MaterialFieldMask>(next.instanceParameters & ~asset::fieldBit(field));
+                row.changed = true;
+            }
+            ImGui::EndDisabled();
+            if (fromParent && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("declared by the parent material");
+            ImGui::PopID();
+        }
+
+        if (row.changed) {
+            editor.editMaterial(next, row.continuing);
+            if (g_thumbnails != nullptr)
+                g_thumbnails->refresh(absolute);
+        }
+    }
+    ImGui::End();
+    if (!keepOpen)
+        editor.closeMaterial();
+}
+
 // The skinned mesh at or above `id`, or an invalid id.
 //
 // The same walk `PhysicsSync::rigAbove` does and for the same reason: a `Bone`
@@ -2284,6 +2782,21 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
         ImGui::PushID(static_cast<int>(descriptor.name.id));
         ImGui::SetNextItemWidth(-FLT_MIN);
         drawInstanceRef(world, root, inspector, targets, descriptor, shared, mixed, tree, icons, commands);
+        ImGui::PopID();
+        return;
+    }
+    // A part's material and what it may change about it (ADR 0090), before the
+    // absent-value guard for the reason a reference is: wearing nothing IS the
+    // absent value, and it is the state somebody opens the field to change.
+    if (editorFor(descriptor) == EditorKind::Material) {
+        ImGui::PushID(static_cast<int>(descriptor.name.id));
+        drawMaterialField(world, inspector, targets, descriptor, shared, mixed, tree, commands);
+        ImGui::PopID();
+        return;
+    }
+    if (editorFor(descriptor) == EditorKind::MaterialParameters) {
+        ImGui::PushID(static_cast<int>(descriptor.name.id));
+        drawMaterialParameters(world, inspector, targets, descriptor, mixed);
         ImGui::PopID();
         return;
     }
@@ -2719,6 +3232,8 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
     // that an absent value would have tripped -- and it is named so this switch
     // stays exhaustive under `-Werror`.
     case EditorKind::InstanceRef:
+    case EditorKind::Material:
+    case EditorKind::MaterialParameters:
     case EditorKind::ReadOnlyText: {
         // The floor every `ValueType` falls back to, so that one with no editor
         // of its own is still inspectable rather than absent (M4 brief,
@@ -3918,9 +4433,19 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
         // cursor would be a surprise every time it worked.
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* dropped = ImGui::AcceptDragDropPayload(kContentDragPayload); dropped != nullptr) {
-                commands.placeStamp = static_cast<const ContentDrag*>(dropped->Data)->path;
-                commands.placeStampLinked = true;
-                commands.placeStampParent = {};
+                const auto* drag = static_cast<const ContentDrag*>(dropped->Data);
+                if (isMaterialDrag(*drag)) {
+                    // Onto whatever part is under the pointer, which the frame
+                    // loop picks: a material lands on a thing, not in a place.
+                    const ImVec2 at = ImGui::GetMousePos();
+                    commands.assignMaterialPath = drag->path;
+                    commands.assignMaterialPixel = core::Vec2{at.x - origin.x, at.y - origin.y};
+                }
+                else if (isStampDrag(*drag)) {
+                    commands.placeStamp = drag->path;
+                    commands.placeStampLinked = true;
+                    commands.placeStampParent = {};
+                }
             }
             ImGui::EndDragDropTarget();
         }
@@ -4140,6 +4665,11 @@ void buildDefaultLayout(ImGuiID dockspace)
         return icons::ContentFont;
     case ContentKind::Chunk:
         return icons::ContentChunk;
+    // The class drawing the set already has for it: a material was a class
+    // until ADR 0090, and the picture of one did not change when it became a
+    // file.
+    case ContentKind::Material:
+        return icons::ClassMaterial;
     case ContentKind::Other:
         break;
     }
@@ -4250,6 +4780,8 @@ bool drawContentThumbnail(const ContentTree& tree, const ContentEntry& entry, fl
         return "font";
     case ContentKind::Chunk:
         return "chunk";
+    case ContentKind::Material:
+        return "material";
     case ContentKind::Other:
         break;
     }
@@ -4655,6 +5187,10 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         // the thing you do to a world rather than to a file.
                         else if (entry.kind == ContentKind::Stamp)
                             commands.openStamp = entry.path;
+                        // A material opens in the material panel: a file
+                        // somebody edits, with its own undo (ADR 0090).
+                        else if (entry.kind == ContentKind::Material)
+                            commands.openMaterial = entry.path;
                     }
 
                     // **What KIND of thing this stamp is, on hover.** A stamp
@@ -4678,7 +5214,11 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                     // is what a Project window is for: drop it on a row of the
                     // Explorer to place it there, or on the viewport to place
                     // it under `Workspace`.
-                    if (entry.kind == ContentKind::Stamp &&
+                    // A material is dragged too -- onto a part's `Material`
+                    // field, an Explorer row or the part in the viewport, and
+                    // the part wears it.
+                    if ((entry.kind == ContentKind::Stamp || entry.kind == ContentKind::Material ||
+                         entry.kind == ContentKind::Texture) &&
                         ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) {
                         ContentDrag payload;
                         (void)std::snprintf(payload.path, sizeof(payload.path), "%s", entry.path.c_str());
@@ -4695,6 +5235,17 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
                         if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
                             openSceneOrAsk(editor, commands, dialogs, entry.path);
+                        if (entry.kind == ContentKind::Material) {
+                            if (iconMenuItem(icons, icons::ActionOpen, "Open"))
+                                commands.openMaterial = entry.path;
+                            // **A variant**: a material that names this one and
+                            // changes only what it writes, so editing this one
+                            // reaches it (ADR 0090).
+                            if (iconMenuItem(icons, icons::ClassMaterial, "New Variant...")) {
+                                dialogs.newMaterial = true;
+                                dialogs.newMaterialParent = entry.path;
+                            }
+                        }
                         if (entry.kind == ContentKind::Stamp) {
                             if (ImGui::MenuItem("Open"))
                                 commands.openStamp = entry.path;
@@ -4869,6 +5420,10 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                 dialogs.newFolder = true;
             if (ImGui::MenuItem("New Stamp..."))
                 dialogs.pickStampClass = true;
+            if (iconMenuItem(icons, icons::ClassMaterial, "New Material...")) {
+                dialogs.newMaterial = true;
+                dialogs.newMaterialParent.clear();
+            }
             if (ImGui::MenuItem("Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();
@@ -5332,6 +5887,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         dialogs.newFolder = false;
         ImGui::OpenPopup("New Folder");
     }
+    if (dialogs.newMaterial) {
+        dialogs.newMaterial = false;
+        ImGui::OpenPopup("New Material");
+    }
     if (dialogs.newStamp) {
         dialogs.newStamp = false;
         ImGui::OpenPopup("New Stamp");
@@ -5390,6 +5949,50 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             }
             dialogs.renameTarget = {};
             dialogs.renameContentPath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // A material, or a variant of the one right-clicked (ADR 0090). One box:
+    // what differs between the two is only what the new file names as its
+    // parent, which the browser already knows.
+    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("New Material", nullptr, ImGuiWindowFlags_NoResize)) {
+        static std::array<char, 128> materialName{};
+        if (dialogOpening()) {
+            materialName.fill(0);
+            ImGui::SetKeyboardFocusHere();
+        }
+        if (!dialogs.newMaterialParent.empty())
+            ImGui::TextWrapped("A variant of %s: it looks like it until you change something.",
+                               dialogs.newMaterialParent.c_str());
+        ImGui::SetNextItemWidth(-1.0f);
+        const bool submitted = ImGui::InputText("##material", materialName.data(), materialName.size(),
+                                                ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(materialName.data());
+        const std::string resolved = Editor::normalizeMaterialPath(typed);
+        if (!typed.empty())
+            ImGui::TextDisabled("content/%s", resolved.c_str());
+
+        ImGui::Spacing();
+        ImGui::BeginDisabled(typed.empty() || !ContentTree::isUsableName(typed));
+        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+            dialogs.newMaterialParent.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        if ((submitted || accepted) && !typed.empty() && ContentTree::isUsableName(typed)) {
+            if (dialogs.newMaterialParent.empty()) {
+                commands.newMaterial = typed;
+            }
+            else {
+                commands.newMaterialVariantOf = dialogs.newMaterialParent;
+                commands.newMaterialVariantName = typed;
+            }
+            dialogs.newMaterialParent.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -6310,6 +6913,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         }
         ImGui::End();
     }
+    if (editor != nullptr)
+        drawMaterialPanel(*editor);
 
     // Draws with no VM for the same reason it does in the overlay: the LOG half
     // is what somebody wants when the VM failed to boot.

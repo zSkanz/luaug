@@ -1510,11 +1510,12 @@ void Editor::closeMaterial()
     m_material = MaterialSession{};
 }
 
-void Editor::editMaterial(const asset::MaterialAsset& next)
+void Editor::editMaterial(const asset::MaterialAsset& next, bool continuing)
 {
     if (!m_material.open() || next == m_material.asset)
         return;
-    m_material.undo.push_back(m_material.asset);
+    if (!continuing || m_material.undo.empty())
+        m_material.undo.push_back(m_material.asset);
     m_material.redo.clear();
     m_material.asset = next;
     if (m_materials != nullptr)

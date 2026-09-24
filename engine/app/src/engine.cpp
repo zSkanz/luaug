@@ -1977,6 +1977,38 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (editorCommands.breakStamp.valid())
                     (void)editor.breakStamp(authored(), editorCommands.breakStamp);
+                // **A material is worn by URN** (ADR 0090): nothing is placed in
+                // the world, so there is no parent to choose and no stamp
+                // boundary for it to fall outside of.
+                if (!editorCommands.assignMaterialPath.empty()) {
+                    core::InstanceId target = editorCommands.assignMaterialTarget;
+                    if (editorCommands.assignMaterialPixel.has_value()) {
+                        if (const std::optional<PickHit> hit = pickNearest(
+                                authored(), authoredRoot(), editor.rayThrough(*editorCommands.assignMaterialPixel));
+                            hit.has_value())
+                            target = hit->instance;
+                    }
+                    if (target.valid()) {
+                        const core::InstanceId one[] = {target};
+                        (void)editor.assignMaterialTo(authored(), editorCommands.assignMaterialPath, one);
+                    }
+                    else if (!editorCommands.assignMaterialPixel.has_value()) {
+                        (void)editor.assignMaterialTo(authored(), editorCommands.assignMaterialPath,
+                                                      inspector.selectionSet());
+                    }
+                }
+                if (!editorCommands.newMaterial.empty()) {
+                    if (const std::string made = editor.createMaterial(editorCommands.newMaterial); !made.empty())
+                        (void)editor.openMaterial(made);
+                }
+                if (!editorCommands.newMaterialVariantOf.empty()) {
+                    if (const std::string made = editor.createMaterialVariant(editorCommands.newMaterialVariantOf,
+                                                                              editorCommands.newMaterialVariantName);
+                        !made.empty())
+                        (void)editor.openMaterial(made);
+                }
+                if (!editorCommands.openMaterial.empty())
+                    (void)editor.openMaterial(editorCommands.openMaterial);
 
                 // **Which document the frame's mutations belonged to, decided
                 // BEFORE anything can swap it.** `touch()` marks the stage when

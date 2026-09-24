@@ -66,11 +66,10 @@ private:
     // be drawn with the previous one still in it.
     void resetScratch();
 
-    // Puts a ball wearing the material into an otherwise empty scratch world,
-    // and leaves a subtree that has geometry alone. False only when the world
-    // refused to build one, which is not recoverable.
-    [[nodiscard]] bool swatchIfMaterial();
-    // A ball of one metre wearing a material asset, for a material's own row.
+    // A ball of one metre wearing a material asset, for a material's own row
+    // (ADR 0090): roughness, metalness and a normal map are all about how light
+    // moves ACROSS a curvature, and a flat swatch shows none of them. False
+    // only when the world refused to build one.
     [[nodiscard]] bool swatchOf(const std::string& material);
 
     scene::ClassRegistry& classes_;
