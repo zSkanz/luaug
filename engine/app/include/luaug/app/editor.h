@@ -523,6 +523,12 @@ struct EditorCommands
     core::InstanceId renameInstance;
     std::string renameInstanceTo;
 
+    // **Insert one of these, by class name** (the ribbon's Model tab): inside
+    // the selection when something authored can live there, and in the
+    // viewport's `Workspace` otherwise. By name because the ribbon draws with
+    // no world to look a class id up in.
+    std::string insertClassName;
+
     // Move the selection under this. Set by a drop in the Explorer.
     core::InstanceId reparentTo;
     // **And then to this place among its new siblings**, for one instance
@@ -666,10 +672,11 @@ struct EditorCommands
     // it, and the flag is cleared where the write happens.
     [[nodiscard]] bool mutatesWorld() const noexcept
     {
-        return createClass != scene::InvalidClass || deleteSelection || duplicateSelection || groupSelection ||
-               groupAsFolder || ungroupSelection || reparentTo.valid() || reorderChild.valid() ||
-               renameInstance.valid() || paste || pasteInto || cutSelection || !placeStamp.empty() ||
-               breakStamp.valid() || stampSubject.valid() || undo || redo || newScene || !assignMaterialPath.empty();
+        return createClass != scene::InvalidClass || !insertClassName.empty() || deleteSelection ||
+               duplicateSelection || groupSelection || groupAsFolder || ungroupSelection || reparentTo.valid() ||
+               reorderChild.valid() || renameInstance.valid() || paste || pasteInto || cutSelection ||
+               !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo || redo || newScene ||
+               !assignMaterialPath.empty();
     }
 
     [[nodiscard]] bool any() const noexcept
@@ -677,13 +684,14 @@ struct EditorCommands
         return play.has_value() || pause.has_value() || save || newScene || quit || resetLayout || clearSelection ||
                undo || redo || colorAsked || copySelection || cutSelection || paste || pasteInto ||
                stampSubject.valid() || !stampFolder.empty() || !placeStamp.empty() || breakStamp.valid() ||
-               !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass || deleteSelection ||
-               duplicateSelection || groupSelection || groupAsFolder || ungroupSelection || reparentTo.valid() ||
-               reorderChild.valid() || renameInstance.valid() || !saveAs.empty() || !openScene.empty() ||
-               !createFolder.empty() || !deleteContent.empty() || !duplicateContent.empty() ||
-               newStampClass != scene::InvalidClass || !renameContent.empty() || !assignStampPath.empty() ||
-               importAssets || importParent.valid() || openScript.valid() || !assignMaterialPath.empty() ||
-               !openMaterial.empty() || !newMaterial.empty() || !newMaterialVariantOf.empty();
+               !openStamp.empty() || saveStamp || closeStamp || createClass != scene::InvalidClass ||
+               !insertClassName.empty() || deleteSelection || duplicateSelection || groupSelection || groupAsFolder ||
+               ungroupSelection || reparentTo.valid() || reorderChild.valid() || renameInstance.valid() ||
+               !saveAs.empty() || !openScene.empty() || !createFolder.empty() || !deleteContent.empty() ||
+               !duplicateContent.empty() || newStampClass != scene::InvalidClass || !renameContent.empty() ||
+               !assignStampPath.empty() || importAssets || importParent.valid() || openScript.valid() ||
+               !assignMaterialPath.empty() || !openMaterial.empty() || !newMaterial.empty() ||
+               !newMaterialVariantOf.empty();
     }
 };
 

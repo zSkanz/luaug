@@ -46,6 +46,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace luaug::app {
@@ -197,6 +198,29 @@ enum class EditorKind : core::u8
 // the more useful thing to say, and a read-only property nothing consumes is a
 // declaration problem rather than a panel one.
 [[nodiscard]] const char* propertyTag(const scene::PropertyDesc& descriptor) noexcept;
+
+// **Which heading a property sits under in the Properties panel**, by the task
+// it serves rather than by the class that declares it. A `Part`'s colour, size
+// and collision come from three classes up its chain, and a panel grouped by
+// class put them under `BasePart`, `PVInstance` and `Instance` -- headings that
+// answer "who declared this", which nobody opening the panel is asking.
+//
+// A table in the editor and not a field in the IDL: it is presentation, it
+// changes when the panel's layout does, and a property it does not name falls
+// under `Behavior` rather than going missing.
+struct PropertyCategory
+{
+    std::string_view name;
+    // Where the heading sits; lower is higher up the panel.
+    int order = 0;
+};
+[[nodiscard]] PropertyCategory propertyCategory(std::string_view property) noexcept;
+
+// **The Properties filter**: every word of `filter` appears somewhere in the
+// property's name or its category's, ignoring case. "can col" finds
+// `CanCollide`, "appear" finds everything under Appearance, and an empty
+// filter matches everything.
+[[nodiscard]] bool propertyMatches(std::string_view property, std::string_view filter) noexcept;
 
 // Every property the class has, inherited members first and in slot order --
 // the same numbering `ClassRegistry::propertySlot` assigns, so what the panel

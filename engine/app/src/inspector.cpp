@@ -4,6 +4,7 @@
 #include "luaug/scene/enum_registry.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <optional>
@@ -261,6 +262,243 @@ scene::EnumId enumDomainOf(const scene::EnumRegistry& enums, const scene::Proper
     // `findId` on an empty atom answers `InvalidEnum` already, so a hand-built
     // descriptor that names no enum falls out here rather than needing a case.
     return enums.findId(descriptor.enumName);
+}
+
+namespace {
+
+struct CategoryRow
+{
+    std::string_view property;
+    std::string_view category;
+};
+
+// The headings, in the order the panel shows them. What a person looks at
+// first -- how it looks, what it is called, where it is -- comes first, and
+// the specialist groups follow.
+constexpr std::array<std::string_view, 17> kCategoryOrder{
+    "Appearance", "Data",  "Transform", "Behavior", "Collision",  "Physics",   "Text",      "Image",      "Layout",
+    "Camera",     "Light", "Audio",     "Emission", "Constraint", "Character", "Streaming", "Navigation",
+};
+
+// Sorted by property name, so a lookup is a binary search. A name several
+// classes share is one row: it means the same thing wherever it is declared.
+constexpr std::array<CategoryRow, 151> kCategories{{
+    {"AbsolutePosition", "Layout"},
+    {"AbsoluteSize", "Layout"},
+    {"Acceleration", "Emission"},
+    {"Active", "Behavior"},
+    {"Adornee", "Data"},
+    {"AgentHeight", "Navigation"},
+    {"AgentMaxClimb", "Navigation"},
+    {"AgentMaxSlope", "Navigation"},
+    {"AgentRadius", "Navigation"},
+    {"AlwaysOnTop", "Appearance"},
+    {"Ambient", "Appearance"},
+    {"AnchorPoint", "Transform"},
+    {"Anchored", "Physics"},
+    {"Angle", "Light"},
+    {"AngularVelocity", "Physics"},
+    {"Archivable", "Data"},
+    {"Attachment0", "Constraint"},
+    {"Attachment1", "Constraint"},
+    {"Authority", "Data"},
+    {"AutoStepHeight", "Character"},
+    {"AutomaticSize", "Layout"},
+    {"BackgroundColor", "Appearance"},
+    {"BackgroundTransparency", "Appearance"},
+    {"Brightness", "Light"},
+    {"C0", "Constraint"},
+    {"C1", "Constraint"},
+    {"CFrame", "Transform"},
+    {"CanCollide", "Collision"},
+    {"CanQuery", "Collision"},
+    {"CanTouch", "Collision"},
+    {"CanvasPosition", "Layout"},
+    {"CanvasSize", "Layout"},
+    {"CastShadow", "Appearance"},
+    {"CellSize", "Data"},
+    {"ClassName", "Data"},
+    {"ClipsDescendants", "Layout"},
+    {"ClockTime", "Appearance"},
+    {"CollideConnected", "Constraint"},
+    {"Collides", "Collision"},
+    {"CollisionFidelity", "Collision"},
+    {"CollisionGroup", "Collision"},
+    {"Color", "Appearance"},
+    {"ColorEnd", "Emission"},
+    {"Content", "Data"},
+    {"CornerRadius", "Appearance"},
+    {"CurrentCamera", "Camera"},
+    {"Density", "Physics"},
+    {"DisplayName", "Data"},
+    {"DisplayOrder", "Layout"},
+    {"Drag", "Emission"},
+    {"Elasticity", "Physics"},
+    {"Enabled", "Behavior"},
+    {"ExposureCompensation", "Appearance"},
+    {"Face", "Light"},
+    {"FarPlane", "Camera"},
+    {"FieldOfView", "Camera"},
+    {"FillDirection", "Layout"},
+    {"FixedRotation", "Physics"},
+    {"FlipX", "Appearance"},
+    {"FogColor", "Appearance"},
+    {"FogEnd", "Appearance"},
+    {"FogStart", "Appearance"},
+    {"Font", "Text"},
+    {"Friction", "Physics"},
+    {"GeographicLatitude", "Appearance"},
+    {"Gravity", "Physics"},
+    {"GravityScale", "Physics"},
+    {"HorizontalAlignment", "Layout"},
+    {"Image", "Image"},
+    {"ImageColor", "Image"},
+    {"ImageRectOffset", "Image"},
+    {"ImageRectSize", "Image"},
+    {"JumpSpeed", "Character"},
+    {"LayoutOrder", "Layout"},
+    {"Lifetime", "Emission"},
+    {"LightEmission", "Emission"},
+    {"LimitsEnabled", "Constraint"},
+    {"LinearVelocity", "Physics"},
+    {"LoadRadius", "Streaming"},
+    {"Looped", "Audio"},
+    {"LowerAngle", "Constraint"},
+    {"MasterVolume", "Audio"},
+    {"Material", "Appearance"},
+    {"MaterialParameters", "Appearance"},
+    {"MaxDistance", "Audio"},
+    {"MaxSlopeAngle", "Character"},
+    {"MeshContent", "Data"},
+    {"MeshSize", "Transform"},
+    {"MinRadius", "Streaming"},
+    {"Name", "Data"},
+    {"NearPlane", "Camera"},
+    {"Orientation", "Transform"},
+    {"OrthographicSize", "Camera"},
+    {"OutdoorAmbient", "Appearance"},
+    {"Padding", "Layout"},
+    {"PaddingBottom", "Layout"},
+    {"PaddingLeft", "Layout"},
+    {"PaddingRight", "Layout"},
+    {"PaddingTop", "Layout"},
+    {"Parent", "Data"},
+    {"Part0", "Constraint"},
+    {"Part1", "Constraint"},
+    {"PauseOutsideLoadedArea", "Streaming"},
+    {"PivotOffset", "Transform"},
+    {"PixelsPerMetre", "Appearance"},
+    {"PlaceholderText", "Text"},
+    {"PlaybackSpeed", "Audio"},
+    {"Playing", "Audio"},
+    {"Position", "Transform"},
+    {"PrimaryPart", "Data"},
+    {"Priority", "Behavior"},
+    {"Projection", "Camera"},
+    {"Range", "Light"},
+    {"Rate", "Emission"},
+    {"Restitution", "Physics"},
+    {"RichText", "Text"},
+    {"RollOffMaxDistance", "Audio"},
+    {"RollOffMinDistance", "Audio"},
+    {"Rotation", "Transform"},
+    {"Scale", "Transform"},
+    {"ScaleType", "Image"},
+    {"ScrollBarThickness", "Layout"},
+    {"Sensor", "Collision"},
+    {"Shadows", "Light"},
+    {"Shape", "Appearance"},
+    {"Size", "Transform"},
+    {"SizeEnd", "Emission"},
+    {"SliceCenter", "Image"},
+    {"SortOrder", "Layout"},
+    {"Source", "Data"},
+    {"Speed", "Emission"},
+    {"SpreadAngle", "Emission"},
+    {"StreamingMode", "Streaming"},
+    {"Text", "Text"},
+    {"TextColor", "Text"},
+    {"TextScaled", "Text"},
+    {"TextSize", "Text"},
+    {"TextWrapped", "Text"},
+    {"Texture", "Appearance"},
+    {"Tileset", "Data"},
+    {"TimePosition", "Audio"},
+    {"Transparency", "Appearance"},
+    {"TransparencyEnd", "Emission"},
+    {"TwistLimit", "Constraint"},
+    {"UpperAngle", "Constraint"},
+    {"Velocity", "Physics"},
+    {"VerticalAlignment", "Layout"},
+    {"Visible", "Appearance"},
+    {"Volume", "Audio"},
+    {"WalkSpeed", "Character"},
+    {"ZIndex", "Layout"},
+}};
+
+// The lookup is a binary search, so an entry out of order is an entry that is
+// never found -- checked where it is written rather than discovered in a panel.
+static_assert(std::is_sorted(kCategories.begin(), kCategories.end(),
+                             [](const CategoryRow& a, const CategoryRow& b) { return a.property < b.property; }));
+static_assert(std::adjacent_find(kCategories.begin(), kCategories.end(),
+                                 [](const CategoryRow& a, const CategoryRow& b) { return a.property == b.property; }) ==
+              kCategories.end());
+
+[[nodiscard]] char lowerAscii(char c) noexcept
+{
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+[[nodiscard]] bool containsIgnoringCase(std::string_view haystack, std::string_view needle) noexcept
+{
+    if (needle.size() > haystack.size())
+        return false;
+    for (std::size_t start = 0; start + needle.size() <= haystack.size(); ++start) {
+        std::size_t index = 0;
+        while (index < needle.size() && lowerAscii(haystack[start + index]) == lowerAscii(needle[index]))
+            ++index;
+        if (index == needle.size())
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+PropertyCategory propertyCategory(std::string_view property) noexcept
+{
+    std::string_view category = "Behavior";
+    const auto found =
+        std::lower_bound(kCategories.begin(), kCategories.end(), property,
+                         [](const CategoryRow& row, std::string_view name) { return row.property < name; });
+    if (found != kCategories.end() && found->property == property)
+        category = found->category;
+    int order = 0;
+    for (std::size_t index = 0; index < kCategoryOrder.size(); ++index) {
+        if (kCategoryOrder[index] == category)
+            order = static_cast<int>(index);
+    }
+    return PropertyCategory{category, order};
+}
+
+bool propertyMatches(std::string_view property, std::string_view filter) noexcept
+{
+    const std::string_view category = propertyCategory(property).name;
+    std::size_t at = 0;
+    while (at < filter.size()) {
+        while (at < filter.size() && (filter[at] == ' ' || filter[at] == '\t'))
+            ++at;
+        std::size_t end = at;
+        while (end < filter.size() && filter[end] != ' ' && filter[end] != '\t')
+            ++end;
+        if (end > at) {
+            const std::string_view word = filter.substr(at, end - at);
+            if (!containsIgnoringCase(property, word) && !containsIgnoringCase(category, word))
+                return false;
+        }
+        at = end;
+    }
+    return true;
 }
 
 const char* propertyTag(const scene::PropertyDesc& descriptor) noexcept

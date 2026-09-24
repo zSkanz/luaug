@@ -2002,6 +2002,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     (void)editor.createInstance(authored(), editorCommands.createClass, editorCommands.createParent,
                                                 authoredRoot(), inspector);
                 }
+                // The ribbon's insert: into the selection when it can hold
+                // authored things, and into the Workspace the viewport draws
+                // otherwise -- the same fallback a placed stamp uses.
+                if (!editorCommands.insertClassName.empty()) {
+                    const scene::ClassId cls =
+                        authored().classes().findId(authored().atoms().lookup(editorCommands.insertClassName));
+                    const core::InstanceId primary = inspector.selection();
+                    const core::InstanceId parent =
+                        primary.valid() && Editor::canParentInto(authored(), primary, authoredRoot())
+                            ? primary
+                            : (stageOf() != nullptr ? stageOf()->workspace() : host->workspace());
+                    if (cls != scene::InvalidClass)
+                        (void)editor.createInstance(authored(), cls, parent, authoredRoot(), inspector);
+                }
                 // **Copied before either verb runs**, because both of them
                 // change the selection -- a duplicate selects the copies -- and
                 // a span into the inspector would be a span into a vector that

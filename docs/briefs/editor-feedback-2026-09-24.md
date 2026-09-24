@@ -27,9 +27,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **Alt+click selects the part itself**, not the model it belongs to.
 - [x] **Selecting a model highlights every part in it**, not only its box.
 - [x] **Shift+P toggles a free camera while playing.**
-- [ ] **The snap increments live on the viewport's toolbar**, where they are
+- [x] **The snap increments live on the viewport's toolbar**, where they are
       used, and not only in Viewport Settings.
-- [ ] **A ribbon of tabs above the viewport** (Home, Model, Test, View) that
+- [x] **A ribbon of tabs above the viewport** (Home, Model, Test, View) that
       groups the tools by task.
 - [x] **A Camera draws its view volume as a wireframe** when selected.
 - [x] **Inserting or selecting an instance leaves a terrain brush.** A part added
@@ -41,11 +41,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Explorer and Properties
 
-- [ ] **Properties reads as a grid**: collapsible categories, a label column and
+- [x] **Properties reads as a grid**: collapsible categories, a label column and
       a value column with a shared divider, quiet row separators, checkboxes
       for booleans, and composite values (a CFrame's position and orientation)
       as expandable rows. Our theme, not a copy of anybody's.
-- [ ] **The Properties filter keeps the category** a match belongs to and
+- [x] **The Properties filter keeps the category** a match belongs to and
       matches anywhere in a name, not only at its start.
 - [x] **Group and Ungroup for Folder**, as for Model.
 - [x] **Dragging in the Explorer**: a Script dragged from Workspace to
@@ -69,6 +69,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [ ] **One Ctrl+Z undoes one action.** Some needed two.
 - [ ] **An error says what is wrong** at the end of its line, not only with a
       red underline.
+- [ ] **Ctrl+/ comments and uncomments** the line or every line selected.
+- [ ] **Type annotations are coloured** as the Luau grammar reads them: the
+      names after `:`, `->` and `type X =`, generics, and `typeof`.
+- [ ] **Renaming a script renames its tab**, in the Explorer or anywhere else.
 
 ## Console
 
@@ -103,3 +107,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
    leaves the file, so both then exist and the file has to be deleted by hand.
    A mounted script cannot be dragged back out, because the file would mount it
    again at the next open and both would run.
+6. **The Properties headings were the declaring classes.** A part's colour,
+   size and collision sat under `BasePart`, `PVInstance` and `Instance`. They
+   are grouped by task now through a table in the editor (`propertyCategory`),
+   not a field in the IDL: it is presentation, and a property the table does
+   not name falls under Behavior rather than going missing. The filter already
+   matched inside names; what it lost was the heading, and several words.
+7. **The ribbon's first-in-row test cannot ask the cursor.** The viewport's
+   window has no padding, so "is the cursor past the padding" was true for
+   every button and each one took a row of its own. A flag set per tab is the
+   answer; found by capturing the window, not by a test.

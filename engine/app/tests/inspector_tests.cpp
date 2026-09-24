@@ -1460,3 +1460,38 @@ TEST_CASE("a dead or invalid id resolves to itself rather than walking a freed t
     world.retireDestroyed();
     CHECK(resolveSelection(world, root, gone, core::InstanceId{}) == gone);
 }
+
+TEST_CASE("a property sits under the heading of the task it serves, and an unknown one under Behavior")
+{
+    // **Reported as a panel that should read like the editors people know.**
+    // Grouped by declaring class, a part's colour, size and collision sat under
+    // three headings named after classes; by task they sit where a person looks.
+    CHECK(luaug::app::propertyCategory("Color").name == "Appearance");
+    CHECK(luaug::app::propertyCategory("Material").name == "Appearance");
+    CHECK(luaug::app::propertyCategory("Name").name == "Data");
+    CHECK(luaug::app::propertyCategory("CFrame").name == "Transform");
+    CHECK(luaug::app::propertyCategory("Size").name == "Transform");
+    CHECK(luaug::app::propertyCategory("CanCollide").name == "Collision");
+    CHECK(luaug::app::propertyCategory("Anchored").name == "Physics");
+    CHECK(luaug::app::propertyCategory("FieldOfView").name == "Camera");
+    CHECK(luaug::app::propertyCategory("SomethingNobodyDeclared").name == "Behavior");
+
+    // The headings come in a fixed order: how it looks, what it is, where it is.
+    CHECK(luaug::app::propertyCategory("Color").order < luaug::app::propertyCategory("Name").order);
+    CHECK(luaug::app::propertyCategory("Name").order < luaug::app::propertyCategory("CFrame").order);
+    CHECK(luaug::app::propertyCategory("CFrame").order < luaug::app::propertyCategory("CanCollide").order);
+}
+
+TEST_CASE("the properties filter finds every word anywhere in a name or its heading")
+{
+    using luaug::app::propertyMatches;
+    CHECK(propertyMatches("CanCollide", ""));
+    CHECK(propertyMatches("CanCollide", "collide"));
+    CHECK(propertyMatches("CanCollide", "can col"));
+    CHECK(propertyMatches("CanCollide", "  COLL  "));
+    CHECK_FALSE(propertyMatches("CanCollide", "can touch"));
+    // The heading matches too, so "appear" lists everything under Appearance.
+    CHECK(propertyMatches("Transparency", "appear"));
+    CHECK(propertyMatches("Material", "appearance mat"));
+    CHECK_FALSE(propertyMatches("Anchored", "appear"));
+}

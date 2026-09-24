@@ -3598,7 +3598,8 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     // **A search box, because the grid grew** (S5.14). A `Part` declares
     // twenty-odd properties across four classes and a `TextLabel` more than
     // that; "which row is `CanCollide` again" is a scroll, and it is the single
-    // most common thing anybody does in a properties panel.
+    // most common thing anybody does in a properties panel. Every word typed
+    // must appear somewhere in the name or its heading (`propertyMatches`).
     static std::array<char, 64> filter{};
     ImGui::SetNextItemWidth(-FLT_MIN);
     searchField(icons, "##property-filter", "filter properties", filter.data(), filter.size());
@@ -3612,41 +3613,74 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
         return;
     }
 
+    // **Rows grouped by the task they serve** (`propertyCategory`), in the
+    // panel's heading order, and in declaration order inside a heading -- the
+    // sort is stable. A heading was the class that declared the row, which put
+    // a part's colour, size and collision under three headings nobody reads.
+    struct PropertyRow
+    {
+        const scene::PropertyDesc* descriptor = nullptr;
+        PropertyCategory category;
+    };
+    static std::vector<PropertyRow> s_rows;
+    s_rows.clear();
+    for (const scene::PropertyDesc* descriptor : g_properties) {
+        const std::string_view name = world.atoms().text(descriptor->name);
+        if (propertyMatches(name, needle))
+            s_rows.push_back(PropertyRow{descriptor, propertyCategory(name)});
+    }
+    std::stable_sort(s_rows.begin(), s_rows.end(),
+                     [](const PropertyRow& a, const PropertyRow& b) { return a.category.order < b.category.order; });
+    if (s_rows.empty()) {
+        ImGui::TextDisabled("no property matches \"%s\"", filter.data());
+        return;
+    }
+
     const bool stacked = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 22.0f;
-    if (ImGui::BeginTable(stacked ? "properties-stacked" : "properties", stacked ? 1 : 2,
-                          ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("property", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+    // A grid: one divider between the columns that drags, quiet alternate rows,
+    // and no box around every cell -- the lines that say where a value starts
+    // and nothing more.
+    const ImGuiTableFlags gridFlags = ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp |
+                                      ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg;
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(ImGui::GetStyle().CellPadding.x * 2.0f, 2.0f));
+    if (ImGui::BeginTable(stacked ? "properties-stacked" : "properties-grid", stacked ? 1 : 2, gridFlags)) {
+        ImGui::TableSetupColumn("property", ImGuiTableColumnFlags_WidthStretch, 0.42f);
         if (!stacked)
-            ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+            ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
 
-        // **The class each row came from, as a header.** `collectProperties`
-        // already emits root-first, so the rows arrive grouped and this only has
-        // to notice when the group changes -- no sorting, no second pass.
-        //
-        // Off while filtering: a filter is a flat answer to "where is that one",
-        // and headers between two matches would be furniture around it.
-        const scene::ClassId primaryClass = world.classOf(inspector.selection());
-        scene::ClassId group = scene::InvalidClass;
-
-        for (const scene::PropertyDesc* descriptor : g_properties) {
+        std::string_view heading;
+        bool headingOpen = true;
+        for (const PropertyRow& row : s_rows) {
+            const scene::PropertyDesc* descriptor = row.descriptor;
             const std::string_view propertyName = world.atoms().text(descriptor->name);
-            if (!needle.empty() && !containsFold(propertyName, needle))
-                continue;
 
-            if (needle.empty()) {
-                if (const scene::ClassId declaring = declaringClassOf(world.classes(), primaryClass, descriptor->name);
-                    declaring != group) {
-                    group = declaring;
-                    const scene::ClassDescriptor* owner = world.classes().find(group);
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::SeparatorText(owner != nullptr ? std::string(world.atoms().text(owner->name)).c_str() : "?");
-                }
+            // **The heading, as a row of its own across both columns**, on the
+            // raised surface so it reads as a heading and not as a property.
+            // Collapsing one is remembered per heading; a filter opens every
+            // heading it matched in, because a match hidden under a closed
+            // heading is a filter that found nothing.
+            if (row.category.name != heading) {
+                heading = row.category.name;
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
+                char headingLabel[64];
+                (void)std::snprintf(headingLabel, sizeof(headingLabel), "%.*s##heading",
+                                    static_cast<int>(heading.size()), heading.data());
+                const bool expanded = ImGui::TreeNodeEx(
+                    headingLabel, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_NoTreePushOnOpen |
+                                      ImGuiTreeNodeFlags_SpanAllColumns | ImGuiTreeNodeFlags_LabelSpanAllColumns);
+                headingOpen = expanded || !needle.empty();
             }
+            if (!headingOpen)
+                continue;
 
             ImGui::PushID(static_cast<int>(descriptor->name.id));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
+            // In from the heading's arrow, and level with the widget beside it.
+            ImGui::Indent(ImGui::GetStyle().IndentSpacing * 0.5f);
+            ImGui::AlignTextToFramePadding();
 
             const EditorKind kind = editorFor(*descriptor);
 
@@ -3665,7 +3699,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
                                                      ImGuiTreeNodeFlags_SpanAvailWidth);
             }
             else {
-                ImGui::TextWrapped("%s", nameLabel);
+                ImGui::TextUnformatted(nameLabel);
             }
 
             // **The mark, and the two things a person can do about it** (S5.6).
@@ -3733,6 +3767,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
                     ImGui::SetTooltip("the selected instances hold different values; editing this sets all of them");
             }
 
+            ImGui::Unindent(ImGui::GetStyle().IndentSpacing * 0.5f);
             if (stacked)
                 ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(stacked ? 0 : 1);
@@ -3759,6 +3794,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
         }
         ImGui::EndTable();
     }
+    ImGui::PopStyleVar();
 
     // **Below the grid, and collapsed by default.** A class's properties are the
     // answer to "what is this"; attributes and tags are the answer to "what did
@@ -4285,6 +4321,33 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panel
             ImGui::Checkbox("show a grid in the viewport", &panels.showGrid);
             ImGui::EndPopup();
         }
+
+        // **The steps themselves, on the toolbar beside the switch** (the
+        // owner's feedback): how far a drag moves, turns and resizes is read
+        // and changed while placing something, so it lives where the placing
+        // is and not in a settings panel. Dimmed with the switch off, and still
+        // editable, so the numbers can be set up before snapping is turned on.
+        const auto stepField = [&](GizmoMode mode, const char* id, const char* format, f32 slowest, f32 fastest,
+                                   const char* tip) {
+            ImGui::SameLine();
+            const float width = ImGui::CalcTextSize("move 0.25 m").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            fitControl(width);
+            ImGui::SetNextItemWidth(width);
+            if (!snapping)
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.6f);
+            f32 step = editor.snapStep(mode);
+            if (ImGui::DragFloat(id, &step, step * 0.05f + 0.001f, slowest, fastest, format))
+                editor.setSnapStep(mode, step);
+            if (!snapping)
+                ImGui::PopStyleVar();
+            ImGui::SetItemTooltip("%s", tip);
+        };
+        stepField(GizmoMode::Translate, "##move-step", "move %.2f m", 0.001f, 64.0f,
+                  "how far a move snaps, in metres -- drag or double-click to type");
+        stepField(GizmoMode::Rotate, "##turn-step", "turn %.0f deg", 0.1f, 90.0f,
+                  "how far a turn snaps, in degrees -- drag or double-click to type");
+        stepField(GizmoMode::Scale, "##size-step", "size %.2f m", 0.001f, 64.0f,
+                  "how far a resize snaps, in metres -- drag or double-click to type");
     }
 
     ImGui::SameLine();
@@ -4552,6 +4615,175 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
     }
 }
 
+// --- The ribbon --------------------------------------------------------------
+//
+// **Tabs above the viewport that group the tools by task** (the owner's
+// feedback): Home is the toolbar that was always here, Model is making and
+// arranging things, Test is running the game, View is what is shown. One row
+// per tab, so switching never changes how tall the toolbar is when it fits.
+namespace {
+
+// Whether the next ribbon control starts the tab's row. Set by each tab before
+// its first control; asking the cursor instead fails in the viewport, whose
+// window has no padding to measure against.
+bool g_ribbonFirst = true;
+
+// A labelled button that wraps to the next row when the panel is narrow, and
+// greys when it cannot act.
+bool ribbonButton(const IconAtlas* icons, std::string_view icon, const char* label, const char* tip,
+                  bool enabled = true)
+{
+    const float width = ImGui::CalcTextSize(label).x + ImGui::CalcTextSize(tabIconPad().c_str()).x +
+                        ImGui::GetStyle().FramePadding.x * 2.0f;
+    if (!std::exchange(g_ribbonFirst, false)) {
+        ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x < width)
+            ImGui::NewLine();
+    }
+    ImGui::BeginDisabled(!enabled);
+    const bool pressed = labeledIconButton(icons, icon, label, ImVec2(width, 0.0f));
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("%s", tip);
+    return pressed && enabled;
+}
+
+// A thin divider between two groups of a tab.
+void ribbonDivider()
+{
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("|");
+}
+
+// A switch drawn as a button that stays lit while it is on.
+bool ribbonToggle(const IconAtlas* icons, std::string_view icon, const char* label, bool& value, const char* tip)
+{
+    if (value)
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    const bool pressed = ribbonButton(icons, icon, label, tip);
+    if (value)
+        ImGui::PopStyleColor();
+    if (pressed)
+        value = !value;
+    return pressed;
+}
+
+void drawRibbonModel(Editor& editor, EditorCommands& commands, EditorPanels& panels, const IconAtlas* icons)
+{
+    // Edits made while playing are thrown away at stop, so the tab says so by
+    // greying rather than by losing somebody's work.
+    const bool authoring = !editor.inPlayMode();
+    g_ribbonFirst = true;
+    if (ribbonButton(icons, icons::ClassPart, "Part", "insert a part inside the selection, or in Workspace", authoring))
+        commands.insertClassName = "Part";
+    if (ribbonButton(icons, icons::ClassModel, "Model", "insert an empty model", authoring))
+        commands.insertClassName = "Model";
+    if (ribbonButton(icons, icons::ClassFolder, "Folder", "insert an empty folder", authoring))
+        commands.insertClassName = "Folder";
+    if (ribbonButton(icons, icons::ClassScript, "Script", "insert a script that runs when the game does", authoring))
+        commands.insertClassName = "Script";
+    ribbonDivider();
+    if (ribbonButton(icons, icons::ClassModel, "Group", "group the selection into a model  (Ctrl+G)", authoring))
+        commands.groupSelection = true;
+    if (ribbonButton(icons, icons::ClassFolder, "Group as Folder", "group the selection into a folder  (Ctrl+Alt+G)",
+                     authoring))
+        commands.groupAsFolder = true;
+    if (ribbonButton(icons, icons::ActionExpand, "Ungroup", "take the children out and remove the group  (Ctrl+U)",
+                     authoring))
+        commands.ungroupSelection = true;
+    ribbonDivider();
+    if (ribbonButton(icons, icons::ActionDuplicate, "Duplicate", "duplicate the selection  (Ctrl+D)", authoring))
+        commands.duplicateSelection = true;
+    if (ribbonButton(icons, icons::ActionDelete, "Delete", "delete the selection  (Delete)", authoring))
+        commands.deleteSelection = true;
+    ribbonDivider();
+    if (ribbonButton(icons, icons::ClassTerrain, "Terrain", "open the terrain tools")) {
+        panels.terrain = true;
+        ImGui::SetWindowFocus("Terrain");
+    }
+    if (ribbonButton(icons, icons::ClassVoxelService, "Blocks", "open the block tools")) {
+        panels.blocks = true;
+        ImGui::SetWindowFocus("Blocks");
+    }
+    if (ribbonButton(icons, icons::ClassTilemap2D, "Tiles", "open the 2D tile tools")) {
+        panels.tiles = true;
+        ImGui::SetWindowFocus("Tiles###Tiles");
+    }
+}
+
+void drawRibbonTest(Editor& editor, EditorCommands& commands, const IconAtlas* icons)
+{
+    const bool inPlay = editor.inPlayMode();
+    const RunState run = editor.runState();
+    g_ribbonFirst = true;
+    if (ribbonButton(icons, inPlay ? icons::ActionStop : icons::ActionPlay, inPlay ? "Stop" : "Play",
+                     inPlay ? "leave play mode and put the world back where you pressed play"
+                            : "run the game, remembering the world first")) {
+        commands.play = !inPlay;
+    }
+    if (ribbonButton(icons, run == RunState::Paused ? icons::ActionPlay : icons::ActionPause,
+                     run == RunState::Paused ? "Resume" : "Pause", "hold the running world still", inPlay)) {
+        commands.pause = run != RunState::Paused;
+    }
+    if (ribbonButton(icons, icons::ActionForward, "Step", "advance exactly one simulation tick",
+                     inPlay && run == RunState::Paused))
+        editor.requestStep();
+    ribbonDivider();
+    bool detached = editor.cameraDetached();
+    ImGui::BeginDisabled(!inPlay);
+    if (ribbonToggle(icons, icons::ActionVisible, "Free Camera", detached,
+                     "fly the editor's camera while the game runs; the simulation is untouched  (Shift+P)"))
+        editor.setCameraDetached(detached);
+    ImGui::EndDisabled();
+}
+
+void drawRibbonView(EditorPanels& panels, const IconAtlas* icons)
+{
+    g_ribbonFirst = true;
+    (void)ribbonToggle(icons, icons::ClassModel, "Explorer", panels.explorer, "the instance tree");
+    (void)ribbonToggle(icons, icons::ActionSettings, "Properties", panels.properties, "the selection's properties");
+    (void)ribbonToggle(icons, icons::ContentFolder, "Content", panels.content, "the project's files");
+    (void)ribbonToggle(icons, icons::ClassScriptService, "Console", panels.console, "what the game has said");
+    (void)ribbonToggle(icons, icons::ClassDebugService, "Stats", panels.stats, "frame and memory numbers");
+    (void)ribbonToggle(icons, icons::ClassStreamingService, "Streaming", panels.streaming, "resident cells");
+    (void)ribbonToggle(icons, icons::ClassCamera, "Viewport Settings", panels.viewportSettings,
+                       "camera speed and visualization overlays");
+    ribbonDivider();
+    (void)ribbonToggle(icons, icons::ActionGrid, "Grid", panels.showGrid, "a reference grid at the move snap step");
+    (void)ribbonToggle(icons, icons::ClassPhysicsService, "Collision", panels.showCollision,
+                       "the shapes the physics solver uses");
+    (void)ribbonToggle(icons, icons::ClassBone, "Skeletons", panels.showSkeletons, "joints and bones");
+}
+
+} // namespace
+
+void drawRibbon(Editor& editor, EditorCommands& commands, EditorPanels& panels, const IconAtlas* icons)
+{
+    if (!ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_NoTooltip))
+        return;
+    if (ImGui::BeginTabItem("Home")) {
+        drawTransport(editor, commands, panels, icons);
+        ImGui::EndTabItem();
+    }
+    // Home only while a stamp is open: the stamp's own session controls are
+    // there, and the other tabs act on the scene the stamp has set aside.
+    if (!editor.stampSession().open()) {
+        if (ImGui::BeginTabItem("Model")) {
+            drawRibbonModel(editor, commands, panels, icons);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Test")) {
+            drawRibbonTest(editor, commands, icons);
+            ImGui::EndTabItem();
+        }
+    }
+    if (ImGui::BeginTabItem("View")) {
+        drawRibbonView(panels, icons);
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+}
+
 void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, EditorPanels& panels,
                   bool& open, const IconAtlas* icons)
 {
@@ -4564,7 +4796,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
     ImGui::PopStyleVar();
 
     if (visible) {
-        drawTransport(editor, commands, panels, icons);
+        drawRibbon(editor, commands, panels, icons);
         drawViewportBody(editor, texture, commands);
     }
     ImGui::End();
@@ -6756,22 +6988,10 @@ void drawViewportSettings(Editor* editor, EditorPanels& panels, const IconAtlas*
     if (ImGui::DragFloat("##fly-speed", &speed, 0.5f, 0.1f, 1000.0f, "%.1f"))
         editor->setCameraSpeed(speed);
     ImGui::TextWrapped("WASD/QE fly while the viewport has focus; right-drag to look. Scroll to adjust speed.");
+    // The snap switch and its steps are on the viewport's own toolbar, where a
+    // drag is; a second copy here was a second place to look for one number.
     ImGui::SeparatorText("Snapping");
-    bool snap = editor->snapping();
-    if (toggle(icons::ActionGrid, "Enable snapping", snap, "Hold Alt to temporarily suspend snapping."))
-        editor->setSnap(snap);
-    const auto step = [&](GizmoMode mode, const char* label, const char* format, float low, float high) {
-        ImGui::TextUnformatted(label);
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::PushID(label);
-        f32 value = editor->snapStep(mode);
-        if (ImGui::DragFloat("##step", &value, value * 0.05f + 0.001f, low, high, format))
-            editor->setSnapStep(mode, value);
-        ImGui::PopID();
-    };
-    step(GizmoMode::Translate, "Move", "%.3f m", 0.001f, 64.0f);
-    step(GizmoMode::Rotate, "Rotate", "%.1f deg", 0.1f, 90.0f);
-    step(GizmoMode::Scale, "Scale", "%.3f m", 0.001f, 64.0f);
+    ImGui::TextWrapped("Snapping and how far it moves, turns and resizes are on the viewport toolbar (Home).");
 }
 
 // The Blocks panel's contents (V1, `VoxelService`).
