@@ -829,9 +829,11 @@ TEST_CASE("a file's declared length is read from its header, Ogg Vorbis included
         for (const int value : values)
             ogg.push_back(static_cast<std::byte>(value));
     };
+    // Wider than eight bytes is zero padding: shifting a u64 by 64 or more is
+    // undefined, and the nightly's UBSan says so.
     const auto putLe = [&ogg](core::u64 value, int width) {
         for (int index = 0; index < width; ++index)
-            ogg.push_back(static_cast<std::byte>((value >> (8 * index)) & 0xFFu));
+            ogg.push_back(static_cast<std::byte>(index < 8 ? (value >> (8 * index)) & 0xFFu : 0u));
     };
     const auto page = [&](core::u64 granule, std::initializer_list<int> segments) {
         put({'O', 'g', 'g', 'S', 0, 2});
