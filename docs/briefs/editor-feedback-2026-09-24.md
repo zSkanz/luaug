@@ -24,7 +24,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **The editing keys every code editor shares** (word moves and deletes,
       whole-line cut/copy/delete/duplicate, indent/outdent, select line, select
       next match, jump to bracket, block comment).
-- [ ] **Text UI has a TextTransparency.**
+- [x] **Text UI has a TextTransparency.**
+- [x] **`Material` is a known global** to the lint and to completion.
 - [x] **A CFrame's rotation is editable in Properties**, as the three angles
       `Orientation` uses, beside its position -- it was nine read-only numbers.
 - [x] **WASD flies without a held mouse button.** While the viewport has focus

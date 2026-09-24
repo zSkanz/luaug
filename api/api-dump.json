@@ -3050,6 +3050,11 @@
           "Default": "14"
         },
         {
+          "Name": "TextTransparency",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
           "Name": "TextWrapped",
           "Type": "boolean",
           "Default": "false"

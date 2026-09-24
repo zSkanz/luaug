@@ -53,10 +53,14 @@ constexpr std::array<std::string_view, 21> kKeywords{
 // `engine/script/src/` -- the world globals, the datatype namespaces, and the
 // three functions the runtime installs. Luau's own globals are not here: they
 // come from `script::stdGlobals()`, which is checked against the VM.
-constexpr std::array<std::string_view, 21> kEngineGlobals{
-    "game",     "workspace", "script",    "print",  "warn",          "require", "task",
-    "Instance", "Enum",      "Vector3",   "CFrame", "Color3",        "Vector2", "UDim",
-    "UDim2",    "Rect",      "TweenInfo", "Signal", "RaycastParams", "Random",  "Content",
+//
+// `Material` joined with ADR 0090 and this list did not, so every
+// `Material.load` was underlined as an unknown global -- which is why a test
+// now boots a VM and asks it for each name (`world_host_tests.cpp`).
+constexpr std::array<std::string_view, 22> kEngineGlobals{
+    "game",      "workspace", "script",        "print",  "warn",    "require",  "task",  "Instance",
+    "Enum",      "Vector3",   "CFrame",        "Color3", "Vector2", "UDim",     "UDim2", "Rect",
+    "TweenInfo", "Signal",    "RaycastParams", "Random", "Content", "Material",
 };
 
 // `task` is the engine's library rather than Luau's, so it is not in

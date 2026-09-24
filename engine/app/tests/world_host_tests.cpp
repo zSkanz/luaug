@@ -1,4 +1,5 @@
 #include "luaug/app/inspector.h"
+#include "luaug/app/script_complete.h"
 #include "luaug/app/world_host.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
@@ -1445,4 +1446,22 @@ TEST_CASE("a husk lives while a script holds it, and is swept once nothing does"
     CHECK(host.huskCount() == 0);
     CHECK(world.alive(held));
     CHECK_FALSE(log.contains("[script.err."));
+}
+
+TEST_CASE("every global the editor offers and lints against is one the VM really has")
+{
+    // **The list the script editor completes from and the unknown-global lint
+    // reads** (`engineGlobals`), checked against a booted VM. `Material` joined
+    // the engine with ADR 0090 and not the list, so the editor underlined every
+    // `Material.load` as an unknown global -- the owner's screenshot.
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot({}).has_value());
+    for (const std::string_view name : app::engineGlobals()) {
+        // A type alias and nothing at runtime (api-design.md §2.3); and the
+        // running script's own instance, which a console line has none of.
+        if (name == "Content" || name == "script")
+            continue;
+        CAPTURE(std::string(name));
+        CHECK_FALSE(host.runtime().evaluate("assert(" + std::string(name) + " ~= nil)").has_value());
+    }
 }

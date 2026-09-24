@@ -408,6 +408,9 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
     if (const scene::TextLabelComponent* label = world.textLabels().find(entry.id); label != nullptr) {
         std::string_view text = label->text;
         core::Color3 color = label->textColor;
+        // `TextTransparency`: the words' own see-through, clamped here because
+        // the property keeps what was written.
+        const f32 textAlpha = 1.0f - std::fmin(1.0f, std::fmax(0.0f, label->textTransparency));
         // **Markup, when the label asks for it** -- and never in a field being
         // typed into, whose caret counts the characters of what is written, tags
         // and all. A placeholder is plain for the same reason.
@@ -437,11 +440,11 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
 
         if (rich)
             buildRichTextGeometry(text, label->font, size, label->textWrapped ? self->absoluteSize.x : 0.0f, box,
-                                  label->horizontalAlignment, label->verticalAlignment, color, 1.0f, entry.scissor,
+                                  label->horizontalAlignment, label->verticalAlignment, color, textAlpha, entry.scissor,
                                   out.quads);
         else
             buildTextGeometry(text, label->font, size, label->textWrapped ? self->absoluteSize.x : 0.0f, box,
-                              label->horizontalAlignment, label->verticalAlignment, color, 1.0f, entry.scissor,
+                              label->horizontalAlignment, label->verticalAlignment, color, textAlpha, entry.scissor,
                               out.quads);
 
         // --- The caret (S6.7) -------------------------------------------------

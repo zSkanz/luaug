@@ -955,6 +955,9 @@ struct TextLabelComponent
     // absent; it is not what an empty `Font` asks for.
     std::string font;
     core::Color3 textColor{0.0f, 0.0f, 0.0f};
+    // `TextLabel.TextTransparency`: the words' own see-through, apart from the
+    // box's. Stored as written; drawing clamps it to 0..1.
+    f32 textTransparency = 0.0f;
     f32 textSize = 14.0f;
     // `Enum.HorizontalAlignment` / `Enum.VerticalAlignment`.
     i32 horizontalAlignment = 1;

@@ -2307,6 +2307,14 @@ local Classes: { Schema.Class } = {
                 Doc = "No `3` suffix (§2.5, divergence #11).",
             },
             {
+                Name = "TextTransparency",
+                Type = "number",
+                Default = "0",
+                Doc = "How see-through the text is: 0 solid, 1 not drawn at all. The text's own, apart from "
+                    .. "`BackgroundTransparency`, so a label can fade its words and keep its box, or the "
+                    .. "other way round. Values outside 0 to 1 are kept as written and drawn as the nearer end.",
+            },
+            {
                 Name = "TextSize",
                 Type = "number",
                 Default = "14",

@@ -161,6 +161,8 @@ scene::Value getTextLabelText(const scene::World& world, core::InstanceId id);
 bool setTextLabelText(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelTextColor(const scene::World& world, core::InstanceId id);
 bool setTextLabelTextColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getTextLabelTextTransparency(const scene::World& world, core::InstanceId id);
+bool setTextLabelTextTransparency(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelTextSize(const scene::World& world, core::InstanceId id);
 bool setTextLabelTextSize(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getTextLabelFont(const scene::World& world, core::InstanceId id);

@@ -456,7 +456,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(frameDesc);
 
     // --- TextLabel ---
-    static std::array<scene::PropertyDesc, 9> textLabelProperties;
+    static std::array<scene::PropertyDesc, 10> textLabelProperties;
     textLabelProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("Text"),
@@ -479,6 +479,17 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
             .get = native::getTextLabelTextColor,
             .set = native::setTextLabelTextColor,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("TextTransparency"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How see-through the text is: 0 solid, 1 not drawn at all. The text's own, apart from `BackgroundTransparency`, so a label can fade its words and keep its box, or the other way round. Values outside 0 to 1 are kept as written and drawn as the nearer end.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getTextLabelTextTransparency,
+            .set = native::setTextLabelTextTransparency,
         },
         scene::PropertyDesc{
             .name = atoms.intern("TextSize"),

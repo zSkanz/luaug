@@ -406,6 +406,25 @@ bool setTextLabelTextColor(scene::World& world, core::InstanceId id, const Value
     return true;
 }
 
+Value getTextLabelTextTransparency(const scene::World& world, core::InstanceId id)
+{
+    const scene::TextLabelComponent* component = world.textLabels().find(id);
+    return component == nullptr ? Value{} : Value{static_cast<f64>(component->textTransparency)};
+}
+
+// Kept as written, like `BackgroundTransparency`; the draw clamps.
+bool setTextLabelTextTransparency(scene::World& world, core::InstanceId id, const Value& value)
+{
+    scene::TextLabelComponent* component = world.textLabels().find(id);
+    if (component == nullptr)
+        return false;
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !isFinite(*number))
+        return false;
+    component->textTransparency = static_cast<f32>(*number);
+    return true;
+}
+
 Value getTextLabelTextSize(const scene::World& world, core::InstanceId id)
 {
     const scene::TextLabelComponent* component = world.textLabels().find(id);

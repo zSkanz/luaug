@@ -22,5 +22,6 @@ offers is on the base's page, which is what keeps one added member on
 | `TextColor` | `Color3` | `Color3.new(0, 0, 0)` | read/write | No `3` suffix (§2.5, divergence #11). |
 | `TextScaled` | `boolean` | `false` | read/write | Whether `TextSize` is ignored and the text is rasterized at whatever size fills the box. Re-rasterized rather than scaled: there is no distance field in v1, and a stretched bitmap is what "scaled text" usually means and looks like. |
 | `TextSize` | `number` | `14` | read/write | The em size in pixels. An atlas is rasterized per font and integer size, so a fractional one is rounded for rasterization and the layout still uses what was asked for. |
+| `TextTransparency` | `number` | `0` | read/write | How see-through the text is: 0 solid, 1 not drawn at all. The text's own, apart from `BackgroundTransparency`, so a label can fade its words and keep its box, or the other way round. Values outside 0 to 1 are kept as written and drawn as the nearer end. |
 | `TextWrapped` | `boolean` | `false` | read/write | Whether lines break at the box's width. Breaks at spaces, and mid-word only for a word wider than the box -- a word cut in half at a random letter is worse than one that overhangs. |
 | `VerticalAlignment` | `Enum.VerticalAlignment` | `Enum.VerticalAlignment.Center` | read/write | Where it sits down the box. |

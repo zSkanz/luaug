@@ -39,6 +39,19 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **`TextLabel.TextTransparency`**: the words' own see-through, apart from the
+  box's `BackgroundTransparency` (0 solid, 1 not drawn; drawn clamped).
+- **The editor, from the owner's feedback pass**
+  (`docs/briefs/editor-feedback-2026-09-24.md`): a ribbon across the top
+  (Home, Model, Test, View); WASD flies without a held button; Ctrl+1 to
+  Ctrl+4 and Ctrl+L for the tools; Alt+click selects inside a model; Shift+P
+  flies free in play; Properties grouped by task with a filter that keeps its
+  headings and a CFrame's rotation editable in degrees; Group as Folder; a plus
+  on every instance, with every service's contents saved; a script editor with
+  self-closing pairs, clickable suggestions that read the file's own code,
+  type colouring, Ctrl+/, the line and word keys code editors share, and an
+  error's message at the end of its line.
+
 - **The material editor**: New Material and New Variant in the content
   browser, with a rendered ball on each material's row; a Material panel with
   its own undo that shows an edit in every world as it is made; a part's

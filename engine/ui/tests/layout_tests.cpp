@@ -954,3 +954,34 @@ TEST_CASE("a turn reaches every quad the element draws, not only its background"
         CHECK(quad.turn.y == doctest::Approx(1.0).epsilon(0.001));
     }
 }
+
+TEST_CASE("TextTransparency fades the words and not the box")
+{
+    // **The owner's report**: text had no transparency of its own, so fading a
+    // label's words meant fading its box with them.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId label = fixture.child("TextLabel", screen);
+    fixture.object(label).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 40.0f}};
+    fixture.world->textLabels().find(label)->text = "hello";
+    fixture.world->textLabels().find(label)->textTransparency = 0.75f;
+    fixture.run();
+
+    // The box is the first quad and keeps its own alpha; everything after it
+    // is the words, whichever face drew them.
+    ui::DrawList list;
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE(list.quads.size() > 1);
+    CHECK(static_cast<double>(list.quads[0].alpha) == doctest::Approx(1.0));
+    for (std::size_t index = 1; index < list.quads.size(); ++index)
+        CHECK(static_cast<double>(list.quads[index].alpha) == doctest::Approx(0.25));
+
+    // Past 1 is drawn as 1: the words are gone and the box is not.
+    fixture.world->textLabels().find(label)->textTransparency = 3.0f;
+    list.clear();
+    ui::buildDrawList(*fixture.world, fixture.service, list);
+    REQUIRE_FALSE(list.quads.empty());
+    CHECK(static_cast<double>(list.quads[0].alpha) == doctest::Approx(1.0));
+    for (std::size_t index = 1; index < list.quads.size(); ++index)
+        CHECK(static_cast<double>(list.quads[index].alpha) == doctest::Approx(0.0));
+}
