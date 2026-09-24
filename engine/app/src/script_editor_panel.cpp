@@ -1238,7 +1238,7 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
         ImGui::SetNextWindowDockID(console->DockId, ImGuiCond_FirstUseEver);
     }
 
-    if (!ImGui::Begin("Debug", &open)) {
+    if (!ImGui::Begin((tabIconPad() + "Debug###Debug").c_str(), &open)) {
         ImGui::End();
         return;
     }
@@ -1248,28 +1248,34 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
     // The transport. Disabled rather than hidden when nothing is stopped, so
     // the buttons stay where a hand already expects them -- the same rule the
     // File menu follows for Save.
+    const auto nextControl = [](const char* label) {
+        ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f)
+            ImGui::NewLine();
+    };
     ImGui::BeginDisabled(!debug.parked);
     if (ImGui::Button("Continue"))
         out.step = DebugStep::Continue;
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("let the script run on (F5)");
-    ImGui::SameLine();
+    nextControl("Over");
     if (ImGui::Button("Over"))
         out.step = DebugStep::Over;
-    ImGui::SameLine();
+    nextControl("Into");
     if (ImGui::Button("Into"))
         out.step = DebugStep::Into;
-    ImGui::SameLine();
+    nextControl("Out");
     if (ImGui::Button("Out"))
         out.step = DebugStep::Out;
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
     if (debug.parked)
         ImGui::TextColored(ImVec4(p.warning.r, p.warning.g, p.warning.b, 1.0f), "stopped in %s at line %u",
                            debug.chunk.c_str(), debug.line);
-    else
+    else {
+        nextControl("running");
         ImGui::TextDisabled("running");
+    }
 
     // The keys every debugger uses, so hands already know them. Read HERE and
     // not in the code pane: the pane owns the keyboard while the caret is in it,

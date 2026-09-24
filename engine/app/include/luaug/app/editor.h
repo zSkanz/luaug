@@ -298,6 +298,8 @@ struct EditorPanels
     bool content = true;
     bool console = true;
     bool stats = true;
+    bool streaming = false;
+    bool viewportSettings = false;
     // **The terrain brush's own dock**, off until somebody asks for it -- a
     // panel every project sees whether or not it has ground would be furniture,
     // and the toolbar's `dig` and `paint` open it.

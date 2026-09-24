@@ -640,6 +640,22 @@ bool iconMenuItem(const IconAtlas* atlas, std::string_view id, const char* label
     return pressed;
 }
 
+bool searchField(const IconAtlas* icons, const char* id, const char* hint, char* buffer, std::size_t capacity)
+{
+    if (icons == nullptr || !icons->ready())
+        return ImGui::InputTextWithHint(id, hint, buffer, capacity);
+    const ImVec2 padding = ImGui::GetStyle().FramePadding;
+    const float glyph = ImGui::GetFontSize();
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(padding.x + glyph + 4.0f, padding.y));
+    const bool edited = ImGui::InputTextWithHint(id, hint, buffer, capacity);
+    ImGui::PopStyleVar();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    paintActionIcon(icons, icons::ActionSearch, ImVec2(min.x + padding.x, min.y + padding.y), glyph);
+    ImGui::PopStyleColor();
+    return edited;
+}
+
 // Shared Orbit G geometry from branding/luaug-mark.svg, tinted by the theme.
 void drawBrandMark(ImVec2 origin, float size)
 {
@@ -931,7 +947,7 @@ struct ContentDrag
     // for the first of those. It is also the word on every other box
     // in this shell now, and three names for one gesture is three
     // things to learn.
-    ImGui::InputTextWithHint("##add-filter", "search", g_addFilter.data(), g_addFilter.size());
+    searchField(icons, "##add-filter", "search", g_addFilter.data(), g_addFilter.size());
 
     // **Escape closes it**, which is what Escape does to every
     // transient thing on a screen. The shell's own Escape handler
@@ -1118,7 +1134,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     // somebody just opened, with nothing on screen saying why.
     static std::array<char, 96> explorerFilter{};
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##explorer-filter", "search", explorerFilter.data(), explorerFilter.size());
+    searchField(icons, "##explorer-filter", "search", explorerFilter.data(), explorerFilter.size());
     const std::string_view explorerNeedle{explorerFilter.data()};
 
     // **A DIFFERENT world opens collapsed; a restored one does not.** Loading a
@@ -1601,13 +1617,13 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                 // thing in the world that names it. A file the world has no
                 // class for is imported and nothing more, which is honest and
                 // is what the status line then says.
-                if (ImGui::MenuItem("Import...", nullptr, false, platform::canPickFolder())) {
+                if (iconMenuItem(icons, icons::ActionImport, "Import...", nullptr, false, platform::canPickFolder())) {
                     commands->importAssets = true;
                     commands->importParent = row.id;
                 }
                 ImGui::Separator();
 
-                if (ImGui::MenuItem("Rename...", "F2", false, !engineOwned)) {
+                if (iconMenuItem(icons, icons::ActionRename, "Rename...", "F2", false, !engineOwned)) {
                     dialogs->renameTarget = row.id;
                     dialogs->renameContentPath.clear();
                     dialogs->renameSeed = std::string(instanceName);
@@ -1627,29 +1643,30 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                                     static_cast<int>(count));
                 (void)std::snprintf(deleteLabel, sizeof(deleteLabel), count > 1 ? "Delete %d" : "Delete",
                                     static_cast<int>(count));
-                if (ImGui::MenuItem(duplicateLabel, "Ctrl+D", false, !engineOwned))
+                if (iconMenuItem(icons, icons::ActionDuplicate, duplicateLabel, "Ctrl+D", false, !engineOwned))
                     commands->duplicateSelection = true;
-                if (ImGui::MenuItem("Group", "Ctrl+G", false, !engineOwned))
+                if (iconMenuItem(icons, icons::ClassModel, "Group", "Ctrl+G", false, !engineOwned))
                     commands->groupSelection = true;
                 // Offered only on something that HAS children, because
                 // ungrouping a part is not a thing and a greyed row says that
                 // better than a refusal after the click does.
-                if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, !engineOwned && world.firstChild(row.id).valid()))
+                if (iconMenuItem(icons, icons::ActionExpand, "Ungroup", "Ctrl+Shift+G", false,
+                                 !engineOwned && world.firstChild(row.id).valid()))
                     commands->ungroupSelection = true;
 
                 // **Copy, cut and the two pastes**, greyed rather than refused
                 // afterwards -- which is the rule every other item in this menu
                 // follows, and the reason `hasClipboard` is passed in at all.
                 ImGui::Separator();
-                if (ImGui::MenuItem("Copy", "Ctrl+C", false, !engineOwned))
+                if (iconMenuItem(icons, icons::ActionCopy, "Copy", "Ctrl+C", false, !engineOwned))
                     commands->copySelection = true;
-                if (ImGui::MenuItem("Cut", "Ctrl+X", false, !engineOwned))
+                if (iconMenuItem(icons, icons::ActionCut, "Cut", "Ctrl+X", false, !engineOwned))
                     commands->cutSelection = true;
                 // Beside this one, and inside it. That is the whole difference,
                 // and it is why they are two items rather than one.
-                if (ImGui::MenuItem("Paste", "Ctrl+V", false, hasClipboard))
+                if (iconMenuItem(icons, icons::ActionPaste, "Paste", "Ctrl+V", false, hasClipboard))
                     commands->paste = true;
-                if (ImGui::MenuItem("Paste Into", "Ctrl+Shift+V", false, hasClipboard))
+                if (iconMenuItem(icons, icons::ActionPaste, "Paste Into", "Ctrl+Shift+V", false, hasClipboard))
                     commands->pasteInto = true;
 
                 // --- Stamps (ADR 0049) --------------------------------------
@@ -1666,12 +1683,12 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     if (ImGui::MenuItem(stampLabel))
                         commands->breakStamp = stampRoot;
                 }
-                else if (ImGui::MenuItem("Convert to Stamp...", nullptr, false, !engineOwned)) {
+                else if (iconMenuItem(icons, icons::ClassModel, "Convert to Stamp...", nullptr, false, !engineOwned)) {
                     dialogs->stampSubject = row.id;
                     dialogs->newStamp = true;
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem(deleteLabel, "Del", false, !engineOwned))
+                if (iconMenuItem(icons, icons::ActionDelete, deleteLabel, "Del", false, !engineOwned))
                     commands->deleteSelection = true;
                 ImGui::PopStyleVar();
                 ImGui::EndPopup();
@@ -1922,7 +1939,9 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
     ImGui::TextUnformatted(label);
     ImGui::Unindent();
 
-    ImGui::TableSetColumnIndex(1);
+    if (ImGui::TableGetColumnCount() == 1)
+        ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(ImGui::TableGetColumnCount() == 1 ? 0 : 1);
     ImGui::PushID(label);
     ImGui::SetNextItemWidth(-FLT_MIN);
     const bool changed = ImGui::DragFloat("##value", &value, step, 0.0f, 0.0f, mixed ? "--" : format);
@@ -3490,7 +3509,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
         live += world.alive(id) ? 1u : 0u;
 
     if (live == 0) {
-        ImGui::TextUnformatted("nothing selected");
+        ImGui::TextWrapped("Select an object in the Explorer or viewport to edit its properties.");
         return;
     }
 
@@ -3544,7 +3563,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     // most common thing anybody does in a properties panel.
     static std::array<char, 64> filter{};
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##property-filter", "filter properties", filter.data(), filter.size());
+    searchField(icons, "##property-filter", "filter properties", filter.data(), filter.size());
     const std::string_view needle(filter.data());
 
     if (g_properties.empty()) {
@@ -3555,9 +3574,12 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
         return;
     }
 
-    if (ImGui::BeginTable("properties", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp)) {
+    const bool stacked = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 22.0f;
+    if (ImGui::BeginTable(stacked ? "properties-stacked" : "properties", stacked ? 1 : 2,
+                          ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("property", ImGuiTableColumnFlags_WidthStretch, 0.45f);
-        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+        if (!stacked)
+            ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
         // **The class each row came from, as a header.** `collectProperties`
         // already emits root-first, so the rows arrive grouped and this only has
@@ -3605,7 +3627,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
                                                      ImGuiTreeNodeFlags_SpanAvailWidth);
             }
             else {
-                ImGui::TextUnformatted(nameLabel);
+                ImGui::TextWrapped("%s", nameLabel);
             }
 
             // **The mark, and the two things a person can do about it** (S5.6).
@@ -3673,7 +3695,9 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
                     ImGui::SetTooltip("the selected instances hold different values; editing this sets all of them");
             }
 
-            ImGui::TableSetColumnIndex(1);
+            if (stacked)
+                ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(stacked ? 0 : 1);
             drawEditor(world, root, inspector, targets, *descriptor, shared, tree, icons, audio, commands);
 
             // The rows a composite is actually edited in. Disabled with the
@@ -3875,7 +3899,8 @@ void drawMemory(script::ScriptRuntime& runtime)
     return false;
 }
 
-void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCommands = nullptr)
+void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCommands = nullptr,
+                 const IconAtlas* icons = nullptr)
 {
     ConsoleLog& log = console();
 
@@ -3889,7 +3914,7 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
     ImGui::SameLine();
     const float resetWidth = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(resetWidth + ImGui::GetStyle().ItemSpacing.x));
-    ImGui::InputTextWithHint("##filter", "search", filter.data(), filter.size());
+    searchField(icons, "##filter", "search", filter.data(), filter.size());
     ImGui::SameLine();
     ImGui::BeginDisabled(filter[0] == 0);
     if (ImGui::Button("Reset"))
@@ -3905,7 +3930,8 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
     const f32 logHeight =
         consoleLogHeight(ImGui::GetContentRegionAvail().y, ImGui::GetFrameHeightWithSpacing(), kConsoleLogMinHeight);
 
-    if (ImGui::BeginChild("log", ImVec2(0.0f, logHeight), ImGuiChildFlags_Borders)) {
+    if (ImGui::BeginChild("log", ImVec2(0.0f, logHeight), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_HorizontalScrollbar)) {
         std::lock_guard<std::mutex> lock(log.mutex);
         // **Cleared under the same lock the sink writes under.** A clear that
         // raced a line from another thread would drop one that arrived after the
@@ -3917,10 +3943,11 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
             if (!consoleMatches(line.text, needle))
                 continue;
             ++shown;
-            const ImVec4 colour = line.level == core::LogLevel::Error   ? ImVec4(1.0f, 0.45f, 0.4f, 1.0f)
-                                  : line.level == core::LogLevel::Warn  ? ImVec4(1.0f, 0.85f, 0.4f, 1.0f)
-                                  : line.level == core::LogLevel::Debug ? ImVec4(0.6f, 0.65f, 0.75f, 1.0f)
-                                                                        : ImVec4(0.85f, 0.88f, 0.92f, 1.0f);
+            const ThemePalette& p = palette();
+            const ImVec4 colour = themeColor(line.level == core::LogLevel::Error   ? p.danger
+                                             : line.level == core::LogLevel::Warn  ? p.warning
+                                             : line.level == core::LogLevel::Debug ? p.textMuted
+                                                                                   : p.text);
             ImGui::PushStyleColor(ImGuiCol_Text, colour);
 
             // **A line that names a source location is a link** (S5.11). An
@@ -3992,8 +4019,7 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
 // pressing play asks "run my game", pressing stop asks "give me my world back",
 // and a button that means one of them while showing the other is the first
 // thing a person notices.
-void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dialogs, EditorPanels& panels,
-                   const IconAtlas* icons)
+void drawTransport(Editor& editor, EditorCommands& commands, EditorPanels& panels, const IconAtlas* icons)
 {
     const RunState run = editor.runState();
     const bool inPlay = editor.inPlayMode();
@@ -4003,7 +4029,13 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
     // panel they aim at. Falls back to the word when there is no atlas, because
     // a button with nothing on it is not a smaller button.
     const float glyph = ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.y * 2.0f;
+    const auto fitControl = [](float width) {
+        if (ImGui::GetContentRegionAvail().x < width && ImGui::GetCursorPosX() > ImGui::GetStyle().WindowPadding.x)
+            ImGui::NewLine();
+    };
     const auto toolButton = [&](std::string_view id, const char* word, const char* tip) {
+        const float width = icons != nullptr && icons->ready() ? glyph : ImGui::CalcTextSize(word).x;
+        fitControl(width + ImGui::GetStyle().FramePadding.x * 2.0f);
         return iconButton(icons, id, glyph, word, word, tip);
     };
 
@@ -4095,19 +4127,28 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
 
     // --- The manipulators -----------------------------------------------
     //
-    // Three modes, the space they work in, and the grid. Grouped after the
-    // transport and before the file actions, because that is the order somebody
-    // reaches for them in: run it, then change it, then keep it.
+    // Selection and transforms stay here; specialized operations live in their panels.
     ImGui::SameLine();
     ImGui::TextDisabled("|");
 
+    ImGui::SameLine();
+    const bool selecting = editor.tool() == Editor::Tool::Select;
+    if (selecting)
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (toolButton(icons::ActionSelect, "select", "return to object selection (Q)"))
+        editor.setTool(Editor::Tool::Select);
+    if (selecting)
+        ImGui::PopStyleColor();
+
     const auto modeButton = [&](GizmoMode mode, std::string_view id, const char* word, const char* tip) {
         ImGui::SameLine();
-        const bool on = editor.gizmoMode() == mode;
+        const bool on = editor.tool() == Editor::Tool::Select && editor.gizmoMode() == mode;
         if (on)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (toolButton(id, word, tip))
+        if (toolButton(id, word, tip)) {
+            editor.setTool(Editor::Tool::Select);
             editor.setGizmoMode(mode);
+        }
         if (on)
             ImGui::PopStyleColor();
     };
@@ -4123,6 +4164,7 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
     ImGui::SameLine();
     const bool sizing = editor.gizmoMode() == GizmoMode::Scale;
     ImGui::BeginDisabled(sizing);
+    fitControl(ImGui::CalcTextSize("world").x + ImGui::GetStyle().FramePadding.x * 2.0f);
     if (ImGui::Button(sizing || editor.gizmoLocal() ? "local" : "world"))
         editor.setGizmoLocal(!editor.gizmoLocal());
     ImGui::EndDisabled();
@@ -4136,48 +4178,11 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
     ImGui::SameLine();
     {
         const bool centred = editor.gizmoOrigin() == Editor::GizmoOrigin::Centre;
+        fitControl(ImGui::CalcTextSize("centre").x + ImGui::GetStyle().FramePadding.x * 2.0f);
         if (ImGui::Button(centred ? "centre" : "pivot"))
             editor.setGizmoOrigin(centred ? Editor::GizmoOrigin::Pivot : Editor::GizmoOrigin::Centre);
         ImGui::SetItemTooltip(centred ? "the middle of the selection -- click for the last thing clicked"
                                       : "the last thing clicked -- click for the middle of the selection");
-    }
-
-    // --- The brush's mode (F1) -------------------------------------------
-    //
-    // **Three chips here and everything else in the Terrain panel**, which is
-    // the split every editor in this shape makes: what a click MEANS is a mode
-    // and belongs beside the manipulator modes, and how wide the brush is, what
-    // it is made of and what it does are settings that need room.
-    //
-    // Shown always, and not only where the world has terrain in it. That was the
-    // first version and it was wrong in the way that matters: a person opening
-    // the editor on a project with no terrain saw no brush, no panel and no way
-    // to begin, which is not a missing feature -- it is the feature not being
-    // reachable. `dig` and `paint` on an empty world open the panel at Create.
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-
-    {
-        const auto toolChip = [&](Editor::Tool tool, const char* word, const char* tip) {
-            ImGui::SameLine();
-            const bool on = editor.tool() == tool;
-            if (on)
-                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::Button(word)) {
-                editor.setTool(tool);
-                if (tool == Editor::Tool::Blocks)
-                    panels.blocks = true;
-                else if (tool != Editor::Tool::Select)
-                    panels.terrain = true;
-            }
-            if (on)
-                ImGui::PopStyleColor();
-            ImGui::SetItemTooltip("%s", tip);
-        };
-        toolChip(Editor::Tool::Select, "pick", "click to select  (Q)");
-        toolChip(Editor::Tool::Sculpt, "dig", "shape the ground  (T) -- the Terrain panel has the brush");
-        toolChip(Editor::Tool::Paint, "paint", "change what ground is made of, without moving it  (Y)");
-        toolChip(Editor::Tool::Blocks, "blocks", "place and break blocks  (B) -- the Blocks panel has the types");
     }
 
     ImGui::SameLine();
@@ -4244,46 +4249,55 @@ void drawTransport(Editor& editor, EditorCommands& commands, EditorDialogs& dial
     ImGui::SameLine();
     ImGui::TextDisabled("|");
 
-    // A world to start in. Beside save rather than in the content browser,
-    // because "give me somewhere to begin" is a thing you do to the WORLD and
-    // the browser is about files.
-    //
-    // **Through the same gate File > New Scene uses**, and it did not used to
-    // be: this button emptied the scene on the spot while the identical menu
-    // item asked. The one door a hand reaches for without opening a menu was
-    // the only one that threw an hour's work away in silence.
     ImGui::SameLine();
-    if (toolButton(icons::ActionNew, "new", "empty the scene and start over -- anything unsaved is gone"))
-        issueOrAsk(EditorDialogs::Pending::NewScene, editor.hasUnsavedWork(), {}, dialogs, commands);
-
-    ImGui::SameLine();
-    // **Save asks for a name when there is nothing to overwrite.** An editor
-    // that invented one would put somebody's first hour of work in a file they
-    // did not choose and cannot find, which is the whole reason every editor
-    // has this dialog. The dialog itself lives at the shell's level, because
-    // File > Save Scene As has to reach the same one.
-    const bool untitled = editor.openScenePath().empty();
-    if (toolButton(icons::ActionSave, untitled ? "save as..." : "save",
-                   untitled ? "this scene has no name yet -- choose one" : editor.openScenePath().c_str())) {
-        if (untitled)
-            commands.wantSaveAs = true;
-        else
-            commands.save = true;
+    fitControl(ImGui::CalcTextSize("Tools").x + glyph + ImGui::GetStyle().FramePadding.x * 3.0f);
+    if (labeledIconButton(icons, icons::ActionTools, "Tools"))
+        ImGui::OpenPopup("viewport-tools");
+    ImGui::SetItemTooltip("Open a tool panel without changing the active tool");
+    if (ImGui::BeginPopup("viewport-tools")) {
+        if (iconMenuItem(icons, icons::ClassTerrain, "Terrain")) {
+            panels.terrain = true;
+            ImGui::SetWindowFocus("Terrain");
+        }
+        if (iconMenuItem(icons, icons::ClassVoxelService, "Blocks")) {
+            panels.blocks = true;
+            ImGui::SetWindowFocus("Blocks");
+        }
+        if (iconMenuItem(icons, icons::ClassTilemap2D, "Tiles")) {
+            panels.tiles = true;
+            ImGui::SetWindowFocus("Tiles###Tiles");
+        }
+        ImGui::EndPopup();
     }
 
     ImGui::SameLine();
-    switch (run) {
-    case RunState::Playing:
-        ImGui::TextDisabled("playing");
-        break;
-    case RunState::Paused:
-        ImGui::TextDisabled("paused in play mode -- stop to get your world back");
-        break;
-    case RunState::Editing:
-        ImGui::TextDisabled("editing | right-drag to look, WASD/QE to fly, wheel for speed (%.0f m/s)",
-                            static_cast<double>(editor.cameraSpeed()));
-        break;
+    if (toolButton(icons::ActionSettings, "viewport settings", "camera, snapping and visualization overlays"))
+        panels.viewportSettings = !panels.viewportSettings;
+    ImGui::SameLine();
+    const char* status = run == RunState::Playing ? "Playing" : run == RunState::Paused ? "Paused" : "Editing";
+    if (!inPlay) {
+        switch (editor.tool()) {
+        case Editor::Tool::Sculpt:
+            status = "Sculpt (Q: select)";
+            break;
+        case Editor::Tool::Paint:
+            status = "Paint (Q: select)";
+            break;
+        case Editor::Tool::Blocks:
+            status = "Blocks (Q: select)";
+            break;
+        case Editor::Tool::Tiles:
+            status = "Tiles (Q: select)";
+            break;
+        case Editor::Tool::Select:
+            break;
+        }
     }
+    fitControl(ImGui::CalcTextSize(status).x);
+    ImGui::TextDisabled("%s", status);
+    ImGui::SetItemTooltip("Q returns to selection. Choose terrain and block operations in their panels.\nRight-drag to "
+                          "look. WASD/QE to fly. Scroll for speed (%.0f m/s).",
+                          static_cast<double>(editor.cameraSpeed()));
 
     // The status used to be a second line here, and moving it is not cosmetic:
     // a line that exists when there is something to say and does not when there
@@ -4480,8 +4494,8 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
     }
 }
 
-void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, EditorDialogs& dialogs,
-                  EditorPanels& panels, bool& open, const IconAtlas* icons)
+void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, EditorPanels& panels,
+                  bool& open, const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     // **Room for the camera**, painted over the gap by `drawTabIcons`. Before
@@ -4492,7 +4506,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
     ImGui::PopStyleVar();
 
     if (visible) {
-        drawTransport(editor, commands, dialogs, panels, icons);
+        drawTransport(editor, commands, panels, icons);
         drawViewportBody(editor, texture, commands);
     }
     ImGui::End();
@@ -4580,6 +4594,8 @@ void buildDefaultLayout(ImGuiID dockspace)
     // and the order here is only what makes the tabs read left to right.
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderDockWindow("Stats", right);
+    ImGui::DockBuilderDockWindow("Streaming", right);
+    ImGui::DockBuilderDockWindow("Viewport Settings", right);
     // **The Terrain brush docks beside Properties**, which is where the editors
     // this one is measured against put their terrain tools: in the right-hand
     // column, beside whatever describes the selection. It is a tab in that node
@@ -4635,6 +4651,41 @@ void buildDefaultLayout(ImGuiID dockspace)
     return true;
 }
 
+// Every modal has the same escape route. Closing is cancellation, never acceptance.
+// Cancel handlers clear pending requests that would otherwise reopen on the next frame.
+template <typename Cancel>
+bool beginEditorDialog(const char* title, float width, Cancel cancel)
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float scale = ImGui::GetStyle().FontScaleMain;
+    const float fittedWidth = std::max(1.0f, std::min(width * scale, viewport->WorkSize.x - 32.0f));
+    ImGui::SetNextWindowSize(ImVec2(fittedWidth, 0.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(fittedWidth, viewport->WorkSize.y * 0.9f));
+    bool open = true;
+    const bool visible = ImGui::BeginPopupModal(title, &open, ImGuiWindowFlags_NoResize);
+    if (!open) {
+        cancel();
+        return false;
+    }
+    if (visible && dialogCancelled()) {
+        cancel();
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return false;
+    }
+    return visible;
+}
+
+bool dialogButton(const char* label, ImVec2 requested)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float width =
+        std::max(requested.x * style.FontScaleMain, ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f);
+    if (ImGui::GetContentRegionAvail().x < width && ImGui::GetCursorPosX() > style.WindowPadding.x)
+        ImGui::NewLine();
+    return ImGui::Button(label, ImVec2(std::min(width, ImGui::GetContentRegionAvail().x), requested.y));
+}
+
 // A short label for a kind, so a row says what it is without an icon set.
 // The icon id for a content kind, straight off the enum -- the same mechanical
 // mapping `class.` uses, which is what `icons/README.md` means by "content.
@@ -4669,7 +4720,7 @@ void buildDefaultLayout(ImGuiID dockspace)
     // until ADR 0090, and the picture of one did not change when it became a
     // file.
     case ContentKind::Material:
-        return icons::ClassMaterial;
+        return icons::ContentMaterial;
     case ContentKind::Other:
         break;
     }
@@ -4878,7 +4929,7 @@ void openSceneOrAsk(Editor& editor, EditorCommands& commands, EditorDialogs& dia
 void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels, EditorDialogs& dialogs,
                  const IconAtlas* icons, const scene::World* world, const Inspector* inspector)
 {
-    if (!ImGui::Begin("Content", &panels.content)) {
+    if (!ImGui::Begin((tabIconPad() + "Content###Content").c_str(), &panels.content)) {
         ImGui::End();
         return;
     }
@@ -4917,7 +4968,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     // The shell's dialog, so the toolbar button and the folder's own
     // right-click menu reach the same one. A FOLDER rather than a generic
     // "new", because what it makes is a folder and the picture can say so.
-    if (iconButton(icons, icons::ContentFolder, toolbarIcon, "new-folder", "new folder", "new folder", true, true))
+    if (iconButton(icons, icons::ActionNewFolder, toolbarIcon, "new-folder", "new folder", "new folder", true, true))
         dialogs.newFolder = true;
 
     // **One "new stamp", and the picker says which kind.** A verb per class would
@@ -4952,7 +5003,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
     // window does the same thing and lands in the same folder.
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
     ImGui::BeginDisabled(!platform::canPickFolder());
-    if (iconButton(icons, icons::ActionAdd, toolbarIcon, "import", "import", "import files into this folder", true,
+    if (iconButton(icons, icons::ActionImport, toolbarIcon, "import", "import", "import files into this folder", true,
                    true))
         commands.importAssets = true;
     ImGui::EndDisabled();
@@ -5053,7 +5104,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         contentFilter.fill(0);
     }
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9.0f);
-    ImGui::InputTextWithHint("##content-filter", "search", contentFilter.data(), contentFilter.size());
+    searchField(icons, "##content-filter", "search", contentFilter.data(), contentFilter.size());
     const std::string_view contentNeedle{contentFilter.data()};
 
     // **The view, as one button that opens the three.**
@@ -5233,7 +5284,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         // The rows are drawn with no vertical spacing; a menu is
                         // not a row.
                         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, entrySpacing);
-                        if (entry.kind == ContentKind::Scene && ImGui::MenuItem("Open"))
+                        if (entry.kind == ContentKind::Scene && iconMenuItem(icons, icons::ActionOpen, "Open"))
                             openSceneOrAsk(editor, commands, dialogs, entry.path);
                         if (entry.kind == ContentKind::Material) {
                             if (iconMenuItem(icons, icons::ActionOpen, "Open"))
@@ -5241,24 +5292,24 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             // **A variant**: a material that names this one and
                             // changes only what it writes, so editing this one
                             // reaches it (ADR 0090).
-                            if (iconMenuItem(icons, icons::ClassMaterial, "New Variant...")) {
+                            if (iconMenuItem(icons, icons::ActionMaterialVariant, "New Variant...")) {
                                 dialogs.newMaterial = true;
                                 dialogs.newMaterialParent = entry.path;
                             }
                         }
                         if (entry.kind == ContentKind::Stamp) {
-                            if (ImGui::MenuItem("Open"))
+                            if (iconMenuItem(icons, icons::ActionOpen, "Open"))
                                 commands.openStamp = entry.path;
                             // **Two ways to place one, and both are real.** A
                             // linked instance follows the file; a copy is its
                             // own from the first frame. A lamp post you will
                             // place forty of wants the first; a starting point
                             // you are about to rebuild wants the second.
-                            if (ImGui::MenuItem("Place (linked)")) {
+                            if (iconMenuItem(icons, icons::OverlayStamp, "Place (linked)")) {
                                 commands.placeStamp = entry.path;
                                 commands.placeStampLinked = true;
                             }
-                            if (ImGui::MenuItem("Place a copy")) {
+                            if (iconMenuItem(icons, icons::ActionDuplicate, "Place a copy")) {
                                 commands.placeStamp = entry.path;
                                 commands.placeStampLinked = false;
                             }
@@ -5278,7 +5329,7 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                             }
                             ImGui::EndMenu();
                         }
-                        if (ImGui::MenuItem("Rename...")) {
+                        if (iconMenuItem(icons, icons::ActionRename, "Rename...")) {
                             dialogs.renameTarget = {};
                             dialogs.renameContentPath = entry.path;
                             dialogs.renameSeed = ContentTree::stemOf(entry);
@@ -5293,16 +5344,17 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         // Not special-cased to materials: a scene, a stamp and
                         // a folder duplicate the same way and for the same
                         // reason.
-                        if (ImGui::MenuItem("Duplicate", "Ctrl+D"))
+                        if (iconMenuItem(icons, icons::ActionDuplicate, "Duplicate", "Ctrl+D"))
                             commands.duplicateContent = entry.path;
                         ImGui::Separator();
                         // Here as well as on the folder's own menu: a person who
                         // right-clicks lands on whatever was under the pointer,
                         // and which of the two menus they opened is not a
                         // distinction they made on purpose.
-                        if (ImGui::MenuItem("Import...", nullptr, false, platform::canPickFolder()))
+                        if (iconMenuItem(icons, icons::ActionImport, "Import...", nullptr, false,
+                                         platform::canPickFolder()))
                             commands.importAssets = true;
-                        if (ImGui::MenuItem("Delete"))
+                        if (iconMenuItem(icons, icons::ActionDelete, "Delete"))
                             dialogs.deleteContentPath = entry.path;
                         ImGui::PopStyleVar();
                         ImGui::EndPopup();
@@ -5413,18 +5465,18 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
             // thing lives; a right-click is where somebody goes when they have
             // just decided they want it, and an item that is only on the
             // toolbar is one people conclude does not exist.
-            if (ImGui::MenuItem("Import...", nullptr, false, platform::canPickFolder()))
+            if (iconMenuItem(icons, icons::ActionImport, "Import...", nullptr, false, platform::canPickFolder()))
                 commands.importAssets = true;
             ImGui::Separator();
-            if (ImGui::MenuItem("New Folder..."))
+            if (iconMenuItem(icons, icons::ActionNewFolder, "New Folder..."))
                 dialogs.newFolder = true;
-            if (ImGui::MenuItem("New Stamp..."))
+            if (iconMenuItem(icons, icons::ClassModel, "New Stamp..."))
                 dialogs.pickStampClass = true;
-            if (iconMenuItem(icons, icons::ClassMaterial, "New Material...")) {
+            if (iconMenuItem(icons, icons::ActionNewMaterial, "New Material...")) {
                 dialogs.newMaterial = true;
                 dialogs.newMaterialParent.clear();
             }
-            if (ImGui::MenuItem("Refresh"))
+            if (iconMenuItem(icons, icons::ActionRefresh, "Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();
         }
@@ -5485,13 +5537,15 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
                 commands.saveStamp = true;
         }
         else {
-            // Greyed rather than hidden when there is nothing to save to: the
-            // item has to be where somebody expects it even when it cannot act,
-            // or they conclude the editor cannot do it at all.
-            if (iconMenuItem(icons, icons::ActionSave, "Save Scene", "Ctrl+S", false, !editor.openScenePath().empty()))
-                commands.save = true;
+            // Untitled scenes ask for a path, just like Ctrl+S.
+            if (iconMenuItem(icons, icons::ActionSave, "Save Scene", "Ctrl+S")) {
+                if (editor.openScenePath().empty())
+                    commands.wantSaveAs = true;
+                else
+                    commands.save = true;
+            }
         }
-        if (iconMenuItem(icons, icons::ActionSave, "Save Scene As..."))
+        if (iconMenuItem(icons, icons::ActionSave, "Save Scene As...", "Ctrl+Shift+S"))
             dialogs.saveAs = true;
         ImGui::Separator();
         if (iconMenuItem(icons, icons::ActionClose, "Exit"))
@@ -5531,40 +5585,12 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
         panelItem("Content", icons::ContentFolder, panels.content);
         panelItem("Console", icons::ClassScriptService, panels.console);
         panelItem("Stats", icons::ClassDebugService, panels.stats);
-        panelItem("Terrain", icons::ClassWorkspace, panels.terrain);
-        panelItem("Blocks", icons::ClassPart, panels.blocks);
-        panelItem("Tiles", icons::ClassPart, panels.tiles);
+        panelItem("Streaming", icons::ClassStreamingService, panels.streaming);
+        panelItem("Viewport Settings", icons::ClassCamera, panels.viewportSettings);
+        panelItem("Terrain", icons::ClassTerrain, panels.terrain);
+        panelItem("Blocks", icons::ClassVoxelService, panels.blocks);
+        panelItem("Tiles", icons::ClassTilemap2D, panels.tiles);
         panelItem("Debug", icons::ClassDebugService, panels.debug);
-        ImGui::Separator();
-        // Not a panel, but it is a question about what the panels SHOW, and
-        // this is the menu a person opens to ask one.
-        ImGui::MenuItem("Streamed Content", nullptr, &panels.showGenerated);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("show what streaming materialised. It is not part of the scene: the save skips it and "
-                              "nothing authored can live in it");
-        }
-        ImGui::MenuItem("Skeletons", nullptr, &panels.showSkeletons);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("draw every skinned mesh's rig as lines, so a joint is something you can see before you "
-                              "name it in a Bone");
-        }
-        ImGui::MenuItem("Grid", nullptr, &panels.showGrid);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("a reference grid at the snap's own step, so what catches is what you can see. "
-                              "Right-click the snap button for the step");
-        }
-        ImGui::MenuItem("Collision Shapes", nullptr, &panels.showCollision);
-        ImGui::MenuItem("Terrain Wireframe", nullptr, &panels.showTerrainWireframe);
-        ImGui::MenuItem("Terrain Normals", nullptr, &panels.showTerrainNormals);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("draw what the SOLVER thinks each part is, which is not always what is drawn: a mesh "
-                              "collides as a hull, a wedge as its whole box");
-        }
-        ImGui::MenuItem("Streaming Grid", nullptr, &panels.showChunkGrid);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("draw the chunk grid and each focus's rings in the world, coloured by what each cell is "
-                              "doing. Only a project that streams has one");
-        }
         ImGui::Separator();
         // Not "close everything": somebody who has lost a panel behind another
         // wants the arrangement back, not an empty window.
@@ -5574,7 +5600,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
     }
 
     if (ImGui::BeginMenu("Help")) {
-        if (iconMenuItem(icons, icons::ClassInstance, "About LuauG"))
+        if (iconMenuItem(icons, icons::ActionInformation, "About LuauG"))
             dialogs.about = true;
         ImGui::EndMenu();
     }
@@ -5617,8 +5643,7 @@ void drawMenuBar(Editor& editor, EditorPanels& panels, EditorCommands& commands,
 // refuses to open.
 void drawProjectSettings(Editor& editor)
 {
-    ImGui::SetNextWindowSize(ImVec2(520.0f, 0.0f), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Project Settings", nullptr, ImGuiWindowFlags_NoResize))
+    if (!beginEditorDialog("Project Settings", 520.0f, []() {}))
         return;
 
     const std::filesystem::path root = editor.content().root().parent_path();
@@ -5647,12 +5672,14 @@ void drawProjectSettings(Editor& editor)
         quality = static_cast<int>(config.graphics.quality);
     }
 
-    ImGui::TextDisabled("%s", (root / "luaug.toml").string().c_str());
+    ImGui::TextWrapped("%s", root.filename().string().c_str());
     ImGui::Spacing();
 
     ImGui::SeparatorText("Project");
+    ImGui::TextUnformatted("Project name");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##name", "what the project calls itself", name.data(), name.size());
+    ImGui::TextUnformatted("Application ID");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##id", "reverse-DNS identity, e.g. dev.luaug.my-game", identity.data(), identity.size());
     if (ImGui::IsItemHovered()) {
@@ -5661,24 +5688,29 @@ void drawProjectSettings(Editor& editor)
     }
 
     ImGui::SeparatorText("Window");
+    ImGui::TextUnformatted("Window title");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##title", "the window's title bar", title.data(), title.size());
+    ImGui::TextUnformatted("Resolution");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputInt2("##size", size.data());
 
     ImGui::SeparatorText("Graphics");
+    ImGui::TextUnformatted("Quality");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::Combo("##quality", &quality, "low\0medium\0high\0ultra\0");
-    ImGui::TextDisabled("what this world is AUTHORED against, not a demand on the player's machine");
+    ImGui::TextWrapped("Default quality for this project. Players can change it later.");
 
     if (!problem.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s", problem.c_str());
+        ImGui::PushStyleColor(ImGuiCol_Text, themeColor(palette().danger));
+        ImGui::TextWrapped("%s", problem.c_str());
+        ImGui::PopStyleColor();
     }
 
     ImGui::Spacing();
     ImGui::Separator();
-    if (ImGui::Button("Apply", ImVec2(120.0f, 0.0f))) {
+    if (dialogButton("Apply", ImVec2(120.0f, 0.0f))) {
         problem.clear();
         const std::array<core::f64, 2> extent{static_cast<core::f64>(size[0]), static_cast<core::f64>(size[1])};
         static constexpr std::array<const char*, 4> Presets{"low", "medium", "high", "ultra"};
@@ -5713,7 +5745,7 @@ void drawProjectSettings(Editor& editor)
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled())
+    if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled())
         ImGui::CloseCurrentPopup();
 
     ImGui::EndPopup();
@@ -5740,15 +5772,14 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 
     drawProjectSettings(editor);
 
-    ImGui::SetNextWindowSize(ImVec2(470.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Save Scene As", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("Save Scene As", 470.0f, []() {})) {
         static std::array<char, 160> path{};
         ImGui::TextDisabled("Scenes live under the project's content directory.");
         ImGui::Spacing();
 
         ImGui::TextUnformatted("content/");
         ImGui::SameLine(0.0f, 0.0f);
-        ImGui::SetNextItemWidth(330.0f);
+        ImGui::SetNextItemWidth(-1.0f);
         if (dialogOpening()) {
             path.fill(0);
             ImGui::SetKeyboardFocusHere();
@@ -5766,7 +5797,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         const std::string resolved = Editor::normalizeScenePath(typed);
         const bool usable = !typed.empty() && Editor::sceneNameIsUsable(resolved);
         if (usable)
-            ImGui::TextDisabled("saves as content/%s", resolved.c_str());
+            ImGui::TextWrapped("Saves as content/%s", resolved.c_str());
         else if (typed.empty())
             ImGui::TextDisabled("saves as content/…");
         else
@@ -5774,10 +5805,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 
         ImGui::Spacing();
         ImGui::BeginDisabled(!usable);
-        const bool accepted = ImGui::Button("Save", ImVec2(120.0f, 0.0f));
+        const bool accepted = dialogButton("Save", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             path.fill(0);
             ImGui::CloseCurrentPopup();
         }
@@ -5790,8 +5821,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(470.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Preferences", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("Preferences", 520.0f, []() {})) {
         // Deliberately small and deliberately real. An empty preferences window
         // is a promise; one holding the setting somebody actually reaches for is
         // a place the next setting knows where to go.
@@ -5800,8 +5830,9 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // one thing came looking for this.
         ImGui::SeparatorText("Appearance");
         const Theme& current = themeById(g_appearance.themeId);
-        ImGui::SetNextItemWidth(220.0f);
-        if (ImGui::BeginCombo("Theme", std::string(current.name).c_str())) {
+        ImGui::TextUnformatted("Theme");
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::BeginCombo("##theme", std::string(current.name).c_str())) {
             for (const Theme& theme : themes()) {
                 const bool selected = theme.id == current.id;
                 if (ImGui::Selectable(std::string(theme.name).c_str(), selected)) {
@@ -5822,14 +5853,15 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // rewrites the whole style every frame, and writing the file that often
         // is a file write per pixel of travel.
         f32 scale = resolveUiScale(g_appearance.scale, g_displayScale);
-        if (ImGui::SliderFloat("Interface scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx")) {
+        ImGui::TextUnformatted("Interface scale");
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::SliderFloat("##interface-scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx")) {
             g_appearance.scale = scale;
             applyTheme(themeById(g_appearance.themeId), resolveUiScale(scale, g_displayScale));
         }
         if (ImGui::IsItemDeactivatedAfterEdit())
             applyAppearance();
-        ImGui::SameLine();
-        if (ImGui::Button("Match display")) {
+        if (labeledIconButton(icons, icons::ActionRefresh, "Match display")) {
             // Zero is the stored spelling of "ask the display", which is what
             // this button puts back -- not the number the display happens to
             // report today, because that one is wrong the moment somebody
@@ -5837,13 +5869,15 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             g_appearance.scale = 0.0f;
             applyAppearance();
         }
-        ImGui::TextDisabled("This display reports %.2fx. Theme and scale are yours, not the project's.",
-                            static_cast<double>(g_displayScale));
+        ImGui::SameLine();
+        ImGui::TextDisabled("Display: %.2fx", static_cast<double>(g_displayScale));
 
         ImGui::Spacing();
         ImGui::SeparatorText("Viewport");
         f32 speed = editor.cameraSpeed();
-        if (ImGui::DragFloat("Camera speed (m/s)", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
+        ImGui::TextUnformatted("Camera speed (m/s)");
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::DragFloat("##camera-speed", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
             editor.setCameraSpeed(speed);
         ImGui::TextDisabled("The scroll wheel changes this while flying, too.");
 
@@ -5853,25 +5887,15 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             bool tinting = icons->tinting();
             if (ImGui::Checkbox("Colour icons by role", &tinting))
                 icons->setTinting(tinting);
-            // **Not a degraded mode, and it says so.** The set was drawn and
-            // collision-checked in a single ink before any colour existed, so
-            // somebody who cannot use the colours is not being handed a worse
-            // tool -- which is the reason this switch exists at all.
-            ImGui::TextWrapped("The colour says what KIND of thing an icon is, never which thing -- the shape carries "
-                               "that. Off, every icon takes the panel's own foreground, and no two of them are closer "
-                               "than the set was drawn to be.");
+            ImGui::TextWrapped("Use category colors, or turn this off for monochrome icons.");
         }
 
         ImGui::Spacing();
-        ImGui::SeparatorText("Where these live");
-        ImGui::TextWrapped("The panel layout and the scene you had open are per-person and are kept in the project's "
-                           ".luaug directory. What a RUN of the project starts with is the project's own decision, "
-                           "and lives in luaug.toml. The theme and the interface scale are neither: they are about "
-                           "your eyes and your monitor, so they follow you across every project and live in your own "
-                           "user directory.");
+        ImGui::Separator();
+        ImGui::TextWrapped("Theme and interface scale apply to all your projects.");
 
         ImGui::Spacing();
-        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
+        if (dialogButton("Close", ImVec2(120.0f, 0.0f)))
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -5904,8 +5928,12 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     if (dialogs.pending != EditorDialogs::Pending::None)
         ImGui::OpenPopup("Unsaved Changes");
 
-    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Rename", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("Rename", 400.0f, [&]() {
+            dialogs.renameInstance = false;
+            dialogs.renameContent = false;
+            dialogs.renameTarget = {};
+            dialogs.renameContentPath.clear();
+        })) {
         static std::array<char, 128> name{};
         // Seeded once, on the frame the dialog opens. Copying every frame would
         // overwrite what the person is typing with what they started from.
@@ -5929,10 +5957,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 
         ImGui::Spacing();
         ImGui::BeginDisabled(typed.empty());
-        const bool accepted = ImGui::Button("Rename", ImVec2(120.0f, 0.0f));
+        const bool accepted = dialogButton("Rename", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             dialogs.renameTarget = {};
             dialogs.renameContentPath.clear();
             ImGui::CloseCurrentPopup();
@@ -5957,8 +5985,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     // A material, or a variant of the one right-clicked (ADR 0090). One box:
     // what differs between the two is only what the new file names as its
     // parent, which the browser already knows.
-    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("New Material", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("New Material", 400.0f, [&]() { dialogs.newMaterialParent.clear(); })) {
         static std::array<char, 128> materialName{};
         if (dialogOpening()) {
             materialName.fill(0);
@@ -5977,10 +6004,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 
         ImGui::Spacing();
         ImGui::BeginDisabled(typed.empty() || !ContentTree::isUsableName(typed));
-        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        const bool accepted = dialogButton("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             dialogs.newMaterialParent.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -5998,8 +6025,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("New Folder", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("New Folder", 400.0f, []() {})) {
         static std::array<char, 128> folder{};
         ImGui::SetNextItemWidth(-1.0f);
         // Cleared as well as focused: dismissed by clicking outside, this box
@@ -6016,10 +6042,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // Greyed before the press rather than refused after it: a name a
         // filesystem cannot carry is knowable while it is being typed.
         ImGui::BeginDisabled(!ContentTree::isUsableName(typed));
-        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        const bool accepted = dialogButton("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             folder.fill(0);
             ImGui::CloseCurrentPopup();
         }
@@ -6032,13 +6058,12 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(400.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("New Stamp From Class", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("New Stamp From Class", 400.0f, [&]() { dialogs.newStampClass = scene::InvalidClass; })) {
         static std::array<char, 128> stampName{};
         // **What it makes, in one line.** A stamp is a file of an instance, so
         // this makes both: the instance goes into the world where it can be
         // edited, and the file into the browser where it can be reused.
-        ImGui::TextDisabled("Makes one in the world and a file to reuse it from.");
+        ImGui::TextWrapped("Create an object in the scene and save it as a reusable stamp.");
         ImGui::Spacing();
 
         ImGui::SetNextItemWidth(-1.0f);
@@ -6056,10 +6081,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // CANNOT know here is whether the name is taken -- that is a question
         // about a folder, and the answer comes back as a refusal with a message.
         ImGui::BeginDisabled(!Editor::stampNameIsUsable(typed));
-        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        const bool accepted = dialogButton("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             stampName.fill(0);
             dialogs.newStampClass = scene::InvalidClass;
             ImGui::CloseCurrentPopup();
@@ -6075,8 +6100,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("New Stamp", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("New Stamp", 440.0f, [&]() { dialogs.stampSubject = {}; })) {
         static std::array<char, 128> stamp{};
         // **What this does, in one sentence, because the second half surprises
         // people**: it writes a file AND turns the thing you made it from into
@@ -6109,10 +6133,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
 
         ImGui::Spacing();
         ImGui::BeginDisabled(!usable || !dialogs.stampSubject.valid());
-        const bool accepted = ImGui::Button("Create", ImVec2(120.0f, 0.0f));
+        const bool accepted = dialogButton("Create", ImVec2(120.0f, 0.0f));
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             stamp.fill(0);
             dialogs.stampSubject = {};
             ImGui::CloseCurrentPopup();
@@ -6128,17 +6152,15 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Delete", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("Delete", 440.0f, [&]() { dialogs.deleteContentPath.clear(); })) {
         // **Named, not counted.** "Delete 1 item?" is a question nobody can
         // answer; the path is what tells somebody whether they meant it.
         ImGui::TextWrapped("Delete content/%s?", dialogs.deleteContentPath.c_str());
         ImGui::Spacing();
-        ImGui::TextDisabled("This removes the file from disk. A folder goes with everything in it, and there is no "
-                            "undo for either.");
+        ImGui::TextWrapped("This permanently deletes the file or folder and its contents.");
         ImGui::Spacing();
 
-        if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f))) {
+        if (dialogButton("Delete", ImVec2(120.0f, 0.0f))) {
             commands.deleteContent = dialogs.deleteContentPath;
             dialogs.deleteContentPath.clear();
             ImGui::CloseCurrentPopup();
@@ -6148,7 +6170,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         // answer somebody reaches for fastest: a confirmation you cannot back
         // out of with the key every other dialog uses is a confirmation people
         // learn to click through without reading.
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled()) {
             dialogs.deleteContentPath.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -6159,8 +6181,11 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
     // place: closing, starting over, opening something else and leaving for
     // another project all lose the same edits, so `dialogs.pending` remembers
     // which of them asked and the answer re-issues it.
-    ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("Unsaved Changes", 460.0f, [&]() {
+            dialogs.pending = EditorDialogs::Pending::None;
+            dialogs.pendingScene.clear();
+            editor.clearCloseRequest();
+        })) {
         const bool stampOpen = editor.stampSession().open();
         const bool haveSomewhereToSave = stampOpen || !editor.openScenePath().empty();
 
@@ -6176,7 +6201,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             ImGui::TextWrapped("This scene has never been saved.");
         }
         ImGui::Spacing();
-        ImGui::TextDisabled("Discarding loses every edit since the last save, and there is no undo for that.");
+        ImGui::TextWrapped("Unsaved edits will be lost if you continue without saving.");
         ImGui::Spacing();
 
         // Three answers and no more, in the order every application puts them:
@@ -6193,7 +6218,7 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             ImGui::CloseCurrentPopup();
         };
 
-        if (ImGui::Button(haveSomewhereToSave ? "Save" : "Save As...", ImVec2(130.0f, 0.0f))) {
+        if (dialogButton(haveSomewhereToSave ? "Save" : "Save As...", ImVec2(130.0f, 0.0f))) {
             if (stampOpen) {
                 commands.saveStamp = true;
                 proceed();
@@ -6216,10 +6241,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Don't Save", ImVec2(130.0f, 0.0f)))
+        if (dialogButton("Don't Save", ImVec2(130.0f, 0.0f)))
             proceed();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(130.0f, 0.0f))) {
+        if (dialogButton("Cancel", ImVec2(130.0f, 0.0f))) {
             dialogs.pending = EditorDialogs::Pending::None;
             dialogs.pendingScene.clear();
             editor.clearCloseRequest();
@@ -6228,14 +6253,13 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("About LuauG", nullptr, ImGuiWindowFlags_NoResize)) {
+    if (beginEditorDialog("About LuauG", 430.0f, []() {})) {
         ImGui::TextUnformatted("LuauG");
         ImGui::TextDisabled("An open-source game engine scripted in Luau.");
         ImGui::Spacing();
-        ImGui::TextDisabled("Apache-2.0. The editor is post-v1 phase 1.");
+        ImGui::TextDisabled("Version %s  |  Apache-2.0", LUAUG_VERSION_STRING);
         ImGui::Spacing();
-        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
+        if (dialogButton("Close", ImVec2(120.0f, 0.0f)))
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -6266,24 +6290,12 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
     if (icons == nullptr || !icons->ready() || g_device == nullptr)
         return;
 
-    ImGuiDockNode* node = ImGui::DockBuilderGetCentralNode(dockspace);
-    if (node == nullptr || node->TabBar == nullptr || node->HostWindow == nullptr)
-        return;
-
+    ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
     SDL_GPUTexture* native = rhi::nativeTexture(*g_device, icons->texture());
     if (native == nullptr)
         return;
 
-    const ImGuiTabBar& bar = *node->TabBar;
-    const float size = ImGui::GetFontSize();
-    ImDrawList* draw = node->HostWindow->DrawList;
-    draw->PushClipRect(bar.BarRect.Min, bar.BarRect.Max, true);
-
-    for (const ImGuiTabItem& item : bar.Tabs) {
-        if (item.Window == nullptr)
-            continue;
-
-        const std::string_view name = item.Window->Name;
+    const auto iconForName = [&](std::string_view name) {
         std::string id;
         if (name.ends_with("###Viewport")) {
             // The camera, because that is what a viewport IS -- and it is the
@@ -6292,6 +6304,28 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
             // the same idea.
             id = std::string(icons::ClassCamera);
         }
+        else if (name.ends_with("###Explorer"))
+            id = std::string(icons::ClassModel);
+        else if (name.ends_with("###Properties"))
+            id = std::string(icons::ActionSettings);
+        else if (name.ends_with("###Content"))
+            id = std::string(icons::ContentFolder);
+        else if (name.ends_with("###Console"))
+            id = std::string(icons::ClassScriptService);
+        else if (name.ends_with("###Streaming"))
+            id = std::string(icons::ClassStreamingService);
+        else if (name.ends_with("###Viewport Settings"))
+            id = std::string(icons::ClassCamera);
+        else if (name.ends_with("###Stats"))
+            id = std::string(icons::ClassDebugService);
+        else if (name.ends_with("###Terrain"))
+            id = std::string(icons::ClassTerrain);
+        else if (name.ends_with("###Tiles"))
+            id = std::string(icons::ClassTilemap2D);
+        else if (name.ends_with("###Blocks"))
+            id = std::string(icons::ClassVoxelService);
+        else if (name.ends_with("###Debug"))
+            id = std::string(icons::ClassDebugService);
         else if (scripts != nullptr && world != nullptr) {
             for (const OpenScript& tab : scripts->tabs()) {
                 char suffix[48]{};
@@ -6306,26 +6340,76 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
                 break;
             }
         }
+        return id;
+    };
+
+    const auto paintNode = [&](auto&& self, ImGuiDockNode* current) -> void {
+        if (current == nullptr)
+            return;
+        self(self, current->ChildNodes[0]);
+        self(self, current->ChildNodes[1]);
+        if (current->TabBar == nullptr || current->HostWindow == nullptr)
+            return;
+        const ImGuiTabBar& bar = *current->TabBar;
+        const float size = ImGui::GetFontSize();
+        ImDrawList* draw = current->HostWindow->DrawList;
+        draw->PushClipRect(bar.BarRect.Min, bar.BarRect.Max, true);
+
+        for (const ImGuiTabItem& item : bar.Tabs) {
+            if (item.Window == nullptr)
+                continue;
+
+            const std::string id = iconForName(item.Window->Name);
+            if (id.empty())
+                continue;
+
+            const IconSprite sprite = icons->find(id, static_cast<core::u32>(size + 0.5f));
+            if (!sprite.valid)
+                continue;
+
+            const float x = bar.BarRect.Min.x + item.Offset - bar.ScrollingAnim + ImGui::GetStyle().FramePadding.x;
+            const float y = bar.BarRect.Min.y + (bar.BarRect.GetHeight() - size) * 0.5f;
+            const ImVec4 tint = iconTint(icons, id);
+            draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(x, y),
+                           ImVec2(x + size, y + size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
+                           ImGui::GetColorU32(tint));
+        }
+
+        draw->PopClipRect();
+    };
+    paintNode(paintNode, node);
+    // Floating dock groups have their own root; ordinary floating windows have a title bar.
+    ImGuiContext& context = *ImGui::GetCurrentContext();
+    for (const ImGuiStoragePair& pair : context.DockContext.Nodes.Data) {
+        auto* floating = static_cast<ImGuiDockNode*>(pair.val_p);
+        if (floating != nullptr && floating != node && floating->ParentNode == nullptr)
+            paintNode(paintNode, floating);
+    }
+    for (ImGuiWindow* window : context.Windows) {
+        if (!window->Active || window->Hidden || window->DockIsActive ||
+            (window->Flags & ImGuiWindowFlags_NoTitleBar) != 0)
+            continue;
+        const std::string id = iconForName(window->Name);
         if (id.empty())
             continue;
-
+        const float size = ImGui::GetFontSize();
         const IconSprite sprite = icons->find(id, static_cast<core::u32>(size + 0.5f));
         if (!sprite.valid)
             continue;
-
-        const float x = bar.BarRect.Min.x + item.Offset - bar.ScrollingAnim + ImGui::GetStyle().FramePadding.x;
-        const float y = bar.BarRect.Min.y + (bar.BarRect.GetHeight() - size) * 0.5f;
-        const ImVec4 tint = iconTint(icons, id);
-        draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(x, y),
-                       ImVec2(x + size, y + size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
-                       ImGui::GetColorU32(tint));
+        const ImRect title = window->TitleBarRect();
+        // Shared theme keeps titles left aligned and hides the collapse button.
+        const ImVec2 origin(title.Min.x + window->WindowBorderSize + ImGui::GetStyle().FramePadding.x,
+                            title.Min.y + (title.GetHeight() - size) * 0.5f);
+        window->DrawList->PushClipRect(title.Min, title.Max, false);
+        window->DrawList->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), origin,
+                                   ImVec2(origin.x + size, origin.y + size), ImVec2(sprite.u0, sprite.v0),
+                                   ImVec2(sprite.u1, sprite.v1), ImGui::GetColorU32(iconTint(icons, id)));
+        window->DrawList->PopClipRect();
     }
-
-    draw->PopClipRect();
 }
 
 // Declared here and defined beside the other overlay panels, because the editor
-// shell is drawn above them in this file and the Stats panel needs it.
+// shell is drawn above them in this file and the Streaming panel needs it.
 void drawStreaming(const StreamingHost& streaming);
 
 // The Terrain panel's contents (F1).
@@ -6343,13 +6427,26 @@ void drawStreaming(const StreamingHost& streaming);
 // Sections rather than tabs, because this is a dock somebody keeps open beside
 // the viewport rather than a modal they visit, and because Create is a thing you
 // touch once while Sculpt is a thing you touch constantly.
-void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root, Inspector& inspector)
+void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root, Inspector& inspector,
+                      const IconAtlas* icons)
 {
     const core::InstanceId terrainId = editor.terrainIn(world, root);
     const scene::TerrainComponent* terrain = terrainId.valid() ? world.terrains().find(terrainId) : nullptr;
 
+    const auto section = [&](const char* label, std::string_view icon, ImGuiTreeNodeFlags flags) {
+        const std::string title = tabIconPad() + label + "###" + label;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const bool open = ImGui::CollapsingHeader(title.c_str(), flags);
+        paintActionIcon(
+            icons, icon,
+            ImVec2(origin.x + ImGui::GetTreeNodeToLabelSpacing(), origin.y + ImGui::GetStyle().FramePadding.y),
+            ImGui::GetFontSize());
+        return open;
+    };
+    ImGui::TextWrapped("Choose a tool, then drag in the viewport. Q returns to selection.");
+    ImGui::Spacing();
     // --- Create ---------------------------------------------------
-    if (ImGui::CollapsingHeader("Create", terrain == nullptr ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+    if (section("Create", icons::ActionAdd, terrain == nullptr ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
         if (terrain == nullptr) {
             ImGui::TextWrapped("This world has no terrain yet.");
         }
@@ -6374,14 +6471,18 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         // exercises the streaming grid rather than a special case.
         static f32 groundSize = 256.0f;
         static f32 groundHeight = 0.0f;
-        ImGui::SetNextItemWidth(120.0f);
-        ImGui::DragFloat("size", &groundSize, 1.0f, 8.0f, 2048.0f, "%.0f m");
-        ImGui::SetNextItemWidth(120.0f);
-        ImGui::DragFloat("top", &groundHeight, 0.25f, -256.0f, 256.0f, "%.1f m");
+        ImGui::TextUnformatted("Ground size");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::DragFloat("##ground-size", &groundSize, 1.0f, 8.0f, 2048.0f, "%.0f m");
+        ImGui::TextUnformatted("Surface height");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::DragFloat("##ground-height", &groundHeight, 0.25f, -256.0f, 256.0f, "%.1f m");
         ImGui::SetItemTooltip("the height the ground's surface ends up at");
         if (const asset::TerrainMaterial* fill = asset::terrainMaterial(editor.brush().material); fill != nullptr) {
+            ImGui::PushTextWrapPos(0.0f);
             ImGui::TextDisabled("made of %.*s -- pick another under Paint", static_cast<int>(fill->name.size()),
                                 fill->name.data());
+            ImGui::PopTextWrapPos();
         }
 
         // **The derived numbers, live**, which is what a landscape creation
@@ -6395,8 +6496,10 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
             // Flat ground is about four kilobytes a chunk column: one row of
             // voxels in thirty-two is not all ground or all air (ADR 0082).
             const auto kilobytes = side * side * 4;
+            ImGui::PushTextWrapPos(0.0f);
             ImGui::TextDisabled("%d x %d columns  |  %lld chunk columns  |  ~%lld KB", columns, columns, side * side,
                                 kilobytes);
+            ImGui::PopTextWrapPos();
         }
 
         // **One button, because it is one intention.**
@@ -6408,7 +6511,8 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         // because the plane IS its allocation; the two engines with sparse
         // storage both grew a workaround for handing you nothing, and this is
         // ours -- adopted rather than rediscovered.
-        if (ImGui::Button(terrain == nullptr ? "Create Terrain" : "Flat Ground", ImVec2(-FLT_MIN, 0.0f))) {
+        if (labeledIconButton(icons, icons::ActionAdd, terrain == nullptr ? "Create Terrain" : "Generate Flat Ground",
+                              ImVec2(-FLT_MIN, 0.0f))) {
             // **The palette's selection, not a second one.** The first
             // version had a material here that no widget showed and nothing
             // could change, which is a control that lies by being absent --
@@ -6420,21 +6524,26 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
                                   : "lays flat ground over this square, on top of whatever is there");
 
         if (terrain != nullptr) {
-            if (ImGui::Button("Clear", ImVec2(-FLT_MIN, 0.0f)))
+            if (labeledIconButton(icons, icons::ActionDelete, "Clear Terrain", ImVec2(-FLT_MIN, 0.0f)))
                 editor.clearTerrain(world, root, inspector);
             ImGui::SetItemTooltip("removes every bit of ground. One ctrl-Z brings it back");
         }
     }
 
     // --- Sculpt ---------------------------------------------------
-    if (ImGui::CollapsingHeader("Sculpt", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Sculpt", icons::ClassTerrain, ImGuiTreeNodeFlags_DefaultOpen)) {
         const Editor::Brush brush = editor.brush();
 
-        const auto opButton = [&](Editor::BrushOp op, const char* word, const char* tip) {
+        const auto opButton = [&](Editor::BrushOp op, std::string_view icon, const char* word, const char* tip) {
             const bool on = brush.op == op && editor.tool() == Editor::Tool::Sculpt;
             if (on)
                 ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::Button(word, ImVec2(76.0f, 0.0f))) {
+            const float width = std::max(76.0f * ImGui::GetStyle().FontScaleMain,
+                                         ImGui::CalcTextSize(word).x + ImGui::CalcTextSize(tabIconPad().c_str()).x +
+                                             ImGui::GetStyle().FramePadding.x * 2.0f);
+            if (ImGui::GetContentRegionAvail().x < width && ImGui::GetCursorPosX() > ImGui::GetStyle().WindowPadding.x)
+                ImGui::NewLine();
+            if (labeledIconButton(icons, icon, word, ImVec2(width, 0.0f))) {
                 editor.setBrushOp(op);
                 editor.setTool(Editor::Tool::Sculpt);
             }
@@ -6442,53 +6551,61 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
                 ImGui::PopStyleColor();
             ImGui::SetItemTooltip("%s", tip);
         };
-        opButton(Editor::BrushOp::Add, "add", "add a ball of ground where you aim -- hold it to build towards you");
+        opButton(Editor::BrushOp::Add, icons::ActionAdd, "Add",
+                 "add a ball of ground where you aim -- hold it to build towards you");
         ImGui::SameLine();
-        opButton(Editor::BrushOp::Subtract, "subtract",
+        opButton(Editor::BrushOp::Subtract, icons::ActionDelete, "Subtract",
                  "take a ball of ground away where you aim -- hold it to tunnel in");
         ImGui::SameLine();
-        opButton(Editor::BrushOp::Grow, "grow", "move the surface outwards: a field rises, a cliff comes forward");
+        opButton(Editor::BrushOp::Grow, icons::ActionRaise, "Grow",
+                 "move the surface outwards: a field rises, a cliff comes forward");
         ImGui::SameLine();
-        opButton(Editor::BrushOp::Erode, "erode", "move the surface inwards: the ground wears away");
+        opButton(Editor::BrushOp::Erode, icons::ActionDig, "Erode", "move the surface inwards: the ground wears away");
         ImGui::SameLine();
-        opButton(Editor::BrushOp::Smooth, "smooth",
+        opButton(Editor::BrushOp::Smooth, icons::ActionSmooth, "Smooth",
                  "soften what is there, pulling the ground towards its "
                  "neighbours");
         ImGui::SameLine();
-        opButton(Editor::BrushOp::Flatten, "flatten",
+        opButton(Editor::BrushOp::Flatten, icons::ActionFlatten, "Flatten",
                  "level towards the height you first clicked, so a drag does not chase itself downhill");
-
-        ImGui::Separator();
-
-        const bool box = brush.shape == Editor::BrushShape::Box;
-        if (ImGui::Button(box ? "box" : "sphere", ImVec2(76.0f, 0.0f)))
-            editor.setBrushShape(box ? Editor::BrushShape::Sphere : Editor::BrushShape::Box);
-        ImGui::SetItemTooltip(box ? "Add and Subtract stamp a box -- click for the ball"
-                                  : "Add and Subtract stamp a ball -- click for the box");
-        ImGui::SameLine();
+    }
+    // Shared by sculpting and painting; not hidden inside a specific operation.
+    if (section("Brush", icons::ActionSettings, ImGuiTreeNodeFlags_DefaultOpen)) {
+        const Editor::Brush brush = editor.brush();
+        ImGui::TextUnformatted("Shape");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        int shape = brush.shape == Editor::BrushShape::Box ? 1 : 0;
+        if (ImGui::Combo("##brush-shape", &shape, "Sphere\0Box\0"))
+            editor.setBrushShape(shape == 1 ? Editor::BrushShape::Box : Editor::BrushShape::Sphere);
+        ImGui::SetItemTooltip("the shape Add and Subtract stamp. The other tools are always round");
+        ImGui::TextUnformatted("Radius");
         ImGui::SetNextItemWidth(-FLT_MIN);
         f32 radius = brush.radius;
-        if (ImGui::DragFloat("##radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "size %.2f m"))
+        if (ImGui::DragFloat("##radius", &radius, radius * 0.05f + 0.01f, 0.25f, 64.0f, "%.2f m"))
             editor.setBrushRadius(radius);
 
         // Every op has a strength, and every drag a spacing.
+        ImGui::TextUnformatted("Strength");
         ImGui::SetNextItemWidth(-FLT_MIN);
         f32 strength = brush.strength;
-        if (ImGui::DragFloat("##strength", &strength, 0.01f, 0.02f, 1.0f, "strength %.2f"))
+        if (ImGui::DragFloat("##strength", &strength, 0.01f, 0.02f, 1.0f, "%.2f"))
             editor.setBrushStrength(strength);
         ImGui::SetItemTooltip(brush.op == Editor::BrushOp::Add || brush.op == Editor::BrushOp::Subtract
                                   ? "how fast the brush builds or bores while you hold it"
                                   : "how far one stamp moves the ground");
+        ImGui::TextUnformatted("Spacing");
         ImGui::SetNextItemWidth(-FLT_MIN);
         f32 spacing = brush.spacing;
-        if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "spacing %.2f x size"))
+        if (ImGui::DragFloat("##spacing", &spacing, 0.01f, 0.1f, 1.0f, "%.2f x size"))
             editor.setBrushSpacing(spacing);
         ImGui::SetItemTooltip("how far a drag travels between stamps. Smaller overlaps more");
     }
 
     // --- Paint ----------------------------------------------------
-    if (ImGui::CollapsingHeader("Paint", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Paint", icons::ActionPaint, ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushTextWrapPos(0.0f);
         ImGui::TextDisabled("what new ground is made of, and what paint lays down");
+        ImGui::PopTextWrapPos();
 
         // **Swatches, because a material is a colour before it is a
         // number.** Every editor here shows a palette rather than an id
@@ -6496,9 +6613,12 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
         // person cannot recognise 4 as snow.
         const core::u8 selected = editor.brush().material;
         const f32 swatch = ImGui::GetFrameHeight() * 1.4f;
+        const int columns =
+            std::max(1, static_cast<int>((ImGui::GetContentRegionAvail().x + ImGui::GetStyle().ItemSpacing.x) /
+                                         (swatch + ImGui::GetStyle().ItemSpacing.x)));
         int column = 0;
         for (const asset::TerrainMaterial& material : asset::terrainPalette()) {
-            if (column > 0 && column % 4 != 0)
+            if (column > 0 && column % columns != 0)
                 ImGui::SameLine();
             ++column;
 
@@ -6525,7 +6645,7 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
             ImGui::TextDisabled("%.*s", static_cast<int>(current->name.size()), current->name.data());
         }
 
-        if (ImGui::Button("Paint With This", ImVec2(-FLT_MIN, 0.0f)))
+        if (labeledIconButton(icons, icons::ActionPaint, "Paint Material", ImVec2(-FLT_MIN, 0.0f)))
             editor.setTool(Editor::Tool::Paint);
         ImGui::SetItemTooltip("changes what the ground is made of without moving it at all");
     }
@@ -6538,6 +6658,64 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
     }
 }
 
+// Inspectable settings stay available while working in the viewport.
+void drawViewportSettings(Editor* editor, EditorPanels& panels, const IconAtlas* icons, bool streams)
+{
+    ImGui::SeparatorText("Visualization");
+    const auto toggle = [&](std::string_view icon, const char* label, bool& value, const char* tip) {
+        const std::string padded = tabIconPad() + label;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const bool changed = ImGui::Checkbox(padded.c_str(), &value);
+        paintActionIcon(icons, icon,
+                        ImVec2(origin.x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x,
+                               origin.y + ImGui::GetStyle().FramePadding.y),
+                        ImGui::GetFontSize());
+        ImGui::SetItemTooltip("%s", tip);
+        return changed;
+    };
+    toggle(icons::ActionGrid, "Reference grid", panels.showGrid, "The grid uses the move snap step.");
+    toggle(icons::ClassBone, "Skeletons", panels.showSkeletons, "Show joints and bones of skinned meshes.");
+    toggle(icons::ClassPhysicsService, "Collision shapes", panels.showCollision,
+           "Show the shapes used by the physics solver.");
+    toggle(icons::ClassTerrain, "Terrain wireframe", panels.showTerrainWireframe,
+           "Show the terrain's triangles near the camera. Red is a triangle facing the wrong way.");
+    toggle(icons::ClassTerrain, "Terrain normals", panels.showTerrainNormals,
+           "Show the normal the terrain is lit by, at each vertex near the camera.");
+    // **Only a world that streams has a grid to show**, so the switch says so
+    // rather than being a checkbox that does nothing (the owner's report).
+    ImGui::BeginDisabled(!streams);
+    toggle(icons::ClassStreamingService, "Streaming grid", panels.showChunkGrid,
+           streams ? "Show chunk boundaries and focus rings."
+                   : "This world does not stream: it has no chunk grid to show. A project whose scene is "
+                     "partitioned into cells streams, and the grid appears here.");
+    ImGui::EndDisabled();
+    if (editor == nullptr)
+        return;
+    ImGui::SeparatorText("Camera");
+    ImGui::TextUnformatted("Fly speed (m/s)");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    f32 speed = editor->cameraSpeed();
+    if (ImGui::DragFloat("##fly-speed", &speed, 0.5f, 0.1f, 1000.0f, "%.1f"))
+        editor->setCameraSpeed(speed);
+    ImGui::TextWrapped("Right-drag to look. WASD/QE to fly. Scroll to adjust speed.");
+    ImGui::SeparatorText("Snapping");
+    bool snap = editor->snapping();
+    if (toggle(icons::ActionGrid, "Enable snapping", snap, "Hold Alt to temporarily suspend snapping."))
+        editor->setSnap(snap);
+    const auto step = [&](GizmoMode mode, const char* label, const char* format, float low, float high) {
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::PushID(label);
+        f32 value = editor->snapStep(mode);
+        if (ImGui::DragFloat("##step", &value, value * 0.05f + 0.001f, low, high, format))
+            editor->setSnapStep(mode, value);
+        ImGui::PopID();
+    };
+    step(GizmoMode::Translate, "Move", "%.3f m", 0.001f, 64.0f);
+    step(GizmoMode::Rotate, "Rotate", "%.1f deg", 0.1f, 90.0f);
+    step(GizmoMode::Scale, "Scale", "%.3f m", 0.001f, 64.0f);
+}
+
 // The Blocks panel's contents (V1, `VoxelService`).
 //
 // **Types first, then what a click does.** A block world is a palette before
@@ -6545,7 +6723,7 @@ void drawTerrainPanel(Editor& editor, scene::World& world, core::InstanceId root
 // panel opens on the palette, and making a type is one row under it rather
 // than a dialog. The colours are the three faces a type has: top, sides and
 // bottom, because a grass block is green on top and earth everywhere else.
-void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
+void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector, const IconAtlas* icons)
 {
     scene::VoxelComponent* voxels = Editor::voxelsIn(world);
     if (voxels == nullptr) {
@@ -6557,11 +6735,16 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
 
     // --- What a click does -------------------------------------------
     {
-        const auto opButton = [&](Editor::BlockOp op, const char* word, const char* tip) {
+        const auto opButton = [&](Editor::BlockOp op, std::string_view icon, const char* word, const char* tip) {
             const bool on = editor.blockOp() == op && editor.tool() == Editor::Tool::Blocks;
             if (on)
                 ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::Button(word, ImVec2(76.0f, 0.0f))) {
+            const float width = std::max(76.0f * ImGui::GetStyle().FontScaleMain,
+                                         ImGui::CalcTextSize(word).x + ImGui::CalcTextSize(tabIconPad().c_str()).x +
+                                             ImGui::GetStyle().FramePadding.x * 2.0f);
+            if (ImGui::GetContentRegionAvail().x < width && ImGui::GetCursorPosX() > ImGui::GetStyle().WindowPadding.x)
+                ImGui::NewLine();
+            if (labeledIconButton(icons, icon, word, ImVec2(width, 0.0f))) {
                 editor.setBlockOp(op);
                 editor.setTool(Editor::Tool::Blocks);
             }
@@ -6569,11 +6752,13 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
                 ImGui::PopStyleColor();
             ImGui::SetItemTooltip("%s", tip);
         };
-        opButton(Editor::BlockOp::Place, "place", "a block against the face under the pointer");
+        opButton(Editor::BlockOp::Place, icons::ActionPlaceBlock, "Place",
+                 "a block against the face under the pointer");
         ImGui::SameLine();
-        opButton(Editor::BlockOp::Break, "break", "the block under the pointer goes");
+        opButton(Editor::BlockOp::Break, icons::ActionBreakBlock, "Break", "the block under the pointer goes");
         ImGui::SameLine();
-        opButton(Editor::BlockOp::Replace, "replace", "the block under the pointer becomes the selected type");
+        opButton(Editor::BlockOp::Replace, icons::ActionReplaceBlock, "Replace",
+                 "the block under the pointer becomes the selected type");
         ImGui::TextDisabled("%zu chunk(s), blocks of %.2f m", voxels->grid.chunkCount(),
                             static_cast<double>(voxels->blockSize));
     }
@@ -6585,10 +6770,13 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
                                "same type.");
 
         const f32 swatch = ImGui::GetFrameHeight() * 1.4f;
+        const auto columns = static_cast<core::usize>(
+            std::max(1, static_cast<int>((ImGui::GetContentRegionAvail().x + ImGui::GetStyle().ItemSpacing.x) /
+                                         (swatch + ImGui::GetStyle().ItemSpacing.x))));
         for (core::usize at = 0; at < voxels->types.size(); ++at) {
             const scene::VoxelBlockType& type = voxels->types[at];
             const auto id = static_cast<asset::BlockId>(at + 1);
-            if (at % 6 != 0)
+            if (at % columns != 0)
                 ImGui::SameLine();
             ImGui::PushID(static_cast<int>(id));
             const bool on = editor.blockType() == id;
@@ -6651,7 +6839,7 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
         ImGui::ColorEdit3("top##new", newTop, ImGuiColorEditFlags_NoInputs);
         ImGui::SameLine();
         ImGui::ColorEdit3("sides and bottom##new", newSide, ImGuiColorEditFlags_NoInputs);
-        if (ImGui::Button("Add Type", ImVec2(-FLT_MIN, 0.0f))) {
+        if (labeledIconButton(icons, icons::ActionAdd, "Add Type", ImVec2(-FLT_MIN, 0.0f))) {
             const core::Color3 side{newSide[0], newSide[1], newSide[2]};
             if (editor.addBlockType(world, inspector, newName, core::Color3{newTop[0], newTop[1], newTop[2]}, side,
                                     side) != asset::AirBlock) {
@@ -6664,7 +6852,7 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
 
     // --- World --------------------------------------------------------
     if (ImGui::CollapsingHeader("World")) {
-        if (ImGui::Button("Clear Blocks", ImVec2(-FLT_MIN, 0.0f)))
+        if (labeledIconButton(icons, icons::ActionDelete, "Clear Blocks", ImVec2(-FLT_MIN, 0.0f)))
             (void)editor.clearBlocks(world, inspector);
         ImGui::SetItemTooltip("removes every block and keeps the types. One ctrl-Z brings them back");
     }
@@ -6673,11 +6861,17 @@ void drawBlocksPanel(Editor& editor, scene::World& world, Inspector& inspector)
 // The Tiles tool's panel (the 2D layer): the 2D view it is used from, what a
 // click does, and the tile it lays -- picked from the tileset's own picture
 // when the renderer has loaded it, and by number when it has not.
-void drawTilesPanel(Editor& editor, scene::World& world, core::InstanceId root, Inspector& inspector)
+void drawTilesPanel(Editor& editor, scene::World& world, core::InstanceId root, Inspector& inspector,
+                    const IconAtlas* icons)
 {
     bool flat = editor.view2D();
-    if (ImGui::Checkbox("2D view", &flat))
+    const ImVec2 viewOrigin = ImGui::GetCursorScreenPos();
+    if (ImGui::Checkbox((tabIconPad() + "2D view###2D view").c_str(), &flat))
         editor.setView2D(flat);
+    paintActionIcon(icons, icons::ActionView2D,
+                    ImVec2(viewOrigin.x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x,
+                           viewOrigin.y + ImGui::GetStyle().FramePadding.y),
+                    ImGui::GetFontSize());
     ImGui::SetItemTooltip("look straight at the 2D plane: right-drag pans, the wheel zooms about the pointer");
 
     const core::InstanceId target = Editor::tilemapFor(world, inspector, root);
@@ -6689,11 +6883,15 @@ void drawTilesPanel(Editor& editor, scene::World& world, core::InstanceId root, 
     const std::string_view name = world.atoms().text(world.name(target));
     ImGui::TextDisabled("painting %.*s", static_cast<int>(name.size()), name.data());
 
-    const auto opButton = [&](Editor::TileOp op, const char* word, const char* tip) {
+    const auto opButton = [&](Editor::TileOp op, std::string_view icon, const char* word, const char* tip) {
         const bool on = editor.tileOp() == op && editor.tool() == Editor::Tool::Tiles;
         if (on)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button(word, ImVec2(76.0f * ImGui::GetStyle().FontScaleMain, 0.0f))) {
+        const float width = ImGui::CalcTextSize(word).x + ImGui::CalcTextSize(tabIconPad().c_str()).x +
+                            ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (ImGui::GetContentRegionAvail().x < width && ImGui::GetCursorPosX() > ImGui::GetStyle().WindowPadding.x)
+            ImGui::NewLine();
+        if (labeledIconButton(icons, icon, word, ImVec2(width, 0.0f))) {
             editor.setTileOp(op);
             editor.setTool(Editor::Tool::Tiles);
         }
@@ -6701,9 +6899,10 @@ void drawTilesPanel(Editor& editor, scene::World& world, core::InstanceId root, 
             ImGui::PopStyleColor();
         ImGui::SetItemTooltip("%s", tip);
     };
-    opButton(Editor::TileOp::Paint, "Paint", "the selected tile into every cell the pointer crosses");
+    opButton(Editor::TileOp::Paint, icons::ActionPaint, "Paint",
+             "the selected tile into every cell the pointer crosses");
     ImGui::SameLine();
-    opButton(Editor::TileOp::Erase, "Erase", "empties every cell the pointer crosses");
+    opButton(Editor::TileOp::Erase, icons::ActionErase, "Erase", "empties every cell the pointer crosses");
 
     const Editor::TilesetPreview& preview = editor.tilesetPreview();
     const int columns = preview.tileSize.x > 0.0f ? static_cast<int>(preview.pixels.x / preview.tileSize.x) : 0;
@@ -6832,7 +7031,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (editor != nullptr) {
         if (panels.viewport)
-            drawViewport(*editor, viewport, commands, dialogs, panels, panels.viewport, icons);
+            drawViewport(*editor, viewport, commands, panels, panels.viewport, icons);
         if (panels.content)
             drawContent(*editor, commands, panels, dialogs, icons, world, inspector);
     }
@@ -6864,7 +7063,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     const core::InstanceId treeRoot = editingStamp ? editor->stampSession().root : root;
 
     if (panels.explorer) {
-        if (ImGui::Begin("Explorer", &panels.explorer)) {
+        if (ImGui::Begin((tabIconPad() + "Explorer###Explorer").c_str(), &panels.explorer)) {
             if (world != nullptr && inspector != nullptr) {
                 // **Two trees, and the tabs are what says they are two.** The
                 // scene is what this world holds; `Content` is what the PROJECT
@@ -6887,14 +7086,21 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // arranged it -- so a new panel finding its home must not cost them that
     // arrangement. This is the node Properties is actually in, this launch.
     ImGuiID rightColumn = 0;
+    for (const char* name : {"Properties", "Stats", "Terrain", "Blocks"}) {
+        if (const ImGuiWindow* window = ImGui::FindWindowByName(name); window != nullptr && window->DockId != 0) {
+            rightColumn = window->DockId;
+            break;
+        }
+    }
 
     // What was selected last frame, so "the selection changed to a terrain" is a
     // transition rather than a state -- see the panel below.
     static core::InstanceId lastSelection;
 
     if (panels.properties) {
-        if (ImGui::Begin("Properties", &panels.properties)) {
-            rightColumn = ImGui::GetWindowDockID();
+        if (ImGui::Begin((tabIconPad() + "Properties###Properties").c_str(), &panels.properties)) {
+            if (ImGui::GetWindowDockID() != 0)
+                rightColumn = ImGui::GetWindowDockID();
             if (world != nullptr && inspector != nullptr) {
                 drawProperties(*world, treeRoot, *inspector, editor != nullptr ? &editor->content() : nullptr, icons,
                                audio, editor != nullptr ? &commands : nullptr, editor);
@@ -6919,8 +7125,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // Draws with no VM for the same reason it does in the overlay: the LOG half
     // is what somebody wants when the VM failed to boot.
     if (panels.console) {
-        if (ImGui::Begin("Console", &panels.console))
-            drawConsole(runtime, &scriptCommands);
+        if (ImGui::Begin((tabIconPad() + "Console###Console").c_str(), &panels.console))
+            drawConsole(runtime, &scriptCommands, icons);
         ImGui::End();
     }
 
@@ -6959,7 +7165,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         // an existing `layout.ini` is not rewritten for a window it predates.
         if (rightColumn != 0)
             ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
-        terrainShown = ImGui::Begin("Terrain", &panels.terrain);
+        terrainShown = ImGui::Begin((tabIconPad() + "Terrain###Terrain").c_str(), &panels.terrain);
         if (terrainShown) {
             // **The shell holds pointers, and every one of the three may be
             // null**: this same function draws the F3 overlay, which has a frame
@@ -6969,7 +7175,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
                 ImGui::End();
                 goto terrainPanelDone;
             }
-            drawTerrainPanel(*editor, *world, treeRoot, *inspector);
+            drawTerrainPanel(*editor, *world, treeRoot, *inspector, icons);
             drawTerrainSetup(*editor, *world, treeRoot, *inspector, commands);
         }
         ImGui::End();
@@ -6980,11 +7186,11 @@ terrainPanelDone:;
     if (panels.blocks) {
         if (rightColumn != 0)
             ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Blocks", &panels.blocks)) {
+        if (ImGui::Begin((tabIconPad() + "Blocks###Blocks").c_str(), &panels.blocks)) {
             if (editor == nullptr || world == nullptr || inspector == nullptr)
                 ImGui::TextDisabled("no world");
             else
-                drawBlocksPanel(*editor, *world, *inspector);
+                drawBlocksPanel(*editor, *world, *inspector, icons);
         }
         ImGui::End();
     }
@@ -6993,40 +7199,45 @@ terrainPanelDone:;
     if (panels.tiles) {
         if (rightColumn != 0)
             ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
-        tilesShown = ImGui::Begin("Tiles###Tiles", &panels.tiles);
+        tilesShown = ImGui::Begin((tabIconPad() + "Tiles###Tiles").c_str(), &panels.tiles);
         if (tilesShown) {
             if (editor == nullptr || world == nullptr || inspector == nullptr)
                 ImGui::TextDisabled("no world");
             else
-                drawTilesPanel(*editor, *world, treeRoot, *inspector);
+                drawTilesPanel(*editor, *world, treeRoot, *inspector, icons);
         }
         ImGui::End();
     }
     if (editor != nullptr)
         editor->setTilesPanelShown(tilesShown && panels.tiles);
     if (panels.stats) {
-        if (ImGui::Begin("Stats", &panels.stats)) {
+        if (ImGui::Begin((tabIconPad() + "Stats###Stats").c_str(), &panels.stats)) {
             drawStats(frame, counters);
             if (runtime != nullptr)
                 drawMemory(*runtime);
-
-            // **The Streaming panel, which the editor could not reach until
-            // now** (E5's last gate row). `drawShell` -- the F3 overlay over a
-            // running game -- has drawn this since M7, and `drawEditorShell` was
-            // never handed the host, so the one shell in which somebody is
-            // AUTHORING a streamed world was the one that could not see what
-            // streaming was doing. Which is backwards: a player does not need to
-            // know how many chunks are resident and the person building the
-            // world does.
-            //
-            // In Stats rather than in a panel of its own, because that is what
-            // it is -- counters and a picture of where the focus is -- and a
-            // fourth dock for a project that streams and nothing for one that
-            // does not is furniture.
-            if (streaming != nullptr && streaming->active()) {
-                ImGui::SeparatorText("Streaming");
+        }
+        ImGui::End();
+    }
+    if (panels.streaming) {
+        if (rightColumn != 0)
+            ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin((tabIconPad() + "Streaming###Streaming").c_str(), &panels.streaming)) {
+            ImGui::Checkbox("Show chunk grid", &panels.showChunkGrid);
+            ImGui::Checkbox("Show streamed objects in Explorer", &panels.showGenerated);
+            ImGui::Separator();
+            if (streaming != nullptr && streaming->active())
                 drawStreaming(*streaming);
-            }
+            else
+                ImGui::TextWrapped("Streaming is inactive in this project. Open a world configured for streaming to "
+                                   "inspect its resident cells and loading activity.");
+        }
+        ImGui::End();
+    }
+    if (panels.viewportSettings) {
+        if (rightColumn != 0)
+            ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin((tabIconPad() + "Viewport Settings###Viewport Settings").c_str(), &panels.viewportSettings)) {
+            drawViewportSettings(editor, panels, icons, streaming != nullptr && streaming->active());
         }
         ImGui::End();
     }
@@ -7079,33 +7290,34 @@ terrainPanelDone:;
     // the number somebody wants is far more often a round one, so the modifier
     // is for the exception rather than for the rule.
     if (editor != nullptr && !ImGui::IsAnyItemActive() && !popupOpen && !editor->lookInput().active) {
-        if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+        if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
+            editor->setTool(Editor::Tool::Select);
             editor->setGizmoMode(GizmoMode::Translate);
-        if (ImGui::IsKeyPressed(ImGuiKey_E, false))
-            editor->setGizmoMode(GizmoMode::Rotate);
-        if (ImGui::IsKeyPressed(ImGuiKey_R, false))
-            editor->setGizmoMode(GizmoMode::Scale);
-
-        // **Q, T, Y for the tools**, on the same row and beside the manipulators
-        // for the same reason: they are the keys the hand is already over. Only
-        // where there is terrain, so a world without it cannot be put into a
-        // tool whose toolbar button is not on screen -- a mode you cannot see
-        // and cannot leave is the worst kind of state.
-        if (editor->hasTerrain()) {
-            if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
-                editor->setTool(Editor::Tool::Select);
-            if (ImGui::IsKeyPressed(ImGuiKey_T, false))
-                editor->setTool(Editor::Tool::Sculpt);
-            if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
-                editor->setTool(Editor::Tool::Paint);
         }
-        // B for blocks, and Q back out of it, on the same condition: only
-        // where there is a block world to act on.
-        if (editor->hasVoxels()) {
-            if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
-                editor->setTool(Editor::Tool::Select);
-            if (ImGui::IsKeyPressed(ImGuiKey_B, false))
-                editor->setTool(Editor::Tool::Blocks);
+        if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
+            editor->setTool(Editor::Tool::Select);
+            editor->setGizmoMode(GizmoMode::Rotate);
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+            editor->setTool(Editor::Tool::Select);
+            editor->setGizmoMode(GizmoMode::Scale);
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+            editor->setTool(Editor::Tool::Select);
+        if (editor->hasTerrain()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_T, false)) {
+                editor->setTool(Editor::Tool::Sculpt);
+                panels.terrain = true;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
+                editor->setTool(Editor::Tool::Paint);
+                panels.terrain = true;
+            }
+        }
+        if (editor->hasVoxels() && ImGui::IsKeyPressed(ImGuiKey_B, false)) {
+            editor->setTool(Editor::Tool::Blocks);
+            panels.blocks = true;
         }
 
         // Q out of the Tiles tool, whatever else the world has.
@@ -7291,13 +7503,13 @@ terrainPanelDone:;
 void drawStreaming(const StreamingHost& streaming)
 {
     const asset::StreamingStats& stats = streaming.stats();
-    ImGui::Text("resident %u  loading %u  decoded %u  failed %u", stats.resident, stats.loading, stats.decoded,
-                stats.failed);
-    ImGui::Text("%.2f MiB resident, %llu loaded, %llu evicted", static_cast<double>(stats.bytesResident) / 1048576.0,
-                static_cast<unsigned long long>(stats.chunksLoaded),
-                static_cast<unsigned long long>(stats.chunksEvicted));
-    ImGui::Text("worst pump %.2f ms, last %.2f ms, %llu rebase(s)", stats.worstTickMs, streaming.lastPumpMilliseconds(),
-                static_cast<unsigned long long>(streaming.rebases()));
+    ImGui::TextWrapped("resident %u  loading %u  decoded %u  failed %u", stats.resident, stats.loading, stats.decoded,
+                       stats.failed);
+    ImGui::TextWrapped(
+        "%.2f MiB resident, %llu loaded, %llu evicted", static_cast<double>(stats.bytesResident) / 1048576.0,
+        static_cast<unsigned long long>(stats.chunksLoaded), static_cast<unsigned long long>(stats.chunksEvicted));
+    ImGui::TextWrapped("worst pump %.2f ms, last %.2f ms, %llu rebase(s)", stats.worstTickMs,
+                       streaming.lastPumpMilliseconds(), static_cast<unsigned long long>(streaming.rebases()));
 
     const std::vector<asset::StreamingManager::ChunkView> cells = streaming.view();
     if (cells.empty())
@@ -7335,7 +7547,7 @@ void drawStreaming(const StreamingHost& streaming)
 
         static constexpr const char* kLayerNames[] = {"detail", "structures", "terrain"};
         ImGui::SeparatorText(layer < 3 ? kLayerNames[layer] : "layer");
-        ImGui::Text("%u of %u resident", resident, present);
+        ImGui::TextWrapped("%u of %u resident", resident, present);
 
         const int columns = maxX - minX + 1;
         const int rows = maxZ - minZ + 1;
@@ -7433,14 +7645,14 @@ bool primaryButton(const char* label, ImVec2 size, bool enabled, const IconAtlas
 }
 
 // The list, and the two things a row can do.
-void drawLauncherProjects(LauncherView& view, const IconAtlas* icons)
+void drawLauncherProjects(LauncherView& view, const IconAtlas* icons, float height)
 {
     ProjectList& projects = *view.projects;
     if (projects.entries().empty()) {
         // Inside the same bordered box the list would fill, rather than as a
         // bare line where the box would have been: an empty state that changes
         // the shape of the screen reads as something having gone wrong.
-        if (ImGui::BeginChild("##projects", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+        if (ImGui::BeginChild("##projects", ImVec2(0.0f, height), ImGuiChildFlags_Borders)) {
             ImGui::Spacing();
             ImGui::TextDisabled("No projects yet.");
             ImGui::TextWrapped("Create a project or open an existing folder to get started.");
@@ -7450,7 +7662,7 @@ void drawLauncherProjects(LauncherView& view, const IconAtlas* icons)
     }
 
     const float rowHeight = ImGui::GetFrameHeight() * 2.0f;
-    if (ImGui::BeginChild("##projects", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+    if (ImGui::BeginChild("##projects", ImVec2(0.0f, height), ImGuiChildFlags_Borders)) {
         std::filesystem::path forget;
         for (const RecentProject& entry : projects.entries()) {
             ImGui::PushID(entry.path.string().c_str());
@@ -7654,7 +7866,7 @@ void drawLauncherOpen(LauncherView& view, const IconAtlas* icons)
 // that is not a control and it should not read as one. `WindowPadding` is zero
 // for this window so the band can reach both edges; the body child below puts
 // the padding back.
-void drawLauncherHeader()
+void drawLauncherHeader(const IconAtlas* icons)
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ThemePalette& p = palette();
@@ -7685,6 +7897,16 @@ void drawLauncherHeader()
     ImGui::SetCursorScreenPos(
         ImVec2(titleX + titleWidth + style.ItemSpacing.x * 1.5f, min.y + (height - ImGui::GetFontSize()) * 0.5f));
     ImGui::TextDisabled("%s", LUAUG_VERSION_STRING);
+
+    const char* themeLabel = currentTheme().dark ? "Light theme" : "Dark theme";
+    const float themeWidth = ImGui::CalcTextSize(themeLabel).x + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f;
+    if (max.x - themeWidth - pad > titleX + titleWidth + 80.0f * style.FontScaleMain) {
+        ImGui::SetCursorScreenPos(ImVec2(max.x - themeWidth - pad, min.y + (height - ImGui::GetFrameHeight()) * 0.5f));
+        if (labeledIconButton(icons, icons::ClassLighting, themeLabel, ImVec2(themeWidth, 0.0f))) {
+            g_appearance.themeId = currentTheme().dark ? "light" : "dark";
+            applyAppearance();
+        }
+    }
 
     ImGui::SetCursorScreenPos(ImVec2(min.x, max.y));
 }
@@ -7731,7 +7953,7 @@ void drawLauncher(LauncherView* view, const IconAtlas* icons)
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
     ImGui::PopStyleVar();
 
-    drawLauncherHeader();
+    drawLauncherHeader(icons);
 
     const float footerHeight = view->message.empty() ? 0.0f : ImGui::GetFrameHeight() * 1.6f;
     if (ImGui::BeginChild("##body", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_AlwaysUseWindowPadding)) {
@@ -7739,17 +7961,22 @@ void drawLauncher(LauncherView* view, const IconAtlas* icons)
         // right. The proportion is deliberate -- the list is the thing somebody
         // came for, and on every launch after the first it is the only thing
         // they touch.
-        const float rightWidth = std::min(viewport->WorkSize.x * 0.38f, 420.0f);
-        if (ImGui::BeginTable("##launcher-columns", 2, ImGuiTableFlags_None)) {
+        const float scale = ImGui::GetStyle().FontScaleMain;
+        const bool compact = viewport->WorkSize.x < 900.0f * scale;
+        const float rightWidth = std::min(viewport->WorkSize.x * 0.38f, 420.0f * scale);
+        if (ImGui::BeginTable("##launcher-columns", compact ? 1 : 2, ImGuiTableFlags_None)) {
             ImGui::TableSetupColumn("##left", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("##right", ImGuiTableColumnFlags_WidthFixed, rightWidth);
+            if (!compact)
+                ImGui::TableSetupColumn("##right", ImGuiTableColumnFlags_WidthFixed, rightWidth);
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             sectionLabel("Your projects", icons, icons::ContentFolder);
-            drawLauncherProjects(*view, icons);
+            drawLauncherProjects(*view, icons, compact ? ImGui::GetFrameHeight() * 6.0f : 0.0f);
 
-            ImGui::TableSetColumnIndex(1);
+            if (compact)
+                ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(compact ? 0 : 1);
             // **Making one comes before opening one**, which is the opposite of
             // the order this screen shipped with. Somebody who has projects
             // opens them from the list on the left; the right-hand column is

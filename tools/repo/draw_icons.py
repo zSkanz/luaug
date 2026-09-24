@@ -130,6 +130,10 @@ def draw_icon(group, name):
             if name == "Forward": i.line((3,12),(16,12))
             if name == "Collapse":
                 i = Icon().line((5,9),(12,16),(19,9))
+        elif name == "NewMaterial":
+            i.circle(9,10,7).line((4,14),(12,4)).line((7,16),(15,6)).line((14,18),(22,18)).line((18,14),(18,22))
+        elif name == "MaterialVariant":
+            i.circle(8,8,5).line((4,11),(11,4)).line((8,13),(8,20),(14,20)).circle(18,18,4).line((16,20),(20,16))
         elif name == "Erase": i.line((3,14),(14,3),(22,11),(12,21),(9,21),closed=True).line((7,10),(16,18)).line((12,21),(22,21))
         elif name == "View2D": i.rect(7,3,14,14,1).line((3,4),(3,21),(20,21)).line((1,7),(3,4),(5,7)).line((17,19),(20,21),(17,23))
         elif name == "Import": i.line((3,14),(3,21),(21,21),(21,14)).line((12,2),(12,16)).line((7,11),(12,16),(17,11))
@@ -169,10 +173,12 @@ def draw_icon(group, name):
             i.line((4,9),(14,9),(18,11),(20,15),(20,19)).line((8,4),(3,9),(8,14))
             if name == "Redo":
                 return mirror(i)
-        elif name in ("Rotate","Refresh"):
-            i.arc(12,12,8,40,310).line((13,3),(18,5),(18,2))
-            if name == "Rotate": i.circle(12,12,2,True)
-            else: i.line((10,21),(6,19),(6,22))
+        elif name == "Rotate":
+            i.arc(12,12,8,40,310).line((13,3),(18,5),(18,2)).circle(12,12,2,True)
+        elif name == "Refresh":
+            # Two open arcs with arrowheads attached to their endpoints.
+            i.arc(12,12,8,195,330).line((14,8),(19,8),(19,3))
+            i.arc(12,12,8,15,150).line((10,16),(5,16),(5,21))
         elif name == "Move":
             i.line((12,2),(12,22)).line((2,12),(22,12))
             for pts in [((9,5),(12,2),(15,5)),((9,19),(12,22),(15,19)),((5,9),(2,12),(5,15)),((19,9),(22,12),(19,15))]: i.line(*pts)

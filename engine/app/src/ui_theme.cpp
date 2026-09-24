@@ -305,6 +305,10 @@ void applyTheme(const Theme& theme, f32 scale)
     style.PopupBorderSize = metrics.borderSize;
     style.FrameBorderSize = 0.0f;
     style.TabBorderSize = 0.0f;
+    // One close affordance per tab; the extra node button closes an entire group.
+    style.DockingNodeHasCloseButton = false;
+    style.TabCloseButtonMinWidthSelected = -1.0f;
+    style.TabCloseButtonMinWidthUnselected = -1.0f;
     style.TabBarBorderSize = metrics.tabBarBorderSize;
     style.TabBarOverlineSize = metrics.tabBarOverlineSize;
     style.DockingSeparatorSize = metrics.dockingSeparatorSize;

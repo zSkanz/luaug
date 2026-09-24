@@ -1,7 +1,7 @@
 # Orbit — LuauG editor icon system
 
 Created 2026-09-23. This is the active style for the default editor theme:
-118 unique drawings serving 129 logical IDs. The application logo and branding
+120 unique drawings serving 132 logical IDs. The application logo and branding
 are a separate identity. Earlier PNG masters and briefs in the parent directory
 are retained as historical sources; this specification supersedes their style.
 
@@ -81,7 +81,7 @@ for flatten, a brush for paint, and conventional clipboard/scissors/document
 symbols. Preserve Orbit's 24-unit grid, rounded strokes and white alpha masks.
 
 Validation: all 71 classes in the generated engine reflection descriptors
-resolve to a declared icon. All 129 IDs resolve to existing 256 x 256 RGBA
+resolve to a declared icon. All 132 IDs resolve to existing 256 x 256 RGBA
 white masks with nonempty alpha. Dark/light sheets cover 32/24/16/13 px.
 
 Further action subjects: Import uses an arrow entering a tray; NewFolder adds
@@ -114,3 +114,14 @@ NavigationService extension (2026-09-24): draw a route from an outlined start
 point through two waypoints to an arrow indicating the destination. Use the
 motion role and preserve Orbit's 24-unit grid, stroke and alpha-mask rules.
 The Explorer resolves it directly by the reflected class name.
+
+Material-assets extension: keep the surface sphere for content.Material (alias
+of the established material art). NewMaterial adds a plus to that silhouette;
+MaterialVariant connects a parent surface to a derived surface. Use the spatial
+role and the same rounded white strokes. Wire the two actions to the browser's
+New Material and New Variant menus.
+
+Refresh refinement: use two opposing open circular arcs with arrowheads
+connected to their endpoints. Keep clear gaps between the arrows and an open
+center so the refresh silhouette survives at 13/16 px. Do not reuse Rotate's
+single arc or add disconnected arrowhead marks.
