@@ -4522,6 +4522,34 @@ TEST_CASE("digging moves the ground, and one stroke is one undo step")
     CHECK(static_cast<double>(*undone) == doctest::Approx(static_cast<double>(*before)));
 }
 
+TEST_CASE("the brush acts only while the Terrain panel is on screen")
+{
+    // **The owner, 2026-09-23**: moving about the viewport, passing over the
+    // ground brought up the terrain brush. The brush is the Terrain panel's,
+    // so with the panel closed or behind another tab there is none -- no ring,
+    // no stroke -- whatever tool was chosen last.
+    BrushRig rig;
+    rig.lookDown(60.0);
+    rig.editor.setTool(Editor::Tool::Sculpt);
+    rig.editor.setBrushOp(Editor::BrushOp::Subtract);
+    rig.editor.setBrushRadius(4.0f);
+    const core::u64 revisionBefore = rig.field().fieldRevision;
+
+    rig.editor.setTerrainPanelShown(false);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    CHECK_FALSE(rig.editor.sculpting());
+    CHECK_FALSE(rig.editor.brushAim().has_value());
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    CHECK(rig.field().fieldRevision == revisionBefore);
+
+    // Brought back to the front, the same click digs.
+    rig.editor.setTerrainPanelShown(true);
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), true, true);
+    CHECK(rig.editor.sculpting());
+    rig.frame(rig.pixelOf(core::DVec3{0.0, 0.0, 0.0}), false, false);
+    CHECK(rig.field().fieldRevision > revisionBefore);
+}
+
 TEST_CASE("a dig aimed at a wall bores into it, at a speed and not a framerate")
 {
     // **The user's report: digging sideways went nowhere.** A dig is a height

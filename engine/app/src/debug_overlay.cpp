@@ -6240,13 +6240,18 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         }
     }
 
+    // **The brush follows the panel** (`Editor::setTerrainPanelShown`): only
+    // while the Terrain panel is open and on screen -- `Begin` answers false for
+    // a tab behind another in its dock, or a collapsed window.
+    bool terrainShown = false;
     if (panels.terrain) {
         // `FirstUseEver`, so this decides only where a panel with no remembered
         // place goes. Somebody who has moved it keeps it where they put it, and
         // an existing `layout.ini` is not rewritten for a window it predates.
         if (rightColumn != 0)
             ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Terrain", &panels.terrain)) {
+        terrainShown = ImGui::Begin("Terrain", &panels.terrain);
+        if (terrainShown) {
             // **The shell holds pointers, and every one of the three may be
             // null**: this same function draws the F3 overlay, which has a frame
             // and counters and no editor at all.
@@ -6261,6 +6266,8 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
 terrainPanelDone:;
+    if (editor != nullptr)
+        editor->setTerrainPanelShown(terrainShown && panels.terrain);
     if (panels.blocks) {
         if (rightColumn != 0)
             ImGui::SetNextWindowDockID(rightColumn, ImGuiCond_FirstUseEver);

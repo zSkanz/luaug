@@ -2991,7 +2991,9 @@ bool Editor::driveSculpt(scene::World& world, core::InstanceId root, Inspector& 
         m_stroke.reset();
     };
 
-    if (m_tool == Tool::Select) {
+    // The brush is the Terrain panel's: with the panel out of sight there is
+    // no brush, whatever tool was last chosen (`setTerrainPanelShown`).
+    if (m_tool == Tool::Select || !m_terrainPanelShown) {
         endStroke();
         return false;
     }

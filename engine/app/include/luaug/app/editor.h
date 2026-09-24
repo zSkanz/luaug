@@ -1851,6 +1851,15 @@ public:
     // a tool with nothing to act on is furniture.
     [[nodiscard]] bool hasTerrain() const noexcept { return m_hasTerrain; }
     [[nodiscard]] bool sculpting() const noexcept { return m_stroke.has_value(); }
+    // **Whether the Terrain panel is on screen**: open, and its tab the one
+    // showing where it is docked. The shell says so every frame it draws.
+    // **The brush acts only while it is** (the owner, 2026-09-23: moving
+    // around the viewport, passing over the ground opened the terrain editor's
+    // brush). A tool chosen and then put out of sight is a tool at rest, not a
+    // ring following the pointer over every hill. True until a shell says
+    // otherwise, so a caller that draws no panels -- a test -- keeps a brush.
+    void setTerrainPanelShown(bool shown) noexcept { m_terrainPanelShown = shown; }
+    [[nodiscard]] bool terrainPanelShown() const noexcept { return m_terrainPanelShown; }
     // How many stamps the last finished stroke laid down. Zero before the first
     // one. For the status line, and for the test that a drag cut into forty
     // frames edits the ground the same number of times as the same drag cut
@@ -2316,6 +2325,7 @@ private:
 
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;
+    bool m_terrainPanelShown = true;
     bool m_brushPlaneLock = true;
     std::filesystem::path m_heightmapSource;
     core::u32 m_lastStrokeStamps = 0;
