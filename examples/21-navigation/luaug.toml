@@ -1,0 +1,15 @@
+# Navigation (ADR 0089): a walker that finds its own way through a maze.
+#
+# No scene file: the maze is an ASCII map in the script, built from anchored
+# parts, which is all walkable ground is.
+
+[project]
+name = "LuauG Navigation"
+id = "dev.luaug.navigation"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Navigation"
+width = 1280
+height = 720

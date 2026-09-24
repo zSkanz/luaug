@@ -1728,6 +1728,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "UIService"): UIService
     function GetService(self, name: "AudioService"): AudioService
     function GetService(self, name: "VoxelService"): VoxelService
+    function GetService(self, name: "NavigationService"): NavigationService
     --- Returns the service of this name. Services are singletons and all of them exist from boot, so
     --- this is a lookup rather than a creation and every call returns the same ordinary child of
     --- `game`. A string literal gives an exactly typed result; a name computed at runtime gives the
@@ -2298,6 +2299,32 @@ declare extern type VoxelService extends Instance with
     --- The block is what a pickaxe breaks; the block plus the normal is where a placed block goes. A
     --- fluid is passed through, as if it were air.
     function Raycast(self, origin: vector, direction: vector): (vector?, vector?)
+end
+
+declare extern type NavigationService extends Instance with
+    --- How wide the agent is, in metres, from its middle: paths keep this far from walls.
+    AgentRadius: number
+    --- How tall it is: a gap lower than this is not a way through.
+    AgentHeight: number
+    --- The highest step it walks up rather than around, in metres.
+    AgentMaxClimb: number
+    --- The steepest ground it walks on, in degrees from level.
+    AgentMaxSlope: number
+    --- The waypoints from `from` to `to`, each a corner to walk to in a straight line, and whether they
+    --- reach the goal. **Nil when `from` is not on walkable ground at all.** A path that stops short --
+    --- the goal is off the ground, cut off, or past ground not built yet -- still comes back, with
+    --- `false`: walk it and ask again from where it ends.
+    function FindPath(self, from: vector, to: vector): ({ vector }?, boolean)
+    --- The nearest walkable point within `maxDistance` metres, or nil. What a spawn point, a teleport
+    --- and a click on the world need before they can ask for a path.
+    function NearestPoint(self, point: vector, maxDistance: number?): vector?
+    --- Walks straight from `from` towards `to` over the walkable ground and answers where it stops --
+    --- at `to`, or where a wall or an edge is in the way. Nil when `from` is not on the ground. The
+    --- cheap question to ask before `FindPath`: most steps are straight.
+    function Raycast(self, from: vector, to: vector): vector?
+    --- Builds the walkable ground over a box now, so the first path through it costs no building.
+    --- Answers how many tiles it built; ground already built and unchanged costs nothing.
+    function BuildRegion(self, minimum: vector, maximum: vector): number
 end
 
 declare Enum: {

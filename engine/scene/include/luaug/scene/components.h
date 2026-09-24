@@ -697,6 +697,19 @@ struct Tilemap2DComponent
     }
 };
 
+// `NavigationService`'s agent (ADR 0089): the one body size its walkable mesh
+// is built for. The mesh itself is not state -- it is built from the world
+// where queries ask, and a restored world rebuilds it -- so this is all of the
+// service a world holds.
+struct NavigationComponent
+{
+    f32 agentRadius = 0.5f;
+    f32 agentHeight = 2.0f;
+    f32 agentMaxClimb = 0.5f;
+    // Degrees.
+    f32 agentMaxSlope = 45.0f;
+};
+
 // A registered block type (V1, `VoxelService`). Its id is its position in the
 // registry plus one, which is registration order -- a pure function of the
 // script that registered it.

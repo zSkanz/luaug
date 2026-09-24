@@ -17,6 +17,7 @@
 #include "luaug/core/error.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/input/input.h"
+#include "luaug/nav/nav.h"
 #include "luaug/physics/backends.h"
 #include "luaug/render/animation.h"
 #include "luaug/scene/class_registry.h"
@@ -427,6 +428,9 @@ private:
     // the order their signals are raised in.
     physics::Physics2DResult m_backend2d;
     std::optional<scene::PhysicsSync2D> m_physics2d;
+    // Walkable ground and paths over it (ADR 0089), built from the world where
+    // queries ask. Null in a build without Recast.
+    std::unique_ptr<nav::INavigation> m_navigation;
     input::InputSystem m_input;
 
     // The skeletons the mesh loader reads out of each glTF, and the system that

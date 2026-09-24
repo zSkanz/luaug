@@ -19,6 +19,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/input/input.h"
+#include "luaug/nav/nav.h"
 #include "luaug/net/async_client.h"
 #include "luaug/platform/event.h"
 #include "luaug/scene/class_registry.h"
@@ -246,6 +247,9 @@ public:
     // The plane's mirror (the 2D layer), on the same terms: null answers
     // `Workspace:Raycast2D` with nil.
     scene::PhysicsSync2D* physics2d = nullptr;
+    // Navigation over the world (ADR 0089), or null in a build without it:
+    // `NavigationService`'s queries then answer nothing, as an empty world's do.
+    nav::INavigation* navigation = nullptr;
 
     // The input system `InputService` reads and, in exactly one place, writes:
     // `SetVirtualState` drives the four virtual channels, which is the seam that

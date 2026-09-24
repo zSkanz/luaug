@@ -2784,6 +2784,93 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     voxelServiceDesc.attachComponents = native::attachVoxelComponents;
     voxelServiceDesc.detachComponents = native::detachVoxelComponents;
     classes.registerClass(voxelServiceDesc);
+
+    // --- NavigationService ---
+    static std::array<PropertyDesc, 4> navigationServiceProperties;
+    navigationServiceProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("AgentRadius"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How wide the agent is, in metres, from its middle: paths keep this far from walls.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getNavigationServiceAgentRadius,
+            .set = native::setNavigationServiceAgentRadius,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AgentHeight"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How tall it is: a gap lower than this is not a way through.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getNavigationServiceAgentHeight,
+            .set = native::setNavigationServiceAgentHeight,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AgentMaxClimb"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The highest step it walks up rather than around, in metres.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getNavigationServiceAgentMaxClimb,
+            .set = native::setNavigationServiceAgentMaxClimb,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AgentMaxSlope"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The steepest ground it walks on, in degrees from level.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.nav_slope"),
+            .get = native::getNavigationServiceAgentMaxSlope,
+            .set = native::setNavigationServiceAgentMaxSlope,
+        },
+    }};
+    static std::array<MethodDesc, 4> navigationServiceMethods;
+    navigationServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("FindPath"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The waypoints from `from` to `to`, each a corner to walk to in a straight line, and whether they reach the goal. **Nil when `from` is not on walkable ground at all.** A path that stops short -- the goal is off the ground, cut off, or past ground not built yet -- still comes back, with `false`: walk it and ask again from where it ends.",
+        },
+        MethodDesc{
+            .name = atoms.intern("NearestPoint"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "The nearest walkable point within `maxDistance` metres, or nil. What a spawn point, a teleport and a click on the world need before they can ask for a path.",
+        },
+        MethodDesc{
+            .name = atoms.intern("Raycast"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Walks straight from `from` towards `to` over the walkable ground and answers where it stops -- at `to`, or where a wall or an edge is in the way. Nil when `from` is not on the ground. The cheap question to ask before `FindPath`: most steps are straight.",
+        },
+        MethodDesc{
+            .name = atoms.intern("BuildRegion"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Builds the walkable ground over a box now, so the first path through it costs no building. Answers how many tiles it built; ground already built and unchanged costs nothing.",
+        },
+    }};
+    ClassDescriptor navigationServiceDesc;
+    navigationServiceDesc.name = atoms.intern("NavigationService");
+    navigationServiceDesc.super = instanceClass;
+    navigationServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    navigationServiceDesc.defaultName = atoms.intern("NavigationService");
+    navigationServiceDesc.doc = "Where an agent can walk, and how it gets somewhere (ADR 0089). The walkable ground is every anchored, colliding part under `Workspace` and the `Terrain`'s surface, turned into a navigation mesh for one agent size -- the four `Agent` properties.\012\012**The mesh is built where it is asked for.** A query builds, in square tiles, the ground between its two ends, and rebuilds a tile when what stands in it moved, so a door that opened is walkable on the next tick. Ground no query has reached yet is not built, and a path through it stops short: `BuildRegion` builds an area ahead of time.\012\012Following a path is the game's: walk a `CharacterBody` towards each waypoint in turn.";
+    navigationServiceDesc.properties = navigationServiceProperties;
+    navigationServiceDesc.methods = navigationServiceMethods;
+    navigationServiceDesc.attachComponents = native::attachNavigationComponents;
+    navigationServiceDesc.detachComponents = native::detachNavigationComponents;
+    classes.registerClass(navigationServiceDesc);
 }
 
 // Registered in declaration order, so an enum's `EnumId` is its position in

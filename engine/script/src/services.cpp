@@ -850,6 +850,89 @@ int workspaceRaycast2D(lua_State* L)
     return 1;
 }
 
+// --- NavigationService (ADR 0089) ---------------------------------------------
+//
+// Every query hands the service's agent to the navigation first: the agent is
+// scene state a script sets, and the mesh is built for it -- a different one
+// throws the old mesh away, which is the property's documented cost.
+
+[[nodiscard]] nav::INavigation* navigationFor(lua_State* L, core::InstanceId service)
+{
+    nav::INavigation* navigation = services(L).navigation;
+    if (navigation == nullptr)
+        return nullptr;
+    if (const scene::NavigationComponent* agent = world(L).navigation().find(service); agent != nullptr) {
+        navigation->setAgent(
+            nav::NavAgent{agent->agentRadius, agent->agentHeight, agent->agentMaxClimb, agent->agentMaxSlope});
+    }
+    return navigation;
+}
+
+int navigationFindPath(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const core::Vec3 from = checkVector3(L, 2);
+    const core::Vec3 to = checkVector3(L, 3);
+    nav::INavigation* navigation = navigationFor(L, service);
+    const std::optional<nav::NavPath> path =
+        navigation != nullptr ? navigation->findPath(core::toDVec3(from), core::toDVec3(to)) : std::nullopt;
+    if (!path.has_value()) {
+        lua_pushnil(L);
+        lua_pushboolean(L, 0);
+        return 2;
+    }
+    // A fresh array every call, so a caller may keep it and change it.
+    lua_createtable(L, static_cast<int>(path->points.size()), 0);
+    for (usize at = 0; at < path->points.size(); ++at) {
+        pushVector3(L, core::toVec3(path->points[at]));
+        lua_rawseti(L, -2, static_cast<int>(at) + 1);
+    }
+    lua_pushboolean(L, path->complete ? 1 : 0);
+    return 2;
+}
+
+int navigationNearestPoint(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const core::Vec3 point = checkVector3(L, 2);
+    const auto reach = static_cast<f32>(luaL_optnumber(L, 3, 4.0));
+    nav::INavigation* navigation = navigationFor(L, service);
+    const std::optional<core::DVec3> found =
+        navigation != nullptr ? navigation->nearestPoint(core::toDVec3(point), reach) : std::nullopt;
+    if (!found.has_value())
+        lua_pushnil(L);
+    else
+        pushVector3(L, core::toVec3(*found));
+    return 1;
+}
+
+int navigationRaycast(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const core::Vec3 from = checkVector3(L, 2);
+    const core::Vec3 to = checkVector3(L, 3);
+    nav::INavigation* navigation = navigationFor(L, service);
+    const std::optional<core::DVec3> stop =
+        navigation != nullptr ? navigation->raycast(core::toDVec3(from), core::toDVec3(to)) : std::nullopt;
+    if (!stop.has_value())
+        lua_pushnil(L);
+    else
+        pushVector3(L, core::toVec3(*stop));
+    return 1;
+}
+
+int navigationBuildRegion(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const core::Vec3 minimum = checkVector3(L, 2);
+    const core::Vec3 maximum = checkVector3(L, 3);
+    nav::INavigation* navigation = navigationFor(L, service);
+    const usize built =
+        navigation != nullptr ? navigation->buildRegion(core::toDVec3(minimum), core::toDVec3(maximum)) : 0;
+    lua_pushnumber(L, static_cast<double>(built));
+    return 1;
+}
+
 int workspaceSpherecast(lua_State* L)
 {
     (void)checkInstance(L, 1);
@@ -1528,6 +1611,10 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
 
     {"Workspace", "Raycast", workspaceRaycast},
     {"Workspace", "Raycast2D", workspaceRaycast2D},
+    {"NavigationService", "FindPath", navigationFindPath},
+    {"NavigationService", "NearestPoint", navigationNearestPoint},
+    {"NavigationService", "Raycast", navigationRaycast},
+    {"NavigationService", "BuildRegion", navigationBuildRegion},
     {"Workspace", "Spherecast", workspaceSpherecast},
     {"Workspace", "GetBodiesInBox", workspaceGetBodiesInBox},
 

@@ -302,6 +302,7 @@ struct NameIndex
     X(DecalComponent, decals)                                                                                          \
     X(Part2DComponent, parts2d)                                                                                        \
     X(Tilemap2DComponent, tilemaps2d)                                                                                  \
+    X(NavigationComponent, navigation)                                                                                 \
     X(SpotLightComponent, spotLights)                                                                                  \
     X(LightingComponent, lighting)                                                                                     \
     X(NameIndex, nameIndices)                                                                                          \
@@ -633,6 +634,15 @@ public:
     // not hashed, and nothing a script can see.
     [[nodiscard]] core::u64 restores() const noexcept { return m_restores; }
 
+    // **How many writes this world has taken** through its own verbs --
+    // `create`, `destroy`, `setParent`, `setProperty` -- counted up and never
+    // restored. Not state, on the same terms as `restores`: what it is for is a
+    // cache that must not answer from before a script's write in the same tick,
+    // and must not rebuild a thousand times in a tick when nothing was written.
+    // A quiet write straight into a component (the physics mirror's) does not
+    // count; a reader that cares about those says so.
+    [[nodiscard]] core::u64 mutations() const noexcept { return m_mutations; }
+
     // --- Frame plumbing ------------------------------------------------------
 
     [[nodiscard]] ChangeQueue& changes() noexcept { return m_changes; }
@@ -748,6 +758,8 @@ public:
     // The 2D layer (post-v1 phase 3).
     [[nodiscard]] ComponentPool<Part2DComponent>& parts2d() noexcept { return m_parts2d; }
     [[nodiscard]] const ComponentPool<Part2DComponent>& parts2d() const noexcept { return m_parts2d; }
+    [[nodiscard]] ComponentPool<NavigationComponent>& navigation() noexcept { return m_navigation; }
+    [[nodiscard]] const ComponentPool<NavigationComponent>& navigation() const noexcept { return m_navigation; }
     [[nodiscard]] ComponentPool<Tilemap2DComponent>& tilemaps2d() noexcept { return m_tilemaps2d; }
     [[nodiscard]] const ComponentPool<Tilemap2DComponent>& tilemaps2d() const noexcept { return m_tilemaps2d; }
     [[nodiscard]] ComponentPool<ParticleEmitterComponent>& particleEmitters() noexcept { return m_particleEmitters; }
@@ -860,6 +872,7 @@ private:
     EngineState m_engineState;
     ChangeQueue m_changes;
     core::u64 m_restores = 0;
+    core::u64 m_mutations = 0;
 };
 
 } // namespace luaug::scene

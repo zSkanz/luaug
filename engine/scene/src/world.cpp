@@ -46,6 +46,7 @@ World::World(ClassRegistry& classes, EnumRegistry& enums, core::AtomTable& atoms
 
 core::InstanceId World::create(ClassId classId)
 {
+    ++m_mutations;
     const ClassDescriptor* descriptor = m_classes.find(classId);
     if (descriptor == nullptr || hasFlag(descriptor->flags, ClassFlags::Abstract))
         return {};
@@ -79,6 +80,7 @@ core::InstanceId World::create(ClassId classId)
 
 bool World::destroy(core::InstanceId id)
 {
+    ++m_mutations;
     InstanceRecord* record = m_instances.find(id);
     if (record == nullptr || record->destroyed)
         return false;
@@ -281,6 +283,7 @@ bool World::isAncestorOf(core::InstanceId id, core::InstanceId descendant) const
 
 std::optional<core::TextKey> World::setParent(core::InstanceId id, core::InstanceId newParent)
 {
+    ++m_mutations;
     InstanceRecord* record = m_instances.find(id);
     if (record == nullptr)
         return LUAUG_TR("script.err.instance_dead");
@@ -597,6 +600,7 @@ std::optional<Value> World::getProperty(core::InstanceId id, core::NameAtom prop
 
 World::SetResult World::setProperty(core::InstanceId id, core::NameAtom property, const Value& value)
 {
+    ++m_mutations;
     InstanceRecord* record = m_instances.find(id);
     if (record == nullptr)
         return SetResult::UnknownProperty;

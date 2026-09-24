@@ -362,13 +362,14 @@ does. All three are additive to build, and `Enum.WindowMode` went with the third
 of them (§2.3).
 
 **Reserved meanings, not implemented in v1** (do not squat them): the service
-names `Players`, `ReplicationService` and `NavigationService`, which name no
-class at all; and `Enum.RunContext`,
+names `Players` and `ReplicationService`, which name no class at all; and `Enum.RunContext`,
 which *is* declared and does carry `Client` and `Server` (§2.3) — the items
 exist, nothing reads them, and a `Script` runs identically whatever its
 `RunContext` says. Reserving a meaning is not the same as withholding a name:
 these are reserved so that v1 code cannot come to mean something else by them
-once the client/server split ships. `NetworkService` was on this list until
+once the client/server split ships. `NavigationService` was on this list until
+post-v1 phase 3 built it (ADR 0089): paths over the walkable ground, built
+where queries ask. `NetworkService` was on this list until
 post-v1 phase 4 built it (ADR 0069, ADR 0070): it reports the process's posture
 -- `Authority`, `Topology`, `ServerTick`, `PeerCount` -- and sets none of it.
 

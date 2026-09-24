@@ -35,6 +35,7 @@ luaug_add_module(script
         audio
         core
         input
+        nav
         net_api
         physics_api
         platform

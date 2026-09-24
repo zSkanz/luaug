@@ -1,27 +1,36 @@
-# L4 -- the navigation seam (ADR 0022, roadmap M7: "vendored, seam defined, no
-# integration").
+# L4 -- navigation (ADR 0022, integrated by ADR 0089).
 #
-# An INTERFACE library and nothing else. There is no `.cpp`, no Recast, and no
-# link edge to `third_party/recastnavigation` anywhere in this tree -- that is
-# the scope bullet, and the layering gate reading real `#include` edges is what
-# keeps it true.
-#
-# **Why a target at all, then.** A header nobody compiles is a header that rots:
-# a typo in it survives every build until the day somebody first includes it,
-# which by construction is years away. The test below includes it and implements
-# it with a stub, so the seam is at least known to BE valid C++ and to have an
-# interface that can actually be implemented.
-add_library(luaug_nav INTERFACE)
-add_library(luaug::nav ALIAS luaug_nav)
-target_include_directories(luaug_nav INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(luaug_nav INTERFACE luaug::core)
-
-if(LUAUG_BUILD_TESTS)
-    luaug_add_module_tests(nav
-        MODULES
-            core
+# A tiled navmesh over Recast and Detour, built from the scene's static
+# geometry where queries ask for it. `scene` for what stands in the world,
+# `asset` for the terrain mesher the renderer and the collider already use, and
+# Recast privately: no Recast type crosses `nav.h` (R17).
+if(LUAUG_NAV_RECAST)
+    luaug_add_module(nav
+        LAYER 4
         SOURCES
-            tests/nav_seam_tests.cpp
+            src/recast_navigation.cpp
+        DEPS
+            core
+            scene
+            asset
+        PRIVATE_DEPS
+            recastnavigation
     )
-    target_link_libraries(luaug_nav_tests PRIVATE luaug::nav)
+
+    if(LUAUG_BUILD_TESTS)
+        luaug_add_module_tests(nav
+            MODULES
+                nav
+                scene
+            SOURCES
+                tests/navigation_tests.cpp
+        )
+    endif()
+else()
+    # A build without it still has the header, so the script bindings compile
+    # and answer "no navigation" rather than failing to link.
+    add_library(luaug_nav INTERFACE)
+    add_library(luaug::nav ALIAS luaug_nav)
+    target_include_directories(luaug_nav INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(luaug_nav INTERFACE luaug::core)
 endif()

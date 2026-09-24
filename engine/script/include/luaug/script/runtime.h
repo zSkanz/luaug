@@ -121,6 +121,7 @@ public:
     // as an empty world rather than as an error.
     void setPhysics(scene::PhysicsSync* physics);
     void setPhysics2D(scene::PhysicsSync2D* physics);
+    void setNavigation(nav::INavigation* navigation);
 
     // The device snapshot `InputService:IsKeyDown` reads, and the source of the
     // raw events below. Null in a runtime the host has not wired, which those

@@ -547,15 +547,17 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `Terrain`'s `FillCylinder`, `SmoothBall`, `FlattenBall`, `ReplaceMaterial`, `ReadVoxels`, `WriteVoxels`,
     // `WorldToCell` and `CellCenterToWorld`; and 114 with the 2D layer (phase 3):
     // `Part2D:ApplyImpulse`, `Tilemap2D`'s `SetCell`, `GetCell`, `FillRect` and
-    // `Clear`, and `Workspace:Raycast2D`. This number is what makes a
+    // `Clear`, and `Workspace:Raycast2D`; and 118 with navigation (ADR 0089):
+    // `NavigationService`'s `FindPath`, `NearestPoint`, `Raycast` and
+    // `BuildRegion`. This number is what makes a
     // DECLARED-but-unbound method impossible to ship: the IDL would count it and the binding table would not, which is
     // `Inert` for a method.
     //
     // **It earned its keep at F1.** Five methods were declared in the IDL in one
     // commit and this failed on the next build, before anything could reach a
     // script and find a name that answered nothing.
-    CHECK(coverage.declared == 114);
-    CHECK(coverage.bound == 114);
+    CHECK(coverage.declared == 118);
+    CHECK(coverage.bound == 118);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

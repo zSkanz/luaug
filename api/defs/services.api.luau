@@ -1574,6 +1574,101 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "NavigationService",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Navigation",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "Where an agent can walk, and how it gets somewhere (ADR 0089). The walkable ground is every "
+            .. "anchored, colliding part under `Workspace` and the `Terrain`'s surface, turned into a "
+            .. "navigation mesh for one agent size -- the four `Agent` properties.\n\n"
+            .. "**The mesh is built where it is asked for.** A query builds, in square tiles, the ground "
+            .. "between its two ends, and rebuilds a tile when what stands in it moved, so a door that "
+            .. "opened is walkable on the next tick. Ground no query has reached yet is not built, and a "
+            .. "path through it stops short: `BuildRegion` builds an area ahead of time.\n\n"
+            .. "Following a path is the game's: walk a `CharacterBody` towards each waypoint in turn.",
+        Properties = {
+            {
+                Name = "AgentRadius",
+                Type = "number",
+                Default = "0.5",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "How wide the agent is, in metres, from its middle: paths keep this far from walls.",
+            },
+            {
+                Name = "AgentHeight",
+                Type = "number",
+                Default = "2",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "How tall it is: a gap lower than this is not a way through.",
+            },
+            {
+                Name = "AgentMaxClimb",
+                Type = "number",
+                Default = "0.5",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The highest step it walks up rather than around, in metres.",
+            },
+            {
+                Name = "AgentMaxSlope",
+                Type = "number",
+                Default = "45",
+                ErrorKey = "scene.err.nav_slope",
+                Doc = "The steepest ground it walks on, in degrees from level.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "FindPath",
+                Parameters = {
+                    { Name = "from", Type = "vector" },
+                    { Name = "to", Type = "vector" },
+                },
+                Returns = { "{ vector }?", "boolean" },
+                ThreadSafety = "Unsafe",
+                Doc = "The waypoints from `from` to `to`, each a corner to walk to in a straight line, and "
+                    .. "whether they reach the goal. **Nil when `from` is not on walkable ground at all.** A "
+                    .. "path that stops short -- the goal is off the ground, cut off, or past ground not built "
+                    .. "yet -- still comes back, with `false`: walk it and ask again from where it ends.",
+            },
+            {
+                Name = "NearestPoint",
+                Parameters = {
+                    { Name = "point", Type = "vector" },
+                    { Name = "maxDistance", Type = "number?", Default = "4" },
+                },
+                Returns = { "vector?" },
+                ThreadSafety = "Unsafe",
+                Doc = "The nearest walkable point within `maxDistance` metres, or nil. What a spawn point, "
+                    .. "a teleport and a click on the world need before they can ask for a path.",
+            },
+            {
+                Name = "Raycast",
+                Parameters = {
+                    { Name = "from", Type = "vector" },
+                    { Name = "to", Type = "vector" },
+                },
+                Returns = { "vector?" },
+                ThreadSafety = "Unsafe",
+                Doc = "Walks straight from `from` towards `to` over the walkable ground and answers where it "
+                    .. "stops -- at `to`, or where a wall or an edge is in the way. Nil when `from` is not on "
+                    .. "the ground. The cheap question to ask before `FindPath`: most steps are straight.",
+            },
+            {
+                Name = "BuildRegion",
+                Parameters = {
+                    { Name = "minimum", Type = "vector" },
+                    { Name = "maximum", Type = "vector" },
+                },
+                Returns = { "number" },
+                ThreadSafety = "Unsafe",
+                Doc = "Builds the walkable ground over a box now, so the first path through it costs no "
+                    .. "building. Answers how many tiles it built; ground already built and unchanged costs "
+                    .. "nothing.",
+            },
+        } :: { Schema.Method },
+    },
 }
 
 local Definition: Schema.Definition = {

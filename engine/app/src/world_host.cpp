@@ -320,6 +320,11 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         m_runtime->setPhysics(&*m_physics);
     }
 #endif
+    m_navigation = nav::createNavigation(*m_world);
+    if (m_navigation != nullptr) {
+        m_navigation->setWorkspace(m_workspace);
+        m_runtime->setNavigation(m_navigation.get());
+    }
 #if LUAUG_PHYSICS_BOX2D
     m_backend2d = physics::createBox2DPhysics();
     if (m_backend2d != nullptr) {
@@ -494,6 +499,8 @@ std::optional<core::EngineError> WorldHost::restartRuntime()
         m_runtime->setPhysics(&*m_physics);
     if (m_physics2d.has_value())
         m_runtime->setPhysics2D(&*m_physics2d);
+    if (m_navigation != nullptr)
+        m_runtime->setNavigation(m_navigation.get());
 
     // **The services are the ones that were already there.** `registerServices`
     // adopted the DataModel, and everything under it is found rather than made,
@@ -840,6 +847,10 @@ void WorldHost::tick()
     m_runtime->fireAnimationEnded(m_animation->drainEnded());
     m_animation->retire(*m_world);
 
+    // What stands in the world is gathered at most once per tick, however
+    // many paths the tick's scripts ask for.
+    if (m_navigation != nullptr)
+        m_navigation->setTick(state.tick);
     m_runtime->firePhase(core::Phase::PreSimulation, state.fixedTimestep);
     m_runtime->drain(core::Phase::PreSimulation);
 

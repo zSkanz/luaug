@@ -737,12 +737,28 @@ endif()
 add_library(enet::enet ALIAS luaug_enet)
 
 # ---------------------------------------------------------------------------
-# Recast/Detour is VENDORED AND NOT BUILT, and that is the M7 scope bullet:
-# "vendored, seam defined, no integration" (ADR 0022). There is deliberately no
-# target here. `engine/nav` carries the header that says what the seam is; a
-# build target with no caller would be compile time bought for nothing, and
-# would make the layering gate's answer to "who links Recast" a target instead
-# of the honest "nobody yet".
+# Recast/Detour (ADR 0022, integrated by ADR 0089): the navmesh builder and its
+# query library, and nothing else of the vendored tree -- DetourCrowd and
+# DetourTileCache stay unbuilt until something calls them. Its sources directly,
+# as Box2D's are, because upstream's CMake configures the demo and the tests.
+#
+# Deterministic by construction: it is single-threaded, and `engine/nav` feeds
+# it geometry in a fixed order. Upstream's warnings are upstream's.
+# ---------------------------------------------------------------------------
+if(LUAUG_NAV_RECAST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Source/Recast.cpp")
+    file(GLOB LUAUG_RECAST_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Source/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Source/*.cpp")
+    add_library(recastnavigation STATIC ${LUAUG_RECAST_SOURCES})
+    target_include_directories(recastnavigation SYSTEM PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Include")
+    if(MSVC)
+        target_compile_options(recastnavigation PRIVATE /W0)
+    else()
+        target_compile_options(recastnavigation PRIVATE -w)
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # assimp -- the OFFLINE importer, for `assetc` and never for the runtime

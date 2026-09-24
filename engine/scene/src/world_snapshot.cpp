@@ -53,6 +53,7 @@ void World::restore(const WorldSnapshot& snapshot)
     // that reads them is the VM the caller rebuilds after this returns.
     m_changes.clear();
     ++m_restores;
+    ++m_mutations;
 }
 
 } // namespace luaug::scene

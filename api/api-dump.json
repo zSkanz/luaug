@@ -1508,6 +1508,97 @@
       "Events": []
     },
     {
+      "Name": "NavigationService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [
+        {
+          "Name": "AgentHeight",
+          "Type": "number",
+          "Default": "2"
+        },
+        {
+          "Name": "AgentMaxClimb",
+          "Type": "number",
+          "Default": "0.5"
+        },
+        {
+          "Name": "AgentMaxSlope",
+          "Type": "number",
+          "Default": "45"
+        },
+        {
+          "Name": "AgentRadius",
+          "Type": "number",
+          "Default": "0.5"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "BuildRegion",
+          "Parameters": [
+            {
+              "Name": "minimum",
+              "Type": "vector"
+            },
+            {
+              "Name": "maximum",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["number"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FindPath",
+          "Parameters": [
+            {
+              "Name": "from",
+              "Type": "vector"
+            },
+            {
+              "Name": "to",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["{ vector }?", "boolean"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "NearestPoint",
+          "Parameters": [
+            {
+              "Name": "point",
+              "Type": "vector"
+            },
+            {
+              "Name": "maxDistance",
+              "Type": "number?",
+              "Default": "4"
+            }
+          ],
+          "Returns": ["vector?"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Raycast",
+          "Parameters": [
+            {
+              "Name": "from",
+              "Type": "vector"
+            },
+            {
+              "Name": "to",
+              "Type": "vector"
+            }
+          ],
+          "Returns": ["vector?"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Events": []
+    },
+    {
       "Name": "NetworkService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],

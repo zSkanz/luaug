@@ -141,6 +141,7 @@ option(LUAUG_PHYSICS_JOLT "Build the Jolt physics backend (the v1 default)" ON)
 # The 2D backend (ADR 0008), from post-v1 phase 3: Box2D behind `IPhysics2D`,
 # beside Jolt rather than instead of it -- a world may hold both kinds of body.
 option(LUAUG_PHYSICS_BOX2D "Build the Box2D 2D physics backend" ON)
+option(LUAUG_NAV_RECAST "Build navigation over Recast/Detour (ADR 0089)" ON)
 
 # Jolt's own wireframe output, bridged to the engine's debug draw (roadmap M5).
 #

@@ -76,6 +76,7 @@ local Sections: { Section } = {
             { Slug = "terrain", Title = "Terrain" },
             { Slug = "blocks", Title = "Block worlds" },
             { Slug = "2d", Title = "2D games" },
+            { Slug = "navigation", Title = "Navigation" },
             { Slug = "scenes", Title = "Scenes: the world as data" },
         },
     },

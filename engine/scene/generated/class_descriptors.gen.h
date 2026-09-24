@@ -399,6 +399,18 @@ Value getVoxelServiceBlockTypeCount(const World& world, core::InstanceId id);
 void attachVoxelComponents(World& world, core::InstanceId id);
 void detachVoxelComponents(World& world, core::InstanceId id);
 
+// NavigationService
+Value getNavigationServiceAgentRadius(const World& world, core::InstanceId id);
+bool setNavigationServiceAgentRadius(World& world, core::InstanceId id, const Value& value);
+Value getNavigationServiceAgentHeight(const World& world, core::InstanceId id);
+bool setNavigationServiceAgentHeight(World& world, core::InstanceId id, const Value& value);
+Value getNavigationServiceAgentMaxClimb(const World& world, core::InstanceId id);
+bool setNavigationServiceAgentMaxClimb(World& world, core::InstanceId id, const Value& value);
+Value getNavigationServiceAgentMaxSlope(const World& world, core::InstanceId id);
+bool setNavigationServiceAgentMaxSlope(World& world, core::InstanceId id, const Value& value);
+void attachNavigationComponents(World& world, core::InstanceId id);
+void detachNavigationComponents(World& world, core::InstanceId id);
+
 } // namespace native
 
 } // namespace luaug::scene

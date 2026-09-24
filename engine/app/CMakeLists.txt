@@ -59,6 +59,7 @@ luaug_add_module(app
         rhi_api
         net_api
         input
+        nav
         physics_api
         render
         replication_api
@@ -765,7 +766,8 @@ if(LUAUG_BUILD_TESTS)
     # `--rhi=null` because none of it needs a device: what is under test is the
     # script, the scene and the assets, and a CI runner with no Vulkan driver
     # must not turn "this machine has no graphics" into a red build.
-    foreach(example 01-instances 02-meshes 03-physics-playground 06-scene 11-ocean 12-ragdoll 20-platformer)
+    foreach(example 01-instances 02-meshes 03-physics-playground 06-scene 11-ocean 12-ragdoll 20-platformer
+                    21-navigation)
         add_test(NAME example_boot_${example}
             COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/${example}"
                     --headless --frames=20 --exit --rhi=null)
@@ -789,6 +791,17 @@ if(LUAUG_BUILD_TESTS)
     set_tests_properties(example_ragdoll_builds PROPERTIES
         PASS_REGULAR_EXPRESSION "figure 6 built 16 limb\\(s\\)"
         TIMEOUT 60)
+
+    # `examples/21-navigation`'s walker has to ARRIVE (ADR 0089): the maze is
+    # built, `FindPath` answers, and a `CharacterBody` walking the corners
+    # reaches the goal. A navigation that answered a straight line through the
+    # walls would leave it pressed against one, and "it ran" would still be
+    # true -- so the assertion is the arrival.
+    add_test(NAME example_navigation_arrives
+        COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/21-navigation" --headless --frames=1200 --exit --rhi=null)
+    set_tests_properties(example_navigation_arrives PROPERTIES
+        PASS_REGULAR_EXPRESSION "reached goal 1"
+        TIMEOUT 120)
 
     add_test(NAME chunk_grid_differential
         COMMAND ${CMAKE_COMMAND}

@@ -99,9 +99,6 @@ describe("game:GetService", function()
         expect(function()
             dataModel:GetService("ReplicationService")
         end):ToThrow()
-        expect(function()
-            dataModel:GetService("NavigationService")
-        end):ToThrow()
     end)
 end)
 
@@ -124,7 +121,6 @@ describe("game:FindService", function()
     it("returns nil for a name 2.1 reserves for a later version", function()
         expect(game:FindService("Players")):ToBeNil()
         expect(game:FindService("ReplicationService")):ToBeNil()
-        expect(game:FindService("NavigationService")):ToBeNil()
     end)
 
     it("returns nil for an unknown name instead of erroring", function()
@@ -193,7 +189,17 @@ describe("service construction", function()
     it("keeps no reserved name in the DataModel's children", function()
         expect(game:FindFirstChild("Players")):ToBeNil()
         expect(game:FindFirstChild("ReplicationService")):ToBeNil()
-        expect(game:FindFirstChild("NavigationService")):ToBeNil()
+    end)
+end)
+
+-- **`NavigationService` left the reserved list when phase 3 built it** (ADR
+-- 0089), as `NetworkService` did before it: a service every world has from
+-- boot. What it answers is `navigation.spec.luau`'s.
+describe("NavigationService", function()
+    it("exists from boot, with a half-metre agent", function()
+        local navigation = game:GetService("NavigationService")
+        expect(game:FindService("NavigationService")):ToBe(navigation)
+        expect(navigation.AgentRadius):ToBe(0.5)
     end)
 end)
 
