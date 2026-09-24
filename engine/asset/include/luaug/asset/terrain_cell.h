@@ -78,8 +78,9 @@ inline constexpr TerrainCellLimits WholeFieldLimits{MaxFieldChunks};
 // One cell's worth of field, with the coordinates that place it.
 struct TerrainCell
 {
-    // Which cell, on the streaming grid. No `y`: `asset::ChunkId` has none and
-    // a cell is a vertically-infinite column of chunks.
+    // Which cell, on the streaming grid. No `y`: a field cell is a column of
+    // chunks from floor to ceiling, because the ground over a cave is its roof
+    // (ADR 0086), and its `ChunkId` is always band zero.
     core::i32 x = 0;
     core::i32 z = 0;
 

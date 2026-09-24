@@ -142,7 +142,10 @@ bool terrainCellUntouched(const TerrainField& field, const TerrainCell& cell, u3
 {
     const auto across = static_cast<i32>(cellChunks);
     // Every chunk column of the cell's square: the field holds exactly the
-    // chunks the cell brought, each still the very object it shared.
+    // chunks the cell brought -- the very objects it shared, or ones with the
+    // same bytes. The second is an undo (ADR 0087): a snapshot hands back the
+    // chunks it kept, which are the same ground in other objects, and a cell
+    // compared by identity alone would never be let go again.
     for (i32 z = cell.z * across; z < (cell.z + 1) * across; ++z) {
         for (i32 x = cell.x * across; x < (cell.x + 1) * across; ++x) {
             const std::span<const TerrainField::Entry> held = field.column(x, z);
@@ -150,7 +153,9 @@ bool terrainCellUntouched(const TerrainField& field, const TerrainCell& cell, u3
             if (held.size() != brought.size())
                 return false;
             for (usize at = 0; at < held.size(); ++at) {
-                if (!(held[at].first == brought[at].first) || held[at].second != brought[at].second)
+                if (!(held[at].first == brought[at].first))
+                    return false;
+                if (held[at].second != brought[at].second && held[at].second->digest() != brought[at].second->digest())
                     return false;
             }
         }

@@ -144,6 +144,40 @@ TEST_CASE("a focus loads the chunks around it and nothing else")
     CHECK(harness.manager.stateOf(ChunkId{4, 4, 0}) == ChunkState::Unloaded);
 }
 
+TEST_CASE("a replaced index keeps what was resident, and adds and forgets rows without an eviction (ADR 0087)")
+{
+    // What an editor's save does to the terrain's index: rows it wrote are
+    // new, a row it emptied is gone, and everything else -- above all what the
+    // camera has loaded -- is exactly as it was.
+    seedRealCatalog();
+    Harness harness(gridIndex(4));
+    const StreamingFocus foci[] = {focusAt(CellCentre, 256.0, 300.0)};
+    harness.manager.setFoci(foci);
+    StreamingBudget budget;
+    budget.milliseconds = 1000.0;
+    harness.settle(budget);
+    REQUIRE(harness.manager.stats().resident == 9);
+
+    ChunkIndex next = harness.manager.index();
+    // One far row goes, one new row comes.
+    std::erase_if(next.chunks, [](const ChunkIndexEntry& entry) { return entry.id == ChunkId{4, 4, 0}; });
+    ChunkIndexEntry added = next.chunks.front();
+    added.id = ChunkId{9, 9, 0};
+    added.bounds = chunkBounds(added.id, next.chunkSize);
+    next.chunks.push_back(added);
+    harness.manager.replaceIndex(next);
+
+    CHECK(harness.manager.stateOf(ChunkId{0, 0, 0}) == ChunkState::Resident);
+    CHECK(harness.manager.stateOf(ChunkId{1, 1, 0}) == ChunkState::Resident);
+    CHECK(harness.manager.stateOf(ChunkId{9, 9, 0}) == ChunkState::Unloaded);
+    CHECK(harness.manager.index().find(ChunkId{4, 4, 0}) == nullptr);
+    CHECK(harness.manager.stats().resident == 9);
+    // And the next tick has nothing to do: nothing resident was forgotten.
+    const auto loadsBefore = harness.manager.stats().chunksLoaded;
+    harness.settle(budget);
+    CHECK(harness.manager.stats().chunksLoaded == loadsBefore);
+}
+
 TEST_CASE("the nearest chunk is asked for first")
 {
     seedRealCatalog();

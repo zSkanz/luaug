@@ -45,6 +45,10 @@ using core::usize;
 // registered focus with its per-layer radii, or the camera of the workspace
 // above `streamRoot` when nothing is registered (D098). A free function so the
 // terrain and block-world streamer asks the same question the same way.
+// One focus at `position`, with the radii the world's `StreamingService` sets:
+// the camera fallback below, and the editor's own camera (ADR 0087).
+[[nodiscard]] asset::StreamingFocus streamingFocusAt(const scene::World& world, core::DVec3 position);
+
 [[nodiscard]] std::vector<asset::StreamingFocus> collectStreamingFoci(const scene::World& world,
                                                                       core::InstanceId streamRoot);
 

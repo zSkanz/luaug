@@ -207,6 +207,24 @@ std::vector<asset::StreamingFocus> StreamingHost::collectFoci() const
     return m_world != nullptr ? collectStreamingFoci(*m_world, m_streamRoot) : std::vector<asset::StreamingFocus>{};
 }
 
+asset::StreamingFocus streamingFocusAt(const scene::World& world, core::DVec3 position)
+{
+    const scene::EngineState& state = world.engineState();
+    const auto layerPair = [](f64 minRadius, f64 loadRadius) {
+        asset::StreamingLayerRadii radii;
+        radii.loadRadius = loadRadius;
+        radii.minRadius = loadRadius > 0.0 ? std::min(minRadius, loadRadius) : minRadius;
+        return radii;
+    };
+    asset::StreamingFocus focus;
+    focus.position = position;
+    focus.loadRadius = state.streamingLoadRadius;
+    focus.minRadius = std::min(state.streamingMinRadius, state.streamingLoadRadius);
+    focus.layers[1] = layerPair(state.streamingStructureMinRadius, state.streamingStructureLoadRadius);
+    focus.layers[2] = layerPair(state.streamingTerrainMinRadius, state.streamingTerrainLoadRadius);
+    return focus;
+}
+
 std::vector<asset::StreamingFocus> collectStreamingFoci(const scene::World& world, core::InstanceId streamRoot)
 {
     std::vector<asset::StreamingFocus> foci;
@@ -287,13 +305,8 @@ std::vector<asset::StreamingFocus> collectStreamingFoci(const scene::World& worl
         }
 
         asset::StreamingFocus focus;
-        if (workspace != nullptr && focusAt(workspace->currentCamera, focus)) {
-            focus.loadRadius = state.streamingLoadRadius;
-            focus.minRadius = std::min(state.streamingMinRadius, state.streamingLoadRadius);
-            focus.layers[1] = layerPair(state.streamingStructureMinRadius, state.streamingStructureLoadRadius);
-            focus.layers[2] = layerPair(state.streamingTerrainMinRadius, state.streamingTerrainLoadRadius);
-            foci.push_back(focus);
-        }
+        if (workspace != nullptr && focusAt(workspace->currentCamera, focus))
+            foci.push_back(streamingFocusAt(world, focus.position));
     }
     return foci;
 }

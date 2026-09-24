@@ -1169,6 +1169,41 @@ TEST_CASE("a sculpted world survives a save and a load")
     CHECK(scene::writeScene(reloaded.world) == text);
 }
 
+TEST_CASE("a terrain saved as cells writes where they are, and reads back as its settings and no ground (ADR 0087)")
+{
+    Fixture fixture;
+    const core::InstanceId workspace = makeWorkspace(fixture);
+    const core::InstanceId id = fixture.world.create(fixture.schema.terrainClass);
+    fixture.world.setName(id, fixture.atom("Terrain"));
+    (void)fixture.world.setParent(id, workspace);
+    scene::TerrainComponent& terrain = *fixture.world.terrains().find(id);
+    terrain.field =
+        asset::TerrainField(asset::FieldSettings{.voxelSize = 0.5f, .minHeight = -100.0f, .maxHeight = 80.0f});
+    terrain.minHeight = -100.0f;
+    terrain.maxHeight = 80.0f;
+    // Some ground resident, as there is while editing: it is not written.
+    (void)asset::fillBall(terrain.field, core::DVec3{0.0, 0.0, 0.0}, 4.0, 1);
+    terrain.cellIndex = "terrain/scenes/main.scene/index.json";
+
+    const std::string text = scene::writeScene(fixture.world);
+    CHECK(text.find("\"terrainCells\"") != std::string::npos);
+    CHECK(text.find("\"terrain\"") == std::string::npos);
+
+    Fixture reopened;
+    (void)makeWorkspace(reopened);
+    REQUIRE_FALSE(scene::readScene(reopened.world, text).has_value());
+    bool found = false;
+    reopened.world.terrains().forEach([&](core::InstanceId, const scene::TerrainComponent& read) {
+        found = true;
+        CHECK(read.cellIndex == "terrain/scenes/main.scene/index.json");
+        CHECK(read.field.empty());
+        CHECK(read.field.settings().voxelSize == 0.5f);
+        CHECK(read.minHeight == -100.0f);
+        CHECK(read.maxHeight == 80.0f);
+    });
+    CHECK(found);
+}
+
 TEST_CASE("a terrain with nothing in it writes nothing")
 {
     // An empty field is not a fact about the world worth a kilobyte of base64 --

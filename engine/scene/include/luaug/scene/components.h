@@ -563,6 +563,18 @@ struct TerrainComponent
     // Mirrored into the field's settings, where the brushes read them.
     f32 minHeight = -256.0f;
     f32 maxHeight = 256.0f;
+
+    // **Where the ground lives when it is not in the scene** (ADR 0087): the
+    // cell index of a terrain saved as a folder of cells, relative to the
+    // project's `content/`, or empty for one whose field the scene carries.
+    //
+    // With one, `field` holds what is resident -- the cells around whoever is
+    // looking, and every cell edited since it was last saved -- and the rest is
+    // on disk, streamed in the editor exactly as a game streams it. Not a
+    // property: it is where the scene's ground is stored, which a script has
+    // no business moving, and not simulation state, so the world hash leaves
+    // it out as it leaves out a mesh's file name.
+    std::string cellIndex;
 };
 
 // A registered block type (V1, `VoxelService`). Its id is its position in the

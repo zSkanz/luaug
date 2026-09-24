@@ -557,7 +557,21 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     // cells. A field with nothing in it writes nothing, which is what keeps
     // every existing scene byte-identical.
     if (const TerrainComponent* terrain = world.terrains().find(id); terrain != nullptr) {
-        if (!terrain->field.empty()) {
+        // **A terrain saved as cells writes where they are, not what they hold**
+        // (ADR 0087): the field in memory is only what is resident, so writing
+        // it here would write a fraction of the ground and call it the world.
+        // The cells themselves are the saver's to write, before this runs.
+        if (!terrain->cellIndex.empty()) {
+            out.key("terrainCells");
+            out.beginObject();
+            out.field("index", terrain->cellIndex);
+            out.field("voxelSize", static_cast<core::f64>(terrain->field.settings().voxelSize));
+            out.field("minHeight", static_cast<core::f64>(terrain->minHeight));
+            out.field("maxHeight", static_cast<core::f64>(terrain->maxHeight));
+            out.endObject();
+            ++report.properties;
+        }
+        else if (!terrain->field.empty()) {
             asset::TerrainCell cell;
             cell.settings = terrain->field.settings();
             cell.field = terrain->field;
@@ -796,6 +810,32 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
     if (const JsonValue tags = json["tags"]; tags.type() == core::JsonType::Array) {
         for (core::usize index = 0; index < tags.size(); ++index)
             (void)world.addTag(id, world.atoms().intern(tags.at(index).asString()));
+    }
+
+    // Ground saved as cells (ADR 0087): the settings and where the cells are,
+    // and an empty field, which whoever streams the cells fills.
+    if (const JsonValue cells = json["terrainCells"]; cells.type() == core::JsonType::Object) {
+        if (TerrainComponent* component = world.terrains().find(id); component != nullptr) {
+            asset::FieldSettings settings;
+            settings.voxelSize =
+                static_cast<core::f32>(cells["voxelSize"].asNumber(static_cast<core::f64>(settings.voxelSize)));
+            settings.minHeight =
+                static_cast<core::f32>(cells["minHeight"].asNumber(static_cast<core::f64>(settings.minHeight)));
+            settings.maxHeight =
+                static_cast<core::f32>(cells["maxHeight"].asNumber(static_cast<core::f64>(settings.maxHeight)));
+            const std::string_view index = cells["index"].asString();
+            if (settings.voxelSize > 0.0f && settings.maxHeight > settings.minHeight && !index.empty()) {
+                component->field = asset::TerrainField(settings);
+                component->minHeight = settings.minHeight;
+                component->maxHeight = settings.maxHeight;
+                component->cellIndex = std::string(index);
+                component->fieldRevision += 1;
+                ++report.properties;
+            }
+            else {
+                ++report.droppedReferences;
+            }
+        }
     }
 
     // The ground. Counted as one property either way, so a load that could not

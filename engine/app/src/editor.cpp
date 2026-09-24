@@ -181,6 +181,7 @@ void Editor::stop(scene::World& world, Inspector& inspector)
 
     world.restore(*m_playSnapshot);
     m_playSnapshot.reset();
+    ++m_worldRestores;
     // A play session's changes were never edits, and the edits before it belong
     // to a world this restore has just replaced.
     m_history.clear();
@@ -197,6 +198,14 @@ void Editor::stop(scene::World& world, Inspector& inspector)
 
 bool Editor::save(scene::World& world, const std::filesystem::path& path)
 {
+    // The terrain's cells first: the scene names where they are, so a scene
+    // written before them would name cells that are not there yet.
+    std::string terrainNote;
+    if (m_terrainSaver && !m_terrainSaver(world, path, terrainNote)) {
+        m_status = EditorStatus{"could not write the terrain's cells: " + terrainNote, true};
+        return false;
+    }
+
     scene::SceneIoReport report;
     // **The stamps this scene names, read once each**, so a stamped instance
     // is written as a mark plus what differs rather than as a copy of the
@@ -224,6 +233,8 @@ bool Editor::save(scene::World& world, const std::filesystem::path& path)
         (void)writeSceneDefinitions(world, m_content.root().parent_path());
 
     std::string message = "saved " + std::to_string(report.instances) + " instance(s) to " + path.string();
+    if (!terrainNote.empty())
+        message += " -- " + terrainNote;
     // Counted rather than swallowed. A reference that pointed outside the scene
     // is a thing the person authored and the file cannot hold, and finding that
     // out when you reopen is finding it out too late.
@@ -833,6 +844,7 @@ bool Editor::undo(scene::World& world, Inspector& inspector)
     const std::string label(m_history.undoLabel());
     if (!m_history.undo(world))
         return false;
+    ++m_worldRestores;
 
     inspector.pruneDead(world);
     inspector.onWorldRestored();
@@ -846,6 +858,7 @@ bool Editor::redo(scene::World& world, Inspector& inspector)
     const std::string label(m_history.redoLabel());
     if (!m_history.redo(world))
         return false;
+    ++m_worldRestores;
 
     inspector.pruneDead(world);
     inspector.onWorldRestored();

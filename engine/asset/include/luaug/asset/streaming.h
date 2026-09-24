@@ -152,6 +152,15 @@ public:
     void setIndex(ChunkIndex index);
     [[nodiscard]] const ChunkIndex& index() const noexcept { return m_index; }
 
+    // **A new index that keeps what the old one had resident** (ADR 0087): an
+    // entry whose id is in both keeps its state -- resident stays resident,
+    // a load in flight stays in flight -- and a new one starts unloaded. One
+    // that is gone is forgotten WITHOUT an eviction: the caller removed it
+    // because what it named is gone, which is `forgetResidency`'s reasoning
+    // for one entry. `setIndex` forgets everything, which is right for a new
+    // world and wrong for an editor that has just saved a cell.
+    void replaceIndex(ChunkIndex index);
+
     void setCallbacks(StreamingCallbacks callbacks) { m_callbacks = std::move(callbacks); }
 
     // Forgets that anything is resident WITHOUT asking for an eviction.

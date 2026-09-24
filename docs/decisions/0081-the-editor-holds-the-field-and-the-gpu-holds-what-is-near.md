@@ -6,6 +6,9 @@
   left "editing a world larger than memory" for later;
   [0071](0071-terrain-ground-is-drawn-from-a-height-atlas.md), the height atlas
 - Decided by: the agent, under the owner's standing instruction of 2026-08-26.
+- **Decision 3 built by [0087](0087-a-large-terrain-is-a-folder-of-cells-and-the-editor-pages-it.md)**
+  (2026-09-23), with the trigger moved from memory to size: a terrain of 256
+  cells or more is saved as a folder of cells and paged around the camera.
 
 ## Context
 

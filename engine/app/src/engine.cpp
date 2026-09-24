@@ -33,6 +33,7 @@
 #include "luaug/app/skeleton_overlay.h"
 #include "luaug/app/soak.h"
 #include "luaug/app/streaming_host.h"
+#include "luaug/app/terrain_cells.h"
 #include "luaug/app/terrain_overlay.h"
 #include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_text.h"
@@ -1072,6 +1073,15 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // `host` rather than the object, because a reload replaces the host.
     const auto held = [&host](core::InstanceId id) { return host != nullptr && host->instanceHeld(id); };
     streaming.setReferenceProbe(held);
+
+    // **A terrain saved as cells** (ADR 0087): adopted by the frame loop, and
+    // written by the editor's save through the same object.
+    TerrainCells terrainCells(fields, contentRoot);
+    editor.setTerrainSaver(
+        [&host, &terrainCells](scene::World& world, const std::filesystem::path& scenePath, std::string& note) {
+            return terrainCells.save(world, host->workspace(), scenePath, note);
+        });
+
     LiveCharacterReplay characterReplay(host);
     if (network != nullptr) {
         network->setReferenceProbe(held);
@@ -2282,6 +2292,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // than each taking them: two managers are two budgets that do not know
         // about each other, and would overrun together. The ground goes first
         // because a missing collider is a fall and a missing prop is not.
+        // **A terrain saved as cells is streamed wherever it is being looked
+        // at** (ADR 0087): around the editor's camera while editing, around the
+        // world's own foci while it plays.
+        terrainCells.frame(host->world(), host->workspace(), editor.worldRestores(),
+                           options.editor && editing(editor.runState())
+                               ? std::optional<core::DVec3>(editor.cameraCFrame().position)
+                               : std::nullopt);
         const f64 streamBudget = streaming.active() && fields.active() ? 1.0 : 2.0;
         if (fields.active()) {
             fields.setWorld(&host->world(), host->workspace());

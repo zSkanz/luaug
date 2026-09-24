@@ -15,6 +15,7 @@
 #include <array>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1860,6 +1861,20 @@ public:
     // otherwise, so a caller that draws no panels -- a test -- keeps a brush.
     void setTerrainPanelShown(bool shown) noexcept { m_terrainPanelShown = shown; }
     [[nodiscard]] bool terrainPanelShown() const noexcept { return m_terrainPanelShown; }
+
+    // **How many times the world has been put back** -- an undo, a redo, a
+    // stop. Something that holds state about the world from outside it, the
+    // way a terrain's cell streamer holds which cells it loaded, compares this
+    // to know its picture may have been replaced (ADR 0087).
+    [[nodiscard]] core::u64 worldRestores() const noexcept { return m_worldRestores; }
+
+    // **Run at the start of every save, before the scene is written** (ADR
+    // 0087): a terrain saved as cells writes the cells it changed, and one
+    // grown past what a scene should carry becomes cells here. False refuses
+    // the save, with `note` saying why; true may leave a note for the status.
+    using TerrainSaver =
+        std::function<bool(scene::World& world, const std::filesystem::path& scenePath, std::string& note)>;
+    void setTerrainSaver(TerrainSaver saver) { m_terrainSaver = std::move(saver); }
     // How many stamps the last finished stroke laid down. Zero before the first
     // one. For the status line, and for the test that a drag cut into forty
     // frames edits the ground the same number of times as the same drag cut
@@ -2326,6 +2341,8 @@ private:
     Tool m_tool = Tool::Select;
     bool m_hasTerrain = false;
     bool m_terrainPanelShown = true;
+    core::u64 m_worldRestores = 0;
+    TerrainSaver m_terrainSaver;
     bool m_brushPlaneLock = true;
     std::filesystem::path m_heightmapSource;
     core::u32 m_lastStrokeStamps = 0;

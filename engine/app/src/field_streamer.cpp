@@ -9,6 +9,8 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <iterator>
+#include <set>
 
 namespace luaug::app {
 namespace {
@@ -31,6 +33,151 @@ void FieldStreamer::setIndex(const asset::ChunkIndex& index, const CellResolver&
     m_active = !index.chunks.empty();
     m_primed = !m_active;
     installCallbacks();
+}
+
+void FieldStreamer::adoptTerrain(const asset::ChunkIndex& index, const CellResolver& resolve)
+{
+    asset::ChunkIndex merged;
+    merged.chunkSize = static_cast<core::f32>(asset::FieldCellMetres);
+    for (const asset::ChunkIndexEntry& entry : m_manager.index().chunks) {
+        if (entry.id.layer != asset::FieldLayerTerrain)
+            merged.chunks.push_back(entry);
+    }
+    for (auto at = m_paths.begin(); at != m_paths.end();) {
+        at = at->first.layer == asset::FieldLayerTerrain ? m_paths.erase(at) : std::next(at);
+    }
+    for (const asset::ChunkIndexEntry& entry : index.chunks) {
+        if (entry.id.layer != asset::FieldLayerTerrain)
+            continue;
+        merged.chunks.push_back(entry);
+        if (const std::optional<std::filesystem::path> path = resolve(entry); path.has_value())
+            m_paths.emplace(entry.id, *path);
+    }
+    // A different terrain's cells are nobody's now: its field went with it.
+    m_terrainCells.clear();
+    if (!m_active) {
+        m_manager.setIndex(merged);
+        installCallbacks();
+    }
+    else {
+        m_manager.replaceIndex(merged);
+    }
+    m_active = !merged.chunks.empty();
+    m_primed = m_primed || !m_active;
+}
+
+void FieldStreamer::reconcile()
+{
+    if (m_world == nullptr || m_terrainCells.empty())
+        return;
+    scene::TerrainComponent* component = terrain();
+    if (component == nullptr)
+        return;
+    for (const auto& held : m_terrainCells)
+        component->field.shareFrom(held.second.field);
+    component->fieldRevision += 1;
+}
+
+FieldStreamer::TerrainSaveReport FieldStreamer::saveTerrain(const TerrainCellWriter& writer)
+{
+    TerrainSaveReport report;
+    scene::TerrainComponent* component = m_world != nullptr ? terrain() : nullptr;
+    if (component == nullptr) {
+        report.ok = false;
+        return report;
+    }
+    const asset::FieldSettings settings = component->field.settings();
+    const core::u32 across = asset::terrainCellChunks(settings.voxelSize);
+
+    // What the index holds now, terrain rows only, by id.
+    std::map<asset::ChunkId, asset::ChunkIndexEntry> rows;
+    for (const asset::ChunkIndexEntry& entry : m_manager.index().chunks) {
+        if (entry.id.layer == asset::FieldLayerTerrain)
+            rows.emplace(entry.id, entry);
+    }
+
+    std::vector<asset::TerrainCell> cells = asset::splitTerrain(component->field);
+    std::set<asset::ChunkId> present;
+    for (asset::TerrainCell& cell : cells) {
+        const asset::ChunkId id{cell.x, cell.z, asset::FieldLayerTerrain};
+        present.insert(id);
+        const auto held = m_terrainCells.find(id);
+        if (held != m_terrainCells.end() && asset::terrainCellUntouched(component->field, held->second, across)) {
+            report.unchanged += 1;
+            continue;
+        }
+        // **Ground the field does not hold is still the cell's.** A cell that
+        // is not resident -- nobody loaded it, or it was let go -- may still
+        // have ground written into its square (Generate Flat Ground over a
+        // large square reaches past what is loaded). The file is the rest of
+        // it, and what the field holds wins, because it is newer.
+        if (held == m_terrainCells.end()) {
+            if (const auto row = rows.find(id); row != rows.end() && writer.read) {
+                if (const std::optional<std::vector<std::byte>> bytes = writer.read(row->second); bytes.has_value()) {
+                    asset::TerrainCell onDisk;
+                    if (!asset::decodeTerrainCell(*bytes, onDisk).has_value())
+                        cell.field.shareFrom(onDisk.field);
+                }
+            }
+        }
+        cell.settings = settings;
+        const std::vector<std::byte> bytes = asset::encodeTerrainCell(cell);
+        const std::optional<std::string> urn = writer.write(id, bytes);
+        if (!urn.has_value()) {
+            report.ok = false;
+            continue;
+        }
+        asset::ChunkIndexEntry entry;
+        entry.id = id;
+        entry.bounds = asset::terrainCellBounds(cell, across, component->origin);
+        entry.urn = *urn;
+        entry.bytes = static_cast<core::u32>(bytes.size());
+        rows[id] = entry;
+        if (writer.resolve) {
+            if (const std::optional<std::filesystem::path> path = writer.resolve(entry); path.has_value())
+                m_paths[id] = *path;
+        }
+        // An ordinary cell again: what it holds is what its file holds, so the
+        // camera moving away may let it go.
+        m_terrainCells[id] = std::move(cell);
+        report.written += 1;
+    }
+
+    // A cell this streamer loaded whose square is now empty was dug to
+    // nothing: its file goes, and its row with it.
+    for (auto held = m_terrainCells.begin(); held != m_terrainCells.end();) {
+        if (present.contains(held->first)) {
+            ++held;
+            continue;
+        }
+        if (const auto row = rows.find(held->first); row != rows.end()) {
+            if (writer.remove)
+                writer.remove(row->second);
+            rows.erase(row);
+            report.removed += 1;
+        }
+        m_paths.erase(held->first);
+        held = m_terrainCells.erase(held);
+    }
+
+    report.index.chunkSize = static_cast<core::f32>(asset::FieldCellMetres);
+    for (const auto& row : rows)
+        report.index.chunks.push_back(row.second);
+
+    asset::ChunkIndex merged = report.index;
+    for (const asset::ChunkIndexEntry& entry : m_manager.index().chunks) {
+        if (entry.id.layer != asset::FieldLayerTerrain)
+            merged.chunks.push_back(entry);
+    }
+    if (!m_active) {
+        m_manager.setIndex(merged);
+        installCallbacks();
+    }
+    else {
+        m_manager.replaceIndex(merged);
+    }
+    m_active = !merged.chunks.empty();
+    return report;
 }
 
 void FieldStreamer::setWorld(scene::World* world, core::InstanceId workspace)
@@ -200,7 +347,9 @@ void FieldStreamer::pump(f64 budgetMilliseconds)
     // `TerrainMinRadius` have named "cells of terrain" since they were
     // reserved; the block world is ground too. A zero there follows the focus's
     // own pair, which is the rule every layer has.
-    std::vector<asset::StreamingFocus> foci = collectStreamingFoci(*m_world, m_workspace);
+    std::vector<asset::StreamingFocus> foci =
+        m_focusOverride.has_value() ? std::vector<asset::StreamingFocus>{streamingFocusAt(*m_world, *m_focusOverride)}
+                                    : collectStreamingFoci(*m_world, m_workspace);
     for (asset::StreamingFocus& focus : foci) {
         focus.layers[asset::FieldLayerTerrain] = focus.layers[2];
         focus.layers[asset::FieldLayerVoxels] = focus.layers[2];

@@ -55,6 +55,35 @@ void StreamingManager::setIndex(ChunkIndex index)
     m_inFlight = 0;
 }
 
+void StreamingManager::replaceIndex(ChunkIndex index)
+{
+    std::sort(index.chunks.begin(), index.chunks.end(),
+              [](const ChunkIndexEntry& a, const ChunkIndexEntry& b) { return a.id < b.id; });
+    std::vector<Entry> entries(index.chunks.size());
+    std::vector<bool> kept(m_index.chunks.size(), false);
+    for (usize at = 0; at < index.chunks.size(); ++at) {
+        const ChunkIndexEntry* old = m_index.find(index.chunks[at].id);
+        if (old == nullptr)
+            continue;
+        const auto slot = static_cast<usize>(old - m_index.chunks.data());
+        entries[at] = std::move(m_entries[slot]);
+        kept[slot] = true;
+    }
+    for (usize slot = 0; slot < m_entries.size(); ++slot) {
+        if (kept[slot])
+            continue;
+        const Entry& gone = m_entries[slot];
+        if (gone.state == ChunkState::Loading && m_inFlight > 0)
+            m_inFlight -= 1;
+        if (gone.state == ChunkState::Resident) {
+            m_stats.bytesResident -= std::min<u64>(m_stats.bytesResident, gone.bytes);
+            m_stats.resident -= std::min<u32>(m_stats.resident, 1u);
+        }
+    }
+    m_index = std::move(index);
+    m_entries = std::move(entries);
+}
+
 void StreamingManager::forgetResidency() noexcept
 {
     for (Entry& entry : m_entries) {
