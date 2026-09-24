@@ -148,7 +148,7 @@ int main(int argc, char** argv)
     }
 
     std::cout << "assetc: " << result.meshCount << " mesh(es), " << result.textureCount << " texture(s), "
-              << result.chunkCount << " chunk(s), " << result.rawCount << " raw file(s) -> " << result.pack.size()
-              << " bytes\n";
+              << result.materialCount << " material(s), " << result.chunkCount << " chunk(s), " << result.rawCount
+              << " raw file(s) -> " << result.pack.size() << " bytes\n";
     return 0;
 }

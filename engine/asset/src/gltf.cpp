@@ -610,6 +610,7 @@ std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<st
         if (defaultMaterialSlot_ == TextureRef::Missing) {
             defaultMaterialSlot_ = static_cast<u32>(out_.materials.size());
             out_.materials.emplace_back();
+            out_.materialSources.push_back(Model::NoSourceMaterial);
         }
         slot = defaultMaterialSlot_;
         materialWantsTangents_ = false;
@@ -709,6 +710,7 @@ std::optional<core::EngineError> Importer::resolveMaterial(const fg::Optional<st
     materialSlots_[index] = slot;
     materialWantsTangents_ = material.normal.present();
     out_.materials.push_back(std::move(material));
+    out_.materialSources.push_back(static_cast<u32>(index));
     return std::nullopt;
 }
 

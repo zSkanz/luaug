@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <utility>
 
 namespace luaug::asset {
@@ -565,12 +566,170 @@ void MaterialLibrary::put(std::string_view urn, MaterialAsset material)
     ++m_revision;
 }
 
+// --- The compiled form ---------------------------------------------------------
+
+namespace {
+
+constexpr std::array<char, 4> CompiledMagic{'L', 'M', 'A', 'T'};
+constexpr core::u32 CompiledVersion = 1;
+
+class ByteWriter
+{
+public:
+    void raw(const void* data, usize size)
+    {
+        const auto* bytes = static_cast<const std::byte*>(data);
+        m_out.insert(m_out.end(), bytes, bytes + size);
+    }
+    // Little-endian on every host by construction: shifted out byte by byte.
+    void word(core::u32 value)
+    {
+        for (int shift = 0; shift < 32; shift += 8)
+            m_out.push_back(static_cast<std::byte>((value >> shift) & 0xFFu));
+    }
+    void real(core::f32 value)
+    {
+        core::u32 bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        word(bits);
+    }
+    void text(std::string_view value)
+    {
+        word(static_cast<core::u32>(value.size()));
+        raw(value.data(), value.size());
+    }
+    [[nodiscard]] std::vector<std::byte> take() { return std::move(m_out); }
+
+private:
+    std::vector<std::byte> m_out;
+};
+
+class ByteReader
+{
+public:
+    explicit ByteReader(std::span<const std::byte> bytes) : m_bytes(bytes) {}
+    [[nodiscard]] bool word(core::u32& out)
+    {
+        if (m_at + 4 > m_bytes.size())
+            return false;
+        out = 0;
+        for (usize index = 0; index < 4; ++index)
+            out |= static_cast<core::u32>(m_bytes[m_at + index]) << (8 * index);
+        m_at += 4;
+        return true;
+    }
+    [[nodiscard]] bool real(core::f32& out)
+    {
+        core::u32 bits = 0;
+        if (!word(bits))
+            return false;
+        std::memcpy(&out, &bits, sizeof(out));
+        return true;
+    }
+    [[nodiscard]] bool text(std::string& out)
+    {
+        core::u32 size = 0;
+        if (!word(size) || m_at + size > m_bytes.size())
+            return false;
+        out.assign(reinterpret_cast<const char*>(m_bytes.data() + m_at), size);
+        m_at += size;
+        return true;
+    }
+    [[nodiscard]] bool bytes(std::span<std::byte> out)
+    {
+        if (m_at + out.size() > m_bytes.size())
+            return false;
+        std::memcpy(out.data(), m_bytes.data() + m_at, out.size());
+        m_at += out.size();
+        return true;
+    }
+    [[nodiscard]] bool done() const noexcept { return m_at == m_bytes.size(); }
+
+private:
+    std::span<const std::byte> m_bytes;
+    usize m_at = 0;
+};
+
+} // namespace
+
+std::vector<std::byte> encodeMaterial(const CompiledMaterial& material)
+{
+    const MaterialAsset& asset = material.asset;
+    const MaterialProperties& p = asset.properties;
+    ByteWriter out;
+    out.raw(CompiledMagic.data(), CompiledMagic.size());
+    out.word(CompiledVersion);
+    out.word(asset.written);
+    out.word(asset.instanceParameters);
+    out.text(asset.parent);
+    for (const core::f32 value : {p.color.r, p.color.g, p.color.b, p.transparency, p.emissive.r, p.emissive.g,
+                                  p.emissive.b, p.metalness, p.roughness, p.normalScale, p.alphaCutoff})
+        out.real(value);
+    out.word(static_cast<core::u32>(p.alphaMode));
+    out.word(p.doubleSided ? 1u : 0u);
+    const std::array<const std::string*, 4> maps{&p.colorMap, &p.normalMap, &p.metallicRoughnessMap, &p.emissiveMap};
+    for (usize index = 0; index < maps.size(); ++index) {
+        out.text(*maps[index]);
+        const std::array<std::byte, 16> hash = core::toBytes(material.mapHashes[index]);
+        out.raw(hash.data(), hash.size());
+    }
+    return out.take();
+}
+
+std::optional<CompiledMaterial> decodeMaterial(std::span<const std::byte> bytes)
+{
+    if (bytes.size() < CompiledMagic.size() || std::memcmp(bytes.data(), CompiledMagic.data(), 4) != 0)
+        return std::nullopt;
+    ByteReader in(bytes.subspan(CompiledMagic.size()));
+    CompiledMaterial out;
+    MaterialAsset& asset = out.asset;
+    MaterialProperties& p = asset.properties;
+    core::u32 version = 0;
+    core::u32 written = 0;
+    core::u32 declared = 0;
+    if (!in.word(version) || version != CompiledVersion || !in.word(written) || !in.word(declared) ||
+        !in.text(asset.parent))
+        return std::nullopt;
+    asset.written = static_cast<MaterialFieldMask>(written & AllMaterialFields);
+    asset.instanceParameters = static_cast<MaterialFieldMask>(declared & DeclarableParameters);
+    for (core::f32* value : {&p.color.r, &p.color.g, &p.color.b, &p.transparency, &p.emissive.r, &p.emissive.g,
+                             &p.emissive.b, &p.metalness, &p.roughness, &p.normalScale, &p.alphaCutoff}) {
+        if (!in.real(*value))
+            return std::nullopt;
+    }
+    core::u32 alphaMode = 0;
+    core::u32 doubleSided = 0;
+    if (!in.word(alphaMode) || !in.word(doubleSided))
+        return std::nullopt;
+    p.alphaMode = static_cast<core::i32>(alphaMode);
+    p.doubleSided = doubleSided != 0;
+    const std::array<std::string*, 4> maps{&p.colorMap, &p.normalMap, &p.metallicRoughnessMap, &p.emissiveMap};
+    for (usize index = 0; index < maps.size(); ++index) {
+        std::array<std::byte, 16> hash{};
+        if (!in.text(*maps[index]) || !in.bytes(hash))
+            return std::nullopt;
+        out.mapHashes[index] = core::fromBytes(std::span<const std::byte, 16>(hash));
+    }
+    if (!in.done())
+        return std::nullopt;
+    return out;
+}
+
 MaterialLibrary::Source mountedMaterials(const ContentMounts& mounts)
 {
     return [&mounts](std::string_view urn, MaterialReadNotes& notes) -> std::optional<MaterialAsset> {
         const ResolvedContent resolved = mounts.resolve(urn);
         if (!resolved.found())
             return std::nullopt;
+        // **The compiled form first**, which a shipped game has and a dev
+        // session may: the pack's kind says what the blob is.
+        if (resolved.source == ResolvedContent::Source::Pack && resolved.kind == AssetKind::Material) {
+            if (std::optional<CompiledMaterial> compiled = decodeMaterial(resolved.bytes))
+                return std::move(compiled->asset);
+            const std::array<core::I18nArg, 1> args{core::I18nArg{"path", std::string(urn)}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.err.compiled_damaged"), args);
+            return std::nullopt;
+        }
         std::string text;
         if (resolved.source == ResolvedContent::Source::Loose) {
             std::vector<std::byte> bytes;

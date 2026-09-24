@@ -1779,6 +1779,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             authored().classes().findId(authored().atoms().intern("Model"));
                         const core::NameAtom meshContent = authored().atoms().intern("MeshContent");
 
+                        const core::NameAtom materialProperty = authored().atoms().intern("Material");
                         for (const std::string& name : report.imported) {
                             if (contentKindOf(name) != ContentKind::Mesh || meshPartClass == scene::InvalidClass)
                                 continue;
@@ -1786,7 +1787,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             // `asset://` plus the path under the content root,
                             // which is what a mount resolves and what a scene
                             // stores.
-                            const std::string urn = "asset://" + (folder.empty() ? name : folder + "/" + name);
+                            const std::string relativeModel = folder.empty() ? name : folder + "/" + name;
+                            const std::string urn = "asset://" + relativeModel;
+                            // **One material asset per material in the file**
+                            // (ADR 0090), and the parts below wear them. One the
+                            // file's maps cannot be named for stays in the mesh.
+                            const ModelMaterials worn = writeModelMaterials(editor.content().root(), relativeModel);
+                            if (!worn.written.empty())
+                                (void)editor.content().refresh();
+                            const auto wear = [&](core::InstanceId part, const std::string& material) {
+                                if (!material.empty())
+                                    (void)authored().setProperty(
+                                        part, materialProperty,
+                                        scene::Value{scene::MaterialRef{"asset://" + material, 0}});
+                            };
 
                             // What the compiler split this file into, if it
                             // split it at all. Read off the rows it produced
@@ -1826,6 +1840,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                     authored().setName(inspector.selection(), authored().atoms().intern(piece));
                                     (void)authored().setProperty(inspector.selection(), meshContent,
                                                                  scene::Value{urn + "#" + piece});
+                                    wear(inspector.selection(), worn.ofPiece(piece));
                                 }
                                 // The MODEL is what a person wants selected
                                 // after dropping a model in, not whichever piece
@@ -1841,6 +1856,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             // `createInstance` selects what it made, so the
                             // selection IS the thing to point at the file.
                             (void)authored().setProperty(inspector.selection(), meshContent, scene::Value{urn});
+                            // A part draws one material; a file that uses
+                            // several without splitting keeps its own.
+                            wear(inspector.selection(), worn.whole());
                         }
                     }
                     importParent = core::InstanceId{};

@@ -1,4 +1,5 @@
 #include "luaug/asset/content.h"
+#include "luaug/asset/material.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/asset/pack.h"
 #include "luaug/asset/texture.h"
@@ -507,43 +508,20 @@ TEST_CASE("no cache root is the behaviour this tool always had")
 
 // --- What a loose texture is FOR ----------------------------------------------
 //
-// A `Material` in a project's content says what each of its maps is: `ColorMap`
-// and `EmissiveMap` are colour, `NormalMap` and `MetallicRoughnessMap` are
-// numbers (`api/defs/instances.api.luau`). Every image below is the same
-// two-by-two PNG, so the ONLY thing that can make two of them different blobs is
-// the transfer function they were encoded with.
+// A material file in a project's content says what each of its maps is (ADR
+// 0090): `ColorMap` and `EmissiveMap` are colour, `NormalMap` and
+// `MetallicRoughnessMap` are numbers. Every image below is the same two-by-two
+// PNG, so the ONLY thing that can make two of them different blobs is the
+// transfer function they were encoded with.
 
 namespace {
 
-[[nodiscard]] std::string materialNode(const std::string& name, const std::string& maps)
+// A material file holding `properties` (a JSON object body), and a parent when
+// it is a variant.
+[[nodiscard]] std::string materialFile(const std::string& properties, const std::string& parent = {})
 {
-    return R"({"class":"Material","name":")" + name + R"(","properties":{)" + maps + "}}";
-}
-
-[[nodiscard]] std::string modelNode(const std::string& name, const std::string& child)
-{
-    return R"({"class":"Model","name":")" + name + R"(","children":[)" + child + "]}";
-}
-
-[[nodiscard]] std::string stampedNode(const std::string& name, const std::string& stamp, const std::string& overrides)
-{
-    return R"({"stamp":")" + stamp + R"(","name":")" + name + R"(","overrides":{)" + overrides + "}}";
-}
-
-// A scene whose `Workspace` holds exactly these nodes. Assembled rather than
-// written out per case, because the cases differ only in which maps a material
-// names and a literal apiece would bury that.
-[[nodiscard]] std::string sceneOf(const std::vector<std::string>& children)
-{
-    std::string text = R"({"format":"luaug-scene","version":1,)"
-                       R"("root":{"class":"Workspace","name":"Workspace","children":[)";
-    for (usize i = 0; i < children.size(); ++i) {
-        if (i > 0)
-            text += ',';
-        text += children[i];
-    }
-    text += "]}}";
-    return text;
+    return R"({"format":"luaug-material","version":1,"parent":")" + parent +
+           R"(","instanceParameters":[],"properties":{)" + properties + "}}";
 }
 
 struct MaterialFixture
@@ -556,8 +534,7 @@ struct MaterialFixture
         root = std::filesystem::temp_directory_path(ec) / "luaug-assetc-material-tests";
         std::filesystem::remove_all(root, ec);
         std::filesystem::create_directories(root / "textures", ec);
-        std::filesystem::create_directories(root / "scenes", ec);
-        std::filesystem::create_directories(root / "stamps", ec);
+        std::filesystem::create_directories(root / "materials" / "nested", ec);
         REQUIRE(std::filesystem::is_directory(root / "textures"));
 
         const std::filesystem::path data = LUAUG_ASSET_TEST_DATA;
@@ -566,12 +543,18 @@ struct MaterialFixture
             Fixture::copy(data / "checker.png", root / "textures" / name);
         }
 
-        // The stamp names `both.png` as a normal map; the scene names it as a
-        // colour map. One image, two uses, and the pack holds it once.
-        Fixture::write(root / "stamps" / "post.stamp.json",
-                       R"({"format":"luaug-scene","version":1,"root":)" +
-                           modelNode("Post", materialNode("Skin", R"("NormalMap":"asset://textures/both.png")")) + "}");
-        writeScene({});
+        write("brick", materialFile(R"("ColorMap":"asset://textures/colour.png",)"
+                                    R"("NormalMap":"asset://textures/normal.png",)"
+                                    R"("MetallicRoughnessMap":"asset://textures/orm.png",)"
+                                    R"("EmissiveMap":"asset://textures/glow.png")"));
+        // One image, two uses, and the pack holds it once. Nested, because a
+        // material lives wherever its author put it -- `materials/` is a
+        // convention and not a rule.
+        write("nested/packed", materialFile(R"("ColorMap":"asset://textures/both.png")"));
+        write("skin", materialFile(R"("NormalMap":"asset://textures/both.png")"));
+        // A variant that names a map of its own.
+        write("worn",
+              materialFile(R"("NormalMap":"asset://textures/overridden.png")", "asset://materials/skin.material.json"));
     }
 
     ~MaterialFixture()
@@ -583,22 +566,9 @@ struct MaterialFixture
     MaterialFixture(const MaterialFixture&) = delete;
     MaterialFixture& operator=(const MaterialFixture&) = delete;
 
-    // `extra` is appended to the standing cast, so a case can author a material
-    // that claims an image nothing claimed before.
-    void writeScene(const std::vector<std::string>& extra) const
+    void write(const std::string& name, const std::string& text) const
     {
-        std::vector<std::string> children{
-            materialNode("Brick", R"("ColorMap":"asset://textures/colour.png",)"
-                                  R"("NormalMap":"asset://textures/normal.png",)"
-                                  R"("MetallicRoughnessMap":"asset://textures/orm.png",)"
-                                  R"("EmissiveMap":"asset://textures/glow.png")"),
-            // Nested, because a material is an instance and lives wherever the
-            // author put it -- not in a list at the top of the file.
-            modelNode("Nested", materialNode("Packed", R"("ColorMap":"asset://textures/both.png")")),
-            stampedNode("Post", "post", R"("Skin":{"NormalMap":"asset://textures/overridden.png"})"),
-        };
-        children.insert(children.end(), extra.begin(), extra.end());
-        Fixture::write(root / "scenes" / "main.scene.json", sceneOf(children));
+        Fixture::write(root / "materials" / (name + ".material.json"), text);
     }
 
     [[nodiscard]] CompileResult build() const
@@ -624,6 +594,38 @@ struct MaterialFixture
 }
 
 } // namespace
+
+TEST_CASE("a material compiles to its own kind, naming its textures by their compiled hashes")
+{
+    // `AssetKind::Material` had no writer from ADR 0060 to ADR 0090; this is
+    // the one its comment always described.
+    seedRealCatalog();
+    const MaterialFixture fixture;
+    const CompileResult result = fixture.build();
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+    CHECK(result.materialCount == 4);
+
+    luaug::asset::Pack pack;
+    REQUIRE_FALSE(luaug::asset::Pack::openVerified(result.pack, pack).has_value());
+
+    const ManifestEntry* const brick = findUrn(result, "asset://materials/brick.material.json");
+    REQUIRE(brick != nullptr);
+    CHECK(brick->kind == luaug::asset::AssetKind::Material);
+    const std::optional<luaug::asset::CompiledMaterial> compiled = luaug::asset::decodeMaterial(pack.blob(brick->hash));
+    REQUIRE(compiled.has_value());
+    CHECK(compiled->asset.properties.colorMap == "asset://textures/colour.png");
+    const ManifestEntry* const colour = findUrn(result, "asset://textures/colour.png");
+    REQUIRE(colour != nullptr);
+    CHECK(compiled->mapHashes[0] == colour->hash);
+
+    // A variant keeps its parent, so the library resolves it at load exactly
+    // as it resolves the loose file.
+    const ManifestEntry* const worn = findUrn(result, "asset://materials/worn.material.json");
+    REQUIRE(worn != nullptr);
+    const std::optional<luaug::asset::CompiledMaterial> variant = luaug::asset::decodeMaterial(pack.blob(worn->hash));
+    REQUIRE(variant.has_value());
+    CHECK(variant->asset.parent == "asset://materials/skin.material.json");
+}
 
 TEST_CASE("a material decides whether a loose texture is colour or numbers")
 {
@@ -676,11 +678,10 @@ TEST_CASE("an image used as colour and as numbers is encoded as colour")
     CHECK(encodedAsColour(result, pack, "asset://textures/both.png"));
 }
 
-TEST_CASE("a map named only in a stamp override is found")
+TEST_CASE("a map named only by a variant is found")
 {
-    // An override is a property map keyed by a path inside the placed stamp
-    // (ADR 0051), and a material map set there is as real as one set in
-    // `properties`.
+    // A variant writes only what it overrides, and a map it names is as real
+    // as one its parent names.
     seedRealCatalog();
     const MaterialFixture fixture;
 
@@ -733,7 +734,7 @@ TEST_CASE("a material that starts claiming a texture recompiles it")
     const CompileResult first = compile(options);
     REQUIRE_MESSAGE(first.ok, first.diagnostic);
 
-    fixture.writeScene({materialNode("Late", R"("NormalMap":"asset://textures/unclaimed.png")")});
+    fixture.write("late", materialFile(R"("NormalMap":"asset://textures/unclaimed.png")"));
 
     const CompileResult second = compile(options);
     REQUIRE_MESSAGE(second.ok, second.diagnostic);

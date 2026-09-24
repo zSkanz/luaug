@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -105,6 +106,38 @@ ContentImportReport openProjectContent(const std::filesystem::path& projectRoot,
 
 // Where the store lives, so the mount at boot and the writer at import cannot
 // disagree about it. `<project>/.luaug/import/objects` and `.../index.json`.
+// **The materials a glTF file describes, as material assets** (ADR 0090): one
+// `.material.json` per material in the file, under
+// `content/materials/<model stem>/`, so the parts an import builds can WEAR
+// them -- and a person can edit one the way they edit any other.
+//
+// A re-import writes the assets that are missing and leaves existing ones
+// alone: an asset somebody has already edited is theirs, and an import that
+// put the file's numbers back would undo them.
+//
+// **A material whose maps are not files beside the model is not written**: an
+// image embedded in a `.glb` or a data URI has no `Content` a material can
+// name, so the parts using it keep drawing the file's own material, which is
+// what an unimported mesh looks like.
+struct ModelMaterials
+{
+    // Content-relative, per submesh of the model in the importer's order;
+    // empty for one that keeps the file's own material.
+    std::vector<std::string> bySubmesh;
+    // Parallel to `bySubmesh`: what the importer named each piece.
+    std::vector<std::string> submeshNames;
+    // Every asset path this import wrote (not the ones it found already there).
+    std::vector<std::string> written;
+
+    // The one material every submesh shares, or empty.
+    [[nodiscard]] std::string whole() const;
+    // The material of the piece named `piece`, or empty.
+    [[nodiscard]] std::string ofPiece(std::string_view piece) const;
+};
+
+[[nodiscard]] ModelMaterials writeModelMaterials(const std::filesystem::path& contentRoot,
+                                                 const std::string& modelRelative);
+
 [[nodiscard]] std::filesystem::path importObjectsDir(const std::filesystem::path& projectRoot);
 [[nodiscard]] std::filesystem::path importIndexPath(const std::filesystem::path& projectRoot);
 

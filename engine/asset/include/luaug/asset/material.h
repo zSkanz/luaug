@@ -22,12 +22,15 @@
 #pragma once
 
 #include "luaug/asset/content.h"
+#include "luaug/core/content_hash.h"
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -297,6 +300,21 @@ private:
     std::unordered_map<std::string, ResolvedMaterial> m_resolved;
     core::u64 m_revision = 0;
 };
+
+// **The compiled form** (`AssetKind::Material`, ADR 0090): the parameter
+// block and, for each of the four maps, its URN and the content hash of the
+// compiled texture it names (zero for a map the pack does not hold). Binary,
+// little-endian, versioned by its own magic -- the pack's table of contents is
+// what says a blob is a material, so a mesh asking for one fails at the index.
+struct CompiledMaterial
+{
+    MaterialAsset asset;
+    // ColorMap, NormalMap, MetallicRoughnessMap, EmissiveMap.
+    std::array<core::ContentHash, 4> mapHashes{};
+};
+
+[[nodiscard]] std::vector<std::byte> encodeMaterial(const CompiledMaterial& material);
+[[nodiscard]] std::optional<CompiledMaterial> decodeMaterial(std::span<const std::byte> bytes);
 
 // The source that reads through content mounts: a compiled material from a
 // pack first (`AssetKind::Material`), the loose file second.

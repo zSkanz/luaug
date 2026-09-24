@@ -56,6 +56,9 @@ enum class SourceKind
     // world bigger than memory cannot have its instance lists resident
     // (`asset/chunk.h`).
     Chunk,
+    // A `*.material.json` (ADR 0090): compiled to `AssetKind::Material`, its
+    // parameter block and the content hashes of the textures it names.
+    Material,
     // Copied through untouched: a font, a catalog, a shader blob. Copying
     // rather than refusing is what lets a project put anything it likes in its
     // content directory.
@@ -170,6 +173,7 @@ struct CompileResult
     u32 meshCount = 0;
     u32 textureCount = 0;
     u32 rawCount = 0;
+    u32 materialCount = 0;
     u32 chunkCount = 0;
 
     CompileStats stats;

@@ -4,6 +4,7 @@
 #include "luaug/asset/content.h"
 #include "luaug/asset/gltf.h"
 #include "luaug/asset/image.h"
+#include "luaug/asset/material.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/asset/model_split.h"
 #include "luaug/assetc/exotic.h"
@@ -57,6 +58,9 @@ using asset::AssetKind;
     if (endsWith(name, ".chunk.json")) {
         return SourceKind::Chunk;
     }
+    if (endsWith(name, asset::MaterialSuffix)) {
+        return SourceKind::Material;
+    }
 
     if (extension == ".gltf" || extension == ".glb") {
         return SourceKind::Mesh;
@@ -94,7 +98,10 @@ using asset::AssetKind;
 // 2: a loose texture a `Material` names as a normal or metallic-roughness map
 // is encoded as numbers rather than as colour, so what this tool produces for
 // such an image moved.
-constexpr core::u32 kCompilerRules = 2;
+//
+// 3: that answer comes from the project's MATERIAL FILES (ADR 0090) rather
+// than from `Material` instances in its scenes, which no longer exist.
+constexpr core::u32 kCompilerRules = 3;
 
 // What one source compiled to, remembered between runs.
 //
@@ -256,16 +263,14 @@ struct CachedSource
 
 // --- What a loose texture is FOR ---------------------------------------------
 //
-// A `Material` is an instance like any other, so a project's materials live in
-// its scenes and its stamps, wherever their author put them -- and those files
+// A material is a `.material.json` under `content/` (ADR 0090), and those files
 // are already sources. Reading them says what each image they name is, which is
 // the one thing a standalone image cannot say about itself.
 
-// The four `Material` properties that name an image, and whether what they name
-// is colour or numbers (`api/defs/instances.api.luau`): `ColorMap` is sampled
-// and multiplied by `Color`, `EmissiveMap` is what the surface glows with, and
-// the other two are values a shader reads rather than a picture anybody looks
-// at.
+// The four material fields that name an image, and whether what they name is
+// colour or numbers: `ColorMap` is sampled and multiplied by `Color`,
+// `EmissiveMap` is what the surface glows with, and the other two are values a
+// shader reads rather than a picture anybody looks at.
 struct MaterialMap
 {
     std::string_view property;
@@ -284,8 +289,7 @@ constexpr MaterialMap kMaterialMaps[] = {
 // depended on a hash order would be an answer that depended on the machine.
 using TextureUses = std::map<std::string, bool>;
 
-// One property map -- a `Material`'s `properties`, or one entry of an
-// `overrides` block, which is the same shape at a path inside a placed stamp.
+// One material file's `properties`.
 void readMaterialMaps(const core::JsonValue& properties, TextureUses& out)
 {
     if (properties.type() != core::JsonType::Object) {
@@ -307,43 +311,6 @@ void readMaterialMaps(const core::JsonValue& properties, TextureUses& out)
     }
 }
 
-void collectMaterialMaps(const core::JsonValue& value, TextureUses& out)
-{
-    switch (value.type()) {
-    case core::JsonType::Array:
-        for (usize index = 0; index < value.size(); ++index) {
-            collectMaterialMaps(value.at(index), out);
-        }
-        break;
-
-    case core::JsonType::Object: {
-        if (value["class"].asString() == "Material") {
-            readMaterialMaps(value["properties"], out);
-        }
-        // **A placed stamp's edits count.** A scene records them under
-        // `overrides`, keyed by the path inside the stamp, and a map set there
-        // is as real as one set in `properties` (ADR 0051). What the path names
-        // is somewhere in the stamp FILE, so its class is not written down here
-        // -- which is why this reads the property names, and it is sound
-        // because `Material` is the only class that declares them.
-        if (const core::JsonValue overrides = value["overrides"]; overrides.type() == core::JsonType::Object) {
-            for (usize index = 0; index < overrides.size(); ++index) {
-                readMaterialMaps(overrides[overrides.keyAt(index)], out);
-            }
-        }
-        for (usize index = 0; index < value.size(); ++index) {
-            collectMaterialMaps(value[value.keyAt(index)], out);
-        }
-        break;
-    }
-
-    default:
-        break;
-    }
-    // Recursion is bounded by the parser: a document nested deeper than
-    // `core::JsonDocument` allows never parses in the first place.
-}
-
 // **Run after the sort and before anything is encoded.** The sort is the first
 // of the four determinism rules and this must not disturb it; reading a second
 // time here rather than remembering during the walk is what keeps it untouched.
@@ -351,25 +318,19 @@ void collectMaterialMaps(const core::JsonValue& value, TextureUses& out)
 {
     TextureUses uses;
     for (const SourceFile& source : sources) {
-        const std::string name = lowercase(source.path.filename().string());
-        if (!endsWith(name, ".scene.json") && !endsWith(name, ".stamp.json") && !endsWith(name, ".chunk.json")) {
+        if (source.kind != SourceKind::Material)
             continue;
-        }
-
         std::vector<std::byte> bytes;
-        if (!readWhole(source.path, bytes)) {
+        if (!readWhole(source.path, bytes))
             continue;
-        }
         core::JsonDocument document;
         // **A file that will not parse is left alone here.** The branch that
-        // compiles it is the one that owns saying so -- a chunk source with a
-        // diagnostic, a scene riding through as raw -- and refusing the build
+        // compiles it is the one that owns saying so, and refusing the build
         // twice for one file would report it twice.
         const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        if (!document.parse(text, source.relative.generic_string())) {
+        if (!document.parse(text, source.relative.generic_string()))
             continue;
-        }
-        collectMaterialMaps(document.root(), uses);
+        readMaterialMaps(document.root()["properties"], uses);
     }
     return uses;
 }
@@ -394,6 +355,8 @@ const char* sourceKindName(SourceKind kind) noexcept
         return "texture";
     case SourceKind::Chunk:
         return "chunk";
+    case SourceKind::Material:
+        return "material";
     case SourceKind::Raw:
         return "raw";
     }
@@ -725,7 +688,17 @@ CompileResult compile(const CompileOptions& options)
         }
     }
 
+    // **Materials last**: a compiled material carries the content hash of each
+    // texture it names, and those are known once the textures are in the pack.
+    // Not cached -- a material is a few hundred bytes of JSON and compiling one
+    // is cheaper than hashing a cache key for it.
+    std::vector<const SourceFile*> materials;
+
     for (const SourceFile& source : sources) {
+        if (source.kind == SourceKind::Material) {
+            materials.push_back(&source);
+            continue;
+        }
         std::vector<std::byte> bytes;
         if (!readWhole(source.path, bytes)) {
             result.diagnostic = "could not read " + source.path.string();
@@ -1019,6 +992,11 @@ CompileResult compile(const CompileOptions& options)
             break;
         }
 
+        case SourceKind::Material:
+            // Taken out before this loop: materials compile after the
+            // textures they name.
+            break;
+
         case SourceKind::Raw: {
             ManifestEntry entry;
             entry.urn = urn;
@@ -1044,6 +1022,43 @@ CompileResult compile(const CompileOptions& options)
             if (platform::createDirectories(path.parent_path()))
                 (void)writeFile(path, encodeCache(produced), ignored);
         }
+    }
+
+    for (const SourceFile* source : materials) {
+        std::vector<std::byte> bytes;
+        if (!readWhole(source->path, bytes)) {
+            result.diagnostic = "could not read " + source->path.string();
+            return result;
+        }
+        const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        std::string error;
+        std::optional<asset::MaterialAsset> read = asset::readMaterialAsset(text, nullptr, &error);
+        if (!read.has_value()) {
+            result.diagnostic = source->relative.generic_string() + ": " + error;
+            return result;
+        }
+        asset::CompiledMaterial compiled;
+        compiled.asset = std::move(*read);
+        const std::array<const std::string*, 4> maps{
+            &compiled.asset.properties.colorMap, &compiled.asset.properties.normalMap,
+            &compiled.asset.properties.metallicRoughnessMap, &compiled.asset.properties.emissiveMap};
+        for (usize index = 0; index < maps.size(); ++index) {
+            for (const ManifestEntry& entry : manifest) {
+                if (entry.kind == AssetKind::Texture && entry.urn == *maps[index]) {
+                    compiled.mapHashes[index] = entry.hash;
+                    break;
+                }
+            }
+        }
+        const std::vector<std::byte> encoded = asset::encodeMaterial(compiled);
+        ManifestEntry entry;
+        entry.urn = urnFor(source->relative);
+        entry.hash = pack.addContent(AssetKind::Material, encoded);
+        entry.kind = AssetKind::Material;
+        entry.originalBytes = bytes.size();
+        entry.storedBytes = encoded.size();
+        manifest.push_back(std::move(entry));
+        result.materialCount += 1;
     }
 
     // The manifest is sorted by URN, which is the second determinism rule: the

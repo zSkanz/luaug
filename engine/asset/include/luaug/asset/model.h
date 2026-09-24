@@ -227,6 +227,13 @@ struct Model
 {
     Mesh mesh;
     std::vector<MaterialDef> materials;
+    // Parallel to `materials`: the index in the SOURCE file each one came from,
+    // or `NoSourceMaterial` for the default a primitive with none was given.
+    // `materials` is in first-use order, and an import that writes one
+    // material asset per material in the file (ADR 0090) has to know which
+    // asset a submesh's material is.
+    static constexpr u32 NoSourceMaterial = 0xFFFFFFFFu;
+    std::vector<u32> materialSources;
     std::vector<Image> images;
 
     // One name per `mesh.submeshes`, from the node the primitive came from.

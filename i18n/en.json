@@ -130,6 +130,7 @@
   "asset.gltf.err.too_many_vertices": "The glTF file has more vertices than one mesh can hold.",
   "asset.gltf.err.image_missing": "A texture the glTF file names could not be found.",
   "asset.gltf.err.image_decode_failed": "Could not decode a texture from the glTF file.",
+  "asset.material.err.compiled_damaged": "The compiled material {path} in the content pack is damaged; parts wearing it draw the default material until the pack is rebuilt.",
   "asset.material.err.unreadable": "Could not read the material {path}: {reason}. Parts wearing it draw the default material.",
   "asset.material.warn.unknown_field": "The material {path} has a field this engine does not know ({field}); it was ignored.",
   "asset.material.warn.malformed_field": "The material {path} has a value of the wrong kind for {field}; the field was ignored.",

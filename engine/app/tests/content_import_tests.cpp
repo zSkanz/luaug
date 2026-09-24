@@ -28,8 +28,10 @@
 #include "luaug/assetc/compiler.h"
 #endif
 
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <system_error>
@@ -317,3 +319,46 @@ TEST_CASE("import_matches_build: the editor's import and a command-line build ag
 }
 
 #endif
+
+// --- The materials of an imported model (ADR 0090) ----------------------------
+
+TEST_CASE("an imported model's materials become assets its pieces can wear, and a re-import keeps edits")
+{
+    std::error_code ec;
+    const std::filesystem::path content =
+        std::filesystem::temp_directory_path(ec) / "luaug-import-materials" / "content";
+    std::filesystem::remove_all(content.parent_path(), ec);
+    std::filesystem::create_directories(content / "models", ec);
+    const std::filesystem::path data = std::filesystem::path(LUAUG_TEST_MESH).parent_path();
+    std::filesystem::copy_file(data / "textured.gltf", content / "models" / "textured.gltf",
+                               std::filesystem::copy_options::overwrite_existing, ec);
+    std::filesystem::copy_file(data / "checker.png", content / "models" / "checker.png",
+                               std::filesystem::copy_options::overwrite_existing, ec);
+
+    const app::ModelMaterials first = app::writeModelMaterials(content, "models/textured.gltf");
+    // `Plain` samples `checker.png` beside the model and is written; `Bumpy`
+    // glows with a data URI, which no material can name, and is left in the
+    // mesh.
+    REQUIRE(first.written.size() == 1);
+    CHECK(first.written[0] == "materials/textured/plain.material.json");
+    std::string text;
+    REQUIRE(platform::readTextFile(content / first.written[0], text));
+    const std::optional<asset::MaterialAsset> plain = asset::readMaterialAsset(text);
+    REQUIRE(plain.has_value());
+    CHECK(plain->properties.colorMap == "asset://models/checker.png");
+    // glTF's own defaults where the file says nothing.
+    CHECK(plain->properties.metalness == 1.0f);
+    CHECK(plain->properties.roughness == 1.0f);
+
+    // Some submesh wears it and some keeps the file's own.
+    CHECK(std::find(first.bySubmesh.begin(), first.bySubmesh.end(), first.written[0]) != first.bySubmesh.end());
+    CHECK(std::find(first.bySubmesh.begin(), first.bySubmesh.end(), std::string{}) != first.bySubmesh.end());
+
+    // Somebody edits it; a re-import leaves it alone.
+    REQUIRE(platform::writeTextFile(content / first.written[0], "edited"));
+    const app::ModelMaterials second = app::writeModelMaterials(content, "models/textured.gltf");
+    CHECK(second.written.empty());
+    REQUIRE(platform::readTextFile(content / first.written[0], text));
+    CHECK(text == "edited");
+    std::filesystem::remove_all(content.parent_path(), ec);
+}

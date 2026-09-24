@@ -50,9 +50,12 @@ void writeU64(std::vector<std::byte>& out, u64 value)
     return value;
 }
 
+// The highest kind, not `Raw`: `Material` came after it, and a reader that
+// stopped at `Raw` refused the first pack that held one -- the kind had been in
+// the table since ADR 0060 with no writer, so nothing had ever tried (ADR 0090).
 [[nodiscard]] bool knownKind(u32 value) noexcept
 {
-    return value <= static_cast<u32>(AssetKind::Raw);
+    return value <= static_cast<u32>(AssetKind::Material);
 }
 
 } // namespace
