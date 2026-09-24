@@ -1,6 +1,6 @@
 # icons/ — the editor's icon themes
 
-> **Current artwork: Orbit (2026-09-23).** All 87 IDs resolve to 82 geometric
+> **Current artwork: Orbit (2026-09-23).** All 129 IDs resolve to 118 geometric
 > drawings. See [the style and exact prompt](../art/editor-icons/orbit/STYLE.md)
 > and [the visual gallery](../art/editor-icons/orbit/index.html). The loader,
 > palette and alias contracts below still apply; historical counts and
@@ -59,7 +59,7 @@ A theme is any directory containing a `theme.json`:
 | `fallback` | the id to draw when a lookup misses. Must exist |
 | `icons` | logical id to path, relative to the theme directory |
 
-**Paths repeat on purpose.** Five ids point at another id's file — a browser
+**Paths repeat on purpose.** Eleven ids point at another id's file — a browser
 `Folder` and a tree `Folder` are one drawing, and a `.glb` in the content folder
 is what a `MeshPart` points at. Two names for one file, never two files that are
 the same icon and drift apart the first time one is touched.

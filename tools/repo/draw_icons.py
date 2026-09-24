@@ -130,6 +130,28 @@ def draw_icon(group, name):
             if name == "Forward": i.line((3,12),(16,12))
             if name == "Collapse":
                 i = Icon().line((5,9),(12,16),(19,9))
+        elif name == "Erase": i.line((3,14),(14,3),(22,11),(12,21),(9,21),closed=True).line((7,10),(16,18)).line((12,21),(22,21))
+        elif name == "View2D": i.rect(7,3,14,14,1).line((3,4),(3,21),(20,21)).line((1,7),(3,4),(5,7)).line((17,19),(20,21),(17,23))
+        elif name == "Import": i.line((3,14),(3,21),(21,21),(21,14)).line((12,2),(12,16)).line((7,11),(12,16),(17,11))
+        elif name == "NewFolder": i.line((3,6),(9,6),(12,9),(21,9),(21,20),(3,20),closed=True).line((8,14),(16,14)).line((12,10),(12,18))
+        elif name == "Tools": i.line((4,4),(9,9),(15,3),(20,3),(16,7),(17,11),(21,12),(15,15),(10,10),(4,16),(2,20),(5,22),(9,18),(10,14)).circle(5,19,1,True)
+        elif name == "Information": i.circle(12,12,10).circle(12,7,1.2,True).line((11,11),(12,11),(12,17)).line((10,17),(14,17))
+        elif name in ("PlaceBlock", "BreakBlock", "ReplaceBlock"):
+            i.line((3,7),(9,3),(15,7),(15,16),(9,20),(3,16),closed=True).line((3,7),(9,11),(15,7)).line((9,11),(9,20))
+            if name == "PlaceBlock": i.line((16,18),(22,18)).line((19,15),(19,21))
+            elif name == "BreakBlock": i.line((16,18),(22,18))
+            else: i.line((17,4),(22,8),(17,12)).line((22,8),(17,8))
+        elif name == "Select": i.line((5,3),(5,19),(10,15),(14,22),(18,20),(14,13),(21,12),closed=True,fill=True)
+        elif name in ("Raise", "Dig"):
+            i.line((3,20),(7,17),(12,19),(17,17),(21,20))
+            if name == "Raise": i.line((12,14),(12,3)).line((7,8),(12,3),(17,8))
+            else: i.line((12,3),(12,14)).line((7,9),(12,14),(17,9))
+        elif name == "Smooth": i.line((2,9),(6,6),(10,10),(14,5),(18,9),(22,7)).arc(12,22,8,210,330)
+        elif name == "Flatten": i.line((3,18),(21,18)).line((12,3),(12,13)).line((8,9),(12,13),(16,9))
+        elif name == "Paint": i.line((10,13),(18,3),(22,7),(13,16),closed=True).line((10,13),(6,14),(5,19),(2,21),(9,21),(13,16),closed=True)
+        elif name == "Copy": page(i).line((2,7),(2,22),(16,22))
+        elif name == "Cut": i.circle(5,17,3).circle(19,17,3).line((7,15),(19,3)).line((17,15),(5,3))
+        elif name == "Paste": i.rect(4,5,16,17).rect(8,2,8,5,1).line((8,12),(16,12)).line((8,17),(14,17))
         elif name == "Add": i.line((12,4),(12,20)).line((4,12),(20,12))
         elif name == "Close": i.line((6,6),(18,18)).line((18,6),(6,18))
         elif name == "Play": i.line((8,4),(20,12),(8,20),closed=True,fill=True)
@@ -178,7 +200,35 @@ def draw_icon(group, name):
         elif name == "Scene": i.line((3,9),(21,9),(21,21),(3,21),closed=True).line((3,9),(2,4),(20,2),(21,6),(3,9)).line((8,3),(11,7)).line((15,2),(18,6)).line((10,13),(15,16),(10,19),closed=True,fill=True)
         else: raise ValueError(name)
         return i
-    if name == "Part": cube(i)
+    if name == "Part2D": i.rect(6,3,15,15,1).line((2,7),(2,22),(17,22)).circle(13.5,10.5,2)
+    elif name == "Tilemap2D":
+        for x,y in ((3,3),(10,3),(3,10),(10,10),(17,10),(10,17),(17,17)): i.rect(x,y,5,5,0.5)
+    elif name == "Terrain": i.line((2,20),(7,8),(11,13),(16,3),(22,20),closed=True).line((13,9),(16,11),(18,9))
+    elif name == "VoxelService":
+        for x,y in ((3,3),(13,8),(3,13)): i.rect(x,y,8,8,1)
+    elif name == "NavigationService":
+        i.line((5,19),(5,10),(18,10),(18,3)).circle(5,19,3).circle(5,10,2,True).circle(18,10,2,True).line((14,6),(18,2),(22,6))
+    elif name == "NetworkService":
+        i.circle(12,12,3)
+        for x,y in ((4,4),(20,4),(4,20),(20,20)): i.line((12,12),(x,y)).circle(x,y,2,True)
+    elif name == "ParticleEmitter":
+        i.line((4,22),(9,15),(13,19),closed=True)
+        for x,y,r in ((6,9,1.4),(13,8,2),(20,4,2),(20,13,1.3),(12,2,1)): i.circle(x,y,r,True)
+    elif name == "Player": i.circle(12,7,4).arc(12,21,8,180,360).line((4,21),(20,21))
+    elif name in ("RemoteEvent", "RemoteFunction"):
+        i.rect(2,6,6,12,1).rect(16,6,6,12,1).line((8,10),(16,10)).line((12,7),(16,10),(12,13))
+        if name == "RemoteFunction": i.line((16,16),(8,16)).line((11,13),(8,16),(11,19))
+    elif name in ("ReplicatedStorage", "ServerStorage"):
+        i.rect(3,4,18,7,1).rect(3,14,18,7,1).circle(6,7.5,1,True).circle(6,17.5,1,True)
+        if name == "ReplicatedStorage": i.line((11,7),(18,7)).line((15,5),(18,7),(15,9)).line((18,18),(11,18)).line((14,16),(11,18),(14,20))
+        else: i.line((11,7),(17,7)).line((11,18),(17,18))
+    elif name == "Decal": i.line((3,3),(21,3),(21,14),(14,21),(3,21),closed=True).line((14,21),(14,14),(21,14)).circle(8,8,2)
+    elif name == "BillboardGui": i.rect(2,3,20,13).line((12,16),(12,22)).line((8,22),(16,22)).line((7,8),(17,8)).line((7,12),(13,12))
+    elif name == "SurfaceGui": i.line((3,7),(18,2),(21,18),(6,22),closed=True).line((7,9),(15,6),(17,15),(9,18),closed=True)
+    elif name == "HingeConstraint": i.rect(3,3,7,18,1).rect(14,3,7,18,1).line((12,4),(12,20),width=2.6)
+    elif name == "BallSocketConstraint": i.line((2,20),(8,14)).circle(12,10,4).arc(12,10,8,0,180).line((18,16),(22,20))
+    elif name == "FixedConstraint": i.rect(2,6,7,12,1).rect(15,6,7,12,1).line((9,9),(15,9)).line((9,15),(15,15))
+    elif name == "Part": cube(i)
     elif name == "MeshPart": cube(i).line((3,17),(12,13),(21,17)).line((12,3),(12,13))
     elif name == "Instance": i.line((12,3),(21,12),(12,21),(3,12),closed=True).circle(12,12,2,True)
     elif name == "Folder": i.line((3,6),(9,6),(12,9),(21,9),(21,20),(3,20),closed=True)

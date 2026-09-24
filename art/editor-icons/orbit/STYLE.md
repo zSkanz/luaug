@@ -1,7 +1,7 @@
 # Orbit — LuauG editor icon system
 
 Created 2026-09-23. This is the active style for the default editor theme:
-82 unique drawings serving 87 logical IDs. The application logo and branding
+118 unique drawings serving 129 logical IDs. The application logo and branding
 are a separate identity. Earlier PNG masters and briefs in the parent directory
 are retained as historical sources; this specification supersedes their style.
 
@@ -66,3 +66,51 @@ verify every manifest path and intentional alias, and confirm the overlay has
 the same outer silhouette as its base. The gallery is monochrome; the PNG sheets
 apply the actual role colors from the theme. The engine must be rebuilt/copied
 and restarted to refresh an already loaded icon atlas.
+
+## Coverage extension
+
+Added the built-in network, player, particle, terrain, voxel, 3D GUI and
+constraint classes. Abstract/base classes reuse the corresponding family
+silhouette. Dedicated selection, terrain operation and clipboard symbols
+replace unrelated action icons in the editor.
+
+Subject prompt extension: use connected nodes for networking, a particle plume
+for emitters, mountain contours for terrain and stepped cells for voxels. Use
+a cursor for selection, arrows over a ground line for raise/dig, an even line
+for flatten, a brush for paint, and conventional clipboard/scissors/document
+symbols. Preserve Orbit's 24-unit grid, rounded strokes and white alpha masks.
+
+Validation: all 71 classes in the generated engine reflection descriptors
+resolve to a declared icon. All 129 IDs resolve to existing 256 x 256 RGBA
+white masks with nonempty alpha. Dark/light sheets cover 32/24/16/13 px.
+
+Further action subjects: Import uses an arrow entering a tray; NewFolder adds
+a plus to the folder; Tools uses a wrench/tool silhouette; Information uses
+a circled i. PlaceBlock, BreakBlock and ReplaceBlock share a cube silhouette
+with plus, minus and replacement-arrow marks. These are wired to Content,
+Tools, About and the Blocks panel, retaining text labels and tooltips.
+
+Latest action-extension validation: PNG mask checks and Windows app/platform/
+editor-shell suites passed. The Linux host build was blocked by unrelated
+`-Wdouble-promotion` errors in scene_file.cpp (terrain cell settings); no full
+Linux test pass is claimed for this extension.
+
+2D layer extension: Part2D is a flat outlined shape with an origin marker and
+an offset plane corner; Tilemap2D is a stepped arrangement of square tiles.
+Use the spatial role, shared rounded strokes and existing alpha-mask format.
+Both resolve directly from reflected class names in the Explorer and pickers.
+
+2026-09-24: Tiles-panel extension. Erase uses a diagonal eraser silhouette;
+View2D uses a flat frame with perpendicular axes. Keep Orbit geometry and masks.
+Tiles tabs/menus use Tilemap2D; Paint reuses the brush.
+
+Tiles-extension validation: all 128 manifest IDs have valid 256px RGBA masks;
+preview inspected at 32/24/16/13 px. The Windows interface object compiled.
+The complete build was blocked by undefined asI32 calls in replication's
+extract.cpp, outside this icon change. The subsequent Linux host build and targeted
+app/platform/editor-shell tests passed.
+
+NavigationService extension (2026-09-24): draw a route from an outlined start
+point through two waypoints to an arrow indicating the destination. Use the
+motion role and preserve Orbit's 24-unit grid, stroke and alpha-mask rules.
+The Explorer resolves it directly by the reflected class name.
