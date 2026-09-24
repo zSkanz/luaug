@@ -32,8 +32,10 @@ class World;
 namespace luaug::app {
 
 // Appends the terrain around the ground the camera at `eye` looks at along
-// `forward` -- a cube 32 voxels on a side -- in WORLD space, or around the eye
-// itself when the look meets no ground. Nothing when neither is asked for or
+// `forward`, in WORLD space -- or around the eye itself when the look meets no
+// ground. Meshed at the level of detail its distance calls for, over a square
+// that widens with it, so what is drawn is the ground in view at a density that
+// can be read. Nothing when neither is asked for or
 // the world has no terrain.
 void drawTerrainDebug(const scene::World& world, core::DVec3 eye, core::Vec3 forward, bool wireframe, bool normals,
                       render::DebugDraw& draw);

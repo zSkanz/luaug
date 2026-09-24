@@ -12,6 +12,7 @@
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <doctest/doctest.h>
 
 #include "class_descriptors.gen.h"
@@ -47,6 +48,22 @@ struct Ground
         app::drawTerrainDebug(world, eye, forward, true, false, draw);
         return draw.lineCount();
     }
+
+    // How wide, on x, the drawn wireframe is.
+    [[nodiscard]] double span(core::DVec3 eye, core::Vec3 forward)
+    {
+        render::DebugDraw draw;
+        app::drawTerrainDebug(world, eye, forward, true, false, draw);
+        if (draw.empty())
+            return 0.0;
+        float low = draw.vertices()[0].position.x;
+        float high = low;
+        for (const render::DebugVertex& vertex : draw.vertices()) {
+            low = std::min(low, vertex.position.x);
+            high = std::max(high, vertex.position.x);
+        }
+        return static_cast<double>(high - low);
+    }
 };
 
 } // namespace
@@ -60,9 +77,24 @@ TEST_CASE("the wireframe shows the ground an editor's camera looks down at from 
     CHECK(ground.lines(core::DVec3{-60.0, 50.0, 0.0}, core::normalize(core::Vec3{1.0f, -0.8f, 0.0f})) > 0);
 }
 
+TEST_CASE("from far away the wireframe covers the ground in view, not a patch of it")
+{
+    // The owner's second report: sixty metres off, the first fix drew a
+    // thirty-two metre square so dense it read as a solid block.
+    Ground ground;
+    const core::Vec3 down = core::normalize(core::Vec3{1.0f, -1.0f, 0.0f});
+    CHECK(ground.span(core::DVec3{-45.0, 45.0, 0.0}, down) > 60.0);
+    // Far off it is a coarser level -- fewer, longer triangles over the same
+    // ground -- and up close the voxels' own.
+    const core::usize near = ground.lines(core::DVec3{0.0, 3.0, 0.0}, core::Vec3{0.0f, -1.0f, 0.0f});
+    const core::usize far = ground.lines(core::DVec3{-200.0, 200.0, 0.0}, down);
+    CHECK(far > 0);
+    CHECK(far < near);
+}
+
 TEST_CASE("looking at the sky, the wireframe is what is round the camera, as before")
 {
     Ground ground;
-    CHECK(ground.lines(core::DVec3{0.0, 40.0, 0.0}, core::Vec3{0.0f, 1.0f, 0.0f}) == 0);
+    CHECK(ground.lines(core::DVec3{0.0, 80.0, 0.0}, core::Vec3{0.0f, 1.0f, 0.0f}) == 0);
     CHECK(ground.lines(core::DVec3{0.0, 2.0, 0.0}, core::Vec3{0.0f, 1.0f, 0.0f}) > 0);
 }

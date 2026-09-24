@@ -4,6 +4,7 @@
 #include "luaug/render/debug_draw.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <vector>
@@ -12,8 +13,21 @@ namespace luaug::app {
 
 namespace {
 
-// How far out from the looked-at voxel the cube reaches on each axis.
-constexpr core::i32 HalfExtent = 16;
+// How far out from the looked-at cell the region reaches, in cells of the
+// level it is meshed at: across, and up and down.
+constexpr core::i32 HalfExtent = 64;
+constexpr core::i32 HalfHeight = 32;
+// **A cell about this fraction of the distance to the ground looked at**: fine
+// enough that the lines read as the triangles the ground is made of, coarse
+// enough that the region -- 128 cells across -- covers what is in view. The
+// renderer makes the same trade by distance; a level chosen only to cover a
+// width went so coarse that a four-metre slab averaged away to nothing.
+constexpr double CellsPerDistance = 32.0;
+// The region moves in steps of this many cells, so a camera gliding across the
+// ground re-meshes it now and then rather than every frame.
+constexpr core::i32 Snap = 16;
+// The coarsest level a chunk keeps (32 voxels down to one).
+constexpr core::u32 CoarsestLevel = 5;
 // How far along the look the ground is searched for, in metres.
 constexpr double LookReach = 1000.0;
 
@@ -33,6 +47,7 @@ struct Cached
     core::i32 x = 0;
     core::i32 y = 0;
     core::i32 z = 0;
+    core::u32 level = 0;
     asset::TerrainMesh mesh;
 };
 
@@ -66,12 +81,25 @@ void drawTerrainDebug(const scene::World& world, core::DVec3 eye, core::Vec3 for
             focus = core::DVec3{terrain.origin.x + hit->position.x, terrain.origin.y + hit->position.y,
                                 terrain.origin.z + hit->position.z};
         }
-        const auto cell = [&](double world, double origin) {
-            return static_cast<core::i32>(std::floor((world - origin) / voxel)) - HalfExtent;
+        // **The level of detail the renderer would use at that distance**, so
+        // the square widens as the camera backs off and its lines stay as far
+        // apart on screen as they are up close -- rather than a fixed patch
+        // that shrinks to a solid-looking block (the owner's second report).
+        const double distance =
+            std::sqrt((focus.x - eye.x) * (focus.x - eye.x) + (focus.y - eye.y) * (focus.y - eye.y) +
+                      (focus.z - eye.z) * (focus.z - eye.z));
+        const double wantedCell = std::max(distance / CellsPerDistance, voxel);
+        const double levels = std::floor(std::log2(wantedCell / voxel));
+        const auto level = static_cast<core::u32>(std::clamp(levels, 0.0, static_cast<double>(CoarsestLevel)));
+        const double cellMetres = voxel * static_cast<double>(1u << level);
+        const auto cell = [&](double world, double origin, core::i32 half) {
+            const auto at = static_cast<core::i32>(std::floor((world - origin) / cellMetres));
+            const core::i32 snapped = static_cast<core::i32>(std::floor(static_cast<double>(at) / Snap)) * Snap;
+            return snapped - half;
         };
-        const core::i32 x = cell(focus.x, terrain.origin.x);
-        const core::i32 y = cell(focus.y, terrain.origin.y);
-        const core::i32 z = cell(focus.z, terrain.origin.z);
+        const core::i32 x = cell(focus.x, terrain.origin.x, HalfExtent);
+        const core::i32 y = cell(focus.y, terrain.origin.y, HalfHeight);
+        const core::i32 z = cell(focus.z, terrain.origin.z, HalfExtent);
 
         Cached* entry = nullptr;
         for (Cached& candidate : cache) {
@@ -84,16 +112,19 @@ void drawTerrainDebug(const scene::World& world, core::DVec3 eye, core::Vec3 for
             entry->world = &world;
             entry->terrain = id;
         }
-        if (entry->revision != terrain.fieldRevision || entry->x != x || entry->y != y || entry->z != z) {
+        if (entry->revision != terrain.fieldRevision || entry->x != x || entry->y != y || entry->z != z ||
+            entry->level != level) {
             constexpr auto Cells = static_cast<core::u32>(2 * HalfExtent);
+            constexpr auto Rows = static_cast<core::u32>(2 * HalfHeight);
             entry->mesh = asset::meshField(
                 terrain.field,
                 asset::MeshRegion{
-                    .minX = x, .minY = y, .minZ = z, .cellsX = Cells, .cellsY = Cells, .cellsZ = Cells, .level = 0});
+                    .minX = x, .minY = y, .minZ = z, .cellsX = Cells, .cellsY = Rows, .cellsZ = Cells, .level = level});
             entry->revision = terrain.fieldRevision;
             entry->x = x;
             entry->y = y;
             entry->z = z;
+            entry->level = level;
         }
 
         // The field's metres, placed where the terrain stands.
@@ -121,7 +152,7 @@ void drawTerrainDebug(const scene::World& world, core::DVec3 eye, core::Vec3 for
             }
         }
         if (normals) {
-            const float length = NormalLength * static_cast<float>(voxel);
+            const float length = NormalLength * static_cast<float>(cellMetres);
             for (const asset::Vertex& vertex : vertices) {
                 const core::Vec3 from = place(vertex.position);
                 draw.line(from, from + vertex.normal * length, normalColour);
