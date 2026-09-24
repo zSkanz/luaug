@@ -74,12 +74,11 @@ local endings = 0
 for _, sound in { short, medium, long } do
     sound.Ended:Connect(function()
         endings += 1
-        -- Straight back on, and REWOUND first. `Play` resumes from wherever
-        -- `TimePosition` is -- that is what makes it the counterpart of `Pause`
-        -- -- so a sound replayed from its own `Ended` handler without a rewind
-        -- resumes at the end and ends again on the very next tick, forever. A
-        -- voice retired and immediately re-allocated is the pattern that finds a
-        -- pool which does not release, and this is how a real game writes it.
+        -- Straight back on. `Ended` has already rewound it, and the explicit
+        -- seek is kept because it is what a script that wants the start writes:
+        -- `Play` starts from a `TimePosition` set since the sound last started.
+        -- A voice retired and immediately re-allocated is the pattern that finds
+        -- a pool which does not release, and this is how a real game writes it.
         sound.TimePosition = 0
         sound:Play()
     end)

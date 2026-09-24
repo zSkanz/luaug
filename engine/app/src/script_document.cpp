@@ -262,6 +262,8 @@ std::optional<ColorLiteral> findColorLiteral(std::string_view line, u32 lineInde
         ColorLiteral literal;
         literal.kind = found->kind;
         literal.args = Range{Position{lineIndex, static_cast<u32>(open)}, Position{lineIndex, static_cast<u32>(close)}};
+        literal.call =
+            Range{Position{lineIndex, static_cast<u32>(best)}, Position{lineIndex, static_cast<u32>(close + 1)}};
         if (found->kind == ColorLiteralKind::FromHex) {
             std::string_view text = trimmed(inside);
             if (text.size() < 2 || (text.front() != '"' && text.front() != '\'') || text.back() != text.front())

@@ -1,8 +1,9 @@
 // The hand-written half of `audio`'s reflection (architecture.md §4).
 //
-// Eleven properties, and three of them are worth reading. `Playing` is a
+// Twelve properties, and four of them are worth reading. `Playing` is a
 // property AND a pair of methods, so the write path is the same code the methods
-// call. `TimePosition` is writable, which is how a script seeks. `Group` is an
+// call. `TimePosition` is writable, which is how a script seeks, and kept
+// inside `TimeLength`, which only `audio` writes. `Group` is an
 // Instance reference and therefore the one property here that can be nil.
 #include "luaug/audio/scene_types.h"
 #include "luaug/scene/world.h"
@@ -89,6 +90,8 @@ bool setSoundContent(scene::World& world, core::InstanceId id, const Value& valu
     // nothing today -- there is no file -- and it is the behaviour a caller will
     // expect the moment there is one.
     self->loadedFired = false;
+    // And a new length, which the next tick reads from the new file.
+    self->timeLength = 0.0;
     return true;
 }
 
@@ -104,10 +107,9 @@ bool setSoundPlaying(scene::World& world, core::InstanceId id, const Value& valu
     scene::SoundComponent* self = sound(world, id);
     if (flag == nullptr || self == nullptr)
         return false;
-    // Deliberately NOT a rewind. `Playing = false` is `Pause`, not `Stop`: the
-    // property says whether the timeline is advancing, and rewinding on a write
-    // would make `Playing = false; Playing = true` mean something different from
-    // `Pause(); Play()`.
+    // Deliberately NOT a rewind. `Playing = false` is `Pause` and `Playing =
+    // true` is `Resume`: the property says whether the timeline is advancing,
+    // and a sound that reached its end has already rewound (see `Ended`).
     self->playing = *flag;
     return true;
 }
@@ -171,8 +173,21 @@ bool setSoundTimePosition(scene::World& world, core::InstanceId id, const Value&
     scene::SoundComponent* self = sound(world, id);
     if (number == nullptr || self == nullptr || !isFinite(*number) || *number < 0.0)
         return false;
-    self->timePosition = *number;
+    // **Kept inside the clip** once its length is known: past the end is where
+    // the tick would have stopped it, or wrapped it for a loop.
+    f64 position = *number;
+    if (self->timeLength > 0.0 && position > self->timeLength)
+        position = self->looped ? std::fmod(position, self->timeLength) : self->timeLength;
+    self->timePosition = position;
+    // Where the next `Play` starts, rather than at 0.
+    self->seeked = true;
     return true;
+}
+
+Value getSoundTimeLength(const scene::World& world, core::InstanceId id)
+{
+    const scene::SoundComponent* self = sound(world, id);
+    return self == nullptr ? Value{} : Value{self->timeLength};
 }
 
 Value getSoundRollOffMinDistance(const scene::World& world, core::InstanceId id)

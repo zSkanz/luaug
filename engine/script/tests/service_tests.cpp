@@ -779,3 +779,35 @@ TEST_CASE("RemoteFunction on a dedicated server: nobody to ask as")
                          "net.err.remote_no_player"));
     CHECK(fixture.world->engineState().remoteOutbox.empty());
 }
+
+TEST_CASE("Sound:Play starts from the start, Resume carries on, and a seek is where Play starts")
+{
+    // **The owner: "I play a sound, then play again, and nothing plays".** A
+    // `Play` that resumed was a `Play` that did nothing to a sound paused at its
+    // end. `Play` starts again; `Resume` is what carries on.
+    Fixture fixture;
+
+    CHECK(fixture.failure(R"(
+        local sound = Instance.new("Sound")
+        sound.Parent = workspace
+
+        sound.TimePosition = 0.5
+        sound:Play()
+        assert(sound.Playing)
+        assert(sound.TimePosition == 0.5, "a seek is where Play starts")
+
+        sound:Pause()
+        assert(not sound.Playing)
+        assert(sound.TimePosition == 0.5)
+        sound:Resume()
+        assert(sound.Playing)
+        assert(sound.TimePosition == 0.5, "Resume carries on")
+
+        sound:Play()
+        assert(sound.TimePosition == 0, "Play starts from the start")
+
+        sound:Stop()
+        assert(not sound.Playing)
+        assert(sound.TimePosition == 0)
+    )") == "");
+}

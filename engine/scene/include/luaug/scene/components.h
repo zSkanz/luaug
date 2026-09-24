@@ -1067,12 +1067,19 @@ struct SoundComponent
     // Seconds. f64 because it is compared against `simTime`-shaped quantities
     // and a 32-bit second drifts visibly over a long track.
     f64 timePosition = 0.0;
+    // `Content`'s length in seconds, which `audio` writes (`AudioSystem::
+    // clipDuration`) and nothing else can: 0 until it has been asked for. It
+    // is a pure function of the file's bytes, so a replay agrees on it (R10).
+    f64 timeLength = 0.0;
     f32 volume = 0.5f;
     f32 playbackSpeed = 1.0f;
     f32 rollOffMinDistance = 8.0f;
     f32 rollOffMaxDistance = 80.0f;
     bool playing = false;
     bool looped = false;
+    // `TimePosition` was written since the sound last started, so the next
+    // `Play` starts there instead of at 0.
+    bool seeked = false;
     // Whether `Loaded` has been raised. One shot: the event is a past-tense fact
     // and a sound is loaded once.
     bool loadedFired = false;

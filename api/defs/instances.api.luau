@@ -2737,9 +2737,19 @@ local Classes: { Schema.Class } = {
                 Default = "0",
                 ErrorKey = "scene.err.number_at_least_zero",
                 Transient = true,
-                Doc = "Where the timeline is, in seconds. Writable, which is how a script seeks; the write "
-                    .. "lands on the next tick like every other, and past the end it stops or wraps exactly as "
-                    .. "arriving there would.",
+                Doc = "Where the timeline is, in seconds, from 0 to `TimeLength`. Writable, which is how a "
+                    .. "script seeks: a write below zero is refused, and one past the end is clamped to it -- "
+                    .. "or wrapped, for a `Looped` sound -- exactly as arriving there would.",
+            },
+            {
+                Name = "TimeLength",
+                Type = "number",
+                ReadOnly = true,
+                Transient = true,
+                Doc = "How long `Content` is, in seconds: the file's own length, read from its header, or the "
+                    .. "placeholder tone's one second when it names nothing. 0 until the length has been read: "
+                    .. "the world's first tick after `Content` is set reads it, and the editor reads it for the "
+                    .. "sound it shows.",
             },
             {
                 Name = "RollOffMinDistance",
@@ -2772,16 +2782,25 @@ local Classes: { Schema.Class } = {
                 Parameters = {},
                 Returns = {},
                 ThreadSafety = "Unsafe",
-                Doc = "Starts it from `TimePosition`, which is 0 for a sound that has never played and "
-                    .. "wherever `Stop` left it otherwise. Playing one that is already playing is a no-op "
-                    .. "rather than a restart -- restarting is `TimePosition = 0` and then this.",
+                Doc = "Plays it from the start -- or from `TimePosition`, when a script set it since the "
+                    .. "sound last started. Playing one that is already playing starts it again. `Resume` "
+                    .. "is what carries on from where `Pause` left it.",
+            },
+            {
+                Name = "Resume",
+                Parameters = {},
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Carries on from `TimePosition`, which is where `Pause` left it. The same as "
+                    .. "`Playing = true`.",
             },
             {
                 Name = "Pause",
                 Parameters = {},
                 Returns = {},
                 ThreadSafety = "Unsafe",
-                Doc = "Stops the timeline where it is. `Play` resumes from there.",
+                Doc = "Stops the timeline where it is. `Resume` carries on from there; `Play` starts "
+                    .. "again from the start. The same as `Playing = false`.",
             },
             {
                 Name = "Stop",
@@ -2797,7 +2816,8 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Ended",
                 Parameters = {},
-                Doc = "Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From "
+                Doc = "Fired on the tick the timeline reaches the end of a sound that is not `Looped`, which "
+                    .. "stops it and rewinds `TimePosition` to 0 -- so playing it again plays it again. From "
                     .. "the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, "
                     .. "in a headless run, and on a machine whose audio buffer is four times the size.",
             },

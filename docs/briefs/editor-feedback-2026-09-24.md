@@ -101,16 +101,40 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **Type annotations are coloured** as the Luau grammar reads them: the
       names after `:`, `->` and `type X =`, generics, and `typeof`.
 - [x] **Renaming a script renames its tab**, in the Explorer or anywhere else.
+- [x] **A colour's swatch appears beside the colour under the pointer**, after
+      its closing parenthesis, and a click on it opens the picker.
+- [x] **`continue` is coloured as a keyword**, as `if` and `return` are.
+- [ ] **Signature help**: the parameters of the function being called, with the
+      one being typed highlighted, and its doc.
+- [ ] **Types across `require`**: a `ModuleScript` that defines `Snake` gives
+      its type to the script that requires it.
+- [ ] **`Signal` is typed** in completion and hover.
 
 ## Console
 
 - [x] **The console's layout stays inside its window.**
+- [x] **Its text can be selected and copied**: drag, Shift+click, double-click
+      for a line, Ctrl+A, Ctrl+C and a right-click menu.
+- [x] **Up and down walk the commands already typed**, as a shell does.
+- [x] **Copy all**, for pasting the console into a report.
 
 ## Explorer, second report
 
 - [x] **Any instance takes a child from the plus**, and the scene keeps what is
       put inside any service (the owner: "whether it does anything is another
-      story"). `ScriptService` makes the Script a file.
+      story").
+- [x] **A script lives in the instance it is put in** (ADR 0092): made or
+      dropped anywhere, `ScriptService` included, it is saved with the scene,
+      and a script -- one read from a file included -- holds children, so a
+      `Loader` keeps its modules.
+- [x] **An interface element starts 50 by 50 pixels.**
+- [ ] **A selected interface element has handles** to move and resize it.
+
+## Sound
+
+- [x] **`TimeLength` is in Properties**, and `TimePosition` stays inside it.
+- [x] **A sound plays again.** `Play` starts from the start, `Resume` carries on
+      and a sound that ends rewinds.
 
 ## Findings
 
@@ -212,3 +236,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
     drawn where it landed; a glide is interpolated as before. `streaming_soak`
     was also run five times on Windows and passed every time: its
     intermittence is on the Linux tier only.
+20. **The scene knew the mount by where it was.** Every `Script` under
+    `ScriptService` was taken for a file's, so one somebody made there was not
+    saved, and nothing inside a file's script could be. The mount now marks
+    what it made (`World::mounted`), and the scene writes a mark for a marked
+    node that holds something authored (ADR 0092).
+21. **A sound played once.** Its timeline stopped AT its length and `Play`
+    carried on from `TimePosition`, so the next `Play` began at the end and
+    ended on its first tick. The audio soak's own comment described the
+    workaround -- rewind first -- as how a game has to write it. `Play` now
+    starts from the start and a sound that ends rewinds.

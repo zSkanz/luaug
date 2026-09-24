@@ -406,6 +406,9 @@ for _, datatype in Datatypes do
     -- `Instance.new`'s string singletons use below.
     local order: { string } = {}
     local byName: { [string]: { string } } = {}
+    -- The first overload's prose, written above the field as the methods' is
+    -- above theirs: the script editor's signature help reads it from here.
+    local docs: { [string]: string } = {}
     for _, constructor in orEmpty(datatype.Constructors) do
         local overloads = byName[constructor.Name]
         if overloads == nil then
@@ -414,10 +417,14 @@ for _, datatype in Datatypes do
             table.insert(order, constructor.Name)
         end
         table.insert(overloads, `({functionType(constructor)})`)
+        if docs[constructor.Name] == nil and constructor.Doc ~= nil and constructor.Doc ~= "" then
+            docs[constructor.Name] = constructor.Doc
+        end
     end
     for _, name in order do
         local overloads = byName[name]
         local rendered = if #overloads == 1 then overloads[1] else table.concat(overloads, " & ")
+        emitDoc(entries, "    ", docs[name])
         table.insert(entries, `    {name}: {rendered},`)
     end
     for _, constant in orEmpty(datatype.Constants) do
@@ -439,6 +446,7 @@ end
 for _, library in Libraries do
     table.insert(Lines, `declare {library.Name}: \{`)
     for _, fn in library.Functions do
+        emitDoc(Lines, "    ", fn.Doc)
         table.insert(Lines, `    {fn.Name}: ({functionType(fn)}),`)
     end
     table.insert(Lines, "}")

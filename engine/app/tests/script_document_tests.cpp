@@ -693,3 +693,23 @@ TEST_CASE("a colour written in code is found, and written back in its own form")
     CHECK(app::formatColorLiteral(ColorLiteralKind::FromRgb, core::Color3{1.0f, 0.5f, 0.0f}) == "255, 128, 0");
     CHECK(app::formatColorLiteral(ColorLiteralKind::FromHex, core::Color3{1.0f, 0.5f, 0.0f}) == "\"#FF8000\"");
 }
+
+TEST_CASE("return and continue colour as keywords wherever a statement can be")
+{
+    // **The owner's report**: `continue` did not colour like `if` and `end`.
+    // It is a contextual keyword the lexer reads as a name, so the highlighter
+    // decides; `return` is reserved and the lexer already knows.
+    //           0         1         2         3
+    //           0123456789012345678901234567890123
+    ScriptDocument loop("for i = 1, 3 do if i then continue end end");
+    CHECK(kindAt(loop, 0, 26) == TokenKind::Keyword); // continue
+    ScriptDocument alone("    continue");
+    CHECK(kindAt(alone, 0, 4) == TokenKind::Keyword);
+    ScriptDocument returned("if dead then return end");
+    CHECK(kindAt(returned, 0, 13) == TokenKind::Keyword); // return
+    ScriptDocument typed("function f(): Snake return snake end");
+    CHECK(kindAt(typed, 0, 20) == TokenKind::Keyword); // return, after a return type
+    // A variable called `continue` is a name.
+    ScriptDocument variable("local continue = 1");
+    CHECK(kindAt(variable, 0, 6) == TokenKind::Identifier);
+}

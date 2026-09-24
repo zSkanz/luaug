@@ -103,6 +103,7 @@ scene::Value getSoundPlaybackSpeed(const scene::World& world, core::InstanceId i
 bool setSoundPlaybackSpeed(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getSoundTimePosition(const scene::World& world, core::InstanceId id);
 bool setSoundTimePosition(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSoundTimeLength(const scene::World& world, core::InstanceId id);
 scene::Value getSoundRollOffMinDistance(const scene::World& world, core::InstanceId id);
 bool setSoundRollOffMinDistance(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getSoundRollOffMaxDistance(const scene::World& world, core::InstanceId id);

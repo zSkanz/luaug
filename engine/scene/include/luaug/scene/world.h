@@ -93,6 +93,15 @@ struct InstanceRecord
     // instance of one stamp: forty lamp posts intern one name.
     core::NameAtom stamp;
 
+    // **Made from a file under `src/scripts`** (ADR 0092): a `Script` the mount
+    // read, or a `Folder` it made to hold one. The FILE is its source, so a
+    // scene does not write it -- but what somebody put inside it is theirs and
+    // is written, hung on a mark that finds it again at the next open. The
+    // same kind of fact as `generated`: what a person wrote down, carried by a
+    // snapshot, and not in the world hash. A clone does not inherit it -- a copy
+    // of a file's script is a script of its own.
+    bool mounted = false;
+
     // Which of the class's first 64 properties have a listener. A write to an
     // unsubscribed property enqueues nothing, which is what lets 10k parts move
     // every tick for free while nobody is watching (architecture.md §4). Past
@@ -419,6 +428,12 @@ public:
     // same statement a thousand times.
     void setGenerated(core::InstanceId id, bool generated) noexcept;
     [[nodiscard]] bool generated(core::InstanceId id) const noexcept;
+
+    // Marks an instance as made from a file under `src/scripts` (ADR 0092).
+    // Unlike `generated` it is NOT inherited by a subtree: a file's script may
+    // hold instances somebody authored, and those are saved.
+    void setMounted(core::InstanceId id, bool mounted) noexcept;
+    [[nodiscard]] bool mounted(core::InstanceId id) const noexcept;
 
     // The stamp this instance was made from, or an empty atom (ADR 0049).
     //

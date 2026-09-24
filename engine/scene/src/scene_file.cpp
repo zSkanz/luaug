@@ -92,9 +92,9 @@ private:
 // instance inside any other (the owner: "whether it does anything is another
 // story"), and a service the scene did not carry was one where what they put
 // was there until the next save and then gone -- a `ScreenGui` in `UIService`
-// was the one reported. Two are not carried: the world, which is the file's
-// root, and `ScriptService`, which is the mount of `src/scripts` and is saved
-// as files.
+// was the one reported. The world is not carried here, because it is the
+// file's root; `ScriptService` is, minus the scripts its mount made from
+// `src/scripts`, which are saved as files (`mountedScriptTree`).
 //
 // These three come first, in this order, because files already name them in
 // it; any other follows in the data model's own order. Written only when
@@ -116,15 +116,40 @@ constexpr std::array<std::string_view, 3> FirstServices{"ReplicatedStorage", "Se
     return {};
 }
 
+[[nodiscard]] std::string_view classNameOf(const World& world, core::InstanceId id) noexcept
+{
+    const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
+    return descriptor != nullptr ? world.atoms().text(descriptor->name) : std::string_view{};
+}
+
+// **Nothing but what the mount of `src/scripts` made** (ADR 0092): a script
+// read from a file, or a folder the mount made for one, with nothing authored
+// anywhere inside. The files are its source, so the scene does not write it --
+// writing it would put a second copy beside the one the mount makes at the
+// next open. A mounted node that DOES hold something authored is written as a
+// mark instead (see `writeInstance`).
+[[nodiscard]] bool mountedScriptTree(const World& world, core::InstanceId id) noexcept
+{
+    if (!world.mounted(id))
+        return false;
+    for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+        if (!mountedScriptTree(world, child))
+            return false;
+    }
+    return true;
+}
+
 // **Made by a system, so nobody wrote it down and a scene does not record
 // it**: a streamed chunk (and the whole subtree with it), or a `Player`, which
-// the engine makes for somebody taking part and nothing can author.
+// the engine makes for somebody taking part and nothing can author, or
+// what the `src/scripts` mount made.
 [[nodiscard]] bool engineMade(const World& world, core::InstanceId id) noexcept
 {
     if (world.generated(id))
         return true;
-    const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
-    return descriptor != nullptr && world.atoms().text(descriptor->name) == "Player";
+    if (classNameOf(world, id) == "Player")
+        return true;
+    return mountedScriptTree(world, id);
 }
 
 // Whether a storage holds anything a scene would write.
@@ -143,8 +168,10 @@ constexpr std::array<std::string_view, 3> FirstServices{"ReplicatedStorage", "Se
     const ClassDescriptor* descriptor = world.classes().find(world.classOf(id));
     if (descriptor == nullptr || !hasFlag(descriptor->flags, ClassFlags::Service))
         return false;
-    const std::string_view name = world.atoms().text(descriptor->name);
-    return name != "Workspace" && name != "ScriptService";
+    // Not the world, which is the file's root. `ScriptService` is carried like
+    // the rest: what the mount made is left out by `engineMade`, and whatever
+    // else somebody put there is theirs (ADR 0092).
+    return world.atoms().text(descriptor->name) != "Workspace";
 }
 
 // The carried services, by class name, in the order a file writes them.
@@ -631,6 +658,24 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
     out.field("class", descriptor != nullptr ? world.atoms().text(descriptor->name) : std::string_view{});
     out.field("name", world.atoms().text(world.name(id)));
     ++report.instances;
+
+    // **A node the mount made, holding something authored, is written as its
+    // MARK** (ADR 0092): its class and name say which one, the file is its
+    // source, and what is written is only what somebody put inside it -- a
+    // `Loader` script's modules, say. `readInstance` finds the mount's node by
+    // the mark and puts them back under it.
+    if (world.mounted(id)) {
+        out.field("mounted", true);
+        out.key("children");
+        out.beginArray();
+        for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+            if (!engineMade(world, child))
+                writeInstance(out, world, child, paths, report, expandStamped, stamps);
+        }
+        out.endArray();
+        out.endObject();
+        return;
+    }
 
     // **A stamped instance is written as its MARK, its name and where it is, and
     // nothing else** (ADR 0049). Its children belong to the stamp file; writing
@@ -1247,6 +1292,36 @@ core::InstanceId readInstance(World& world, core::InstanceId parent, const JsonV
         return placed;
     }
 
+    // **A mark of a node the mount made** (ADR 0092): the node is the one the
+    // file made, found by class and name, and only its children are read. A
+    // mark whose file has gone keeps its children in a `Folder` of that name,
+    // because they are somebody's work and the file was not.
+    if (json["mounted"].asBool()) {
+        const core::NameAtom name = world.atoms().intern(json["name"].asString());
+        const ClassId markedClass = world.classes().findId(world.atoms().intern(json["class"].asString()));
+        core::InstanceId node;
+        for (core::InstanceId child = world.firstChild(parent); child.valid(); child = world.nextSibling(child)) {
+            if (world.mounted(child) && world.name(child) == name && world.classOf(child) == markedClass) {
+                node = child;
+                break;
+            }
+        }
+        if (!node.valid()) {
+            const ClassId folderClass = world.classes().findId(world.atoms().intern("Folder"));
+            if (folderClass == InvalidClass)
+                return {};
+            node = world.create(folderClass);
+            world.setName(node, name);
+            (void)world.setParent(node, parent);
+            ++report.orphanedMounts;
+        }
+        if (const JsonValue children = json["children"]; children.type() == core::JsonType::Array) {
+            for (core::usize index = 0; index < children.size(); ++index)
+                readInstance(world, node, children.at(index), pending, report, stamps, depth);
+        }
+        return node;
+    }
+
     const std::string_view className = json["class"].asString();
     const ClassId classId = world.classes().findId(world.atoms().intern(className));
     if (classId == InvalidClass) {
@@ -1565,16 +1640,23 @@ void clearScene(World& world)
     for (const auto& [name, service] : carriedServices(world))
         containers.push_back(service);
     std::vector<core::InstanceId> authored;
-    for (const core::InstanceId container : containers) {
+    const auto collect = [&](const auto& self, core::InstanceId container) -> void {
         for (core::InstanceId child = world.firstChild(container); child.valid(); child = world.nextSibling(child)) {
             // Not authored, so not a scene's to remove. A new scene is not a
             // reason to evict the ground a streaming system put there, or the
             // player somebody is.
             if (engineMade(world, child))
                 continue;
+            // The mount's node stays with its file; what is inside it goes.
+            if (world.mounted(child)) {
+                self(self, child);
+                continue;
+            }
             authored.push_back(child);
         }
-    }
+    };
+    for (const core::InstanceId container : containers)
+        collect(collect, container);
     for (const core::InstanceId child : authored)
         (void)world.destroy(child);
 }

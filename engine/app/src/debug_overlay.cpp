@@ -184,6 +184,48 @@ void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view 
     return height < minimum ? minimum : height;
 }
 
+// **The REPL's up and down arrows walk what was typed before**, the way every
+// shell does. `at` is -1 on the line being typed, and otherwise an index into
+// `count` entries, oldest first: up goes back to the newest and stops at the
+// oldest, down comes forward and past the newest returns to the line.
+[[nodiscard]] core::i32 consoleHistoryStep(core::usize count, core::i32 at, bool up) noexcept
+{
+    if (count == 0)
+        return -1;
+    if (up)
+        return at < 0 ? static_cast<core::i32>(count) - 1 : (at > 0 ? at - 1 : 0);
+    if (at < 0 || static_cast<core::usize>(at) + 1 >= count)
+        return -1;
+    return at + 1;
+}
+
+// **What a selection across console lines copies**: from one (line, byte)
+// place to another, in either order, whole lines between them joined by
+// newlines. Offsets past a line's end are its end.
+[[nodiscard]] std::string consoleSelectionText(std::span<const std::string_view> lines, core::usize fromLine,
+                                               core::usize fromOffset, core::usize toLine, core::usize toOffset)
+{
+    if (lines.empty())
+        return {};
+    if (toLine < fromLine || (toLine == fromLine && toOffset < fromOffset)) {
+        std::swap(fromLine, toLine);
+        std::swap(fromOffset, toOffset);
+    }
+    fromLine = std::min(fromLine, lines.size() - 1);
+    toLine = std::min(toLine, lines.size() - 1);
+    std::string out;
+    for (core::usize line = fromLine; line <= toLine; ++line) {
+        const std::string_view text = lines[line];
+        const core::usize begin = line == fromLine ? std::min(fromOffset, text.size()) : 0;
+        const core::usize end = line == toLine ? std::min(toOffset, text.size()) : text.size();
+        if (line != fromLine)
+            out.push_back('\n');
+        if (end > begin)
+            out.append(text.substr(begin, end - begin));
+    }
+    return out;
+}
+
 namespace {
 
 // What the log falls back to where there is nothing to fill: the height it was
@@ -1821,9 +1863,9 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             // everything inside the chunk wrong -- `Chunk_-3_0_0/Ground` is not
             // itself generated, so it wore a plus, took the create, and lost it
             // at the next eviction.
-            // And on ScriptService and its folders, where a Script is made as a file.
-            if (commands != nullptr &&
-                (Editor::canParentInto(world, row.id, root) || Editor::scriptFolderOf(world, row.id).has_value())) {
+            // ScriptService and its folders included: a Script made there
+            // becomes a file, and anything else is made like anywhere else.
+            if (commands != nullptr && Editor::canParentInto(world, row.id, root)) {
                 // **Shown on the row under the pointer and on the selected
                 // ones -- and EXISTING on all of them.** The two are different
                 // questions and conflating them is what broke the first click.
@@ -3917,10 +3959,14 @@ struct ConsoleLog
     {
         core::LogLevel level = core::LogLevel::Info;
         std::string text;
+        // Counts up for as long as the process runs, so a selection names the
+        // lines it spans and survives the oldest ones dropping off the front.
+        core::u64 seq = 0;
     };
 
     std::mutex mutex;
     std::deque<Line> lines;
+    core::u64 nextSeq = 1;
     bool installed = false;
     // The sink that was there first. Chained rather than replaced, so the
     // console pane and the log FILE both get every line -- a shell that ate the
@@ -3989,6 +4035,34 @@ void drawMemory(script::ScriptRuntime& runtime)
     return false;
 }
 
+// **Text in the console can be selected and copied** -- the owner: "I should be
+// able to select its text". Across lines, by dragging, shift-clicking or a
+// double click for a whole line, and copied with ctrl+C or the right-click menu.
+// Held by line NUMBER (`ConsoleLog::Line::seq`) rather than by index, because
+// the index of every line changes whenever the oldest one drops off the front.
+struct ConsoleSelection
+{
+    core::u64 anchorSeq = 0;
+    core::usize anchorOffset = 0;
+    core::u64 headSeq = 0;
+    core::usize headOffset = 0;
+    bool dragging = false;
+    // The drag reached another place, so its release is not a click on a link.
+    bool moved = false;
+    // The link a press landed on, followed on a release that did not move.
+    std::optional<SourceLocation> pressedLink;
+};
+
+// What was typed at the REPL, oldest first -- see `consoleHistoryStep`.
+struct ConsoleHistory
+{
+    static constexpr core::usize kMaxEntries = 100;
+    std::vector<std::string> entries;
+    core::i32 at = -1;
+    // The line being typed when the walk started, given back at its end.
+    std::string draft;
+};
+
 void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCommands = nullptr,
                  const IconAtlas* icons = nullptr, bool docked = false)
 {
@@ -3998,9 +4072,15 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
     // person reaches for when the console has become unreadable, which is
     // exactly when hunting for the control must not be part of the work.
     static std::array<char, 128> filter{};
+    static ConsoleSelection selection;
     bool cleared = false;
     if (ImGui::Button("Clear"))
         cleared = true;
+    ImGui::SameLine();
+    // Everything the filter shows, as text, for pasting into a bug report.
+    const bool copyAll = ImGui::Button("Copy all");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("copy every line shown here");
     ImGui::SameLine();
     const float resetWidth = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(resetWidth + ImGui::GetStyle().ItemSpacing.x));
@@ -4034,8 +4114,37 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
         // raced a line from another thread would drop one that arrived after the
         // button and before the erase, which is the one kind of missing message
         // nobody would ever explain.
-        if (cleared)
+        if (cleared) {
             log.lines.clear();
+            selection = ConsoleSelection{};
+        }
+
+        // Where each shown line was drawn, for the pointer to find it.
+        struct Row
+        {
+            core::u64 seq = 0;
+            std::string_view text;
+            ImVec2 at;
+            bool link = false;
+        };
+        std::vector<Row> rows;
+        rows.reserve(log.lines.size());
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const float lineHeight = ImGui::GetTextLineHeight();
+        const float rowStep = ImGui::GetTextLineHeightWithSpacing();
+        const auto widthOf = [](std::string_view text, core::usize bytes) {
+            return ImGui::CalcTextSize(text.data(), text.data() + std::min(bytes, text.size())).x;
+        };
+        // The selection's ends in document order.
+        const bool anchorFirst =
+            selection.anchorSeq < selection.headSeq ||
+            (selection.anchorSeq == selection.headSeq && selection.anchorOffset <= selection.headOffset);
+        const core::u64 firstSeq = anchorFirst ? selection.anchorSeq : selection.headSeq;
+        const core::usize firstOffset = anchorFirst ? selection.anchorOffset : selection.headOffset;
+        const core::u64 lastSeq = anchorFirst ? selection.headSeq : selection.anchorSeq;
+        const core::usize lastOffset = anchorFirst ? selection.headOffset : selection.anchorOffset;
+        const bool selecting = firstSeq != 0 && (firstSeq != lastSeq || firstOffset != lastOffset);
+
         for (const ConsoleLog::Line& line : log.lines) {
             if (!consoleMatches(line.text, needle))
                 continue;
@@ -4045,7 +4154,23 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
                                              : line.level == core::LogLevel::Warn  ? p.warning
                                              : line.level == core::LogLevel::Debug ? p.textMuted
                                                                                    : p.text);
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            rows.push_back(Row{line.seq, line.text, at, false});
+
+            if (selecting && line.seq >= firstSeq && line.seq <= lastSeq) {
+                const core::usize from = line.seq == firstSeq ? firstOffset : 0;
+                const core::usize to = line.seq == lastSeq ? lastOffset : line.text.size();
+                // A line the selection runs past ends in a sliver, as an editor
+                // shows the newline it takes with it.
+                const float tail = line.seq != lastSeq ? ImGui::CalcTextSize(" ").x : 0.0f;
+                draw->AddRectFilled(ImVec2(at.x + widthOf(line.text, from), at.y),
+                                    ImVec2(at.x + widthOf(line.text, to) + tail, at.y + lineHeight),
+                                    ImGui::GetColorU32(ImGuiCol_TextSelectedBg));
+            }
+
             ImGui::PushStyleColor(ImGuiCol_Text, colour);
+            ImGui::TextUnformatted(line.text.c_str());
+            ImGui::PopStyleColor();
 
             // **A line that names a source location is a link** (S5.11). An
             // error in the console names a file and a line and nothing takes you
@@ -4053,20 +4178,18 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
             //
             // Only the lines that name one: turning ordinary output into
             // something that looks clickable and goes nowhere is worse than not
-            // linking any of it.
-            if (const std::optional<SourceLocation> at = parseSourceLocation(line.text); at.has_value()) {
-                ImGui::PushID(static_cast<int>(shown));
-                if (ImGui::Selectable(line.text.c_str()) && scriptCommands != nullptr)
-                    scriptCommands->jumpTo = at;
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s, line %u", at->chunk.c_str(), static_cast<unsigned>(at->line));
-                ImGui::PopID();
+            // linking any of it. A click that does not drag follows it; a drag
+            // across it selects, like anywhere else.
+            if (const std::optional<SourceLocation> link = parseSourceLocation(line.text); link.has_value()) {
+                rows.back().link = true;
+                if (ImGui::IsItemHovered() && !selection.dragging) {
+                    const ImVec2 min = ImGui::GetItemRectMin();
+                    const ImVec2 max = ImGui::GetItemRectMax();
+                    draw->AddLine(ImVec2(min.x, max.y), ImVec2(max.x, max.y), ImGui::ColorConvertFloat4ToU32(colour));
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    ImGui::SetTooltip("%s, line %u", link->chunk.c_str(), static_cast<unsigned>(link->line));
+                }
             }
-            else {
-                ImGui::TextUnformatted(line.text.c_str());
-            }
-
-            ImGui::PopStyleColor();
         }
         // **A filter that hides everything says so.** An empty pane and a pane
         // filtered down to nothing look identical, and one of them means the
@@ -4075,20 +4198,167 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
         if (shown == 0 && !log.lines.empty())
             ImGui::TextDisabled("%zu line(s) hidden by the filter.", static_cast<std::size_t>(log.lines.size()));
 
+        using Place = std::pair<core::usize, core::usize>;
+        // The place under the pointer: the nearest row by height, and the
+        // nearest character boundary along it.
+        const auto placeAt = [&](ImVec2 mouse) -> Place {
+            if (mouse.y < rows.front().at.y)
+                return {0, 0};
+            if (mouse.y >= rows.back().at.y + rowStep)
+                return {rows.size() - 1, rows.back().text.size()};
+            core::usize row = 0;
+            while (row + 1 < rows.size() && mouse.y >= rows[row].at.y + rowStep)
+                ++row;
+            const std::string_view text = rows[row].text;
+            core::usize best = 0;
+            float before = 0.0f;
+            for (core::usize at = 1; at <= text.size(); ++at) {
+                // Only between whole UTF-8 characters.
+                if (at < text.size() && (static_cast<unsigned char>(text[at]) & 0xC0u) == 0x80u)
+                    continue;
+                const float width = widthOf(text, at);
+                if (rows[row].at.x + (before + width) * 0.5f > mouse.x)
+                    break;
+                best = at;
+                before = width;
+            }
+            return {row, best};
+        };
+        // A selection end's row among those shown -- the first one after it
+        // when its own line is filtered out or has dropped off the front.
+        const auto rowOf = [&](core::u64 seq, core::usize offset) -> Place {
+            const auto found = std::lower_bound(rows.begin(), rows.end(), seq,
+                                                [](const Row& row, core::u64 value) { return row.seq < value; });
+            if (found == rows.end())
+                return {rows.size() - 1, rows.back().text.size()};
+            return {static_cast<core::usize>(found - rows.begin()), found->seq == seq ? offset : 0};
+        };
+        const auto textOf = [&](Place from, Place to) {
+            std::vector<std::string_view> texts;
+            texts.reserve(rows.size());
+            for (const Row& row : rows)
+                texts.push_back(row.text);
+            return consoleSelectionText(texts, from.first, from.second, to.first, to.second);
+        };
+        const auto selectAll = [&]() {
+            selection.anchorSeq = rows.front().seq;
+            selection.anchorOffset = 0;
+            selection.headSeq = rows.back().seq;
+            selection.headOffset = rows.back().text.size();
+        };
+        const auto copyEverything = [&]() {
+            ImGui::SetClipboardText(textOf({0, 0}, {rows.size() - 1, rows.back().text.size()}).c_str());
+        };
+
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        // Not over the scrollbars, whose drag is theirs.
+        const bool overText = ImGui::IsWindowHovered() && ImGui::GetCurrentWindow()->InnerRect.Contains(mouse);
+        if (!rows.empty()) {
+            if (overText && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                const auto [row, offset] = placeAt(mouse);
+                selection.headSeq = rows[row].seq;
+                selection.headOffset = offset;
+                if (!ImGui::GetIO().KeyShift || selection.anchorSeq == 0) {
+                    selection.anchorSeq = rows[row].seq;
+                    selection.anchorOffset = offset;
+                }
+                selection.dragging = true;
+                selection.moved = ImGui::GetIO().KeyShift;
+                selection.pressedLink.reset();
+                if (rows[row].link && mouse.x < rows[row].at.x + widthOf(rows[row].text, rows[row].text.size()))
+                    selection.pressedLink = parseSourceLocation(rows[row].text);
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    selection.anchorOffset = 0;
+                    selection.headOffset = rows[row].text.size();
+                    selection.moved = true;
+                }
+            }
+            else if (selection.dragging && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                const auto [row, offset] = placeAt(mouse);
+                if (rows[row].seq != selection.headSeq || offset != selection.headOffset)
+                    selection.moved = true;
+                selection.headSeq = rows[row].seq;
+                selection.headOffset = offset;
+                // Past the edge scrolls, so a selection can run beyond the view.
+                const ImRect inner = ImGui::GetCurrentWindow()->InnerRect;
+                if (mouse.y < inner.Min.y)
+                    ImGui::SetScrollY(ImGui::GetScrollY() - rowStep);
+                else if (mouse.y > inner.Max.y)
+                    ImGui::SetScrollY(ImGui::GetScrollY() + rowStep);
+            }
+            if (selection.dragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                selection.dragging = false;
+                if (!selection.moved && selection.pressedLink.has_value() && scriptCommands != nullptr)
+                    scriptCommands->jumpTo = selection.pressedLink;
+            }
+
+            const bool focused = ImGui::IsWindowFocused();
+            const bool ctrl = ImGui::GetIO().KeyCtrl;
+            if (focused && ctrl && ImGui::IsKeyPressed(ImGuiKey_A, false))
+                selectAll();
+            const bool hasSelection = selection.anchorSeq != 0 && (selection.anchorSeq != selection.headSeq ||
+                                                                   selection.anchorOffset != selection.headOffset);
+            const auto copySelection = [&]() {
+                ImGui::SetClipboardText(textOf(rowOf(selection.anchorSeq, selection.anchorOffset),
+                                               rowOf(selection.headSeq, selection.headOffset))
+                                            .c_str());
+            };
+            if (focused && ctrl && ImGui::IsKeyPressed(ImGuiKey_C, false) && hasSelection)
+                copySelection();
+
+            if (ImGui::BeginPopupContextWindow("##console-menu")) {
+                if (ImGui::MenuItem("Copy", "Ctrl+C", false, hasSelection))
+                    copySelection();
+                if (ImGui::MenuItem("Select all", "Ctrl+A"))
+                    selectAll();
+                if (ImGui::MenuItem("Copy all"))
+                    copyEverything();
+                ImGui::EndPopup();
+            }
+            if (copyAll)
+                copyEverything();
+        }
+
         // Only while already at the bottom, so scrolling back to read something
-        // is not undone by the next log line.
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        // is not undone by the next log line -- nor by a selection being dragged.
+        if (!selection.dragging && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
             ImGui::SetScrollHereY(1.0f);
     }
     ImGui::EndChild();
 
     static std::array<char, 512> input{};
+    static ConsoleHistory history;
+    const auto recall = [](ImGuiInputTextCallbackData* data) -> int {
+        if (data->EventFlag != ImGuiInputTextFlags_CallbackHistory)
+            return 0;
+        ConsoleHistory& state = *static_cast<ConsoleHistory*>(data->UserData);
+        const core::i32 next = consoleHistoryStep(state.entries.size(), state.at, data->EventKey == ImGuiKey_UpArrow);
+        if (next == state.at)
+            return 0;
+        if (state.at < 0)
+            state.draft.assign(data->Buf, static_cast<core::usize>(data->BufTextLen));
+        state.at = next;
+        const std::string& text = next < 0 ? state.draft : state.entries[static_cast<core::usize>(next)];
+        data->DeleteChars(0, data->BufTextLen);
+        data->InsertChars(0, text.c_str());
+        return 0;
+    };
     ImGui::SetNextItemWidth(-1.0f);
-    const bool submitted = ImGui::InputText("##repl", input.data(), input.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool submitted =
+        ImGui::InputText("##repl", input.data(), input.size(),
+                         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory, recall, &history);
     if (!submitted)
         return;
 
     const std::string_view source{input.data()};
+    // Kept for the arrows, once per run of the same line, as a shell does.
+    if (!source.empty() && (history.entries.empty() || history.entries.back() != source)) {
+        history.entries.emplace_back(source);
+        if (history.entries.size() > ConsoleHistory::kMaxEntries)
+            history.entries.erase(history.entries.begin());
+    }
+    history.at = -1;
+    history.draft.clear();
     if (!source.empty() && runtime != nullptr) {
         // Echoed first, so the log reads as a session rather than as a list of
         // answers with no questions.
@@ -8737,7 +9007,7 @@ void DebugOverlay::captureLog()
         ConsoleLog& sink = console();
         {
             std::lock_guard<std::mutex> lock(sink.mutex);
-            sink.lines.push_back(ConsoleLog::Line{level, std::string(text)});
+            sink.lines.push_back(ConsoleLog::Line{level, std::string(text), sink.nextSeq++});
             while (sink.lines.size() > ConsoleLog::kMaxLines)
                 sink.lines.pop_front();
         }

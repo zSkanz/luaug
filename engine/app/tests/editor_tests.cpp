@@ -30,6 +30,7 @@
 #include <system_error>
 #include <vector>
 
+#include "../../audio/generated/class_descriptors.gen.h"
 #include "../../ui/generated/class_descriptors.gen.h"
 #include "class_descriptors.gen.h"
 #include "inspector_fixture.h"
@@ -997,12 +998,14 @@ TEST_CASE("a drop target lights up for exactly the drops that would move somethi
     CHECK(world.parentOf(folder) == root);
 }
 
-TEST_CASE("ScriptService takes a Script as a file and nothing else, and a mounted script stays in it")
+TEST_CASE("a script lives in any instance, and one made from a file stays where its file says")
 {
-    // **Reported as "I cannot drag a script from Workspace to the script
-    // service".** The service is the mount of `src/scripts` and the scene saves
-    // nothing in it, so the drop is a move into a FILE -- which the frame loop
-    // performs -- and anything else there would be lost at the next save.
+    // **Reported three times**: "I cannot drag a script to the script service",
+    // "my friend could not make a Sound in ScriptService", and "a script is an
+    // instance -- a Loader script with module scripts under it should work".
+    // A script is an instance like any other and goes anywhere (ADR 0092);
+    // only one the `src/scripts` mount made from a file keeps its place, and
+    // even that one takes children.
     app::testing::Fixture fixture;
     scene::World world(fixture.classes, fixture.enums, fixture.atoms, 1234u);
     Editor editor;
@@ -1018,41 +1021,41 @@ TEST_CASE("ScriptService takes a Script as a file and nothing else, and a mounte
     const core::InstanceId workspace = make(fixture.workspaceClass, "Workspace", root);
     const core::InstanceId service = make(fixture.scriptServiceClass, "ScriptService", root);
     const core::InstanceId enemy = make(fixture.folderClass, "enemy", service);
+    const core::InstanceId loader = make(fixture.scriptClass, "Loader", service);
+    const core::InstanceId patrol = make(fixture.scriptClass, "patrol", enemy);
+    for (const core::InstanceId id : {enemy, loader, patrol})
+        world.setMounted(id, true);
     const core::InstanceId script = make(fixture.scriptClass, "Spawner", workspace);
     const core::InstanceId module = make(fixture.moduleScriptClass, "Shared", workspace);
     const core::InstanceId part = make(fixture.widgetClass, "Crate", workspace);
-    const core::InstanceId mounted = make(fixture.scriptClass, "patrol", enemy);
 
-    // Nothing is created in it: the plus is drawn from this.
-    CHECK_FALSE(Editor::canParentInto(world, service, root));
-    CHECK_FALSE(Editor::canParentInto(world, enemy, root));
-    CHECK(Editor::canParentInto(world, workspace, root));
+    // Anything can be made anywhere -- in the service, and in a script,
+    // including one read from a file.
+    CHECK(Editor::canParentInto(world, service, root));
+    CHECK(Editor::canParentInto(world, loader, root));
+    CHECK(Editor::canParentInto(world, script, root));
+    CHECK(Editor::fileBacked(world, loader));
+    CHECK_FALSE(Editor::fileBacked(world, script));
 
-    // The directory a drop means.
-    CHECK(Editor::scriptFolderOf(world, service) == std::optional<std::string>{""});
-    CHECK(Editor::scriptFolderOf(world, enemy) == std::optional<std::string>{"enemy"});
-    CHECK_FALSE(Editor::scriptFolderOf(world, workspace).has_value());
+    // A script, a module and a part all simply move, into the service or into
+    // a script -- a `Loader` holding its modules.
+    const std::array<core::InstanceId, 2> both{script, part};
+    CHECK(editor.reparent(world, both, service, root, inspector));
+    CHECK(world.parentOf(script) == service);
+    CHECK(world.parentOf(part) == service);
+    const std::array<core::InstanceId, 1> modules{module};
+    CHECK(editor.reparent(world, modules, loader, root, inspector));
+    CHECK(world.parentOf(module) == loader);
+    CHECK(editor.reparent(world, modules, script, root, inspector));
+    CHECK(world.parentOf(module) == script);
 
-    // A Script lights the row and is what moves; a ModuleScript and a part do not.
-    const std::array<core::InstanceId, 1> scripts{script};
-    const Editor::ReparentPlan plan = Editor::planReparent(world, scripts, enemy, root);
-    CHECK(plan.toScriptFiles);
-    REQUIRE(plan.movable.size() == 1);
-    CHECK(plan.movable.front() == script);
-    const std::array<core::InstanceId, 2> others{module, part};
-    CHECK_FALSE(Editor::canReparent(world, others, service, root));
-
-    // The world-only verb never makes the move: it would be lost at the save.
-    CHECK_FALSE(editor.reparent(world, scripts, service, root, inspector));
-    CHECK(world.parentOf(script) == workspace);
-
-    // And a mounted script does not leave: the file would mount it again.
-    const std::array<core::InstanceId, 1> fromFile{mounted};
+    // And one made from a file does not leave: the file would mount it again.
+    const std::array<core::InstanceId, 1> fromFile{patrol};
     const Editor::ReparentPlan out = Editor::planReparent(world, fromFile, workspace, root);
     CHECK(out.movable.empty());
     CHECK(out.mountedRefused);
     CHECK_FALSE(editor.reparent(world, fromFile, workspace, root, inspector));
-    CHECK(world.parentOf(mounted) == enemy);
+    CHECK(world.parentOf(patrol) == enemy);
 }
 
 TEST_CASE("a drop at a place under another parent moves and places in one undo step")
@@ -5444,6 +5447,66 @@ TEST_CASE("a scene keeps the screens under UIService, and the Explorer can make 
     CHECK(rig.world.childCount(ui) == 1);
 }
 
+TEST_CASE("a scene keeps what is put in ScriptService and inside a file's script, and not the file's script")
+{
+    // **Reported as "my friend could not make a Sound in ScriptService" and "a
+    // Loader script with module scripts under it should work"** (ADR 0092).
+    // The scene carries the service; what the `src/scripts` mount made is its
+    // files', so it is left out -- except as the MARK that puts back what
+    // somebody authored inside it.
+    BrushRig rig;
+    luaug::audio::generated::registerClasses(rig.classes, rig.atoms);
+    const auto make = [&](std::string_view cls, std::string_view name, core::InstanceId parent) {
+        const core::InstanceId id = rig.world.create(rig.classes.findId(rig.atoms.intern(cls)));
+        rig.world.setName(id, rig.atoms.intern(name));
+        REQUIRE_FALSE(rig.world.setParent(id, parent).has_value());
+        return id;
+    };
+    const std::string plain = scene::writeScene(rig.world);
+    const core::InstanceId service = make("ScriptService", "ScriptService", rig.root);
+    const core::InstanceId enemy = make("Folder", "enemy", service);
+    const core::InstanceId patrol = make("Script", "patrol", enemy);
+    const core::InstanceId loader = make("Script", "Loader", service);
+    for (const core::InstanceId id : {enemy, patrol, loader})
+        rig.world.setMounted(id, true);
+    CHECK(scene::writeScene(rig.world) == plain);
+
+    // Authored: a sound, a script of the scene's own, and a module inside the
+    // file's `Loader`.
+    (void)make("Sound", "Theme", service);
+    const core::InstanceId own = make("Script", "Spawner", service);
+    REQUIRE(rig.world.setProperty(own, rig.atoms.intern("Source"), scene::Value{std::string("print(1)")}) ==
+            scene::World::SetResult::Changed);
+    (void)make("ModuleScript", "Config", loader);
+    const std::string text = scene::writeScene(rig.world);
+    CHECK(text.find("\"Theme\"") != std::string::npos);
+    CHECK(text.find("print(1)") != std::string::npos);
+    CHECK(text.find("\"Config\"") != std::string::npos);
+    CHECK(text.find("\"mounted\"") != std::string::npos);
+    CHECK(text.find("\"patrol\"") == std::string::npos);
+    CHECK(text.find("\"enemy\"") == std::string::npos);
+
+    // Read back over the same world: the file's nodes stay, the authored
+    // instances come back once each, and the module is under the file's Loader.
+    REQUIRE_FALSE(scene::readScene(rig.world, text).has_value());
+    CHECK(rig.world.alive(loader));
+    CHECK(rig.world.alive(patrol));
+    CHECK(rig.world.findFirstChild(loader, rig.atoms.intern("Config")).valid());
+    CHECK(rig.world.childCount(loader) == 1);
+    CHECK(rig.world.childCount(service) == 4); // enemy, Loader, Theme, Spawner
+
+    // A mark whose file has gone keeps what was inside it, in a folder.
+    rig.world.setMounted(loader, false);
+    (void)rig.world.destroy(loader);
+    rig.world.retireDestroyed();
+    scene::SceneIoReport report;
+    REQUIRE_FALSE(scene::readScene(rig.world, text, &report).has_value());
+    CHECK(report.orphanedMounts == 1);
+    const core::InstanceId kept = rig.world.findFirstChild(service, rig.atoms.intern("Loader"));
+    REQUIRE(kept.valid());
+    CHECK(rig.world.findFirstChild(kept, rig.atoms.intern("Config")).valid());
+}
+
 TEST_CASE("each brush stroke is its own undo step (D168)")
 {
     // **The owner's report**: one ctrl+Z undid every change made to the
@@ -5678,4 +5741,23 @@ TEST_CASE("a scene saved with a label's old alignment names opens with them unde
     REQUIRE(again.valid());
     CHECK(rig.world.textLabels().find(again)->horizontalAlignment == 0);
     CHECK(rig.world.textLabels().find(again)->verticalAlignment == 2);
+}
+
+TEST_CASE("an interface element made in the editor starts 50 by 50 pixels")
+{
+    // **The owner's call**: a Frame made with no size is one nobody can see to
+    // drag. A script's `Instance.new` keeps the API's zero size.
+    BrushRig rig;
+    luaug::ui::generated::registerClasses(rig.classes, rig.atoms);
+    const core::InstanceId ui = rig.world.create(rig.classes.findId(rig.atoms.intern("UIService")));
+    REQUIRE_FALSE(rig.world.setParent(ui, rig.root).has_value());
+    const core::InstanceId screen = rig.world.create(rig.classes.findId(rig.atoms.intern("ScreenGui")));
+    REQUIRE_FALSE(rig.world.setParent(screen, ui).has_value());
+
+    REQUIRE(rig.editor.createInstance(rig.world, rig.classes.findId(rig.atoms.intern("Frame")), screen, rig.root,
+                                      rig.inspector));
+    const core::InstanceId frame = rig.inspector.selection();
+    const std::optional<scene::Value> size = rig.world.getProperty(frame, rig.atoms.intern("Size"));
+    REQUIRE(size.has_value());
+    CHECK(std::get<core::UDim2>(*size) == core::UDim2{core::UDim{0.0f, 50.0f}, core::UDim{0.0f, 50.0f}});
 }

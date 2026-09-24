@@ -1427,26 +1427,18 @@ public:
         // `refused` because it is a fact about the TARGET, and a drag of four
         // things onto it fails for one reason rather than four.
         bool targetRefuses = false;
-        // **The target is `ScriptService` or a folder in it**, where what a
-        // project runs comes from the files under `src/scripts` and nothing is
-        // saved in the scene. A `Script` dropped there is moved by writing its
-        // source to the matching file and mounting it -- which is the frame
-        // loop's job, because it needs the disk and the VM; `movable` is what it
-        // moves.
-        bool toScriptFiles = false;
-        // Something turned away was a mounted script, which says "move the
-        // file" rather than "cannot go there".
+        // Something turned away was made from a file under `src/scripts`,
+        // which says "move the file" rather than "cannot go there".
         bool mountedRefused = false;
     };
     [[nodiscard]] static ReparentPlan planReparent(const scene::World& world, std::span<const core::InstanceId> ids,
                                                    core::InstanceId newParent, core::InstanceId root);
 
-    // The directory under `src/scripts` a script dropped on `target` belongs
-    // in -- empty for `ScriptService` itself -- or nothing when the target is
-    // not the service or a folder inside it.
-    [[nodiscard]] static std::optional<std::string> scriptFolderOf(const scene::World& world, core::InstanceId target);
-    // Strictly inside `ScriptService`: a mounted script, or a folder of them.
-    [[nodiscard]] static bool insideScriptService(const scene::World& world, core::InstanceId id);
+    // **Made from a file under `src/scripts`** (ADR 0092): a script the mount
+    // read, or a folder it made for one. The file decides where it is, so it
+    // does not move -- but it takes children like any instance, and what is
+    // put inside it is saved with the scene.
+    [[nodiscard]] static bool fileBacked(const scene::World& world, core::InstanceId id);
 
     // --- The clipboard -------------------------------------------------------
     //

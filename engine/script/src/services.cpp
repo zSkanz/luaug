@@ -1186,11 +1186,23 @@ int soundPlay(lua_State* L)
 {
     const core::InstanceId id = checkInstance(L, 1);
     if (scene::SoundComponent* sound = world(L).sounds().find(id); sound != nullptr) {
-        // From wherever `TimePosition` is, which is 0 for a sound that has never
-        // played and wherever `Pause` left it otherwise. Playing one that is
-        // already playing is a no-op rather than a restart: restarting is
-        // `TimePosition = 0` and then this, and a `Play` that silently rewound
-        // would make a repeated call cut its own sound off.
+        // **From the start, or from where a script last put `TimePosition`** --
+        // and again from there when it is already playing. `Resume` is what
+        // carries on from where `Pause` left it. A `Play` that resumed instead
+        // was a `Play` that did nothing to a sound paused at its end.
+        if (!sound->seeked)
+            sound->timePosition = 0.0;
+        sound->seeked = false;
+        sound->playing = true;
+    }
+    return 0;
+}
+
+int soundResume(lua_State* L)
+{
+    const core::InstanceId id = checkInstance(L, 1);
+    if (scene::SoundComponent* sound = world(L).sounds().find(id); sound != nullptr) {
+        sound->seeked = false;
         sound->playing = true;
     }
     return 0;
@@ -1214,6 +1226,7 @@ int soundStop(lua_State* L)
         // awards something when a jingle finishes must not be fooled by one that
         // was cut off.
         sound->timePosition = 0.0;
+        sound->seeked = false;
     }
     return 0;
 }
@@ -1605,6 +1618,7 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"TweenService", "GetValue", tweenServiceGetValue},
 
     {"Sound", "Play", soundPlay},
+    {"Sound", "Resume", soundResume},
     {"Sound", "Pause", soundPause},
     {"Sound", "Stop", soundStop},
     {"AudioService", "PlayLocal", audioServicePlayLocal},

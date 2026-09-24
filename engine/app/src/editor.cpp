@@ -881,38 +881,9 @@ namespace {
 
 } // namespace
 
-std::optional<std::string> Editor::scriptFolderOf(const scene::World& world, core::InstanceId target)
+bool Editor::fileBacked(const scene::World& world, core::InstanceId id)
 {
-    // Folder names from the target up to the service, then reversed: the path
-    // a file needs under `src/scripts` to mount back exactly here.
-    std::vector<std::string_view> folders;
-    for (core::InstanceId walk = target; walk.valid() && world.alive(walk); walk = world.parentOf(walk)) {
-        if (isClass(world, walk, "ScriptService")) {
-            std::string path;
-            for (auto name = folders.rbegin(); name != folders.rend(); ++name) {
-                if (!path.empty())
-                    path.push_back('/');
-                path.append(*name);
-            }
-            return path;
-        }
-        // Only folders mount as directories. A script inside a script is not a
-        // file layout the mount can produce.
-        if (!isClass(world, walk, "Folder"))
-            return std::nullopt;
-        folders.push_back(world.atoms().text(world.name(walk)));
-    }
-    return std::nullopt;
-}
-
-bool Editor::insideScriptService(const scene::World& world, core::InstanceId id)
-{
-    for (core::InstanceId walk = world.alive(id) ? world.parentOf(id) : core::InstanceId{}; walk.valid();
-         walk = world.parentOf(walk)) {
-        if (isClass(world, walk, "ScriptService"))
-            return true;
-    }
-    return false;
+    return world.alive(id) && world.mounted(id);
 }
 
 bool Editor::isEngineOwned(const scene::World& world, core::InstanceId id, core::InstanceId root) noexcept
@@ -1036,6 +1007,16 @@ bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::I
         return false;
     }
 
+    // **An interface element starts 50 by 50 pixels** (the owner's call), not
+    // at the zero size a script's `Instance.new` gives it -- a Frame made in
+    // the editor with no size is a Frame nobody can see to drag. Through
+    // `setProperty`, so a class with no `Size` of type UDim2 simply refuses.
+    if (const scene::ClassId uiObject = world.classes().findId(world.atoms().lookup("UIObject"));
+        uiObject != scene::InvalidClass && world.classes().isA(classId, uiObject)) {
+        (void)world.setProperty(made, world.atoms().intern("Size"),
+                                scene::Value{core::UDim2{core::UDim{0.0f, 50.0f}, core::UDim{0.0f, 50.0f}}});
+    }
+
     // **In front of the camera rather than at the origin.** In a streamed world
     // the origin is not where anybody is standing, and a part created four
     // kilometres from the view is one nobody finds. Through `setProperty`
@@ -1076,13 +1057,11 @@ bool Editor::canParentInto(const scene::World& world, core::InstanceId id, core:
     // **Anything else takes a child** -- the owner: "I should be able to put an
     // instance inside any other; whether it does anything is another story" --
     // and the scene saves what is inside every service (`scene_file.cpp`,
-    // `FirstServices`). One exception: `ScriptService` is the mount of
-    // `src/scripts`, where a Script is made or moved as a FILE
-    // (`scriptFolderOf`), because the scene saves nothing there.
+    // `FirstServices`) -- `ScriptService` and a script included: a script is an
+    // instance, and one made from a file keeps what is put inside it too (ADR
+    // 0092).
     for (core::InstanceId walk = id; walk.valid(); walk = world.parentOf(walk)) {
         if (world.generated(walk))
-            return false;
-        if (isClass(world, walk, "ScriptService"))
             return false;
         if (walk == root) {
             if (isClass(world, walk, "DataModel"))
@@ -1108,10 +1087,7 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
         plan.targetRefuses = true;
         return plan;
     }
-    // **Into `ScriptService` a script becomes a FILE** (see `ReparentPlan`),
-    // and nothing else goes there at all.
-    plan.toScriptFiles = scriptFolderOf(world, newParent).has_value();
-    if (!plan.toScriptFiles && !canParentInto(world, newParent, root)) {
+    if (!canParentInto(world, newParent, root)) {
         plan.targetRefuses = true;
         return plan;
     }
@@ -1127,17 +1103,12 @@ Editor::ReparentPlan Editor::planReparent(const scene::World& world, std::span<c
             ++plan.refused;
             continue;
         }
-        // **A mounted script is its file.** Moving it would leave the file to
-        // mount it again at the next open -- two copies, both running.
-        if (insideScriptService(world, id)) {
+        // **A script made from a file is where its file says.** Moving it would
+        // leave the file to mount it again at the next open -- two copies, both
+        // running.
+        if (fileBacked(world, id)) {
             ++plan.refused;
             plan.mountedRefused = true;
-            continue;
-        }
-        // Only a `Script` becomes an entry file: a `ModuleScript` mounted there
-        // would come back as a `Script` and start running.
-        if (plan.toScriptFiles && !isClass(world, id, "Script")) {
-            ++plan.refused;
             continue;
         }
         // A cycle: onto itself, or into its own subtree. `World::setParent`
@@ -2229,20 +2200,9 @@ bool Editor::reparent(scene::World& world, std::span<const core::InstanceId> ids
         return false;
     }
     if (plan.mountedRefused && plan.movable.empty()) {
-        m_status =
-            EditorStatus{"a script in ScriptService is its file in src/scripts -- move or delete the file", true};
+        m_status = EditorStatus{"that script is a file in src/scripts -- move the file to move it", true};
         return false;
     }
-    if (plan.toScriptFiles) {
-        // The frame loop writes the files and mounts them (see
-        // `ReparentPlan::toScriptFiles`); a world-only move here would be lost.
-        m_status = EditorStatus{plan.movable.empty() ? "only a Script can go into ScriptService -- it becomes a file "
-                                                       "in src/scripts, and a ModuleScript would start running"
-                                                     : "scripts go into ScriptService as files",
-                                true};
-        return false;
-    }
-
     if (plan.movable.empty()) {
         m_status =
             EditorStatus{plan.refused > 0 ? "nothing there can be moved into that" : "already there", plan.refused > 0};

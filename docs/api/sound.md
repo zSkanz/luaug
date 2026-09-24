@@ -28,18 +28,23 @@ offers is on the base's page, which is what keeps one added member on
 | `Playing` | `boolean` | `false` | read/write | Whether the timeline is advancing. Writing it is the same as calling `Play` or `Stop`, and reading it is how a script asks without keeping its own flag. |
 | `RollOffMaxDistance` | `number` | `80` | read/write | How far the listener can be before a positional sound is silent. Between the two distances it fades linearly -- linear rather than inverse-square because a game's audible range is a design decision rather than a physical one, and an inverse square makes the far half of it inaudible. |
 | `RollOffMinDistance` | `number` | `8` | read/write | How far the listener can be before a positional sound starts getting quieter. Inside it the sound is at full `Volume`; ignored entirely for a 2D sound. |
-| `TimePosition` | `number` | `0` | read/write | Where the timeline is, in seconds. Writable, which is how a script seeks; the write lands on the next tick like every other, and past the end it stops or wraps exactly as arriving there would. |
+| `TimeLength` | `number` | — | read-only | How long `Content` is, in seconds: the file's own length, read from its header, or the placeholder tone's one second when it names nothing. 0 until the length has been read: the world's first tick after `Content` is set reads it, and the editor reads it for the sound it shows. |
+| `TimePosition` | `number` | `0` | read/write | Where the timeline is, in seconds, from 0 to `TimeLength`. Writable, which is how a script seeks: a write below zero is refused, and one past the end is clamped to it -- or wrapped, for a `Looped` sound -- exactly as arriving there would. |
 | `Volume` | `number` | `0.5` | read/write | A multiplier, combined with the group's and with the listener distance. The default is half rather than full because a game with several sounds at once and every one at 1 is a game that clips, and the first thing anybody does is turn them all down. |
 
 ## Methods
 
 ### `Pause()`
 
-Stops the timeline where it is. `Play` resumes from there.
+Stops the timeline where it is. `Resume` carries on from there; `Play` starts again from the start. The same as `Playing = false`.
 
 ### `Play()`
 
-Starts it from `TimePosition`, which is 0 for a sound that has never played and wherever `Stop` left it otherwise. Playing one that is already playing is a no-op rather than a restart -- restarting is `TimePosition = 0` and then this.
+Plays it from the start -- or from `TimePosition`, when a script set it since the sound last started. Playing one that is already playing starts it again. `Resume` is what carries on from where `Pause` left it.
+
+### `Resume()`
+
+Carries on from `TimePosition`, which is where `Pause` left it. The same as `Playing = true`.
 
 ### `Stop()`
 
@@ -52,7 +57,7 @@ drain point, never inside the call that fired it.
 
 ### `Ended()`
 
-Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless run, and on a machine whose audio buffer is four times the size.
+Fired on the tick the timeline reaches the end of a sound that is not `Looped`, which stops it and rewinds `TimePosition` to 0 -- so playing it again plays it again. From the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless run, and on a machine whose audio buffer is four times the size.
 
 ### `Loaded()`
 

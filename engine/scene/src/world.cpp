@@ -207,6 +207,18 @@ bool World::generated(core::InstanceId id) const noexcept
     return record != nullptr && record->generated;
 }
 
+void World::setMounted(core::InstanceId id, bool mounted) noexcept
+{
+    if (InstanceRecord* record = m_instances.find(id); record != nullptr)
+        record->mounted = mounted;
+}
+
+bool World::mounted(core::InstanceId id) const noexcept
+{
+    const InstanceRecord* record = m_instances.find(id);
+    return record != nullptr && record->mounted;
+}
+
 void World::setStamp(core::InstanceId id, core::NameAtom stamp) noexcept
 {
     if (InstanceRecord* record = m_instances.find(id); record != nullptr)

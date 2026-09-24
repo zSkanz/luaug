@@ -257,14 +257,31 @@ struct CodeColourEdit
 };
 CodeColourEdit g_colourEdit;
 
-// Where a line's swatch is drawn: in the gap between its number and its code.
-[[nodiscard]] ImRect swatchRect(const PaneMetrics& m, ImVec2 textOrigin, u32 line)
+// **Where a colour's swatch is drawn: just after its closing parenthesis**, and
+// only while the pointer is on the call or the swatch (the owner: "it should
+// appear only when the mouse is over a colour"). A swatch fixed in the margin
+// was far from the colour it stood for.
+[[nodiscard]] ImRect swatchRect(const ScriptDocument& document, const PaneMetrics& m, ImVec2 textOrigin,
+                                const ColorLiteral& literal)
 {
-    const float side = std::floor(m.lineHeight * 0.55f);
-    const float centreX = textOrigin.x - m.advance * 1.25f;
+    const u32 line = literal.call.end.line;
+    const float side = std::floor(m.lineHeight * 0.7f);
+    const float left = textOrigin.x + static_cast<float>(document.cellOf(line, literal.call.end.column)) * m.advance +
+                       m.advance * 0.4f;
     const float centreY = textOrigin.y + (static_cast<float>(line) + 0.5f) * m.lineHeight;
-    return ImRect(ImVec2(centreX - side * 0.5f, centreY - side * 0.5f),
-                  ImVec2(centreX + side * 0.5f, centreY + side * 0.5f));
+    return ImRect(ImVec2(left, centreY - side * 0.5f), ImVec2(left + side, centreY + side * 0.5f));
+}
+
+// The span of the call itself, for the hover that brings the swatch up.
+[[nodiscard]] ImRect callRect(const ScriptDocument& document, const PaneMetrics& m, ImVec2 textOrigin,
+                              const ColorLiteral& literal)
+{
+    const u32 line = literal.call.begin.line;
+    const float top = textOrigin.y + static_cast<float>(line) * m.lineHeight;
+    return ImRect(
+        ImVec2(textOrigin.x + static_cast<float>(document.cellOf(line, literal.call.begin.column)) * m.advance, top),
+        ImVec2(textOrigin.x + static_cast<float>(document.cellOf(line, literal.call.end.column)) * m.advance,
+               top + m.lineHeight));
 }
 
 // Defined with the find bar below, and declared here because a key binding needs
@@ -1181,19 +1198,6 @@ void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugVi
         draw->AddRectFilled(ImVec2(origin.x, y), ImVec2(origin.x + m.gutter, y + m.lineHeight), col(p.warning, 0.35f));
     }
 
-    // **A colour written on this line gets its swatch**, which is also what
-    // opens the picker (see `drawPane`).
-    if (const std::optional<ColorLiteral> literal = findColorLiteral(tab.document.line(line), line);
-        literal.has_value()) {
-        const ImVec2 textOrigin(origin.x + m.gutter, origin.y);
-        const ImRect swatch = swatchRect(m, textOrigin, line);
-        core::Color3 shown = literal->color;
-        if (g_colourEdit.open && g_colourEdit.line == line)
-            shown = core::Color3{g_colourEdit.value[0], g_colourEdit.value[1], g_colourEdit.value[2]};
-        draw->AddRectFilled(swatch.Min, swatch.Max, col(shown), 2.0f);
-        draw->AddRect(swatch.Min, swatch.Max, col(p.textMuted), 2.0f);
-    }
-
     char number[16]{};
     (void)std::snprintf(number, sizeof(number), "%u", line + 1);
     // Measured in the code face it is drawn in, and ending two and a half
@@ -1520,7 +1524,29 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // does and what stops a breakpoint from throwing away a selection.
     const bool overGutter = hovered && ImGui::GetIO().MousePos.x < origin.x + ImGui::GetScrollX() + m.gutter;
 
-    if (!popupClick && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    // **The colour under the pointer** (see `swatchRect`): found before the
+    // text takes the click, because a click on its swatch is a choice of
+    // colour and not a caret move.
+    std::optional<ColorLiteral> hoveredColour;
+    bool swatchClicked = false;
+    if (hovered && !overGutter) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const u32 line = hitTest(tab.document, m, textOrigin, mouse).line;
+        if (const std::optional<ColorLiteral> literal = findColorLiteral(tab.document.line(line), line);
+            literal.has_value()) {
+            const bool onSwatch = swatchRect(tab.document, m, textOrigin, *literal).Contains(mouse);
+            if (onSwatch || callRect(tab.document, m, textOrigin, *literal).Contains(mouse))
+                hoveredColour = literal;
+            if (onSwatch && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                g_colourEdit =
+                    CodeColourEdit{line, *literal, {literal->color.r, literal->color.g, literal->color.b}, true};
+                ImGui::OpenPopup("##code-colour");
+                swatchClicked = true;
+            }
+        }
+    }
+
+    if (!popupClick && !swatchClicked && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         ImGui::SetActiveID(id, window);
         ImGui::SetFocusID(id, window);
         ImGui::FocusWindow(window);
@@ -1770,21 +1796,26 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     drawZoomReadout(editor, m);
     drawCompletions(tab, m, textOrigin);
 
-    // **A click on a colour's swatch opens the picker** the Properties panel
-    // uses, instead of arming a breakpoint on that line.
-    bool swatchClicked = false;
-    if (overGutter && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        const u32 line = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
-        if (const std::optional<ColorLiteral> literal = findColorLiteral(tab.document.line(line), line);
-            literal.has_value() &&
-            // The gutter does not scroll sideways with the code, so neither does its swatch.
-            swatchRect(m, ImVec2(textOrigin.x + ImGui::GetScrollX(), textOrigin.y), line)
-                .Contains(ImGui::GetIO().MousePos)) {
-            g_colourEdit = CodeColourEdit{line, *literal, {literal->color.r, literal->color.g, literal->color.b}, true};
-            ImGui::OpenPopup("##code-colour");
-            swatchClicked = true;
-        }
+    // **The swatch of the colour under the pointer**, or of the one whose
+    // picker is open, drawn over the code after its call.
+    const auto drawSwatch = [&](const ColorLiteral& literal, core::Color3 shown) {
+        const ImRect swatch = swatchRect(tab.document, m, textOrigin, literal);
+        const ImRect ring(ImVec2(swatch.Min.x - 2.0f, swatch.Min.y - 2.0f),
+                          ImVec2(swatch.Max.x + 2.0f, swatch.Max.y + 2.0f));
+        draw->AddRectFilled(ring.Min, ring.Max, col(p.surfaceRaised), 3.0f);
+        draw->AddRectFilled(swatch.Min, swatch.Max, col(shown), 2.0f);
+        draw->AddRect(ring.Min, ring.Max, col(p.border), 3.0f);
+    };
+    if (g_colourEdit.open && g_colourEdit.line < tab.document.lineCount()) {
+        if (const std::optional<ColorLiteral> literal =
+                findColorLiteral(tab.document.line(g_colourEdit.line), g_colourEdit.line);
+            literal.has_value())
+            drawSwatch(*literal, core::Color3{g_colourEdit.value[0], g_colourEdit.value[1], g_colourEdit.value[2]});
     }
+    else if (hoveredColour.has_value()) {
+        drawSwatch(*hoveredColour, hoveredColour->color);
+    }
+
     if (ImGui::BeginPopup("##code-colour")) {
         (void)ImGui::ColorPicker3("##picker", g_colourEdit.value,
                                   ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_DisplayRGB);
@@ -1809,7 +1840,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
 
     // A gutter click arms or disarms a breakpoint. Recorded rather than acted
     // on: the debugger has to be told, and it lives a frame away.
-    if (!swatchClicked && overGutter && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    if (overGutter && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         out.toggleBreakpointLine = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
 
     ImGui::EndChild();

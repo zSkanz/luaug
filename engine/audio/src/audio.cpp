@@ -653,6 +653,11 @@ void AudioSystem::tick(scene::World& world, f64 fixedDt)
             world.changes().push(scene::Change{scene::ChangeKind::InstanceEventNoArgs, id, {}, loaded});
         }
 
+        // `TimeLength`, once per content: a header read on the first ask and a
+        // cache lookup after, so a script can read it before playing.
+        if (sound.timeLength == 0.0)
+            sound.timeLength = clipDuration(sound.content);
+
         if (!sound.playing)
             return;
 
@@ -681,7 +686,11 @@ void AudioSystem::tick(scene::World& world, f64 fixedDt)
             return;
         }
 
-        sound.timePosition = duration;
+        // **Rewound at the end**, so playing it again -- `Play`, `Resume` or
+        // `Playing = true` -- plays it again. Left at its length, the next start
+        // began at the end and ended on its first tick: a sound that played
+        // once and then never again.
+        sound.timePosition = 0.0;
         sound.playing = false;
         world.changes().push(scene::Change{scene::ChangeKind::InstanceEventNoArgs, id, {}, ended});
     });

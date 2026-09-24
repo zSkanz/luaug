@@ -1395,124 +1395,6 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             return open != nullptr ? open->workspace() : host->runtime().dataModel();
         };
 
-        // **A `Script` dropped into `ScriptService` becomes a file** (see
-        // `Editor::ReparentPlan::toScriptFiles`): its source is written to
-        // `src/scripts/<folders>/<name>.luau`, the scene's copy is removed, and
-        // the file is mounted now -- exactly what opening the project would have
-        // made of it. A name whose file already exists is left where it was,
-        // because overwriting somebody's script with a drag is not a move.
-        const auto moveScriptsToFiles = [&](std::span<const core::InstanceId> scripts, const std::string& folder) {
-            scene::World& world = authored();
-            const std::filesystem::path scriptsRoot = host->projectRoot() / "src" / "scripts";
-            if (host->projectRoot().empty()) {
-                editor.report("this project is a single file -- it has no src/scripts to move a script into", true);
-                return;
-            }
-            editor.history().record(world, scripts.size() == 1
-                                               ? "Move to ScriptService"
-                                               : "Move " + std::to_string(scripts.size()) + " to ScriptService");
-            const core::NameAtom sourceName = world.atoms().intern("Source");
-            std::vector<core::InstanceId> mounted;
-            core::usize clashed = 0;
-            std::string lastPath;
-            for (const core::InstanceId id : scripts) {
-                const std::string name(world.atoms().text(world.name(id)));
-                // A name that is not a plain file name cannot round-trip through
-                // the mount, which names the instance after the file.
-                if (name.empty() || name.find_first_of("/\\:*?\"<>|") != std::string::npos || name == "." ||
-                    name == "..") {
-                    ++clashed;
-                    continue;
-                }
-                const std::string relative = folder.empty() ? name + ".luau" : folder + "/" + name + ".luau";
-                const std::filesystem::path file = scriptsRoot / std::filesystem::path(relative);
-                std::error_code ec;
-                if (std::filesystem::exists(file, ec)) {
-                    ++clashed;
-                    continue;
-                }
-                std::string source;
-                if (const std::optional<scene::Value> value = world.getProperty(id, sourceName);
-                    value.has_value() && std::holds_alternative<std::string>(*value)) {
-                    source = std::get<std::string>(*value);
-                }
-                std::filesystem::create_directories(file.parent_path(), ec);
-                {
-                    std::ofstream out(file, std::ios::binary | std::ios::trunc);
-                    out.write(source.data(), static_cast<std::streamsize>(source.size()));
-                    if (!out) {
-                        ++clashed;
-                        continue;
-                    }
-                }
-                (void)world.destroy(id);
-                if (const core::InstanceId made = host->mountScriptFile(relative); made.valid())
-                    mounted.push_back(made);
-                lastPath = "src/scripts/" + relative;
-            }
-            world.retireDestroyed();
-            inspector.pruneDead(world);
-            inspector.onWorldRestored();
-            if (!mounted.empty()) {
-                inspector.select(mounted);
-                inspector.reveal(mounted.front());
-            }
-            editor.touch();
-            if (mounted.empty())
-                editor.report("nothing moved -- a file of that name is already in src/scripts", true);
-            else if (clashed > 0)
-                editor.report("moved " + std::to_string(mounted.size()) + " script(s) to src/scripts; " +
-                                  std::to_string(clashed) + " kept, a file of that name already exists",
-                              true);
-            else
-                editor.report(mounted.size() == 1
-                                  ? "moved to " + lastPath
-                                  : "moved " + std::to_string(mounted.size()) + " scripts to src/scripts",
-                              false);
-        };
-
-        // **A Script made inside `ScriptService` is a new file** under
-        // `src/scripts`, for the reason a dropped one is: the service is the
-        // mount of that directory and the scene saves nothing in it. Named
-        // `Script`, `Script2`, ... -- the first name no file has -- and opened
-        // at once, like any script just made.
-        const auto createScriptFile = [&](const std::string& folder) {
-            if (host->projectRoot().empty()) {
-                editor.report("this project is a single file -- it has no src/scripts to make a script in", true);
-                return;
-            }
-            const std::filesystem::path scriptsRoot = host->projectRoot() / "src" / "scripts";
-            std::string relative;
-            std::error_code ec;
-            for (int attempt = 1; attempt < 1000; ++attempt) {
-                const std::string name = attempt == 1 ? "Script" : "Script" + std::to_string(attempt);
-                const std::string candidate = folder.empty() ? name + ".luau" : folder + "/" + name + ".luau";
-                if (!std::filesystem::exists(scriptsRoot / std::filesystem::path(candidate), ec)) {
-                    relative = candidate;
-                    break;
-                }
-            }
-            const std::filesystem::path file = scriptsRoot / std::filesystem::path(relative);
-            std::filesystem::create_directories(file.parent_path(), ec);
-            {
-                std::ofstream out(file, std::ios::binary | std::ios::trunc);
-                if (relative.empty() || !out) {
-                    editor.report("could not write a new script into src/scripts", true);
-                    return;
-                }
-            }
-            const core::InstanceId made = host->mountScriptFile(relative);
-            if (!made.valid()) {
-                editor.report("wrote src/scripts/" + relative + " but could not mount it", true);
-                return;
-            }
-            inspector.select(made);
-            inspector.reveal(made);
-            scriptToOpen = made;
-            editor.touch();
-            editor.report("made src/scripts/" + relative, false);
-        };
-
         if (options.editor && inspector.pendingCount() > 0)
             editor.history().record(authored(), "Edit", coalesceKeyFor(inspector.gesture(), inspector.pending()));
 
@@ -2080,21 +1962,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         scriptToOpen = id;
                 };
                 if (editorCommands.createClass != scene::InvalidClass && editorCommands.createParent.valid()) {
-                    if (const std::optional<std::string> folder =
-                            Editor::scriptFolderOf(authored(), editorCommands.createParent);
-                        folder.has_value() && stageOf() == nullptr) {
-                        const scene::ClassDescriptor* asked = authored().classes().find(editorCommands.createClass);
-                        if (asked != nullptr && authored().atoms().text(asked->name) == "Script")
-                            createScriptFile(*folder);
-                        else
-                            editor.report("ScriptService holds the files in src/scripts -- only a Script can be made "
-                                          "there, and it becomes a file",
-                                          true);
-                    }
-                    else {
-                        openIfScript(editor.createInstance(authored(), editorCommands.createClass,
-                                                           editorCommands.createParent, authoredRoot(), inspector));
-                    }
+                    // A script too, wherever it is made: it is an instance,
+                    // and its `Source` is saved with the scene (ADR 0092).
+                    openIfScript(editor.createInstance(authored(), editorCommands.createClass,
+                                                       editorCommands.createParent, authoredRoot(), inspector));
                 }
                 // The ribbon's insert: into the selection when it can hold
                 // authored things, and into the Workspace the viewport draws
@@ -2130,17 +2001,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                              inspector);
                     }
                     else if (editorCommands.reparentTo.valid()) {
-                        const Editor::ReparentPlan plan =
-                            Editor::planReparent(authored(), acting, editorCommands.reparentTo, authoredRoot());
-                        if (plan.toScriptFiles && !plan.movable.empty() && stageOf() == nullptr)
-                            moveScriptsToFiles(plan.movable,
-                                               *Editor::scriptFolderOf(authored(), editorCommands.reparentTo));
-                        else
-                            // With a place when it was dropped on the edge of a
-                            // row under another parent: moved in, and put where
-                            // the line was drawn.
-                            (void)editor.reparent(authored(), acting, editorCommands.reparentTo, authoredRoot(),
-                                                  inspector, editorCommands.reparentIndex);
+                        // With a place when it was dropped on the edge of a row
+                        // under another parent: moved in, and put where the
+                        // line was drawn.
+                        (void)editor.reparent(authored(), acting, editorCommands.reparentTo, authoredRoot(), inspector,
+                                              editorCommands.reparentIndex);
                     }
                     if (editorCommands.deleteSelection) {
                         (void)editor.deleteInstances(authored(), acting, authoredRoot(), inspector);
@@ -3035,6 +2900,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // itself exists to prevent.
         if (advancing(editor.runState()))
             host->audio().stopAudition();
+        // **The selected sound shows its `TimeLength` while nothing ticks**:
+        // the tick is what reads it otherwise, and an editor that is not
+        // playing has not ticked. One header read, once per content.
+        else if (scene::SoundComponent* shown = authored().sounds().find(inspector.selection());
+                 shown != nullptr && shown->timeLength == 0.0)
+            shown->timeLength = host->audio().clipDuration(shown->content);
         // **The ear goes where the eye is.** A sound parented to a part
         // is positional, and what it is positional AGAINST is the listener --
         // which is `Workspace.CurrentCamera`. A game with no camera of its own

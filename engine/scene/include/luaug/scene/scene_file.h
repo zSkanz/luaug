@@ -96,6 +96,9 @@ struct SceneIoReport
     // of their stamp -- somebody added or removed something inside one. Counted
     // rather than refused: a save must never lose what is in the world.
     core::u32 unlinkedStamps = 0;
+    // Marks of a node the `src/scripts` mount made whose file has gone: what
+    // was authored inside it is kept, in a `Folder` of its name (ADR 0092).
+    core::u32 orphanedMounts = 0;
 };
 
 // How a scene gets the TEXT of a stamp it names (ADR 0049).

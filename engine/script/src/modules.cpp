@@ -506,6 +506,8 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
                 folder = w.create(folderClass);
                 w.setName(folder, name);
                 (void)w.setParent(folder, parent);
+                // The mount's, so a scene leaves it to the files (ADR 0092).
+                w.setMounted(folder, true);
             }
             parent = folder;
         }
@@ -513,6 +515,7 @@ std::vector<core::InstanceId> mountScripts(lua_State* L, std::span<const Mounted
         const core::InstanceId instance = w.create(scriptClass);
         w.setName(instance, w.atoms().intern(withoutExtension(segments.back())));
         (void)w.setParent(instance, parent);
+        w.setMounted(instance, true);
         // **The file's text becomes the instance's `Source`** (ADR 0057), which
         // is what ADR 0050 decided and what the mount never did. The registry
         // keeps the PATH and not a second copy of the text: two places holding

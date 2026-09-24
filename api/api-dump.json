@@ -2376,6 +2376,12 @@
           "Default": "8"
         },
         {
+          "Name": "TimeLength",
+          "Type": "number",
+          "ReadOnly": true,
+          "Transient": true
+        },
+        {
           "Name": "TimePosition",
           "Type": "number",
           "Default": "0",
@@ -2396,6 +2402,12 @@
         },
         {
           "Name": "Play",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Resume",
           "Parameters": [],
           "Returns": [],
           "ThreadSafety": "Unsafe"

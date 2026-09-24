@@ -391,7 +391,8 @@ TEST_CASE("Ended fires at the end of the FILE")
     CHECK_FALSE(fixture.sound(id).playing);
     const std::vector<std::string> atEnd = fixture.events();
     CHECK(std::ranges::count(atEnd, "Ended") == 1);
-    CHECK(fixture.sound(id).timePosition == doctest::Approx(3.0).epsilon(0.01));
+    // Rewound at the end, so starting it again plays it again.
+    CHECK(fixture.sound(id).timePosition == 0.0);
 }
 
 TEST_CASE("a looped sound wraps at the file's length")
@@ -420,6 +421,48 @@ TEST_CASE("a looped sound wraps at the file's length")
     fixture.sound(id).timePosition = 0.0;
     fixture.run(42);
     CHECK(fixture.sound(id).timePosition == doctest::Approx(0.2).epsilon(0.05));
+}
+
+TEST_CASE("TimeLength is the file's, read before playing, and TimePosition stays inside it")
+{
+    // **The owner: "Properties should show a sound's length, and its time
+    // position should be clamped to 0..Length".**
+    Fixture fixture;
+    ContentFixture content;
+    fixture.system.setContentMounts(&content.mounts);
+
+    const InstanceId id = fixture.make("Sound");
+    scene::World& world = *fixture.world;
+    const core::NameAtom length = fixture.atoms.intern("TimeLength");
+    const core::NameAtom position = fixture.atoms.intern("TimePosition");
+    using Result = scene::World::SetResult;
+    const auto number = [&](core::NameAtom name) { return std::get<double>(world.getProperty(id, name).value()); };
+    const auto written = [](Result result) { return result == Result::Changed || result == Result::Unchanged; };
+
+    REQUIRE(written(
+        world.setProperty(id, fixture.atoms.intern("Content"), scene::Value{std::string("asset://sfx/long.wav")})));
+    CHECK(number(length) == 0.0);
+    // One tick reads it, with the sound stopped.
+    fixture.run(1);
+    CHECK_FALSE(fixture.sound(id).playing);
+    CHECK(number(length) == doctest::Approx(3.0).epsilon(0.01));
+    // Read-only to a script.
+    CHECK_FALSE(written(world.setProperty(id, length, scene::Value{10.0})));
+
+    // Past the end is the end; a loop wraps; below zero is refused.
+    REQUIRE(written(world.setProperty(id, position, scene::Value{10.0})));
+    CHECK(number(position) == doctest::Approx(number(length)));
+    fixture.sound(id).looped = true;
+    REQUIRE(written(world.setProperty(id, position, scene::Value{number(length) + 0.5})));
+    CHECK(number(position) == doctest::Approx(0.5).epsilon(0.02));
+    CHECK_FALSE(written(world.setProperty(id, position, scene::Value{-1.0})));
+
+    // A new content is a new length.
+    REQUIRE(written(
+        world.setProperty(id, fixture.atoms.intern("Content"), scene::Value{std::string("asset://sfx/tone.wav")})));
+    CHECK(number(length) == 0.0);
+    fixture.run(1);
+    CHECK(number(length) == doctest::Approx(0.25).epsilon(0.05));
 }
 
 TEST_CASE("the mixer keeps its cursor unless the timeline has really moved")

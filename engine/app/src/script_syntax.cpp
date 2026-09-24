@@ -240,8 +240,20 @@ void markTypes(std::string_view text, std::vector<Token>& tokens)
         tokens[start + 1].kind = TokenKind::Type;
         typeStatement = true;
     }
-    if (tokens.size() == 1 && isName(0, "continue"))
-        tokens[0].kind = TokenKind::Keyword;
+    // `continue` is a statement wherever it stands alone between statements:
+    // not after `.`, `:` or `local`, and not followed by what makes a name an
+    // expression -- `(`, `=`, `.`, `:`, `[` or a string.
+    for (std::size_t at = 0; at < tokens.size(); ++at) {
+        if (!isName(at, "continue"))
+            continue;
+        const bool after =
+            at > 0 && (isOp(at - 1, ".") || isOp(at - 1, ":") ||
+                       (tokens[at - 1].kind == TokenKind::Keyword && textOf(text, tokens[at - 1]) == "local"));
+        const bool before = isOp(at + 1, "(") || isOp(at + 1, "=") || isOp(at + 1, ".") || isOp(at + 1, ":") ||
+                            isOp(at + 1, "[") || (at + 1 < tokens.size() && tokens[at + 1].kind == TokenKind::String);
+        if (!after && !before)
+            tokens[at].kind = TokenKind::Keyword;
+    }
 
     // A generic list `<T, U...>`: every name up to the matching `>` is a type.
     const auto markGenerics = [&](std::size_t open) {

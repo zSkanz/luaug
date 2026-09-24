@@ -71,7 +71,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(audioGroupDesc);
 
     // --- Sound ---
-    static std::array<scene::PropertyDesc, 9> soundProperties;
+    static std::array<scene::PropertyDesc, 10> soundProperties;
     soundProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("Content"),
@@ -135,10 +135,21 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
             .inert = false,
-            .doc = "Where the timeline is, in seconds. Writable, which is how a script seeks; the write lands on the next tick like every other, and past the end it stops or wraps exactly as arriving there would.",
+            .doc = "Where the timeline is, in seconds, from 0 to `TimeLength`. Writable, which is how a script seeks: a write below zero is refused, and one past the end is clamped to it -- or wrapped, for a `Looped` sound -- exactly as arriving there would.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getSoundTimePosition,
             .set = native::setSoundTimePosition,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("TimeLength"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "How long `Content` is, in seconds: the file's own length, read from its header, or the placeholder tone's one second when it names nothing. 0 until the length has been read: the world's first tick after `Content` is set reads it, and the editor reads it for the sound it shows.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getSoundTimeLength,
+            .set = nullptr,
         },
         scene::PropertyDesc{
             .name = atoms.intern("RollOffMinDistance"),
@@ -175,19 +186,25 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .set = native::setSoundGroup,
         },
     }};
-    static std::array<scene::MethodDesc, 3> soundMethods;
+    static std::array<scene::MethodDesc, 4> soundMethods;
     soundMethods = {{
         scene::MethodDesc{
             .name = atoms.intern("Play"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .doc = "Starts it from `TimePosition`, which is 0 for a sound that has never played and wherever `Stop` left it otherwise. Playing one that is already playing is a no-op rather than a restart -- restarting is `TimePosition = 0` and then this.",
+            .doc = "Plays it from the start -- or from `TimePosition`, when a script set it since the sound last started. Playing one that is already playing starts it again. `Resume` is what carries on from where `Pause` left it.",
+        },
+        scene::MethodDesc{
+            .name = atoms.intern("Resume"),
+            .yields = false,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .doc = "Carries on from `TimePosition`, which is where `Pause` left it. The same as `Playing = true`.",
         },
         scene::MethodDesc{
             .name = atoms.intern("Pause"),
             .yields = false,
             .threadSafety = scene::ThreadSafety::Unsafe,
-            .doc = "Stops the timeline where it is. `Play` resumes from there.",
+            .doc = "Stops the timeline where it is. `Resume` carries on from there; `Play` starts again from the start. The same as `Playing = false`.",
         },
         scene::MethodDesc{
             .name = atoms.intern("Stop"),
@@ -201,7 +218,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
         scene::EventDesc{
             .name = atoms.intern("Ended"),
             .slot = 7,
-            .doc = "Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless run, and on a machine whose audio buffer is four times the size.",
+            .doc = "Fired on the tick the timeline reaches the end of a sound that is not `Looped`, which stops it and rewinds `TimePosition` to 0 -- so playing it again plays it again. From the SIM timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless run, and on a machine whose audio buffer is four times the size.",
         },
         scene::EventDesc{
             .name = atoms.intern("Loaded"),

@@ -493,6 +493,9 @@ struct ColorLiteral
     ColorLiteralKind kind = ColorLiteralKind::New;
     // What is inside the parentheses, which is what the picker replaces.
     Range args;
+    // The whole call, `Color3` to `)` inclusive: what the pointer hovers to
+    // bring up the swatch.
+    Range call;
     core::Color3 color;
 };
 // The first such colour on a line, or nothing.

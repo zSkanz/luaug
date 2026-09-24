@@ -4,6 +4,8 @@
 - Date: 2026-08-24
 - Extends: 0046, 0050, 0056
 - Completes: 0050
+- Amended by: [0092](0092-a-script-lives-in-the-instance-it-is-put-in.md) (a script lives in the
+  instance it is put in; a file's script is marked, not found by where it is)
 
 ## Context
 

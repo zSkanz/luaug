@@ -27,6 +27,7 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -56,6 +57,14 @@ void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view 
 // How tall the Console's log child is, given the room the panel has left.
 [[nodiscard]] luaug::core::f32 consoleLogHeight(luaug::core::f32 available, luaug::core::f32 reservedBelow,
                                                 luaug::core::f32 minimum) noexcept;
+
+// Where the REPL's up and down arrows go in what was typed before.
+[[nodiscard]] luaug::core::i32 consoleHistoryStep(luaug::core::usize count, luaug::core::i32 at, bool up) noexcept;
+
+// What a selection across console lines copies.
+[[nodiscard]] std::string consoleSelectionText(std::span<const std::string_view> lines, luaug::core::usize fromLine,
+                                               luaug::core::usize fromOffset, luaug::core::usize toLine,
+                                               luaug::core::usize toOffset);
 
 // A count with thousands separators, for the Stats readout's triangle number.
 [[nodiscard]] std::string formatCount(luaug::core::u32 value);
@@ -754,4 +763,29 @@ TEST_CASE("a row dropped between two rows lands where the pointer said")
     // rather than recording an undo step for (D134).
     CHECK(dropLanding(2, 2, true) == 2);
     CHECK(dropLanding(2, 2, false) == 2);
+}
+
+TEST_CASE("the console's arrows walk what was typed, and a selection copies what it covers")
+{
+    // **The owner: "select its text, up and down for commands already written,
+    // and a button to copy everything".**
+    using luaug::app::consoleHistoryStep;
+    // Up from the line being typed is the newest; it stops at the oldest.
+    CHECK(consoleHistoryStep(3, -1, true) == 2);
+    CHECK(consoleHistoryStep(3, 2, true) == 1);
+    CHECK(consoleHistoryStep(3, 0, true) == 0);
+    // Down comes forward, and past the newest is the line again.
+    CHECK(consoleHistoryStep(3, 1, false) == 2);
+    CHECK(consoleHistoryStep(3, 2, false) == -1);
+    CHECK(consoleHistoryStep(3, -1, false) == -1);
+    CHECK(consoleHistoryStep(0, -1, true) == -1);
+
+    using luaug::app::consoleSelectionText;
+    const std::array<std::string_view, 3> lines{"hello world", "second", "third line"};
+    CHECK(consoleSelectionText(lines, 0, 6, 0, 11) == "world");
+    // Either order, whole lines between, and an offset past the end is the end.
+    CHECK(consoleSelectionText(lines, 2, 5, 0, 6) == "world\nsecond\nthird");
+    CHECK(consoleSelectionText(lines, 0, 0, 2, 99) == "hello world\nsecond\nthird line");
+    CHECK(consoleSelectionText(lines, 1, 3, 1, 3).empty());
+    CHECK(consoleSelectionText({}, 0, 0, 0, 0).empty());
 }

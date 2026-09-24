@@ -1579,9 +1579,15 @@ declare extern type Sound extends Instance with
     --- Zero is refused rather than treated as a pause -- `Playing` is what pauses, and a speed of zero
     --- would be a sound that never ends.
     PlaybackSpeed: number
-    --- Where the timeline is, in seconds. Writable, which is how a script seeks; the write lands on the
-    --- next tick like every other, and past the end it stops or wraps exactly as arriving there would.
+    --- Where the timeline is, in seconds, from 0 to `TimeLength`. Writable, which is how a script
+    --- seeks: a write below zero is refused, and one past the end is clamped to it -- or wrapped, for a
+    --- `Looped` sound -- exactly as arriving there would.
     TimePosition: number
+    --- How long `Content` is, in seconds: the file's own length, read from its header, or the
+    --- placeholder tone's one second when it names nothing. 0 until the length has been read: the
+    --- world's first tick after `Content` is set reads it, and the editor reads it for the sound it
+    --- shows.
+    read TimeLength: number
     --- How far the listener can be before a positional sound starts getting quieter. Inside it the
     --- sound is at full `Volume`; ignored entirely for a 2D sound.
     RollOffMinDistance: number
@@ -1591,19 +1597,23 @@ declare extern type Sound extends Instance with
     RollOffMaxDistance: number
     --- The bus this sound's volume is multiplied by, or nil for none.
     Group: AudioGroup?
-    --- Fired on the tick the timeline reaches the end of a sound that is not `Looped`. From the SIM
-    --- timeline rather than from the mixer, so it lands on the same tick in a replay, in a headless
-    --- run, and on a machine whose audio buffer is four times the size.
+    --- Fired on the tick the timeline reaches the end of a sound that is not `Looped`, which stops it
+    --- and rewinds `TimePosition` to 0 -- so playing it again plays it again. From the SIM timeline
+    --- rather than from the mixer, so it lands on the same tick in a replay, in a headless run, and on
+    --- a machine whose audio buffer is four times the size.
     read Ended: Signal<()>
     --- Fired when this sound's `Content` has been decoded and is ready to play. **Fires immediately in
     --- v1**, because a sound has nothing to wait for yet -- declared now so that code written today
     --- does not have to change when it does.
     read Loaded: Signal<()>
-    --- Starts it from `TimePosition`, which is 0 for a sound that has never played and wherever `Stop`
-    --- left it otherwise. Playing one that is already playing is a no-op rather than a restart --
-    --- restarting is `TimePosition = 0` and then this.
+    --- Plays it from the start -- or from `TimePosition`, when a script set it since the sound last
+    --- started. Playing one that is already playing starts it again. `Resume` is what carries on from
+    --- where `Pause` left it.
     function Play(self): ()
-    --- Stops the timeline where it is. `Play` resumes from there.
+    --- Carries on from `TimePosition`, which is where `Pause` left it. The same as `Playing = true`.
+    function Resume(self): ()
+    --- Stops the timeline where it is. `Resume` carries on from there; `Play` starts again from the
+    --- start. The same as `Playing = false`.
     function Pause(self): ()
     --- Stops it and rewinds to the start. `Ended` does NOT fire: it is a past-tense fact about reaching
     --- the end, and code that awards something when a jingle finishes must not be fooled by one that
@@ -2656,87 +2666,185 @@ declare Enum: {
 }
 
 declare Vector3: {
+    --- Constructs a vector; a missing component is 0. Bound as the `vectorCtor` compile option so a
+    --- literal call is constant-folded and a dynamic one is a fastcall -- neither allocates.
     new: ((x: number?, y: number?, z: number?) -> vector),
+    --- The official vector stdlib's spelling of the constructor, carried so that code written against
+    --- another Luau runtime ports unchanged. Unlike `new` it requires `x` and `y`, because the stdlib
+    --- checks argument count rather than accepting `nil` as zero.
     create: ((x: number, y: number, z: number?) -> vector),
+    --- The vector's length. Preferred over the `.Magnitude` field, which reaches the same number
+    --- through the metatable and is measurably slower.
     magnitude: ((v: vector) -> number),
+    --- The vector scaled to unit length. A zero vector has no direction to preserve and normalizing one
+    --- yields NaN components rather than an error.
     normalize: ((v: vector) -> vector),
+    --- The dot product of two vectors.
     dot: ((a: vector, b: vector) -> number),
+    --- The cross product, right-handed like the world it describes: `cross(right, up) == -look` for any
+    --- frame's basis (§2.3, handedness).
     cross: ((a: vector, b: vector) -> vector),
+    --- The angle between two vectors in radians, in [0, π]. With `axis`, the result is signed about it
+    --- by the right-hand rule and so spans (-π, π] -- which is the only way to tell a rotation from
+    --- its mirror image.
     angle: ((a: vector, b: vector, axis: vector?) -> number),
+    --- Component-wise linear interpolation from `a` to `b`. `alpha` is not clamped, so values outside
+    --- [0, 1] extrapolate.
     lerp: ((a: vector, b: vector, alpha: number) -> vector),
+    --- Each component rounded toward negative infinity.
     floor: ((v: vector) -> vector),
+    --- Each component rounded toward positive infinity.
     ceil: ((v: vector) -> vector),
+    --- Each component's absolute value.
     abs: ((v: vector) -> vector),
+    --- Each component reduced to -1, 0 or 1 by its sign.
     sign: ((v: vector) -> vector),
+    --- Each component clamped into the box `min`..`max`. An inverted box is an error rather than an
+    --- empty result, because there is no component value that satisfies it.
     clamp: ((v: vector, min: vector, max: vector) -> vector),
+    --- The component-wise minimum of every argument -- a corner of the bounding box, not whichever
+    --- argument is shortest.
     min: ((a: vector, ...vector) -> vector),
+    --- The component-wise maximum of every argument -- the opposite corner of the bounding box `min`
+    --- returns.
     max: ((a: vector, ...vector) -> vector),
     zero: vector,
     one: vector,
 }
 
 declare CFrame: {
+    --- A frame with the identity rotation at the given position; a missing component is 0, so
+    --- `CFrame.new()` is the identity. The components are taken as f64 and stored as f64.
     new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: vector) -> CFrame),
+    --- A frame at `position` whose `LookVector` points at `target`, with `up` biasing the roll and
+    --- defaulting to `(0, 1, 0)`. Where the direction is degenerate or `up` is parallel to it the
+    --- result is the identity rotation at `position`, not a frame full of NaN: a camera pointed at
+    --- itself should stop moving, not poison every value it touches.
     lookAt: ((position: vector, target: vector, up: vector?) -> CFrame),
+    --- The ONE euler constructor -- there is no `fromEulerAnglesXYZ`/`YXZ` family, because the order
+    --- belongs in an argument and not in a name. Angles are radians, applied as **intrinsic** rotations
+    --- in `order` (each about the axes the previous one produced) and signed by the right-hand rule
+    --- about each axis.
     fromEuler: ((rx: number, ry: number, rz: number, order: EnumRotationOrder?) -> CFrame),
+    --- A rotation of `angle` radians about `axis` by the right-hand rule, at the origin. The axis is
+    --- normalized on the way in, so its length carries no meaning.
     fromAxisAngle: ((axis: vector, angle: number) -> CFrame),
+    --- A frame at `position` rotated by the quaternion `(qx, qy, qz, qw)` -- w last, matching
+    --- `ToQuaternion`'s tail, which is the half of the convention people get wrong. The quaternion is
+    --- normalized on the way in.
     fromQuaternion: ((position: vector, qx: number, qy: number, qz: number, qw: number) -> CFrame),
+    --- A frame built from an explicit basis. The third axis is **back**, not forward, so `LookVector ==
+    --- -back`. Axes that are neither unit length nor mutually perpendicular are stored as given: a
+    --- constructor that silently repaired its input would hide the bug that produced it.
+    --- `Orthonormalize` is the explicit repair.
     fromMatrix: ((position: vector, right: vector, up: vector, back: vector) -> CFrame),
     identity: CFrame,
 }
 
 declare Color3: {
+    --- A colour from three 0-1 channels, each defaulting to 0, so `Color3.new()` is black. Out-of-range
+    --- values are kept as given.
     new: ((r: number?, g: number?, b: number?) -> Color3),
+    --- A colour from three 0-255 channels, which is the range colour pickers and design tools speak in.
+    --- The channels are divided by 255 and stored, not rounded to a byte.
     fromRGB: ((r: number, g: number, b: number) -> Color3),
+    --- A colour from hue, saturation and value -- **all three** 0-1, hue included, so `fromHSV(1/3, 1,
+    --- 1)` is green and not a hue of one third of a degree.
     fromHSV: ((h: number, s: number, v: number) -> Color3),
+    --- A colour from a hex string, accepting `#rrggbb`, `rrggbb`, `#rgb` and `rgb` case-insensitively,
+    --- so the round trip with `ToHex` is defined in both directions and neither call has to guess what
+    --- the other meant. Anything else raises `script.err.color_hex_invalid` rather than returning a
+    --- silently wrong colour.
     fromHex: ((hex: string) -> Color3),
 }
 
 declare Vector2: {
+    --- A vector from two components, each defaulting to 0.
     new: ((x: number?, y: number?) -> Vector2),
     zero: Vector2,
     one: Vector2,
 }
 
 declare UDim: {
+    --- A UDim from a scale and an offset, both defaulting to 0.
     new: ((scale: number?, offset: number?) -> UDim),
 }
 
 declare UDim2: {
+    --- Four numbers in axis order: x scale, x offset, y scale, y offset. There is deliberately no
+    --- second overload taking two UDims -- one constructor with one argument order is what a frozen
+    --- surface is for.
     new: ((xs: number?, xo: number?, ys: number?, yo: number?) -> UDim2),
+    --- Scale on both axes, zero offsets -- the spelling for a purely relative layout.
     fromScale: ((xs: number?, ys: number?) -> UDim2),
+    --- Pixels on both axes, zero scales -- the spelling for a fixed-size element.
     fromOffset: ((xo: number?, yo: number?) -> UDim2),
 }
 
 declare Rect: {
+    --- A rectangle from its two corners.
     new: ((min: Vector2, max: Vector2) -> Rect),
 }
 
 declare Random: {
+    --- A generator seeded with `seed`, truncated toward zero. **Omitting the seed draws one from the
+    --- host and is not legal in simulation code**: it is exactly the unseeded RNG determinism forbids,
+    --- and `luaug check` flags it. Use it for cosmetics that never reach the world hash, or seed it
+    --- from something the simulation already knows.
     new: ((seed: number?) -> Random),
 }
 
 declare RaycastParams: {
+    --- Filter defaults to empty, FilterType to Exclude and CollisionGroup to the empty string, which
+    --- means every group. An empty Exclude filter therefore hits everything, and an empty Include
+    --- filter hits nothing -- which is what each word means and is worth knowing before a query
+    --- silently returns nil.
     new: ((options: { Filter: { Instance }?, FilterType: EnumRaycastFilterType?, CollisionGroup: string? }?) -> RaycastParams),
 }
 
 declare Signal: {
+    --- A script-owned signal. The pack is generic and inferred from the `Fire` and `Connect` sites;
+    --- annotate it (`Signal<string>`, `Signal<()>`) where inference has nothing to work from, such as
+    --- an array element type.
     new: (<T...>() -> Signal<T...>),
 }
 
 declare TweenInfo: {
+    --- The defaults are a one-second Quad-Out with no repeat, no reverse and no delay, which is the
+    --- tween most UI wants. A negative `time` or `delayTime` raises; a negative `repeatCount` means
+    --- repeat forever, which is the one negative number here that means something.
     new: ((time: number?, easingStyle: EnumEasingStyle?, easingDirection: EnumEasingDirection?, repeatCount: number?, reverses: boolean?, delayTime: number?) -> TweenInfo),
 }
 
 declare Material: {
+    --- The shared, read-only handle for a material asset:
+    --- `Material.load("asset://materials/brick.material.json")`. Raises for a `Content` that names no
+    --- material, because a typo that quietly drew the default would be found by looking at the screen.
     load: ((content: Content) -> Material),
 }
 
 declare task: {
+    --- Resumes `fn` on a new coroutine **immediately**, synchronously, before returning -- the one
+    --- non-deferred call in the library and deliberately so. Returns that thread. An error inside it is
+    --- contained and does not propagate to the caller (§3.1).
     spawn: (<T...>(fn: (T...) -> (), T...) -> thread),
+    --- Enqueues `fn` on the deferred queue, so it runs at the next resumption point ordered against
+    --- signal fires by when it was raised (§3.1). Returns the thread it will resume, which is the
+    --- handle `task.cancel` takes.
     defer: (<T...>(fn: (T...) -> (), T...) -> thread),
+    --- Resumes `fn` at the first task-resume phase at or after `duration` seconds of SimClock time.
+    --- Zero and negative durations both mean the next tick: `delay` must not run before it returns, so
+    --- "at or after 0 seconds" cannot be satisfied by the phase you are standing in.
     delay: (<T...>(duration: number, fn: (T...) -> (), T...) -> thread),
+    --- Yields, and resumes at the first task-resume phase at or after `duration` seconds of SimClock
+    --- time, defaulting to the next tick. Returns the elapsed sim time, which is a whole number of
+    --- ticks times the timestep and therefore at least `duration`. Parks without an `Async` suffix
+    --- because the name already says it waits (§9).
     wait: ((duration: number?) -> number),
+    --- Cancels a pending resumption -- a queued `task.defer` entry counts as one, so cancelling the
+    --- thread `defer` returned stops its callback from running. A finished thread, an already-cancelled
+    --- one and the running one all raise `script.err.task_not_scheduled`: none holds a pending
+    --- resumption, and a pending resumption is the only thing this can take away.
     cancel: ((thread: thread) -> ()),
 }
 
