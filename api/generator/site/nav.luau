@@ -67,9 +67,10 @@ local Sections: { Section } = {
     {
         Slug = "world",
         Title = "Building a world",
-        Summary = "Parts, transforms, meshes, prefabs, terrain, blocks, and the scene the game starts in.",
+        Summary = "Parts, materials, transforms, meshes, prefabs, terrain, blocks, and the scene the game starts in.",
         Pages = {
             { Slug = "parts", Title = "Parts and solids" },
+            { Slug = "materials", Title = "Materials" },
             { Slug = "transforms", Title = "Transforms, pivots and units" },
             { Slug = "meshes", Title = "Meshes and models" },
             { Slug = "prefabs", Title = "Prefabs" },

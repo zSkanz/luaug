@@ -10,7 +10,7 @@ local platform = Instance.new("Part")
 platform.Shape = Enum.PartShape.Block
 platform.Size = vector.create(8, 1, 8)
 platform.Position = vector.create(0, 3, 0)
-platform.Color = Color3.fromRGB(200, 90, 40)
+platform:SetMaterialParameter("Color", Color3.fromRGB(200, 90, 40))
 platform.Anchored = true
 platform.Parent = workspace
 ```
@@ -40,15 +40,24 @@ walked up as you walk towards −Z.
 
 ## How it looks
 
-| Property | Default | Notes |
-|---|---|---|
-| `BasePart.Color` | white | |
-| `BasePart.Transparency` | 0 | 0 opaque, 1 invisible. |
+A part **wears a material** and has no colour of its own (ADR 0090). See
+[Materials](manual:world/materials) for the whole of it.
 
-That is the whole of a part's appearance in this release. **There is no
-`Material`** — it is a surface look rather than rigid-body state, nothing would
-read it, and a property that type-checks and does nothing looks more like a
-working API than a missing member does.
+| Member | Default | Notes |
+|---|---|---|
+| `BasePart.Material` | `nil` | A `Material` from `Material.load` or `material:Clone()`. `nil` is the engine default: white, dielectric, roughness 0.7. |
+| `BasePart.MaterialParameters` | empty | What this part overrides, by name. |
+| `SetMaterialParameter(name, value)` | | Overrides one parameter its material declares; raises for one it does not. |
+| `GetMaterialParameter(name)` | | The value the part draws with. |
+| `ClearMaterialParameter(name)` | | Back to the material's own value. |
+
+The engine default declares `Color` and `Transparency`, so a part wearing
+nothing is still tinted and faded:
+
+```luau
+part:SetMaterialParameter("Color", Color3.fromRGB(200, 90, 40))
+part:SetMaterialParameter("Transparency", 0.5) -- 0 opaque, 1 invisible
+```
 
 A transparent part still collides and still casts a full shadow.
 

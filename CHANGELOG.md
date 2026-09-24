@@ -9,7 +9,44 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ## [Unreleased]
 
+### Changed -- BREAKING
+
+- **A material is an asset, and a part wears one** (ADR 0090). **This is a
+  breaking change to the public API, and the release that carries it is a major
+  version.**
+  - `BasePart.Color` and `BasePart.Transparency` are **removed**. A part's look
+    is its material's; it overrides only the parameters that material declares,
+    with `SetMaterialParameter`, `GetMaterialParameter` and
+    `ClearMaterialParameter`, and reads them as `BasePart.MaterialParameters`.
+    The engine default material -- what a part wearing nothing wears --
+    declares `Color` and `Transparency`, so `part.Color = c` becomes
+    `part:SetMaterialParameter("Color", c)`.
+  - The `Material` **class is removed**: `Instance.new("Material")` raises.
+    A material is a `.material.json` under `content/`, with a `parent` for a
+    variant and `instanceParameters` for what a part may change.
+    `BasePart.Material` is a `Material?` handle.
+  - `Material` is a data type: `Material.load(content)` returns the shared,
+    read-only handle for an asset; `material:Clone()` returns a writable runtime
+    copy. Nothing clones implicitly.
+  - The scene format is version 2. A version 1 scene opens with its tints as
+    overrides on the default material; `luaug migrate materials` converts a
+    project's files.
+  - The wire protocol is version 12: a part's material, its overrides and a
+    runtime copy it wears replicate, where version 11 sent `Color` and
+    `Transparency` and never the material.
+  - A part's fade can no longer be tweened through `TweenService`, which moves
+    properties of instances; a material parameter is neither.
+
 ### Added
+
+- **The material editor**: New Material and New Variant in the content
+  browser, with a rendered ball on each material's row; a Material panel with
+  its own undo that shows an edit in every world as it is made; a part's
+  Properties show its material (picked, or dropped from the browser onto the
+  field, an Explorer row or the part in the viewport) and each parameter the
+  material lets it change.
+- `assetc` compiles materials to their own pack kind, and a glTF import writes
+  one material asset per material in the file.
 
 - **Terrain debug views**: `Terrain wireframe` and `Terrain normals` in the
   editor's viewport settings, and `DebugService:ShowPanel("Terrain")` in a game.

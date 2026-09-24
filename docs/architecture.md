@@ -365,7 +365,8 @@ namespace luaug::asset {
   template<class T> AssetHandle<T> load(ContentHash, Priority);   // refcounted; Unloaded/Loading/Ready/Failed
   AssetHandle<> loadByUrn(std::string_view);         // "asset://models/tree.glb" via the content manifest
   // Asset types: MeshAsset (LOD chain + meshlets), TextureAsset (KTX2, transcoded on jobs),
-  //   MaterialDef, SoundAsset, AnimationClip, ModuleSource (Luau), PrefabDef, ChunkManifest, ShaderPack
+  //   Material (a .material.json, ADR 0090), SoundAsset, AnimationClip, ModuleSource (Luau), PrefabDef,
+  //   ChunkManifest, ShaderPack
   struct StreamingManager {                          // the policy engine for §10
     void setFoci(std::span<const StreamingFocus>);   // position + Min/TargetRadius
     void setBudgetBytes(u64); void tick(FrameBudget);// issues loads/evictions by priority score

@@ -150,14 +150,14 @@ one included -- then a push, then CI read. Nothing lands on a red `main`.
 
 ## Stage 6 — The editor
 
-- [ ] Content browser: `.material.json` rows with a rendered sphere thumbnail
+- [x] Content browser: `.material.json` rows with a rendered sphere thumbnail
       (the thumbnail system exists); *New Material*; *New Variant* on a material's
       menu.
-- [ ] A material panel: opens the asset, edits its fields and its
+- [x] A material panel: opens the asset, edits its fields and its
       `instanceParameters` with the existing preview sphere (`syncMaterialPreview`
       stops needing an instance), undo inside the panel, and save writes the file.
       Every open world updates on save.
-- [ ] Properties on a part: `Material` as a content picker and a drop target
+- [x] Properties on a part: `Material` as a content picker and a drop target
       (dropping a material row on a part assigns its URN -- `assignStampTo`'s
       material use goes); below it, the parameters the material declares, each
       with override and revert, and a kept-but-undeclared one struck through.
@@ -168,24 +168,24 @@ one included -- then a push, then CI read. Nothing lands on a red `main`.
 
 ## Stage 7 — The wire
 
-- [ ] The wire schema (`api/generator/gen_wire.luau`) carries a part's material
+- [x] The wire schema (`api/generator/gen_wire.luau`) carries a part's material
       URN and `MaterialParameters`. A clone is its own wire object -- source URN
       plus changed properties -- sent before any part that names it (ADR 0077's
       ordering). `ProtocolVersion` 11 → 12.
-- [ ] A two-world test: the authority clones a material, changes its `Color`,
+- [x] A two-world test: the authority clones a material, changes its `Color`,
       puts it on a part, and the replica draws that colour.
 
 ## Stage 8 — Documentation and close
 
-- [ ] `docs/manual/world/parts.md` (it still says `Material` is absent -- stale
+- [x] `docs/manual/world/parts.md` (it still says `Material` is absent -- stale
       since E3), `docs/manual/world/meshes.md`, `docs/manual/migrating/divergences.md`
       (a row for `Color`/`Transparency`), a new manual page on materials and
       variants, and `CHANGELOG.md` under Unreleased with the breaking change
       marked as breaking.
-- [ ] `docs/architecture.md` where it names `MaterialDef` among asset kinds.
-- [ ] `PROGRESS.md` updated, this ledger ticked, and a **Findings** section
+- [x] `docs/architecture.md` where it names `MaterialDef` among asset kinds.
+- [x] `PROGRESS.md` updated, this ledger ticked, and a **Findings** section
       appended here: what ADR 0090 assumed that reality corrected.
-- [ ] Tell the owner the work is done and that the release carrying it is a
+- [x] Tell the owner the work is done and that the release carrying it is a
       major version under semantic versioning. **Tagging it is theirs.**
 
 ## Not in this work
@@ -266,3 +266,30 @@ What building ADR 0090 found that the ADR and this ledger did not say.
     place `Color` had.
 15. **A conformance run mounts `tests/conformance/content`** when it exists: a
     spec tree is not a project, and the material specs need files to load.
+16. **The material panel shows edits live and reverts an unsaved one.** An
+    edit is put in the host's library at once, so every world wearing the
+    material draws it; closing without saving forgets it, and the file's look
+    comes back. The panel's undo is its own -- an edit to a file is not a step
+    in the scene's history.
+17. **The stage's instance preview is gone, not moved.** The ball a material is
+    judged on is the content browser's thumbnail renderer, drawing a sphere that
+    wears the material through the same library, refreshed after every edit;
+    there is no preview geometry in any world any more.
+18. **The owner's work in progress is written in a newer idiom than HEAD.** The
+    material UI landed in `debug_overlay.cpp` twice -- once in the working tree
+    beside the owner's orbit-shell edits (`beginEditorDialog`, `iconMenuItem`),
+    once in HEAD's own (`BeginPopupModal`, `MenuItem`) for the commit -- and
+    only the HEAD copy was staged.
+19. **A clone travels with each part that wears it, not as an object of its
+    own.** The protocol replicates instances, and a second kind of wire object
+    was machinery for one use; carrying the clone's changes beside every part
+    wearing it gives the ordering ADR 0077 asks for by construction -- a copy
+    is never named before it has arrived -- and the replica keys it by the
+    authority's number, so parts sharing one still share one. The cost is the
+    copy's 52 bytes once per wearing part rather than once. The values are zero
+    when a part wears no copy, so putting one back on is a change the diff sees.
+20. **A replica's copies live in the top half of the clone id range**, which a
+    replica's own scripts count up from the bottom of and never reach
+    (`World::adoptMaterialClone`).
+21. **A clone's map crosses the wire as a name**, so a script writing one
+    interns it; the atom table the session already replicates carries it.

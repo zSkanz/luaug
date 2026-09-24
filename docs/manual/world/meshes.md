@@ -12,9 +12,14 @@ tree.Anchored = true
 tree.Parent = workspace
 ```
 
-Everything a `Part` has, it has: `Size`, `Color`, `Transparency`, `Anchored`,
-`CFrame`, the physics properties, `Touched`. What it swaps is where the shape
-comes from.
+Everything a `Part` has, it has: `Size`, `Material` and its parameters,
+`Anchored`, `CFrame`, the physics properties, `Touched`. What it swaps is where
+the shape comes from.
+
+**A `MeshPart` wearing no material draws the materials its own file
+described**, and a `Color` it overrides tints them. An import writes one
+[material asset](manual:world/materials) per material in the file and the parts it builds
+wear them, except where a material's images are embedded in the file.
 
 ## One file is one mesh
 

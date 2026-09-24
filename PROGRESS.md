@@ -332,12 +332,16 @@ a public protocol and rollback; 2D joints, sprite animation, and 2D on the wire;
 a post-processing API; the terrain's one-sided skirt. The ledger is
 [`docs/briefs/mandate-2026-09-24.md`](docs/briefs/mandate-2026-09-24.md).
 
-**Materials as assets (ADR 0090) go first**, ahead of the mandate's stages
-that have not started: it changes `BasePart`, the scene format and the wire
-schema, and the mandate's M4 (2D on the wire) and M6 (multiplayer) would
-otherwise be built against a protocol about to change. A mandate stage already
-in flight is finished first, so `main` is green when the switch happens. The
-ledger is [`docs/briefs/materials-kickoff.md`](docs/briefs/materials-kickoff.md).
+**Materials as assets (ADR 0090) are built**, all eight stages of
+[`docs/briefs/materials-kickoff.md`](docs/briefs/materials-kickoff.md), which
+carries twenty-one findings. A part wears a `.material.json` and has no `Color`
+or `Transparency` of its own; `Material.load` and `Clone()` are the script
+surface; the scene format is version 2 and `luaug migrate materials` converts a
+project; the wire is protocol 12 and carries a part's material, overrides and
+runtime copy; the editor has a Material panel. **It is a breaking change to the
+public API, so the release that carries it is a major version, and tagging it
+is the owner's.** The mandate's unstarted stages are next, built against
+protocol 12.
 
 ## Session Log
 
@@ -354,6 +358,16 @@ and a block world -- went to
 [`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
 2026-09-23.
 
+- **Session 34 — materials as assets, 2026-09-24.** ADR 0090's eight
+  stages, each green on the local gate before it was pushed and on all three
+  CI tiers before the next push.
+  No golden moved -- the engine default's white times a tint IS the tint, and
+  the renderer's default path was kept bit for bit -- and all five determinism
+  traces moved once, at tick 0, because `BasePart`'s declared properties
+  changed. Two things only a build found: the pack reader had never accepted
+  its own `Material` kind, and a tool that rewrites `content/` rewrote an
+  untracked file of the owner's, which had to be put back by hand -- so a
+  rewriting tool is now run with such a file copied aside first.
 - **Session 33 — the 2D layer and navigation, 2026-09-23 to 09-24.** The
   mandate's S6 and S7, and with them phase 3.
   - **2D**: `Part2D` and `Tilemap2D` simulated by Box2D beside Jolt, an
