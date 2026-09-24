@@ -42,7 +42,10 @@ using core::u8;
 using core::usize;
 
 inline constexpr char ChunkMagic[4] = {'L', 'G', 'C', 'H'};
-inline constexpr u32 ChunkFormatVersion = 2;
+// Three since a cell has a vertical band (`ChunkId::y`, ADR 0086). Version two
+// is still read, as band zero, which is what every cell of it was.
+inline constexpr u32 ChunkFormatVersion = 3;
+inline constexpr u32 ChunkFormatVersionColumns = 2;
 
 // How many size classes a cell's `layer` may name (ADR 0053): 0 is detail,
 // 1 is structures, 2 is terrain features. The field is an `i32` and always
@@ -63,6 +66,15 @@ struct ChunkId
     i32 x = 0;
     i32 z = 0;
     i32 layer = 0;
+    // **The vertical band** (ADR 0086): cells are cubes of `chunkSize`, and the
+    // bands are centred on y = 0, so band zero is `[-size/2, size/2)`. A world
+    // lying within half a cell of sea level -- every world before this -- is
+    // band zero throughout and partitions exactly as a column grid did; a cave
+    // four hundred metres down is a cell of its own, which a player on the
+    // surface does not load and a player in it does not load the surface for.
+    //
+    // Last, so an id written `{x, z, layer}` still means what it meant.
+    i32 y = 0;
 
     [[nodiscard]] constexpr bool operator==(const ChunkId&) const noexcept = default;
     // Ordering so a chunk set can be a sorted vector rather than a hash set:
@@ -217,8 +229,10 @@ struct ChunkIndex
 [[nodiscard]] std::string writeChunkIndex(const ChunkIndex& index);
 [[nodiscard]] std::optional<core::EngineError> readChunkIndex(std::string_view json, ChunkIndex& out);
 
-// The cell a world position falls in.
+// The cell a world position falls in, band included.
 [[nodiscard]] ChunkId chunkIdAt(core::DVec3 position, f32 chunkSize, i32 layer = 0) noexcept;
+// A cell's cube: its footprint and its band. What a cell is filed under, not
+// what it holds -- the index's bounds are the real extent.
 [[nodiscard]] core::DAABB chunkBounds(ChunkId id, f32 chunkSize) noexcept;
 
 } // namespace luaug::asset

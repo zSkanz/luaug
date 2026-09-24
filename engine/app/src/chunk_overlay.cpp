@@ -10,6 +10,7 @@ namespace luaug::app {
 
 using core::f32;
 using core::f64;
+using core::i32;
 
 namespace {
 
@@ -66,8 +67,14 @@ void drawChunkGrid(const StreamingHost& streaming, f64 groundY, render::DebugDra
     if (chunkSize <= 0.0f)
         return;
 
+    // **The band the camera is in, and no other** (ADR 0086): cells are cubes
+    // now, and every band's squares drawn at one height would be several grids
+    // pretending to be one. The band under a cave is the cave's grid.
+    const i32 band = asset::chunkIdAt(core::DVec3{0.0, groundY, 0.0}, chunkSize).y;
     const std::vector<asset::StreamingManager::ChunkView> cells = streaming.view();
     for (const asset::StreamingManager::ChunkView& cell : cells) {
+        if (cell.id.y != band)
+            continue;
         const core::DAABB bounds = asset::chunkBounds(cell.id, chunkSize);
         const render::DebugColor color = colorOf(cell.state);
 

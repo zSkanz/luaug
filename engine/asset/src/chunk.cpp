@@ -147,8 +147,12 @@ ChunkId chunkIdAt(core::DVec3 position, f32 chunkSize, i32 layer) noexcept
     // `floor` rather than a cast, because a cast truncates toward zero and
     // would put x = -0.5 and x = +0.5 in the same cell -- a seam down the
     // middle of the world that only shows up on the negative side of it.
+    //
+    // **The band is centred on zero** (ADR 0086): a boundary at y = 0 would
+    // cut every world at its ground, filing a floor and the props on it in two
+    // cells that always load together.
     return ChunkId{static_cast<i32>(std::floor(position.x / size)), static_cast<i32>(std::floor(position.z / size)),
-                   layer};
+                   layer, static_cast<i32>(std::floor(position.y / size + 0.5))};
 }
 
 core::DAABB chunkBounds(ChunkId id, f32 chunkSize) noexcept
@@ -156,11 +160,8 @@ core::DAABB chunkBounds(ChunkId id, f32 chunkSize) noexcept
     const auto size = static_cast<core::f64>(chunkSize);
     const core::f64 minX = static_cast<core::f64>(id.x) * size;
     const core::f64 minZ = static_cast<core::f64>(id.z) * size;
-    // Vertically unbounded on purpose: the grid is 2D (architecture.md §10) and
-    // a chunk holds everything above and below its footprint. A y-extent here
-    // would be a third axis the index does not have.
-    return core::DAABB::fromMinMax(core::DVec3{minX, -core::kInfinityD, minZ},
-                                   core::DVec3{minX + size, core::kInfinityD, minZ + size});
+    const core::f64 minY = (static_cast<core::f64>(id.y) - 0.5) * size;
+    return core::DAABB::fromMinMax(core::DVec3{minX, minY, minZ}, core::DVec3{minX + size, minY + size, minZ + size});
 }
 
 std::vector<std::byte> encodeChunk(const Chunk& chunk)
@@ -173,6 +174,7 @@ std::vector<std::byte> encodeChunk(const Chunk& chunk)
     writeU32(out, static_cast<u32>(chunk.id.x));
     writeU32(out, static_cast<u32>(chunk.id.z));
     writeU32(out, static_cast<u32>(chunk.id.layer));
+    writeU32(out, static_cast<u32>(chunk.id.y));
     writeDVec3(out, chunk.bounds.min);
     writeDVec3(out, chunk.bounds.max);
     writeU32(out, static_cast<u32>(chunk.instances.size()));
@@ -238,7 +240,7 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
 
     Reader reader(bytes, 4);
     const u32 version = reader.u32v();
-    if (version != ChunkFormatVersion) {
+    if (version != ChunkFormatVersion && version != ChunkFormatVersionColumns) {
         const I18nArg args[] = {{"found", std::to_string(version)}, {"expected", std::to_string(ChunkFormatVersion)}};
         return core::makeError(LUAUG_TR("asset.chunk.err.version"), args);
     }
@@ -249,6 +251,8 @@ std::optional<core::EngineError> decodeChunk(std::span<const std::byte> bytes, C
     out.id.x = static_cast<i32>(reader.u32v());
     out.id.z = static_cast<i32>(reader.u32v());
     out.id.layer = static_cast<i32>(reader.u32v());
+    // A column-grid cell is band zero, which is what it held.
+    out.id.y = version == ChunkFormatVersionColumns ? 0 : static_cast<i32>(reader.u32v());
     out.bounds.min = reader.dvec3();
     out.bounds.max = reader.dvec3();
 
@@ -384,6 +388,10 @@ std::string writeChunkIndex(const ChunkIndex& index)
         json.field("x", static_cast<core::i64>(entry.id.x));
         json.field("z", static_cast<core::i64>(entry.id.z));
         json.field("layer", static_cast<core::i64>(entry.id.layer));
+        // Only off band zero, so a world that is all at sea level writes the
+        // index it always wrote.
+        if (entry.id.y != 0)
+            json.field("y", static_cast<core::i64>(entry.id.y));
         json.field("urn", entry.urn);
         json.field("instances", static_cast<u64>(entry.instanceCount));
         json.field("bytes", static_cast<u64>(entry.bytes));
@@ -439,6 +447,7 @@ std::optional<core::EngineError> readChunkIndex(std::string_view json, ChunkInde
         entry.id.x = static_cast<i32>(row["x"].asInteger());
         entry.id.z = static_cast<i32>(row["z"].asInteger());
         entry.id.layer = static_cast<i32>(row["layer"].asInteger());
+        entry.id.y = static_cast<i32>(row["y"].asInteger(0));
         entry.urn = std::string(row["urn"].asString());
         entry.instanceCount = static_cast<u32>(row["instances"].asInteger());
         entry.bytes = static_cast<u32>(row["bytes"].asInteger());

@@ -25,8 +25,10 @@ using core::LogLevel;
 // than to be repaired.
 // Two since terrain and block worlds leave the scene as cells of their own
 // (ADR 0075): a cache written by rules one holds a residual with the whole
-// field in it, which would boot correctly and stream nothing.
-constexpr core::u32 PartitionRules = 2;
+// field in it, which would boot correctly and stream nothing. Three since a
+// cell has a vertical band (ADR 0086): a cache from rules two filed a cave and
+// the ground over it as one cell.
+constexpr core::u32 PartitionRules = 3;
 
 constexpr std::string_view kManifest = "partition.json";
 constexpr std::string_view kScene = "scene.json";
@@ -35,7 +37,10 @@ constexpr std::string_view kFieldIndex = "fields.json";
 
 [[nodiscard]] std::string cellName(asset::ChunkId id)
 {
-    return "cell_" + std::to_string(id.x) + "_" + std::to_string(id.z) + "_" + std::to_string(id.layer) + ".lchunk";
+    // The band only when there is one, so a sea-level world's files keep their
+    // names.
+    return "cell_" + std::to_string(id.x) + "_" + std::to_string(id.z) + "_" + std::to_string(id.layer) +
+           (id.y != 0 ? "_y" + std::to_string(id.y) : std::string{}) + ".lchunk";
 }
 
 // A field cell's file, named for what it holds so a person reading the cache

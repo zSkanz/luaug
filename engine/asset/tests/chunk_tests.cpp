@@ -161,6 +161,66 @@ TEST_CASE("the grid puts a position in the cell that contains it")
     CHECK(bounds.max.z == 0.0);
 }
 
+TEST_CASE("a cell has a vertical band, centred on sea level (ADR 0086)")
+{
+    // Band zero is half a cell either side of y = 0, so a world lying near sea
+    // level is band zero throughout and keeps the cells a column grid gave it.
+    CHECK(chunkIdAt(luaug::core::DVec3{10.0, 0.0, 10.0}, 256.0f).y == 0);
+    CHECK(chunkIdAt(luaug::core::DVec3{10.0, 127.9, 10.0}, 256.0f).y == 0);
+    CHECK(chunkIdAt(luaug::core::DVec3{10.0, -128.0, 10.0}, 256.0f).y == 0);
+    CHECK(chunkIdAt(luaug::core::DVec3{10.0, 128.0, 10.0}, 256.0f).y == 1);
+    CHECK(chunkIdAt(luaug::core::DVec3{10.0, -128.1, 10.0}, 256.0f).y == -1);
+    // A cave four hundred metres down is a cell of its own.
+    CHECK(chunkIdAt(luaug::core::DVec3{10.0, -400.0, 10.0}, 256.0f) == ChunkId{0, 0, 0, -2});
+
+    const luaug::core::DAABB band = chunkBounds(ChunkId{0, 0, 0, -2}, 256.0f);
+    CHECK(band.min.y == -640.0);
+    CHECK(band.max.y == -384.0);
+}
+
+TEST_CASE("a cell's band survives its file and its index, and a column-grid file reads as band zero")
+{
+    seedRealCatalog();
+
+    Chunk deep = sampleChunk();
+    deep.id.y = -2;
+    const std::vector<std::byte> bytes = encodeChunk(deep);
+    Chunk decoded;
+    REQUIRE_FALSE(decodeChunk(bytes, decoded).has_value());
+    CHECK(decoded.id == deep.id);
+    CHECK(decoded.instances.size() == deep.instances.size());
+
+    // A version-two file: no band word after the layer.
+    std::vector<std::byte> columns = bytes;
+    columns[4] = std::byte{2};
+    columns.erase(columns.begin() + 24, columns.begin() + 28);
+    Chunk old;
+    REQUIRE_FALSE(decodeChunk(columns, old).has_value());
+    CHECK(old.id == ChunkId{3, -2, 0});
+    CHECK(old.instances.size() == deep.instances.size());
+
+    ChunkIndex index;
+    for (const ChunkId id : {ChunkId{0, 0, 0, -2}, ChunkId{0, 0, 0}, ChunkId{0, 0, 0, 1}}) {
+        ChunkIndexEntry entry;
+        entry.id = id;
+        entry.bounds = chunkBounds(id, index.chunkSize);
+        entry.urn = "asset://world/chunk.lchunk";
+        index.chunks.push_back(entry);
+    }
+    const std::string text = writeChunkIndex(index);
+    ChunkIndex parsed;
+    REQUIRE_FALSE(readChunkIndex(text, parsed).has_value());
+    REQUIRE(parsed.chunks.size() == 3);
+    CHECK(parsed.find(ChunkId{0, 0, 0, -2}) != nullptr);
+    CHECK(parsed.find(ChunkId{0, 0, 0, 1}) != nullptr);
+    CHECK(text.find("\"y\"") != std::string::npos);
+    // Band zero writes no band, so a sea-level world's index is the one it
+    // always wrote.
+    ChunkIndex seaLevel;
+    seaLevel.chunks.push_back(index.chunks[1]);
+    CHECK(writeChunkIndex(seaLevel).find("\"y\"") == std::string::npos);
+}
+
 TEST_CASE("a chunk index round-trips and comes back sorted")
 {
     seedRealCatalog();

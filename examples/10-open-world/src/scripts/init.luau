@@ -81,6 +81,11 @@ local StartHour = 22.5
 --- Below this you have fallen out of the world, which in a streamed world means
 --- you outran the ground. Recovered rather than fatal.
 local DeathHeight = -60
+--- The Deep's floor (`tools/generate_world.luau`), and how far under either
+--- ground counts as fallen: a character in the hall is a kilometre below the
+--- island on purpose, and only one below the hall has fallen out of it.
+local DeepFloor = -1000
+local DeepFall = 100
 
 -- --- The character -----------------------------------------------------------
 
@@ -184,6 +189,28 @@ StreamingService.MinRadius = 320
 -- cannot is the machine this is for.
 StreamingService.PauseOutsideLoadedArea = true
 StreamingService:AddFocus(character)
+
+-- **The lifts to the Deep**, a hall a kilometre under the island (ADR 0086).
+-- The streaming grid's cells are cubes, so going down unloads the island and
+-- loads the hall -- the pause above holds the character until the hall's floor
+-- is there -- and coming back does the reverse. Each lift puts the character
+-- beside the other pad rather than on it, and ignores a touch for a moment
+-- after, so arriving is not leaving again.
+local liftDown = fromScene("Scenery.Lifts.LiftDown") :: Part
+local liftUp = fromScene("Scenery.Lifts.LiftUp") :: Part
+local LiftSettle = 1.5
+local liftReadyAt = 0
+local function lift(pad: Part, destination: Part)
+    pad.Touched:Connect(function(other: BasePart)
+        if not rawequal(other, character) or RunService.SimTime < liftReadyAt then
+            return
+        end
+        liftReadyAt = RunService.SimTime + LiftSettle
+        character.Position = destination.Position + vector.create(8, 3, 0)
+    end)
+end
+lift(liftDown, liftUp)
+lift(liftUp, liftDown)
 
 -- --- Camera and sky ----------------------------------------------------------
 
@@ -529,7 +556,8 @@ RunService.Heartbeat:Connect(function(dt: number)
     -- height field above wherever it got to -- not at the start. Losing four
     -- kilometres of walking to a loading hitch would be the worse bug.
     local position = character.Position
-    if position.y < DeathHeight then
+    local belowIsland = position.y < DeathHeight and position.y > DeepFloor + DeepFall
+    if belowIsland or position.y < DeepFloor - DeepFall then
         character.Position = vector.create(position.x, heightAt(position.x, position.z) + 4, position.z)
         recoverSound:Play()
     end

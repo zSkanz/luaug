@@ -121,6 +121,8 @@ struct Partition
         scene::PartitionCellWritten written;
         written.urn =
             "cell_" + std::to_string(cell.id.x) + "_" + std::to_string(cell.id.z) + "_" + std::to_string(cell.id.layer);
+        if (cell.id.y != 0)
+            written.urn += "_y" + std::to_string(cell.id.y);
         written.bytes = static_cast<core::u32>(asset::encodeChunk(cell).size());
         out.cells.emplace(written.urn, cell);
         return written;
@@ -265,6 +267,37 @@ TEST_CASE("a loose part goes into the cell its position falls in")
     // cast gets wrong and a floor gets right.
     CHECK(partitioned.cells.count("cell_1_-1_0") == 1);
     CHECK(partitioned.result.scene.find("\"Near\"") == std::string::npos);
+}
+
+TEST_CASE("a cave under the ground is a cell of its own, and each is only as tall as what it holds (ADR 0086)")
+{
+    // **The owner's mandate, S4**: a player in a cave loaded the whole column
+    // above them, because a cell was a column and its box ran from the cave to
+    // the ground. Cut into bands, the two are two cells, and the surface is
+    // four hundred metres from anybody standing in the cave.
+    seedRealCatalog();
+    Sandbox sandbox;
+
+    const std::string text =
+        sceneText(partNode("Hut", 10.0, 1.0, 10.0) + "," + partNode("Crystal", 12.0, -400.0, 14.0));
+    const Partition partitioned = partition(sandbox, text);
+
+    REQUIRE(partitioned.cells.size() == 2);
+    REQUIRE(partitioned.cells.count("cell_0_0_0") == 1);
+    REQUIRE(partitioned.cells.count("cell_0_0_0_y-2") == 1);
+    const asset::Chunk& surface = partitioned.cells.at("cell_0_0_0");
+    const asset::Chunk& cave = partitioned.cells.at("cell_0_0_0_y-2");
+    CHECK(surface.bounds.min.y > -1.0);
+    CHECK(cave.bounds.max.y < -398.0);
+
+    // What the streaming manager scores a cell by: a focus in the cave is on
+    // top of the cave's cell and a long way from the surface's.
+    const core::DVec3 inCave{12.0, -399.0, 14.0};
+    CHECK(core::distanceSquared(cave.bounds, inCave) == doctest::Approx(0.0));
+    CHECK(core::distanceSquared(surface.bounds, inCave) > 390.0 * 390.0);
+    // And the index names both, apart.
+    CHECK(partitioned.result.index.find(asset::ChunkId{0, 0, 0}) != nullptr);
+    CHECK(partitioned.result.index.find(asset::ChunkId{0, 0, 0, -2}) != nullptr);
 }
 
 TEST_CASE("something the scene points at stays where it can be pointed at")

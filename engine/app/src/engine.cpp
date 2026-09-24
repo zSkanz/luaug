@@ -2804,9 +2804,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // nobody should pay without asking.
         //
         // Drawn at the camera's own height, so the grid follows somebody up a
-        // hill instead of being buried in it. A chunk is vertically unbounded --
-        // `chunkBounds` says so and means it -- so there is no height it
-        // belongs at, only a height it is USEFUL at.
+        // hill instead of being buried in it, and only the band the camera is
+        // in (ADR 0086): a band is taller than any hill, so within it there is
+        // no height a cell belongs at, only a height it is USEFUL at.
         if (streaming.active() && ((overlay.has_value() && overlay->panels().showChunkGrid) ||
                                    script::panelOpen(host->runtime().state(), "Streaming"))) {
             drawChunkGrid(streaming, editor.cameraCFrame().position.y, debugDraw);

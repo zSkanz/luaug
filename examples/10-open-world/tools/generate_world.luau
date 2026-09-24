@@ -302,7 +302,7 @@ while cx < HalfWorld do
                     table.insert(props, {
                         class = "Model",
                         name = "Tree",
-                        properties = { StreamingMode = "Enum.StreamingMode.Atomic" },
+                        properties = { StreamingMode = "Atomic" },
                         children = {
                             part("Trunk", 0, px, ground + trunk / 2, pz, 0.9, trunk, 0.9, PropPalette[BarkTint]),
                             part("Crown", 1, px, ground + trunk + crown * 0.3, pz, crown, crown, crown, foliage),
@@ -339,7 +339,7 @@ while cx < HalfWorld do
                 table.insert(towers, {
                     class = "Model",
                     name = "Tower",
-                    properties = { StreamingMode = "Enum.StreamingMode.Atomic" },
+                    properties = { StreamingMode = "Atomic" },
                     children = courses,
                 })
             end
@@ -348,6 +348,58 @@ while cx < HalfWorld do
     end
     cx += Cell
 end
+
+--- **The Deep: a hall a kilometre under the island** (ADR 0086). Further down
+--- than `LoadRadius` reaches, which is the point of it: the streaming grid's
+--- cells are cubes, so the hall is a band of cells of its own, and standing in
+--- it loads the hall and not the island over it -- nor the other way round.
+--- With the column grid it replaced, the hall and every island cell above it
+--- were one cell each, as tall as both.
+local DeepFloor = -1000
+local DeepHalf = 48
+local DeepStone = { 0.22, 0.2, 0.24 }
+local CrystalTints = { { 0.35, 0.85, 1 }, { 0.85, 0.4, 1 }, { 0.4, 1, 0.7 } }
+local deep: { Node } = {}
+do
+    local x = -DeepHalf
+    while x < DeepHalf do
+        local z = -DeepHalf
+        while z < DeepHalf do
+            table.insert(deep, part("Floor", 0, x + 8, DeepFloor - 1, z + 8, 16, 2, 16, DeepStone))
+            table.insert(deep, part("Vault", 0, x + 8, DeepFloor + 26, z + 8, 16, 2, 16, DeepStone))
+            z += 16
+        end
+        x += 16
+    end
+    for index = 0, 7 do
+        local angle = index * math.pi / 4
+        local px = math.cos(angle) * 34
+        local pz = math.sin(angle) * 34
+        table.insert(deep, part("Pillar", 0, px, DeepFloor + 12.5, pz, 3, 25, 3, DeepStone))
+    end
+    for index = 1, 40 do
+        local px = (hash(index, 3, 41) - 0.5) * 2 * (DeepHalf - 4)
+        local pz = (hash(index, 7, 43) - 0.5) * 2 * (DeepHalf - 4)
+        local size = 0.6 + hash(index, 11, 47) * 1.8
+        local tint = CrystalTints[1 + math.floor(hash(index, 13, 53) * #CrystalTints)]
+        table.insert(deep, part("Crystal", 0, px, DeepFloor + size / 2, pz, size * 0.6, size * 1.6, size * 0.6, tint))
+    end
+end
+
+--- The two lifts: a pad beside the start that goes down, and one in the hall
+--- that comes back (`src/scripts/init.luau`). **Persistent**, because a script
+--- finds them by name at boot, and a part in a streamed cell is not there to be
+--- found until its cell is.
+local LiftTint = { 0.25, 0.55, 1 }
+local lifts: Node = {
+    class = "Model",
+    name = "Lifts",
+    properties = { StreamingMode = "Persistent" },
+    children = {
+        part("LiftDown", 0, 40, heightAt(40, 16) + 0.2, 16, 6, 0.4, 6, LiftTint),
+        part("LiftUp", 0, 0, DeepFloor + 0.2, 20, 6, 0.4, 6, LiftTint),
+    },
+}
 
 local scene: any = json.deserialize(fs.readFileToString(ScenePath))
 local replaced = false
@@ -358,6 +410,8 @@ for _, child in scene.root.children do
             folder("Sea", sea),
             folder("Props", props),
             folder("Towers", towers),
+            folder("Deep", deep),
+            lifts,
         }
         replaced = true
     end
@@ -367,4 +421,4 @@ if not replaced then
 end
 
 fs.writeStringToFile(ScenePath, json.serialize(scene) .. "\n")
-print(`{#terrain} ground, {#sea} water, {#props} props, {#towers} towers -> {ScenePath}`)
+print(`{#terrain} ground, {#sea} water, {#props} props, {#towers} towers, {#deep} deep -> {ScenePath}`)

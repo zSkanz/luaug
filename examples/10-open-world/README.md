@@ -29,6 +29,12 @@ on a slow machine.
 
 ## What to watch for
 
+- **The lift beside the start goes down a kilometre, to the Deep.** Streaming
+  cells are cubes (ADR 0086), so the hall is cells of its own: going down
+  unloads the island and loads the hall, and the character waits on the pause
+  until the hall's floor is there. The pad in the hall brings you back. Turn on
+  `View > Streaming Grid` on the way down and watch the grid change band.
+
 - **The world arrives before you reach it.** `MinRadius` is the ring that must
   be resident before the focus may advance into it; `LoadRadius` is the
   best-effort ring beyond. The gap between them is hysteresis — a single radius
