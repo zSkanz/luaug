@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace luaug::core {
 namespace {
@@ -65,6 +66,12 @@ std::string jsonQuote(std::string_view text)
     return out;
 }
 
+void JsonWriter::newline(usize depth)
+{
+    m_text.push_back('\n');
+    m_text.append(2 * depth, ' ');
+}
+
 void JsonWriter::separate()
 {
     if (m_expectingValue) {
@@ -72,9 +79,16 @@ void JsonWriter::separate()
         return;
     }
     if (!m_populated.empty()) {
-        if (m_populated.back() != '\0')
+        const bool first = m_populated.back() == '\0';
+        if (!first)
             m_text.push_back(',');
         m_populated.back() = '\1';
+        if (m_layout == JsonLayout::Indented) {
+            if (m_inline.back() == '\0')
+                newline(m_populated.size());
+            else if (!first)
+                m_text.push_back(' ');
+        }
     }
 }
 
@@ -83,13 +97,18 @@ void JsonWriter::beginObject()
     separate();
     m_text.push_back('{');
     m_populated.push_back('\0');
+    m_inline.push_back('\0');
 }
 
 void JsonWriter::endObject()
 {
-    m_text.push_back('}');
-    if (!m_populated.empty())
+    if (!m_populated.empty()) {
+        if (m_layout == JsonLayout::Indented && m_populated.back() != '\0' && m_inline.back() == '\0')
+            newline(m_populated.size() - 1);
         m_populated.pop_back();
+        m_inline.pop_back();
+    }
+    m_text.push_back('}');
 }
 
 void JsonWriter::beginArray()
@@ -97,13 +116,26 @@ void JsonWriter::beginArray()
     separate();
     m_text.push_back('[');
     m_populated.push_back('\0');
+    m_inline.push_back('\0');
+}
+
+void JsonWriter::beginInlineArray()
+{
+    separate();
+    m_text.push_back('[');
+    m_populated.push_back('\0');
+    m_inline.push_back('\1');
 }
 
 void JsonWriter::endArray()
 {
-    m_text.push_back(']');
-    if (!m_populated.empty())
+    if (!m_populated.empty()) {
+        if (m_layout == JsonLayout::Indented && m_populated.back() != '\0' && m_inline.back() == '\0')
+            newline(m_populated.size() - 1);
         m_populated.pop_back();
+        m_inline.pop_back();
+    }
+    m_text.push_back(']');
 }
 
 void JsonWriter::key(std::string_view name)
@@ -111,6 +143,8 @@ void JsonWriter::key(std::string_view name)
     separate();
     m_text.append(jsonQuote(name));
     m_text.push_back(':');
+    if (m_layout == JsonLayout::Indented)
+        m_text.push_back(' ');
     m_expectingValue = true;
 }
 
@@ -157,6 +191,27 @@ void JsonWriter::value(u64 number)
     m_text.append(std::to_string(number));
 }
 
+void JsonWriter::valueFloat(f32 number)
+{
+    separate();
+    if (!std::isfinite(number)) {
+        m_text.append("null");
+        return;
+    }
+    // Nine significant digits always round-trip a float; the loop finds the
+    // fewest that already do. `%g` rather than a hand-written formatter, so
+    // this is the C library's rounding and nobody else's.
+    std::array<char, kNumberBuffer> buffer{};
+    int written = 0;
+    for (int digits = 1; digits <= 9; ++digits) {
+        written = std::snprintf(buffer.data(), buffer.size(), "%.*g", digits, static_cast<f64>(number));
+        if (written > 0 && std::strtof(buffer.data(), nullptr) == number)
+            break;
+    }
+    if (written > 0)
+        m_text.append(buffer.data(), static_cast<usize>(written));
+}
+
 void JsonWriter::nullValue()
 {
     separate();
@@ -193,10 +248,17 @@ void JsonWriter::field(std::string_view name, u64 number)
     value(number);
 }
 
+void JsonWriter::fieldFloat(std::string_view name, f32 number)
+{
+    key(name);
+    valueFloat(number);
+}
+
 void JsonWriter::clear()
 {
     m_text.clear();
     m_populated.clear();
+    m_inline.clear();
     m_expectingValue = false;
 }
 

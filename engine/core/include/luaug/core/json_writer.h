@@ -20,10 +20,21 @@
 
 namespace luaug::core {
 
+// How a writer lays its text out. `Compact` is every message and every scene:
+// bytes another program reads. `Indented` is for a file a PERSON authors and
+// reviews in a diff -- a material (ADR 0090) -- where one field per line is
+// what makes a change to one field a one-line change.
+enum class JsonLayout : u8
+{
+    Compact,
+    Indented,
+};
+
 class JsonWriter
 {
 public:
     JsonWriter() = default;
+    explicit JsonWriter(JsonLayout layout) : m_layout(layout) {}
 
     // Objects and arrays. Each `begin` needs its `end`; the writer inserts the
     // separating commas itself, which is the whole reason it is a writer rather
@@ -31,6 +42,9 @@ public:
     void beginObject();
     void endObject();
     void beginArray();
+    // An array written on one line even in the indented layout: a colour's
+    // three numbers read as one value, and three lines for them would not.
+    void beginInlineArray();
     void endArray();
 
     // Names the next value. Only legal inside an object.
@@ -43,6 +57,11 @@ public:
     void value(i64 number);
     void value(u64 number);
     void nullValue();
+    // **The shortest decimal that reads back as the same `f32`**, where
+    // `value(f64)` writes seventeen digits. A float field authored as 0.7 is
+    // 0.699999988 in single precision, and `%.17g` of that is noise a person
+    // would have to read past in every diff.
+    void valueFloat(f32 number);
 
     // `key` + `value`, which is what almost every call site wants.
     void field(std::string_view name, std::string_view text);
@@ -51,17 +70,22 @@ public:
     void field(std::string_view name, f64 number);
     void field(std::string_view name, i64 number);
     void field(std::string_view name, u64 number);
+    void fieldFloat(std::string_view name, f32 number);
 
     [[nodiscard]] const std::string& text() const noexcept { return m_text; }
     void clear();
 
 private:
     void separate();
+    void newline(usize depth);
 
+    JsonLayout m_layout = JsonLayout::Compact;
     std::string m_text;
     // One flag per open container: whether it already holds something, which is
     // what decides a comma.
     std::string m_populated;
+    // Beside it, one flag per open container: whether it is written on one line.
+    std::string m_inline;
     // True immediately after `key`, so the value that follows is not preceded
     // by a comma of its own.
     bool m_expectingValue = false;

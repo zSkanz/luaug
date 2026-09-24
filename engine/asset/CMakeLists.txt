@@ -24,6 +24,7 @@ luaug_add_module(asset
         src/voxel.cpp
         src/voxel_mesher.cpp
         src/image.cpp
+        src/material.cpp
         src/gltf.cpp
         src/mesh_format.cpp
         src/model_split.cpp
@@ -72,6 +73,7 @@ luaug_add_module_tests(asset
         tests/field_cells_tests.cpp
         tests/voxel_tests.cpp
         tests/image_tests.cpp
+        tests/material_tests.cpp
         tests/gltf_tests.cpp
         tests/mesh_format_tests.cpp
         tests/model_split_tests.cpp

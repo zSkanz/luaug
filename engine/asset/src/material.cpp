@@ -1,0 +1,595 @@
+#include "luaug/asset/material.h"
+
+#include "luaug/core/i18n.h"
+#include "luaug/core/json.h"
+#include "luaug/core/json_writer.h"
+#include "luaug/core/log.h"
+#include "luaug/platform/file.h"
+
+#include <array>
+#include <cmath>
+#include <utility>
+
+namespace luaug::asset {
+
+namespace {
+
+constexpr std::array<std::string_view, MaterialFieldCount> FieldNames{
+    "Color",     "Transparency", "ColorMap",    "NormalMap", "MetallicRoughnessMap", "Emissive",    "EmissiveMap",
+    "Metalness", "Roughness",    "NormalScale", "AlphaMode", "AlphaCutoff",          "DoubleSided",
+};
+
+constexpr std::array<std::string_view, 3> AlphaModeNames{"Opaque", "Mask", "Blend"};
+
+enum class FieldShape : core::u8
+{
+    Color,
+    Number,
+    Map,
+    AlphaMode,
+    Flag,
+};
+
+[[nodiscard]] FieldShape shapeOf(MaterialField field) noexcept
+{
+    switch (field) {
+    case MaterialField::Color:
+    case MaterialField::Emissive:
+        return FieldShape::Color;
+    case MaterialField::ColorMap:
+    case MaterialField::NormalMap:
+    case MaterialField::MetallicRoughnessMap:
+    case MaterialField::EmissiveMap:
+        return FieldShape::Map;
+    case MaterialField::AlphaMode:
+        return FieldShape::AlphaMode;
+    case MaterialField::DoubleSided:
+        return FieldShape::Flag;
+    default:
+        return FieldShape::Number;
+    }
+}
+
+// Where each field lives, for a mutable or a const description alike: one
+// table of which field is where, rather than two that could disagree.
+template <class Properties>
+[[nodiscard]] auto* colorField(MaterialField field, Properties& p) noexcept
+{
+    return field == MaterialField::Color ? &p.color : field == MaterialField::Emissive ? &p.emissive : nullptr;
+}
+
+template <class Properties>
+[[nodiscard]] auto* numberField(MaterialField field, Properties& p) noexcept
+{
+    switch (field) {
+    case MaterialField::Transparency:
+        return &p.transparency;
+    case MaterialField::Metalness:
+        return &p.metalness;
+    case MaterialField::Roughness:
+        return &p.roughness;
+    case MaterialField::NormalScale:
+        return &p.normalScale;
+    case MaterialField::AlphaCutoff:
+        return &p.alphaCutoff;
+    default:
+        return static_cast<decltype(&p.transparency)>(nullptr);
+    }
+}
+
+template <class Properties>
+[[nodiscard]] auto* mapField(MaterialField field, Properties& p) noexcept
+{
+    switch (field) {
+    case MaterialField::ColorMap:
+        return &p.colorMap;
+    case MaterialField::NormalMap:
+        return &p.normalMap;
+    case MaterialField::MetallicRoughnessMap:
+        return &p.metallicRoughnessMap;
+    case MaterialField::EmissiveMap:
+        return &p.emissiveMap;
+    default:
+        return static_cast<decltype(&p.colorMap)>(nullptr);
+    }
+}
+
+[[nodiscard]] bool readColor(const core::JsonValue& json, core::Color3& out)
+{
+    if (json.type() != core::JsonType::Array || json.size() != 3)
+        return false;
+    for (core::usize index = 0; index < 3; ++index) {
+        if (json.at(index).type() != core::JsonType::Number)
+            return false;
+    }
+    out = core::Color3{static_cast<core::f32>(json.at(0).asNumber()), static_cast<core::f32>(json.at(1).asNumber()),
+                       static_cast<core::f32>(json.at(2).asNumber())};
+    return std::isfinite(out.r) && std::isfinite(out.g) && std::isfinite(out.b);
+}
+
+// One field's value from the file into `into`, or false for a value of the
+// wrong shape.
+[[nodiscard]] bool readField(MaterialField field, const core::JsonValue& json, MaterialProperties& into)
+{
+    switch (shapeOf(field)) {
+    case FieldShape::Color:
+        return readColor(json, *colorField(field, into));
+    case FieldShape::Number: {
+        if (json.type() != core::JsonType::Number)
+            return false;
+        const auto number = static_cast<core::f32>(json.asNumber());
+        if (!std::isfinite(number))
+            return false;
+        *numberField(field, into) = number;
+        return true;
+    }
+    case FieldShape::Map:
+        if (json.type() != core::JsonType::String)
+            return false;
+        *mapField(field, into) = std::string(json.asString());
+        return true;
+    case FieldShape::AlphaMode:
+        if (json.type() != core::JsonType::String)
+            return false;
+        for (core::usize index = 0; index < AlphaModeNames.size(); ++index) {
+            if (json.asString() == AlphaModeNames[index]) {
+                into.alphaMode = static_cast<core::i32>(index);
+                return true;
+            }
+        }
+        return false;
+    case FieldShape::Flag:
+        if (json.type() != core::JsonType::Boolean)
+            return false;
+        into.doubleSided = json.asBool();
+        return true;
+    }
+    return false;
+}
+
+void writeField(core::JsonWriter& out, MaterialField field, const MaterialProperties& from)
+{
+    out.key(materialFieldName(field));
+    switch (shapeOf(field)) {
+    case FieldShape::Color: {
+        const core::Color3& c = *colorField(field, from);
+        out.beginInlineArray();
+        out.valueFloat(c.r);
+        out.valueFloat(c.g);
+        out.valueFloat(c.b);
+        out.endArray();
+        return;
+    }
+    case FieldShape::Number:
+        out.valueFloat(*numberField(field, from));
+        return;
+    case FieldShape::Map:
+        out.value(*mapField(field, from));
+        return;
+    case FieldShape::AlphaMode: {
+        const auto mode = static_cast<core::usize>(from.alphaMode);
+        out.value(mode < AlphaModeNames.size() ? AlphaModeNames[mode] : AlphaModeNames[0]);
+        return;
+    }
+    case FieldShape::Flag:
+        out.value(from.doubleSided);
+        return;
+    }
+}
+
+} // namespace
+
+std::string_view materialFieldName(MaterialField field) noexcept
+{
+    const auto index = static_cast<core::usize>(field);
+    return index < FieldNames.size() ? FieldNames[index] : std::string_view{};
+}
+
+std::optional<MaterialField> materialFieldNamed(std::string_view name) noexcept
+{
+    for (core::usize index = 0; index < FieldNames.size(); ++index) {
+        if (FieldNames[index] == name)
+            return static_cast<MaterialField>(index);
+    }
+    return std::nullopt;
+}
+
+bool isMaterialPath(std::string_view path) noexcept
+{
+    return path.size() > MaterialSuffix.size() && path.ends_with(MaterialSuffix);
+}
+
+void copyMaterialField(MaterialField field, const MaterialProperties& from, MaterialProperties& into)
+{
+    switch (shapeOf(field)) {
+    case FieldShape::Color:
+        *colorField(field, into) = *colorField(field, from);
+        return;
+    case FieldShape::Number:
+        *numberField(field, into) = *numberField(field, from);
+        return;
+    case FieldShape::Map:
+        *mapField(field, into) = *mapField(field, from);
+        return;
+    case FieldShape::AlphaMode:
+        into.alphaMode = from.alphaMode;
+        return;
+    case FieldShape::Flag:
+        into.doubleSided = from.doubleSided;
+        return;
+    }
+}
+
+bool sameMaterialField(MaterialField field, const MaterialProperties& a, const MaterialProperties& b)
+{
+    switch (shapeOf(field)) {
+    case FieldShape::Color:
+        return *colorField(field, a) == *colorField(field, b);
+    case FieldShape::Number:
+        return *numberField(field, a) == *numberField(field, b);
+    case FieldShape::Map:
+        return *mapField(field, a) == *mapField(field, b);
+    case FieldShape::AlphaMode:
+        return a.alphaMode == b.alphaMode;
+    case FieldShape::Flag:
+        return a.doubleSided == b.doubleSided;
+    }
+    return false;
+}
+
+std::optional<MaterialAsset> readMaterialAsset(std::string_view json, MaterialReadNotes* notes, std::string* error)
+{
+    MaterialReadNotes scratch;
+    MaterialReadNotes& noted = notes != nullptr ? *notes : scratch;
+
+    core::JsonDocument document;
+    if (const core::JsonDocument::ParseResult parsed = document.parse(json, "material"); !parsed) {
+        if (error != nullptr)
+            *error = parsed.diagnostic;
+        return std::nullopt;
+    }
+    const core::JsonValue root = document.root();
+    if (root.type() != core::JsonType::Object || root["format"].asString() != MaterialFormat) {
+        if (error != nullptr)
+            *error = "not a luaug-material file";
+        return std::nullopt;
+    }
+    if (root["version"].asInteger() != MaterialFormatVersion) {
+        if (error != nullptr)
+            *error =
+                "material version " + std::to_string(root["version"].asInteger()) + " is not one this engine reads";
+        return std::nullopt;
+    }
+
+    MaterialAsset out;
+    for (core::usize index = 0; index < root.size(); ++index) {
+        const std::string_view key = root.keyAt(index);
+        if (key == "format" || key == "version")
+            continue;
+        const core::JsonValue value = root[key];
+        if (key == "parent") {
+            if (value.type() == core::JsonType::String)
+                out.parent = std::string(value.asString());
+            else
+                noted.malformedFields.emplace_back(key);
+            continue;
+        }
+        if (key == "instanceParameters") {
+            if (value.type() != core::JsonType::Array) {
+                noted.malformedFields.emplace_back(key);
+                continue;
+            }
+            for (core::usize item = 0; item < value.size(); ++item) {
+                const std::optional<MaterialField> field = materialFieldNamed(value.at(item).asString());
+                if (!field.has_value() || (fieldBit(*field) & DeclarableParameters) == 0) {
+                    noted.unknownFields.push_back("instanceParameters." + std::string(value.at(item).asString()));
+                    continue;
+                }
+                out.instanceParameters |= fieldBit(*field);
+            }
+            continue;
+        }
+        if (key == "properties") {
+            if (value.type() != core::JsonType::Object) {
+                noted.malformedFields.emplace_back(key);
+                continue;
+            }
+            for (core::usize item = 0; item < value.size(); ++item) {
+                const std::string_view name = value.keyAt(item);
+                const std::optional<MaterialField> field = materialFieldNamed(name);
+                if (!field.has_value()) {
+                    noted.unknownFields.push_back("properties." + std::string(name));
+                    continue;
+                }
+                if (!readField(*field, value[name], out.properties)) {
+                    noted.malformedFields.push_back("properties." + std::string(name));
+                    continue;
+                }
+                out.written |= fieldBit(*field);
+            }
+            continue;
+        }
+        noted.unknownFields.emplace_back(key);
+    }
+    return out;
+}
+
+std::string writeMaterialAsset(const MaterialAsset& material)
+{
+    core::JsonWriter out(core::JsonLayout::Indented);
+    out.beginObject();
+    out.field("format", MaterialFormat);
+    out.field("version", MaterialFormatVersion);
+    out.field("parent", material.parent);
+
+    out.key("instanceParameters");
+    out.beginInlineArray();
+    for (core::usize index = 0; index < MaterialFieldCount; ++index) {
+        const auto field = static_cast<MaterialField>(index);
+        if ((material.instanceParameters & DeclarableParameters & fieldBit(field)) != 0)
+            out.value(materialFieldName(field));
+    }
+    out.endArray();
+
+    // A base says everything, so reading it never depends on this engine's
+    // defaults staying where they are; a variant says only what differs, so
+    // editing its parent reaches it.
+    const MaterialFieldMask written = material.parent.empty() ? AllMaterialFields : material.written;
+    out.key("properties");
+    out.beginObject();
+    for (core::usize index = 0; index < MaterialFieldCount; ++index) {
+        const auto field = static_cast<MaterialField>(index);
+        if ((written & fieldBit(field)) != 0)
+            writeField(out, field, material.properties);
+    }
+    out.endObject();
+    out.endObject();
+
+    std::string text = out.text();
+    text.push_back('\n');
+    return text;
+}
+
+const ResolvedMaterial& defaultMaterial() noexcept
+{
+    static const ResolvedMaterial Default{};
+    return Default;
+}
+
+ResolvedMaterial resolveMaterial(std::string_view urn, const MaterialLookup& lookup, MaterialResolveNotes* notes)
+{
+    if (urn.empty() || !lookup)
+        return defaultMaterial();
+
+    // Child first, as the parents are walked; applied in reverse.
+    std::vector<const MaterialAsset*> chain;
+    std::vector<std::string> visited;
+    std::string current(urn);
+    while (!current.empty()) {
+        for (const std::string& seen : visited) {
+            if (seen == current) {
+                // **Refused, and the engine default instead**: there is no order
+                // to apply a loop in, and picking one would make the answer
+                // depend on which file the walk happened to start from.
+                if (notes != nullptr)
+                    notes->cycleClosedBy = visited.back();
+                return defaultMaterial();
+            }
+        }
+        const MaterialAsset* found = lookup(current);
+        if (found == nullptr) {
+            if (!chain.empty() && notes != nullptr) {
+                notes->missingParentOf = visited.back();
+                notes->missingParent = current;
+            }
+            break;
+        }
+        visited.push_back(current);
+        chain.push_back(found);
+        current = found->parent;
+    }
+    if (chain.empty())
+        return defaultMaterial();
+
+    // **A material with a file declares only what its files declare** -- the
+    // engine default's `Color` and `Transparency` are the default's, and an
+    // authored material is exactly what its author wrote (ADR 0090).
+    ResolvedMaterial out;
+    out.instanceParameters = 0;
+    for (auto link = chain.rbegin(); link != chain.rend(); ++link) {
+        const MaterialAsset& asset = **link;
+        // The root of the chain is a base, and a base missing a field means the
+        // default for it; `written` covers exactly what a file said.
+        for (core::usize index = 0; index < MaterialFieldCount; ++index) {
+            const auto field = static_cast<MaterialField>(index);
+            if ((asset.written & fieldBit(field)) != 0)
+                copyMaterialField(field, asset.properties, out.properties);
+        }
+        out.instanceParameters |= static_cast<MaterialFieldMask>(asset.instanceParameters & DeclarableParameters);
+    }
+    return out;
+}
+
+bool setOverride(MaterialOverrides& overrides, MaterialField field, const MaterialProperties& from)
+{
+    if ((fieldBit(field) & DeclarableParameters) == 0)
+        return false;
+    switch (field) {
+    case MaterialField::Color:
+        overrides.color = from.color;
+        break;
+    case MaterialField::Transparency:
+        overrides.transparency = from.transparency;
+        break;
+    case MaterialField::Emissive:
+        overrides.emissive = from.emissive;
+        break;
+    case MaterialField::Metalness:
+        overrides.metalness = from.metalness;
+        break;
+    case MaterialField::Roughness:
+        overrides.roughness = from.roughness;
+        break;
+    case MaterialField::NormalScale:
+        overrides.normalScale = from.normalScale;
+        break;
+    case MaterialField::AlphaCutoff:
+        overrides.alphaCutoff = from.alphaCutoff;
+        break;
+    default:
+        return false;
+    }
+    overrides.set |= fieldBit(field);
+    return true;
+}
+
+void clearOverride(MaterialOverrides& overrides, MaterialField field)
+{
+    if ((fieldBit(field) & DeclarableParameters) == 0)
+        return;
+    // The storage goes back to the blank value too, so two override sets that
+    // hold the same overrides compare equal whatever they held before.
+    const MaterialFieldMask keep = static_cast<MaterialFieldMask>(overrides.set & ~fieldBit(field));
+    (void)setOverride(overrides, field, overrideValues(MaterialOverrides{}));
+    overrides.set = keep;
+}
+
+MaterialProperties overrideValues(const MaterialOverrides& overrides)
+{
+    MaterialProperties out;
+    out.color = overrides.color;
+    out.transparency = overrides.transparency;
+    out.emissive = overrides.emissive;
+    out.metalness = overrides.metalness;
+    out.roughness = overrides.roughness;
+    out.normalScale = overrides.normalScale;
+    out.alphaCutoff = overrides.alphaCutoff;
+    return out;
+}
+
+void applyOverrides(const MaterialOverrides& overrides, MaterialFieldMask declared, MaterialProperties& into)
+{
+    const MaterialFieldMask applied = static_cast<MaterialFieldMask>(overrides.set & declared & DeclarableParameters);
+    if (applied == 0)
+        return;
+    const MaterialProperties values = overrideValues(overrides);
+    for (core::usize index = 0; index < MaterialFieldCount; ++index) {
+        const auto field = static_cast<MaterialField>(index);
+        if ((applied & fieldBit(field)) != 0)
+            copyMaterialField(field, values, into);
+    }
+}
+
+// --- the library -------------------------------------------------------------
+
+void MaterialLibrary::setSource(Source source)
+{
+    m_source = std::move(source);
+    forgetAll();
+}
+
+const MaterialAsset* MaterialLibrary::asset(std::string_view urn)
+{
+    if (urn.empty())
+        return nullptr;
+    const std::string key(urn);
+    if (const auto found = m_assets.find(key); found != m_assets.end())
+        return found->second.asset.has_value() ? &*found->second.asset : nullptr;
+
+    Loaded loaded;
+    if (m_source) {
+        MaterialReadNotes notes;
+        loaded.asset = m_source(urn, notes);
+        // Said once per load -- the entry below is what stops it being said
+        // every frame -- and not fatal: what this engine understands still
+        // applies.
+        for (const std::string& field : notes.unknownFields) {
+            const std::array<core::I18nArg, 2> args{core::I18nArg{"path", key}, core::I18nArg{"field", field}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.warn.unknown_field"), args);
+        }
+        for (const std::string& field : notes.malformedFields) {
+            const std::array<core::I18nArg, 2> args{core::I18nArg{"path", key}, core::I18nArg{"field", field}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.warn.malformed_field"), args);
+        }
+    }
+    const auto [at, inserted] = m_assets.emplace(key, std::move(loaded));
+    (void)inserted;
+    return at->second.asset.has_value() ? &*at->second.asset : nullptr;
+}
+
+const ResolvedMaterial& MaterialLibrary::resolve(std::string_view urn)
+{
+    if (urn.empty())
+        return defaultMaterial();
+    const std::string key(urn);
+    if (const auto found = m_resolved.find(key); found != m_resolved.end())
+        return found->second;
+
+    MaterialResolveNotes notes;
+    ResolvedMaterial resolved = resolveMaterial(urn, [this](std::string_view link) { return asset(link); }, &notes);
+    if (asset(urn) == nullptr) {
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"path", key}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.warn.missing"), args);
+    }
+    if (!notes.cycleClosedBy.empty()) {
+        const std::array<core::I18nArg, 2> args{core::I18nArg{"path", key},
+                                                core::I18nArg{"closedBy", notes.cycleClosedBy}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.warn.cycle"), args);
+    }
+    if (!notes.missingParent.empty()) {
+        const std::array<core::I18nArg, 2> args{core::I18nArg{"path", notes.missingParentOf},
+                                                core::I18nArg{"parent", notes.missingParent}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.warn.missing_parent"), args);
+    }
+    return m_resolved.emplace(key, std::move(resolved)).first->second;
+}
+
+void MaterialLibrary::forget(std::string_view urn)
+{
+    m_assets.erase(std::string(urn));
+    m_resolved.clear();
+    ++m_revision;
+}
+
+void MaterialLibrary::forgetAll()
+{
+    m_assets.clear();
+    m_resolved.clear();
+    ++m_revision;
+}
+
+void MaterialLibrary::put(std::string_view urn, MaterialAsset material)
+{
+    m_assets[std::string(urn)] = Loaded{std::move(material)};
+    m_resolved.clear();
+    ++m_revision;
+}
+
+MaterialLibrary::Source mountedMaterials(const ContentMounts& mounts)
+{
+    return [&mounts](std::string_view urn, MaterialReadNotes& notes) -> std::optional<MaterialAsset> {
+        const ResolvedContent resolved = mounts.resolve(urn);
+        if (!resolved.found())
+            return std::nullopt;
+        std::string text;
+        if (resolved.source == ResolvedContent::Source::Loose) {
+            std::vector<std::byte> bytes;
+            if (!platform::readFile(resolved.path, bytes))
+                return std::nullopt;
+            text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        }
+        else {
+            text.assign(reinterpret_cast<const char*>(resolved.bytes.data()), resolved.bytes.size());
+        }
+        std::string error;
+        std::optional<MaterialAsset> material = readMaterialAsset(text, &notes, &error);
+        if (!material.has_value()) {
+            const std::array<core::I18nArg, 2> args{core::I18nArg{"path", std::string(urn)},
+                                                    core::I18nArg{"reason", error}};
+            core::log(core::LogLevel::Warn, LUAUG_TR("asset.material.err.unreadable"), args);
+        }
+        return material;
+    };
+}
+
+} // namespace luaug::asset
