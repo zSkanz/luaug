@@ -1,0 +1,16 @@
+# A platformer (the 2D layer, phase 3): Part2D, Tilemap2D and an
+# orthographic camera.
+#
+# No scene file: the level is an ASCII map in the script, so changing it is
+# editing text -- or painting it with the editor's Tiles tool.
+
+[project]
+name = "LuauG Platformer"
+id = "dev.luaug.platformer"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Platformer"
+width = 1280
+height = 720

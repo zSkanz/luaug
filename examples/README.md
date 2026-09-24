@@ -22,6 +22,7 @@ automated headless gate script (screenshot/capture + asserted behavior):
 | `18-world-ui` | post-v1 phase 2 | `SurfaceGui` and `BillboardGui`: a scoreboard with rich text on a wall, name tags and health bars over crates, and a sign sized in metres -- all drawn in the world, hidden by what is in front. The scoreboard's "Next round" button is pressed like a screen's |
 | `19-terrain-test` | post-v1 phase 2 | Every controlled case of the terrain report side by side -- flat, slope, hill, a ball added and taken away, tunnel, cave, wall, overhang, a chunk corner -- toured from above, the side and below, with the mesh and its normals one flag away |
 | `17-cave` | post-v1 phase 2 | `Terrain` as a volume: a mountain with a tunnel dug into its side, a chamber and a skylight shaft, and a camera that flies through it -- dark inside, lit by its lamps |
+| `20-platformer` | post-v1 phase 3 | the 2D layer: a level painted on a `Tilemap2D` from an ASCII map, a `Part2D` hero with coyote time, a jump buffer and variable jump height, coin and flag sensors through `Touched`, and an orthographic camera that follows |
 
 Assets used by examples must be permissively licensed and recorded in
 `THIRD_PARTY_NOTICES.md`. Keep binary assets tiny until the git-LFS ADR (M4);

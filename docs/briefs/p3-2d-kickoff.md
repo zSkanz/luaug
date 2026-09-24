@@ -97,6 +97,8 @@ ruled out in writing.
   *(B, C and D done 2026-09-23, as one commit -- see Findings 1.)*
 - **2D-E** The editor's 2D view and Tiles tool. *(Done 2026-09-23.)*
 - **2D-F** `examples/20-platformer`, conformance specs, documentation.
+  *(Done 2026-09-24: the example, `world/layer2d.spec.luau`, and the manual's
+  "2D games" page.)*
 - **2D-G** Replication: `Part2D` and tilemap edits on protocol 11.
 
 ## The survey this rests on (2026-09-23)
@@ -172,3 +174,18 @@ ruled out in writing.
     owner's report that a brush acting with its panel closed was a trap. A
     stroke paints the Bresenham line between frames, so a fast drag leaves no
     gaps, and is one undo step.
+11. **The first 2D frame found a renderer defect the 3D ones hid (D181).** The
+    bloom chain sampled with a repeating sampler, so a bright bottom edge drew
+    a band along the top; a 3D frame's top is sky and bright already. It also
+    shows that **sprites bloom**: the post chain treats them as the scene they
+    are in, and pixel art wants a neutral one. Deciding that is a question of
+    the post chain's API -- `Lighting` has no bloom control today -- and is
+    left to it rather than special-cased for sprites.
+12. **A platformer's feel is the controller, not the physics.** The example
+    sets velocity from input with acceleration, and adds coyote time, a jump
+    buffer and variable jump height; the body is a fixed-rotation box with no
+    friction, grounded by three short rays. Those are game code on purpose:
+    each game tunes them, and the engine's job is to make them easy to write.
+    Headless, a scripted pilot holding right and jumping on a timer runs at
+    7 m/s, collects coins through sensor `Touched`, falls into the first pit
+    and respawns -- the whole loop, with no input device.
