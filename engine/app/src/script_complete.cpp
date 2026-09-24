@@ -568,6 +568,29 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     }
 
     if (request.joined) {
+        // **What this file's own code says the path is, first** (the owner's
+        // report: `Snake.` offered nothing in a file that had just built
+        // `Snake`). A table the file fills in, an instance of one, a type it
+        // wrote, or an engine class a value is annotated or made as. When it
+        // cannot tell, what follows answers as it always did.
+        if (const SourceMembers own = sourceMembersOf(document.text(), request.path, request.replace.end); own.known) {
+            if (!own.className.empty()) {
+                if (const scene::ClassId named = classes.findId(atoms.lookup(own.className));
+                    named != scene::InvalidClass)
+                    collectMembers(classes, atoms, named, request, out);
+            }
+            for (const SourceMember& member : own.members) {
+                if (request.method && !member.callable)
+                    continue;
+                push(out, request, member.name, member.detail, "",
+                     member.callable ? CompletionKind::Method : CompletionKind::Property);
+            }
+            if (!out.empty()) {
+                sortCompletions(out);
+                return;
+            }
+        }
+
         // **The instance first, its class second.** A resolved path knows both
         // -- what the thing IS and what is inside it -- and a class name alone
         // knows only the first. `classOfSubject` is the fallback for a local

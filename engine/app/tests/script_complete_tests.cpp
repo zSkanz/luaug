@@ -816,3 +816,91 @@ TEST_CASE("a call with a string argument and no parentheses offers nothing insid
     CHECK(after.subject.empty());
     CHECK(after.quoted == app::CompletionQuoted::No);
 }
+
+namespace {
+
+// The owner's friend's file, which is what these cases are held to.
+constexpr std::string_view kSnake = R"(local RunService = game:GetService("RunService")
+
+type Snake = {
+    Body: { BasePart }
+}
+
+local Snake = {}
+Snake.__index = Snake
+
+function Snake.new(): Snake
+    local snake = setmetatable({
+        Body = {},
+    }, Snake)
+    return snake
+end
+
+function Snake:Grow()
+    local tail = self.Body[#self.Body]
+    tail.
+end
+
+function Snake:Update()
+end
+
+local TheLifeSnake = Snake.new()
+)";
+
+[[nodiscard]] std::vector<Completion> completeAfter(Reflection& fixture, std::string source, std::string_view typed)
+{
+    // Appended at the end, where the caret is, on a line of its own.
+    source += typed;
+    return at(fixture, source);
+}
+
+} // namespace
+
+TEST_CASE("a table the file fills in offers what the file put in it")
+{
+    // **The owner's report**: `Snake.` offered nothing.
+    Reflection fixture;
+    const std::vector<Completion> list = completeAfter(fixture, std::string(kSnake), "Snake.");
+    CHECK(has(list, "new"));
+    CHECK(has(list, "Grow"));
+    CHECK(has(list, "Update"));
+    CHECK(has(list, "__index"));
+}
+
+TEST_CASE("a value made by the table's constructor offers its methods and the fields its type declares")
+{
+    Reflection fixture;
+    const std::vector<Completion> dotted = completeAfter(fixture, std::string(kSnake), "TheLifeSnake.");
+    CHECK(has(dotted, "Body"));
+    const std::vector<Completion> called = completeAfter(fixture, std::string(kSnake), "TheLifeSnake:");
+    CHECK(has(called, "Grow"));
+    CHECK(has(called, "Update"));
+    // After a colon, only what can be called.
+    CHECK_FALSE(has(called, "Body"));
+}
+
+TEST_CASE("self inside a method is an instance, and a list type's element is its class")
+{
+    Reflection fixture;
+    std::string source(kSnake);
+    // `self.` on the line inside Grow, where the caret would be.
+    const std::size_t inside = source.find("    tail.");
+    REQUIRE(inside != std::string::npos);
+
+    ScriptDocument selfDoc(source.substr(0, inside) + "    self.");
+    const core::u32 last = selfDoc.lineCount() - 1;
+    const CompletionRequest selfRequest = app::completionAt(selfDoc, Position{last, selfDoc.lineLength(last)});
+    std::vector<Completion> selfList;
+    app::collectCompletions(selfDoc, selfRequest, fixture.classes, fixture.atoms, app::CompletionWorld{}, selfList);
+    CHECK(has(selfList, "Body"));
+    CHECK(has(selfList, "Grow"));
+
+    // `tail` is `self.Body[#self.Body]`, and `Body` is `{ BasePart }`.
+    ScriptDocument tailDoc(source.substr(0, inside) + "    tail.");
+    const core::u32 tailLine = tailDoc.lineCount() - 1;
+    const CompletionRequest tailRequest = app::completionAt(tailDoc, Position{tailLine, tailDoc.lineLength(tailLine)});
+    std::vector<Completion> tailList;
+    app::collectCompletions(tailDoc, tailRequest, fixture.classes, fixture.atoms, app::CompletionWorld{}, tailList);
+    CHECK(has(tailList, "CFrame"));
+    CHECK(has(tailList, "Anchored"));
+}

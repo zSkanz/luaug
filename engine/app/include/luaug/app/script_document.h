@@ -247,6 +247,15 @@ public:
     // False when there was nothing to do.
     bool toggleComment(core::u32 first, core::u32 last);
 
+    // **The line edits every code editor has**, each ONE `replace`, so each is
+    // one Ctrl+Z. `indentLines` adds four spaces to every non-blank line, or
+    // takes up to four (or a tab) off each; `duplicateLines` puts a copy of the
+    // block directly below it; `deleteLines` removes the block and its newline.
+    // False when there was nothing to do.
+    bool indentLines(core::u32 first, core::u32 last, bool outdent);
+    bool duplicateLines(core::u32 first, core::u32 last);
+    bool deleteLines(core::u32 first, core::u32 last);
+
     [[nodiscard]] std::string textIn(Range range) const;
 
     // --- Undo ----------------------------------------------------------------
@@ -453,5 +462,34 @@ struct ModuleMember
 // Empty when the source does not parse, for the reason the lints stop there: a
 // half-typed module has a partial tree and would offer half-typed names.
 void moduleMembers(const std::string& source, std::vector<ModuleMember>& out);
+
+// **What this file's own code says a dotted path is** (the owner's report:
+// `Snake.` offered nothing in a file that had just built `Snake`).
+//
+// A small reading of the AST, not Luau's type checker (ADR 0057 keeps
+// `Luau.Analysis` out of the build). It knows the shapes a script is written
+// in: a table filled with `X.f = ...`, `function X.f` and `function X:m`, the
+// fields `setmetatable({...}, X)` gives an instance, `type T = { ... }`, a
+// value annotated `: T` or returned by `function X.new(): T`, `self` inside a
+// method, a list type's element (`{ BasePart }[i]`), and `Instance.new("C")`.
+// Where it lands on an engine class it names the class, which the caller
+// answers from reflection. Anything it cannot follow answers `known = false`,
+// and the caller falls back to what it did before.
+struct SourceMember
+{
+    std::string name;
+    std::string detail;
+    // A function: offered after `:` as well as `.`.
+    bool callable = false;
+};
+struct SourceMembers
+{
+    bool known = false;
+    std::vector<SourceMember> members;
+    // The engine class the path ends on, when it ends on one.
+    std::string className;
+};
+[[nodiscard]] SourceMembers sourceMembersOf(const std::string& source, std::span<const std::string> path,
+                                            Position caret);
 
 } // namespace luaug::app

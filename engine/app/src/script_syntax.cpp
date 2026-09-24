@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -615,6 +617,441 @@ void fromLocal(const Luau::AstStatBlock* body, const Luau::AstLocal* target, std
 
 } // namespace
 #endif
+
+#if LUAUG_LUAU_COMPILER
+
+namespace {
+
+// **One file, read for what its own code says values are** (`sourceMembersOf`).
+// Filled by a walk of the AST, then asked about a path.
+class SourceModel : public Luau::AstVisitor
+{
+public:
+    // What the model knows a value to be.
+    struct Shape
+    {
+        enum class Kind : core::u8
+        {
+            None,
+            // The table a name holds, filled in by the file: `local X = {}`
+            // then `function X.f`.
+            Table,
+            // Something `setmetatable({...}, X)` made -- an instance of X.
+            Instance,
+            // A type the file wrote: an alias, or a table type in place.
+            Type,
+            // An engine class, answered from reflection by the caller.
+            Class,
+        };
+        Kind kind = Kind::None;
+        std::string name;
+        const Luau::AstType* type = nullptr;
+    };
+
+    explicit SourceModel(std::string_view source) : m_source(source)
+    {
+        m_lineStarts.push_back(0);
+        for (std::size_t at = 0; at < source.size(); ++at) {
+            if (source[at] == '\n')
+                m_lineStarts.push_back(at + 1);
+        }
+    }
+
+    bool visit(Luau::AstStatLocal* node) override
+    {
+        for (std::size_t index = 0; index < node->vars.size; ++index) {
+            Luau::AstLocal* local = node->vars.data[index];
+            m_locals.push_back(local);
+            if (index < node->values.size) {
+                m_init[local] = node->values.data[index];
+                if (const auto* table = node->values.data[index]->as<Luau::AstExprTable>(); table != nullptr)
+                    addFields(m_tables[local->name.value], table);
+            }
+        }
+        return true;
+    }
+
+    bool visit(Luau::AstStatLocalFunction* node) override
+    {
+        m_locals.push_back(node->name);
+        return true;
+    }
+
+    bool visit(Luau::AstExprFunction* node) override
+    {
+        for (Luau::AstLocal* argument : node->args)
+            m_locals.push_back(argument);
+        if (node->self != nullptr)
+            m_locals.push_back(node->self);
+        return true;
+    }
+
+    bool visit(Luau::AstStatAssign* node) override
+    {
+        for (std::size_t index = 0; index < node->vars.size; ++index) {
+            const Luau::AstExpr* value = index < node->values.size ? node->values.data[index] : nullptr;
+            if (const auto* field = node->vars.data[index]->as<Luau::AstExprIndexName>(); field != nullptr) {
+                const std::string base(nameOf(field->expr));
+                if (base.empty())
+                    continue;
+                add(m_tables[base], field->index.value, value);
+                m_fieldValues[base + "." + field->index.value] = value;
+            }
+            else if (const auto* global = node->vars.data[index]->as<Luau::AstExprGlobal>(); global != nullptr) {
+                if (const auto* table = value != nullptr ? value->as<Luau::AstExprTable>() : nullptr)
+                    addFields(m_tables[global->name.value], table);
+            }
+        }
+        return true;
+    }
+
+    bool visit(Luau::AstStatFunction* node) override
+    {
+        if (const auto* field = node->name->as<Luau::AstExprIndexName>(); field != nullptr) {
+            const std::string base(nameOf(field->expr));
+            if (!base.empty()) {
+                addMember(m_tables[base],
+                          SourceMember{field->index.value, field->op == ':' ? "method" : "function", true});
+                m_functions[base + "." + field->index.value] = node->func;
+                if (node->func->self != nullptr)
+                    m_selfOf[node->func->self] = base;
+            }
+        }
+        return true;
+    }
+
+    bool visit(Luau::AstExprCall* node) override
+    {
+        if (isGlobal(node->func, "setmetatable") && node->args.size >= 2) {
+            const auto* table = node->args.data[0]->as<Luau::AstExprTable>();
+            const std::string owner(nameOf(node->args.data[1]));
+            if (table != nullptr && !owner.empty())
+                addFields(m_instanceFields[owner], table);
+        }
+        return true;
+    }
+
+    bool visit(Luau::AstStatTypeAlias* node) override
+    {
+        m_aliases[node->name.value] = node->type;
+        return true;
+    }
+
+    // The local called `name` a reader at `caret` sees: the latest declared
+    // before it. Scopes are not tracked, which is the approximation this
+    // makes -- a shadowed name in a closed block can answer for the outer one.
+    [[nodiscard]] Luau::AstLocal* localAt(std::string_view name, Luau::Position caret) const
+    {
+        Luau::AstLocal* found = nullptr;
+        for (Luau::AstLocal* local : m_locals) {
+            if (local->name.value == nullptr || name != local->name.value)
+                continue;
+            const Luau::Position at = local->location.begin;
+            if (at.line > caret.line || (at.line == caret.line && at.column >= caret.column))
+                continue;
+            if (found == nullptr || found->location.begin.line < at.line ||
+                (found->location.begin.line == at.line && found->location.begin.column < at.column)) {
+                found = local;
+            }
+        }
+        return found;
+    }
+
+    [[nodiscard]] bool hasTable(const std::string& name) const { return m_tables.contains(name); }
+
+    [[nodiscard]] Shape shapeOfLocal(const Luau::AstLocal* local, int depth) const
+    {
+        if (local == nullptr || depth > kDepth)
+            return {};
+        if (const auto owner = m_selfOf.find(local); owner != m_selfOf.end())
+            return Shape{Shape::Kind::Instance, owner->second, nullptr};
+        if (local->annotation != nullptr)
+            return fromType(local->annotation, depth + 1);
+        if (const auto init = m_init.find(local); init != m_init.end()) {
+            const Shape shape = shapeOfExpr(init->second, depth + 1);
+            if (shape.kind != Shape::Kind::None)
+                return shape;
+        }
+        if (local->name.value != nullptr && hasTable(local->name.value))
+            return Shape{Shape::Kind::Table, local->name.value, nullptr};
+        return {};
+    }
+
+    [[nodiscard]] Shape fieldOf(const Shape& shape, std::string_view field, int depth) const
+    {
+        if (depth > kDepth)
+            return {};
+        if (const Luau::AstTypeTable* table = typeTableOf(shape, depth + 1); table != nullptr) {
+            for (const Luau::AstTableProp& prop : table->props) {
+                if (prop.name.value != nullptr && field == prop.name.value)
+                    return fromType(prop.type, depth + 1);
+            }
+        }
+        if (shape.kind == Shape::Kind::Table || shape.kind == Shape::Kind::Instance) {
+            if (const auto value = m_fieldValues.find(shape.name + "." + std::string(field));
+                value != m_fieldValues.end())
+                return shapeOfExpr(value->second, depth + 1);
+        }
+        return {};
+    }
+
+    [[nodiscard]] SourceMembers membersOf(const Shape& shape) const
+    {
+        SourceMembers out;
+        switch (shape.kind) {
+        case Shape::Kind::None:
+            return out;
+        case Shape::Kind::Class:
+            out.known = true;
+            out.className = shape.name;
+            return out;
+        case Shape::Kind::Table:
+        case Shape::Kind::Instance:
+        case Shape::Kind::Type:
+            break;
+        }
+        out.known = true;
+        if (const Luau::AstTypeTable* table = typeTableOf(shape, 0); table != nullptr) {
+            for (const Luau::AstTableProp& prop : table->props) {
+                if (prop.name.value != nullptr)
+                    addMember(out.members, SourceMember{prop.name.value, textOf(prop.type->location),
+                                                        prop.type->is<Luau::AstTypeFunction>()});
+            }
+        }
+        // **A type and a table of one name are one thing**: `type Snake` says
+        // what an instance holds and `local Snake = {}` holds its methods.
+        if (shape.kind == Shape::Kind::Instance || shape.kind == Shape::Kind::Type) {
+            if (const auto fields = m_instanceFields.find(shape.name); fields != m_instanceFields.end()) {
+                for (const SourceMember& member : fields->second)
+                    addMember(out.members, member);
+            }
+        }
+        if (const auto members = m_tables.find(shape.name); members != m_tables.end()) {
+            for (const SourceMember& member : members->second)
+                addMember(out.members, member);
+        }
+        return out;
+    }
+
+private:
+    static constexpr int kDepth = 12;
+
+    [[nodiscard]] static std::string_view nameOf(const Luau::AstExpr* expr) noexcept
+    {
+        if (expr == nullptr)
+            return {};
+        if (const auto* local = expr->as<Luau::AstExprLocal>(); local != nullptr)
+            return local->local->name.value != nullptr ? local->local->name.value : std::string_view{};
+        if (const auto* global = expr->as<Luau::AstExprGlobal>(); global != nullptr)
+            return global->name.value != nullptr ? global->name.value : std::string_view{};
+        return {};
+    }
+
+    [[nodiscard]] static bool isGlobal(const Luau::AstExpr* expr, std::string_view name) noexcept
+    {
+        const auto* global = expr != nullptr ? expr->as<Luau::AstExprGlobal>() : nullptr;
+        return global != nullptr && global->name.value != nullptr && name == global->name.value;
+    }
+
+    [[nodiscard]] std::string textOf(const Luau::Location& where) const
+    {
+        if (where.begin.line >= m_lineStarts.size())
+            return {};
+        const std::size_t from = m_lineStarts[where.begin.line] + where.begin.column;
+        const std::size_t lineEnd =
+            where.begin.line + 1 < m_lineStarts.size() ? m_lineStarts[where.begin.line + 1] - 1 : m_source.size();
+        const std::size_t to = where.end.line == where.begin.line
+                                   ? std::min(m_lineStarts[where.begin.line] + where.end.column, m_source.size())
+                                   : lineEnd;
+        return from < to ? std::string(m_source.substr(from, to - from)) : std::string{};
+    }
+
+    static void addMember(std::vector<SourceMember>& members, SourceMember member)
+    {
+        for (const SourceMember& existing : members) {
+            if (existing.name == member.name)
+                return;
+        }
+        members.push_back(std::move(member));
+    }
+
+    void add(std::vector<SourceMember>& members, const char* name, const Luau::AstExpr* value) const
+    {
+        const bool callable = value != nullptr && value->is<Luau::AstExprFunction>();
+        const bool table = value != nullptr && value->is<Luau::AstExprTable>();
+        addMember(members, SourceMember{name, callable ? "function" : table ? "table" : "field", callable});
+    }
+
+    void addFields(std::vector<SourceMember>& members, const Luau::AstExprTable* table) const
+    {
+        for (const Luau::AstExprTable::Item& item : table->items) {
+            if (item.kind != Luau::AstExprTable::Item::Kind::Record || item.key == nullptr)
+                continue;
+            const auto* key = item.key->as<Luau::AstExprConstantString>();
+            if (key == nullptr)
+                continue;
+            const std::string name(key->value.data, key->value.size);
+            add(members, name.c_str(), item.value);
+        }
+    }
+
+    [[nodiscard]] Shape shapeOfExpr(const Luau::AstExpr* expr, int depth) const
+    {
+        if (expr == nullptr || depth > kDepth)
+            return {};
+        if (const auto* group = expr->as<Luau::AstExprGroup>(); group != nullptr)
+            return shapeOfExpr(group->expr, depth + 1);
+        if (const auto* local = expr->as<Luau::AstExprLocal>(); local != nullptr)
+            return shapeOfLocal(local->local, depth + 1);
+        if (const auto* global = expr->as<Luau::AstExprGlobal>(); global != nullptr) {
+            if (global->name.value != nullptr && hasTable(global->name.value))
+                return Shape{Shape::Kind::Table, global->name.value, nullptr};
+            return {};
+        }
+        if (const auto* cast = expr->as<Luau::AstExprTypeAssertion>(); cast != nullptr)
+            return fromType(cast->annotation, depth + 1);
+        if (const auto* call = expr->as<Luau::AstExprCall>(); call != nullptr) {
+            if (isGlobal(call->func, "setmetatable") && call->args.size >= 2) {
+                const std::string owner(nameOf(call->args.data[1]));
+                if (!owner.empty())
+                    return Shape{Shape::Kind::Instance, owner, nullptr};
+            }
+            if (const auto* callee = call->func->as<Luau::AstExprIndexName>(); callee != nullptr) {
+                const std::string_view method = callee->index.value != nullptr ? callee->index.value : "";
+                // `Instance.new("Part")` is a Part.
+                if (isGlobal(callee->expr, "Instance") && method == "new" && call->args.size >= 1) {
+                    if (const auto* named = call->args.data[0]->as<Luau::AstExprConstantString>(); named != nullptr)
+                        return Shape{Shape::Kind::Class, std::string(named->value.data, named->value.size), nullptr};
+                }
+                const std::string base(nameOf(callee->expr));
+                if (!base.empty()) {
+                    const auto function = m_functions.find(base + "." + std::string(method));
+                    if (function != m_functions.end() && function->second->returnAnnotation != nullptr) {
+                        if (const auto* pack = function->second->returnAnnotation->as<Luau::AstTypePackExplicit>();
+                            pack != nullptr && pack->typeList.types.size > 0) {
+                            return fromType(pack->typeList.types.data[0], depth + 1);
+                        }
+                    }
+                    // `X.new(...)` with no annotation: an instance of X is the
+                    // honest guess, and the one every constructor means.
+                    if (method == "new" && hasTable(base))
+                        return Shape{Shape::Kind::Instance, base, nullptr};
+                }
+            }
+            return {};
+        }
+        if (const auto* field = expr->as<Luau::AstExprIndexName>(); field != nullptr)
+            return fieldOf(shapeOfExpr(field->expr, depth + 1), field->index.value != nullptr ? field->index.value : "",
+                           depth + 1);
+        if (const auto* index = expr->as<Luau::AstExprIndexExpr>(); index != nullptr) {
+            const Luau::AstTypeTable* table = typeTableOf(shapeOfExpr(index->expr, depth + 1), depth + 1);
+            if (table != nullptr && table->indexer != nullptr)
+                return fromType(table->indexer->resultType, depth + 1);
+        }
+        return {};
+    }
+
+    [[nodiscard]] Shape fromType(const Luau::AstType* type, int depth) const
+    {
+        if (type == nullptr || depth > kDepth)
+            return {};
+        if (const auto* group = type->as<Luau::AstTypeGroup>(); group != nullptr)
+            return fromType(group->type, depth + 1);
+        // `T?` is `T | nil`: the value is a T whenever it is anything.
+        if (const auto* either = type->as<Luau::AstTypeUnion>(); either != nullptr) {
+            for (const Luau::AstType* option : either->types) {
+                if (option->is<Luau::AstTypeOptional>())
+                    continue;
+                const auto* named = option->as<Luau::AstTypeReference>();
+                if (named != nullptr && named->name.value != nullptr && std::string_view(named->name.value) == "nil")
+                    continue;
+                return fromType(option, depth + 1);
+            }
+            return {};
+        }
+        if (const auto* named = type->as<Luau::AstTypeReference>(); named != nullptr) {
+            if (named->prefix.has_value() || named->name.value == nullptr)
+                return {};
+            const std::string name(named->name.value);
+            if (const auto alias = m_aliases.find(name); alias != m_aliases.end())
+                return Shape{Shape::Kind::Type, name, alias->second};
+            return Shape{Shape::Kind::Class, name, nullptr};
+        }
+        if (type->is<Luau::AstTypeTable>())
+            return Shape{Shape::Kind::Type, {}, type};
+        return {};
+    }
+
+    // The table type a shape is, following aliases -- or, for a table or an
+    // instance, the alias that shares its name.
+    [[nodiscard]] const Luau::AstTypeTable* typeTableOf(const Shape& shape, int depth) const
+    {
+        if (depth > kDepth)
+            return nullptr;
+        const Luau::AstType* type = shape.type;
+        if (type == nullptr && (shape.kind == Shape::Kind::Table || shape.kind == Shape::Kind::Instance)) {
+            if (const auto alias = m_aliases.find(shape.name); alias != m_aliases.end())
+                type = alias->second;
+        }
+        for (int step = 0; type != nullptr && step < kDepth; ++step) {
+            if (const auto* table = type->as<Luau::AstTypeTable>(); table != nullptr)
+                return table;
+            const Shape next = fromType(type, depth + 1);
+            if (next.type == type || next.type == nullptr)
+                return nullptr;
+            type = next.type;
+        }
+        return nullptr;
+    }
+
+    std::string_view m_source;
+    std::vector<std::size_t> m_lineStarts;
+    std::vector<Luau::AstLocal*> m_locals;
+    std::unordered_map<const Luau::AstLocal*, const Luau::AstExpr*> m_init;
+    std::unordered_map<const Luau::AstLocal*, std::string> m_selfOf;
+    std::unordered_map<std::string, std::vector<SourceMember>> m_tables;
+    std::unordered_map<std::string, std::vector<SourceMember>> m_instanceFields;
+    std::unordered_map<std::string, const Luau::AstExpr*> m_fieldValues;
+    std::unordered_map<std::string, const Luau::AstExprFunction*> m_functions;
+    std::unordered_map<std::string, const Luau::AstType*> m_aliases;
+};
+
+} // namespace
+
+#endif
+
+SourceMembers sourceMembersOf(const std::string& source, std::span<const std::string> path, Position caret)
+{
+#if !LUAUG_LUAU_COMPILER
+    (void)source;
+    (void)path;
+    (void)caret;
+    return {};
+#else
+    if (path.empty())
+        return {};
+    Luau::Allocator allocator;
+    Luau::AstNameTable names(allocator);
+    Luau::ParseOptions options;
+    options.captureComments = false;
+    // **A half-typed file is read too**: the caret is almost always just after
+    // a `.` that does not parse yet, and the parser recovers around it.
+    const Luau::ParseResult result = Luau::Parser::parse(source.data(), source.size(), names, allocator, options);
+    if (result.root == nullptr)
+        return {};
+
+    SourceModel model(source);
+    result.root->visit(&model);
+
+    using Shape = SourceModel::Shape;
+    Shape shape = model.shapeOfLocal(model.localAt(path[0], Luau::Position{caret.line, caret.column}), 0);
+    if (shape.kind == Shape::Kind::None && model.hasTable(path[0]))
+        shape = Shape{Shape::Kind::Table, path[0], nullptr};
+    for (std::size_t step = 1; step < path.size() && shape.kind != Shape::Kind::None; ++step)
+        shape = model.fieldOf(shape, path[step], 0);
+    return model.membersOf(shape);
+#endif
+}
 
 void moduleMembers(const std::string& source, std::vector<ModuleMember>& out)
 {

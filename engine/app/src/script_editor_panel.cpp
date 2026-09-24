@@ -677,6 +677,128 @@ void moveLines(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, in
     out.edited.push_back(index);
 }
 
+// --- The editing keys every code editor shares ------------------------------
+
+[[nodiscard]] bool spaceByte(char c) noexcept
+{
+    return c == ' ' || c == '\t';
+}
+
+// A word to the left: over any blanks, then over a run of word bytes or of
+// punctuation. At a line's start it is the end of the line above.
+[[nodiscard]] Position wordLeft(const ScriptDocument& doc, Position at)
+{
+    if (at.column == 0)
+        return at.line == 0 ? at : Position{at.line - 1, doc.lineLength(at.line - 1)};
+    const std::string_view text = doc.line(at.line);
+    u32 column = std::min<u32>(at.column, static_cast<u32>(text.size()));
+    while (column > 0 && spaceByte(text[column - 1]))
+        --column;
+    if (column > 0 && wordByte(text[column - 1])) {
+        while (column > 0 && wordByte(text[column - 1]))
+            --column;
+    }
+    else {
+        while (column > 0 && !wordByte(text[column - 1]) && !spaceByte(text[column - 1]))
+            --column;
+    }
+    return doc.clamp(Position{at.line, column});
+}
+
+// The same, to the right.
+[[nodiscard]] Position wordRight(const ScriptDocument& doc, Position at)
+{
+    const std::string_view text = doc.line(at.line);
+    if (at.column >= text.size())
+        return at.line + 1 < doc.lineCount() ? Position{at.line + 1, 0} : at;
+    u32 column = at.column;
+    while (column < text.size() && spaceByte(text[column]))
+        ++column;
+    if (column < text.size() && wordByte(text[column])) {
+        while (column < text.size() && wordByte(text[column]))
+            ++column;
+    }
+    else {
+        while (column < text.size() && !wordByte(text[column]) && !spaceByte(text[column]))
+            ++column;
+    }
+    return doc.clamp(Position{at.line, column});
+}
+
+// The lines a selection covers: one that ends at column zero has not reached
+// that line, which is what a drag down to the start of line 9 means.
+[[nodiscard]] std::pair<u32, u32> selectedLines(const OpenScript& tab)
+{
+    const Range span = tab.caret.selection();
+    const u32 first = span.begin.line;
+    const u32 last = span.end.line > first && span.end.column == 0 ? span.end.line - 1 : span.end.line;
+    return {first, last};
+}
+
+// After a line edit: a selection covers the whole lines again, and a caret
+// keeps its place in the text by moving with how much its line grew.
+void afterLineEdit(OpenScript& tab, u32 first, u32 last, u32 lineBefore)
+{
+    ScriptDocument& doc = tab.document;
+    if (tab.caret.hasSelection()) {
+        tab.caret.anchor = Position{first, 0};
+        tab.caret.head = doc.clamp(Position{last, doc.lineLength(last)});
+    }
+    else {
+        const auto grown = static_cast<int>(doc.lineLength(tab.caret.head.line)) - static_cast<int>(lineBefore);
+        const int moved = static_cast<int>(tab.caret.head.column) + grown;
+        tab.caret.head = doc.clamp(Position{tab.caret.head.line, static_cast<u32>(std::max(0, moved))});
+        tab.caret.anchor = tab.caret.head;
+    }
+    tab.caret.desiredColumn = tab.caret.head.column;
+}
+
+// The bracket that pairs with the one at (or just before) the caret, or
+// nothing. Counted across lines, a few thousand bytes at most.
+[[nodiscard]] std::optional<Position> matchingBracket(const ScriptDocument& doc, Position at)
+{
+    const auto openerOf = [](char c) -> char { return c == ')' ? '(' : c == ']' ? '[' : c == '}' ? '{' : '\0'; };
+    const std::string_view here = doc.line(at.line);
+    Position from = at;
+    char c = at.column < here.size() ? here[at.column] : '\0';
+    if (closerOf(c) == '\0' && openerOf(c) == '\0' && at.column > 0) {
+        from = Position{at.line, at.column - 1};
+        c = here[from.column];
+    }
+    const bool forward = c == '(' || c == '[' || c == '{';
+    const char want = forward ? closerOf(c) : openerOf(c);
+    if (want == '\0')
+        return std::nullopt;
+    int depth = 0;
+    int budget = 200000;
+    u32 line = from.line;
+    auto column = static_cast<std::int64_t>(from.column);
+    while (budget-- > 0) {
+        const std::string_view text = doc.line(line);
+        while (column >= 0 && column < static_cast<std::int64_t>(text.size())) {
+            const char at2 = text[static_cast<std::size_t>(column)];
+            if (at2 == c)
+                ++depth;
+            else if (at2 == want && --depth == 0)
+                return Position{line, static_cast<u32>(column)};
+            column += forward ? 1 : -1;
+        }
+        if (forward) {
+            if (line + 1 >= doc.lineCount())
+                return std::nullopt;
+            ++line;
+            column = 0;
+        }
+        else {
+            if (line == 0)
+                return std::nullopt;
+            --line;
+            column = static_cast<std::int64_t>(doc.lineLength(line)) - 1;
+        }
+    }
+    return std::nullopt;
+}
+
 void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m, float paneHeight)
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -712,6 +834,43 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
 
+    // **Alt+Shift+Up/Down copies the lines** above or below themselves, with
+    // the caret on the copy the arrow points at.
+    if (io.KeyAlt && !io.KeyCtrl && shift &&
+        (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true) || ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))) {
+        const auto [first, last] = selectedLines(tab);
+        const bool down = ImGui::IsKeyPressed(ImGuiKey_DownArrow, true);
+        if (doc.duplicateLines(first, last)) {
+            if (down) {
+                const u32 span = last - first + 1;
+                tab.caret.anchor = doc.clamp(Position{tab.caret.anchor.line + span, tab.caret.anchor.column});
+                tab.caret.head = doc.clamp(Position{tab.caret.head.line + span, tab.caret.head.column});
+            }
+            tab.shownCaret = Position{~0u, 0};
+            edited(out, index);
+        }
+        return;
+    }
+
+    // **Shift+Alt+A: a block comment** around the selection, or out of one.
+    if (io.KeyAlt && !io.KeyCtrl && shift && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+        if (!tab.caret.hasSelection()) {
+            const u32 line = tab.caret.head.line;
+            tab.caret.anchor = Position{line, doc.indentOf(line)};
+            tab.caret.head = Position{line, doc.lineLength(line)};
+        }
+        const Range span = tab.caret.selection();
+        const std::string text = doc.textIn(span);
+        const bool wrapped = text.size() >= 6 && text.starts_with("--[[") && text.ends_with("]]");
+        const std::string next = wrapped ? text.substr(4, text.size() - 6) : "--[[" + text + "]]";
+        const Position end = doc.replace(span, next);
+        tab.caret.anchor = span.begin;
+        tab.caret.head = end;
+        tab.caret.desiredColumn = end.column;
+        edited(out, index);
+        return;
+    }
+
     // **Before the plain arrows**, which would otherwise move the caret as well
     // as the line. Alt and not Ctrl+Alt: AltGr is Ctrl+Alt, and a Brazilian
     // keyboard would move a line every time somebody typed a bracket.
@@ -726,10 +885,11 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
 
+    // Ctrl moves a word at a time, and Shift with it selects the words.
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
-        placeCaret(tab, doc.prevColumn(tab.caret.head), shift);
+        placeCaret(tab, ctrl ? wordLeft(doc, tab.caret.head) : doc.prevColumn(tab.caret.head), shift);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
-        placeCaret(tab, doc.nextColumn(tab.caret.head), shift);
+        placeCaret(tab, ctrl ? wordRight(doc, tab.caret.head) : doc.nextColumn(tab.caret.head), shift);
     if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
         moveVertically(tab, -1, shift);
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
@@ -760,12 +920,13 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         if (tab.caret.hasSelection())
             eraseSelection(tab, out, index);
         else if (!(tab.caret.head == Position{0, 0})) {
-            Position from = doc.prevColumn(tab.caret.head);
+            // Ctrl+Backspace takes the word to the left.
+            Position from = ctrl ? wordLeft(doc, tab.caret.head) : doc.prevColumn(tab.caret.head);
             Position to = tab.caret.head;
             // Between a pair the editor just closed -- `(|)` -- both go, or the
             // closer would be left behind by a backspace nobody meant for it.
             const std::string_view text = doc.line(to.line);
-            if (from.line == to.line && to.column < text.size() && from.column < text.size() &&
+            if (!ctrl && from.line == to.line && to.column < text.size() && from.column < text.size() &&
                 closerOf(text[from.column]) != '\0' && closerOf(text[from.column]) == text[to.column]) {
                 to = doc.nextColumn(to);
             }
@@ -779,7 +940,8 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         if (tab.caret.hasSelection())
             eraseSelection(tab, out, index);
         else {
-            const Position to = doc.nextColumn(tab.caret.head);
+            // Ctrl+Delete takes the word to the right.
+            const Position to = ctrl ? wordRight(doc, tab.caret.head) : doc.nextColumn(tab.caret.head);
             if (!(to == tab.caret.head)) {
                 tab.caret.head = doc.erase(Range{tab.caret.head, to});
                 tab.caret.anchor = tab.caret.head;
@@ -788,7 +950,27 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
 
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter, true) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, true)) {
+    const bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, true) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, true);
+    if (enter && ctrl) {
+        // **Ctrl+Enter opens a line below, Ctrl+Shift+Enter one above**,
+        // wherever the caret is on this one, at this line's indent.
+        const u32 line = tab.caret.head.line;
+        const std::string indent(doc.line(line).substr(0, doc.indentOf(line)));
+        doc.breakUndoRun();
+        if (shift) {
+            (void)doc.insert(Position{line, 0}, indent + "\n");
+            tab.caret.head = Position{line, static_cast<u32>(indent.size())};
+        }
+        else {
+            (void)doc.insert(Position{line, doc.lineLength(line)}, "\n" + indent);
+            tab.caret.head = Position{line + 1, static_cast<u32>(indent.size())};
+        }
+        tab.caret.anchor = tab.caret.head;
+        tab.caret.desiredColumn = tab.caret.head.column;
+        edited(out, index);
+        return;
+    }
+    if (enter) {
         // The new line starts where the old one's text did. Losing the indent on
         // every Enter is the single most irritating thing a code editor can do.
         const u32 indent = doc.indentOf(tab.caret.head.line);
@@ -796,8 +978,22 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         text.append(std::string(doc.line(tab.caret.head.line).substr(0, indent)));
         insertText(tab, out, index, text);
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Tab, true))
-        insertText(tab, out, index, "    ");
+    // **Tab over lines indents them, Shift+Tab outdents** -- over a selection
+    // or, for Shift+Tab, the caret's own line. Tab alone is four spaces.
+    if (ImGui::IsKeyPressed(ImGuiKey_Tab, true)) {
+        const Range span = tab.caret.selection();
+        if (shift || (tab.caret.hasSelection() && span.begin.line != span.end.line)) {
+            const auto [first, last] = selectedLines(tab);
+            const u32 before = doc.lineLength(tab.caret.head.line);
+            if (doc.indentLines(first, last, shift)) {
+                afterLineEdit(tab, first, last, before);
+                edited(out, index);
+            }
+        }
+        else {
+            insertText(tab, out, index, "    ");
+        }
+    }
 
     if (!ctrl)
         return;
@@ -807,11 +1003,85 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         tab.caret.anchor = Position{0, 0};
         tab.caret.head = Position{last, doc.lineLength(last)};
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_C, false) && tab.caret.hasSelection())
-        ImGui::SetClipboardText(doc.textIn(tab.caret.selection()).c_str());
-    if (ImGui::IsKeyPressed(ImGuiKey_X, false) && tab.caret.hasSelection()) {
-        ImGui::SetClipboardText(doc.textIn(tab.caret.selection()).c_str());
-        eraseSelection(tab, out, index);
+    // **Copy and cut with nothing selected take the whole line**, newline and
+    // all, which is what every code editor does with them.
+    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+        if (tab.caret.hasSelection())
+            ImGui::SetClipboardText(doc.textIn(tab.caret.selection()).c_str());
+        else
+            ImGui::SetClipboardText((std::string(doc.line(tab.caret.head.line)) + "\n").c_str());
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+        if (tab.caret.hasSelection()) {
+            ImGui::SetClipboardText(doc.textIn(tab.caret.selection()).c_str());
+            eraseSelection(tab, out, index);
+        }
+        else {
+            const u32 line = tab.caret.head.line;
+            ImGui::SetClipboardText((std::string(doc.line(line)) + "\n").c_str());
+            if (doc.deleteLines(line, line)) {
+                tab.caret.head = doc.clamp(Position{line, 0});
+                tab.caret.anchor = tab.caret.head;
+                tab.caret.desiredColumn = 0;
+                edited(out, index);
+            }
+        }
+    }
+    // **Ctrl+Shift+K deletes the lines** the caret or selection is on.
+    if (shift && ImGui::IsKeyPressed(ImGuiKey_K, false)) {
+        const auto [first, last] = selectedLines(tab);
+        if (doc.deleteLines(first, last)) {
+            tab.caret.head = doc.clamp(Position{first, 0});
+            tab.caret.anchor = tab.caret.head;
+            tab.caret.desiredColumn = 0;
+            edited(out, index);
+        }
+    }
+    // **Ctrl+] and Ctrl+[ indent and outdent** the lines, selected or not.
+    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, false) || ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false)) {
+        const bool outdent = ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false);
+        const auto [first, last] = selectedLines(tab);
+        const u32 before = doc.lineLength(tab.caret.head.line);
+        if (doc.indentLines(first, last, outdent)) {
+            afterLineEdit(tab, first, last, before);
+            edited(out, index);
+        }
+    }
+    // **Ctrl+L selects the line**, and again the next one.
+    if (ImGui::IsKeyPressed(ImGuiKey_L, false)) {
+        const Range span = tab.caret.selection();
+        const bool wholeLines = tab.caret.hasSelection() && span.begin.column == 0 && span.end.column == 0;
+        const u32 from = wholeLines ? span.begin.line : tab.caret.head.line;
+        const u32 through = wholeLines ? span.end.line : tab.caret.head.line + 1;
+        tab.caret.anchor = Position{from, 0};
+        tab.caret.head = through < doc.lineCount() ? Position{through, 0}
+                                                   : Position{doc.lineCount() - 1, doc.lineLength(doc.lineCount() - 1)};
+        tab.caret.desiredColumn = 0;
+    }
+    // **Ctrl+D selects the word under the caret, then the next place it
+    // appears.** One caret, so the selection moves rather than growing.
+    if (ImGui::IsKeyPressed(ImGuiKey_D, false)) {
+        if (!tab.caret.hasSelection()) {
+            const Range word = doc.wordAt(tab.caret.head);
+            if (!word.empty()) {
+                tab.caret.anchor = word.begin;
+                tab.caret.head = word.end;
+            }
+        }
+        else {
+            const std::string needle = doc.textIn(tab.caret.selection());
+            const Range hit = doc.findNext(needle, tab.caret.selection().end, {.matchCase = true, .wholeWord = false});
+            if (!hit.empty()) {
+                tab.caret.anchor = hit.begin;
+                tab.caret.head = hit.end;
+            }
+        }
+        tab.caret.desiredColumn = tab.caret.head.column;
+    }
+    // **Ctrl+Shift+\ jumps to the bracket that pairs with this one.**
+    if (shift && ImGui::IsKeyPressed(ImGuiKey_Backslash, false)) {
+        if (const std::optional<Position> pair = matchingBracket(doc, tab.caret.head); pair.has_value())
+            placeCaret(tab, *pair, false);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_V, false)) {
         if (const char* text = ImGui::GetClipboardText(); text != nullptr && *text != '\0')

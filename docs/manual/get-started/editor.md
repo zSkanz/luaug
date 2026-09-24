@@ -121,10 +121,26 @@ the end of its line, and in full under the pointer.
 | Keys | Do |
 |---|---|
 | Ctrl+/ | Comment or uncomment the line, or every selected line |
+| Shift+Alt+A | Block comment around the selection, or take it out |
 | Ctrl+Space | Offer suggestions |
+| Ctrl+Left / Ctrl+Right (with Shift: select) | Move by word |
+| Ctrl+Backspace / Ctrl+Delete | Delete the word to the left / right |
+| Ctrl+C / Ctrl+X with nothing selected | Copy / cut the whole line |
+| Ctrl+Shift+K | Delete the line or the selected lines |
 | Alt+Up / Alt+Down | Move the line or selection |
+| Alt+Shift+Up / Alt+Shift+Down | Copy the line or selection up / down |
+| Ctrl+Enter / Ctrl+Shift+Enter | Open a line below / above |
+| Tab / Shift+Tab over lines, Ctrl+] / Ctrl+[ | Indent / outdent |
+| Ctrl+L | Select the line, then the next |
+| Ctrl+D | Select the word, then its next occurrence |
+| Ctrl+Shift+\ | Jump to the matching bracket |
 | Ctrl+F / Ctrl+H / Ctrl+G | Find / replace / go to |
 | Ctrl+S | Save the script |
+
+Suggestions read the file's own code as well as the engine's API: a table the
+file fills in (`Snake.` offers `new` and `Grow`), `self` inside a method, a
+value annotated with a type the file declares (`type Snake = { Body: ... }`),
+and a list type's element (`self.Body[1].` offers a part's members).
 
 ## Undo
 

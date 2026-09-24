@@ -18,10 +18,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **A model or stamp moves as far as the pointer.** Reported again after
       the arrow fix: "a light drag moved it a lot" -- on a model.
 - [x] **A CharacterBody is drawn as the capsule it moves as**, not as a box.
-- [ ] **Autocomplete reads this file's own code**: `Snake.` offers what the
+- [x] **Autocomplete reads this file's own code**: `Snake.` offers what the
       file put in `Snake`, `self.` in a method offers the instance's fields,
       and a value typed `: T` offers `T`'s fields.
-- [ ] **The editing keys every code editor shares** (word moves and deletes,
+- [x] **The editing keys every code editor shares** (word moves and deletes,
       whole-line cut/copy/delete/duplicate, indent/outdent, select line, select
       next match, jump to bracket, block comment).
 - [ ] **Text UI has a TextTransparency.**
@@ -170,3 +170,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
     back to a place with 1691 instances where the first visit had 1552, and
     the same tree passed on the next run and in every gate before and after.
     Recorded as found, not fixed; it is a streaming question, not an editor one.
+16. **Completion knew the engine and not the file.** A table the file built,
+    an instance of it, `self` in a method and a type the file wrote were all
+    invisible to it, because the one reader of the file's own code answered
+    `require` and nothing else. `sourceMembersOf` reads the same AST for those
+    shapes -- a pattern reader, not Luau's type checker, which ADR 0057 keeps
+    out of the build -- and hands a path that ends on an engine class to
+    reflection. Where it cannot follow a value it says so and the old answer
+    stands.

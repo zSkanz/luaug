@@ -634,3 +634,31 @@ TEST_CASE("Ctrl+/ comments a block at its shallowest indent, and takes the comme
     ScriptDocument blank("\n\n");
     CHECK_FALSE(blank.toggleComment(0, 2));
 }
+
+TEST_CASE("the line edits every code editor has are one undo step each")
+{
+    ScriptDocument document("a()\n    b()\nc()");
+    REQUIRE(document.indentLines(0, 1, false));
+    CHECK(document.text() == "    a()\n        b()\nc()");
+    REQUIRE(document.indentLines(0, 1, true));
+    CHECK(document.text() == "a()\n    b()\nc()");
+
+    REQUIRE(document.duplicateLines(0, 0));
+    CHECK(document.text() == "a()\na()\n    b()\nc()");
+
+    REQUIRE(document.deleteLines(1, 2));
+    CHECK(document.text() == "a()\nc()");
+    // The last line takes the newline before it.
+    REQUIRE(document.deleteLines(1, 1));
+    CHECK(document.text() == "a()");
+
+    // Each was one step: five undos walk all five back.
+    Position caret{0, 0};
+    for (int step = 0; step < 5; ++step)
+        REQUIRE(document.undo(caret));
+    CHECK(document.text() == "a()\n    b()\nc()");
+
+    // Nothing to outdent is nothing done.
+    ScriptDocument flat("x");
+    CHECK_FALSE(flat.indentLines(0, 0, true));
+}

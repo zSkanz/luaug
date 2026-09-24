@@ -184,6 +184,67 @@ Position ScriptDocument::prevColumn(Position at) const noexcept
     return from;
 }
 
+bool ScriptDocument::indentLines(u32 first, u32 last, bool outdent)
+{
+    if (first > last || first >= lineCount())
+        return false;
+    last = std::min(last, lineCount() - 1);
+    std::string rewritten;
+    bool changed = false;
+    for (u32 index = first; index <= last; ++index) {
+        std::string row(line(index));
+        if (outdent) {
+            std::size_t drop = 0;
+            if (!row.empty() && row[0] == '\t')
+                drop = 1;
+            else
+                while (drop < 4 && drop < row.size() && row[drop] == ' ')
+                    ++drop;
+            row.erase(0, drop);
+            changed = changed || drop > 0;
+        }
+        else if (!row.empty()) {
+            row.insert(0, "    ");
+            changed = true;
+        }
+        rewritten += row;
+        if (index < last)
+            rewritten.push_back('\n');
+    }
+    if (!changed)
+        return false;
+    (void)replace(Range{Position{first, 0}, Position{last, lineLength(last)}}, rewritten);
+    return true;
+}
+
+bool ScriptDocument::duplicateLines(u32 first, u32 last)
+{
+    if (first > last || first >= lineCount())
+        return false;
+    last = std::min(last, lineCount() - 1);
+    const std::string block = textIn(Range{Position{first, 0}, Position{last, lineLength(last)}});
+    (void)insert(Position{last, lineLength(last)}, "\n" + block);
+    return true;
+}
+
+bool ScriptDocument::deleteLines(u32 first, u32 last)
+{
+    if (first > last || first >= lineCount())
+        return false;
+    last = std::min(last, lineCount() - 1);
+    // The newline that ends the block goes with it; the last line of the file
+    // has none after it, so it takes the one before instead.
+    if (last + 1 < lineCount())
+        (void)erase(Range{Position{first, 0}, Position{last + 1, 0}});
+    else if (first > 0)
+        (void)erase(Range{Position{first - 1, lineLength(first - 1)}, Position{last, lineLength(last)}});
+    else if (lineLength(last) > 0 || last > first)
+        (void)erase(Range{Position{first, 0}, Position{last, lineLength(last)}});
+    else
+        return false;
+    return true;
+}
+
 bool ScriptDocument::toggleComment(u32 first, u32 last)
 {
     if (first > last || first >= lineCount())
