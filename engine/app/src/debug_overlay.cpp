@@ -4818,9 +4818,34 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
     const bool visible = ImGui::Begin(label.c_str(), &open);
     ImGui::PopStyleVar();
 
-    if (visible) {
-        drawRibbon(editor, commands, panels, icons);
+    // **The viewport is the world and nothing else** (the owner: "the viewport
+    // is just the viewport"). The transport and the tools are the ribbon's, at
+    // the top of the editor, where they are whether this panel is open or not.
+    (void)panels;
+    (void)icons;
+    if (visible)
         drawViewportBody(editor, texture, commands);
+    ImGui::End();
+}
+
+// **The ribbon, across the top of the editor under the menu bar** -- not inside
+// the viewport, because playing, inserting and arranging are the editor's and
+// not one panel's, and a closed viewport took them away. A side bar of the main
+// viewport, so the dockspace is measured below it the way it is below the menu.
+//
+// As tall as it was last frame: one row in a wide window, two when it wraps,
+// and a strip that never cuts its own buttons off.
+void drawRibbonBar(Editor& editor, EditorCommands& commands, EditorPanels& panels, const IconAtlas* icons)
+{
+    static float s_height = 0.0f;
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float oneRow = ImGui::GetFrameHeightWithSpacing() * 2.0f + style.WindowPadding.y * 2.0f;
+    const float height = s_height > 0.0f ? s_height : oneRow;
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse;
+    if (ImGui::BeginViewportSideBar("##ribbon", ImGui::GetMainViewport(), ImGuiDir_Up, height, flags)) {
+        drawRibbon(editor, commands, panels, icons);
+        s_height = std::max(oneRow, ImGui::GetCursorPosY() + style.WindowPadding.y);
     }
     ImGui::End();
 }
@@ -7309,8 +7334,11 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // Before the dockspace. `DockSpaceOverViewport` measures the work area, and
     // a menu bar declared after it would sit on top of the panels by its own
     // height.
-    if (editor != nullptr)
+    if (editor != nullptr) {
         drawMenuBar(*editor, panels, commands, dialogs, icons);
+        // And the ribbon under it, for the same reason.
+        drawRibbonBar(*editor, commands, panels, icons);
+    }
 
     // A transparent central node, so a layout that has not been built yet shows
     // the frame underneath instead of a slab of grey.

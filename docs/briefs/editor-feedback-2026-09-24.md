@@ -18,6 +18,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **A model or stamp moves as far as the pointer.** Reported again after
       the arrow fix: "a light drag moved it a lot" -- on a model.
 - [x] **A CharacterBody is drawn as the capsule it moves as**, not as a box.
+- [ ] **Autocomplete reads this file's own code**: `Snake.` offers what the
+      file put in `Snake`, `self.` in a method offers the instance's fields,
+      and a value typed `: T` offers `T`'s fields.
+- [ ] **The editing keys every code editor shares** (word moves and deletes,
+      whole-line cut/copy/delete/duplicate, indent/outdent, select line, select
+      next match, jump to bracket, block comment).
+- [ ] **Text UI has a TextTransparency.**
 - [x] **A CFrame's rotation is editable in Properties**, as the three angles
       `Orientation` uses, beside its position -- it was nine read-only numbers.
 - [x] **WASD flies without a held mouse button.** While the viewport has focus
@@ -34,8 +41,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **Shift+P toggles a free camera while playing.**
 - [x] **The snap increments live on the viewport's toolbar**, where they are
       used, and not only in Viewport Settings.
-- [x] **A ribbon of tabs above the viewport** (Home, Model, Test, View) that
-      groups the tools by task.
+- [x] **A ribbon of tabs across the top of the editor** (Home, Model, Test,
+      View) that groups the tools by task -- under the menu bar and always
+      there, not inside the viewport, which is only the world now.
 - [x] **A Camera draws its view volume as a wireframe** when selected.
 - [x] **Inserting or selecting an instance leaves a terrain brush.** A part added
       while sculpting stayed under the brush instead of being selected.
