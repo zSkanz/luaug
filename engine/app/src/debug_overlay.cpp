@@ -3194,22 +3194,36 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
         core::CFrameD value = std::get<core::CFrameD>(shared.value);
         f64 position[3]{value.position.x, value.position.y, value.position.z};
         if (ImGui::DragScalarN("##value", ImGuiDataType_Double, position, 3, 0.01f, nullptr, nullptr,
-                               mixed ? "--" : "%.3f")) {
+                               mixed ? "--" : "%.3f m")) {
             value.position = core::DVec3{position[0], position[1], position[2]};
             commit(scene::Value{value});
         }
-        // The basis is shown and never edited. A 3x3 rotation has no honest
-        // widget, and round-tripping it through Euler angles would rewrite the
-        // matrix on every frame the panel is open -- a property-changed fire
-        // per frame for a value nobody touched.
-        for (int axis = 0; axis < 3; ++axis) {
-            if (mixed) {
-                ImGui::TextUnformatted("-- -- --");
-                continue;
+        ImGui::SetItemTooltip("position, in metres");
+        // **The rotation, as the three angles `Orientation` uses** -- YXZ, in
+        // degrees -- because the owner could move a part here and not turn it:
+        // the basis was drawn as nine read-only numbers. Converted for SHOWING
+        // every frame and written only when somebody drags or types, so a
+        // panel left open never rewrites the matrix it is displaying. Each
+        // selected instance keeps its own position; only the turn is shared.
+        constexpr f32 kDegrees = 180.0f / 3.14159265f;
+        const core::Vec3 radians = core::toEulerYxz(value.rotation);
+        // `+ 0.0f` turns a negative zero into a zero, so a square part reads 0.0 and not -0.0.
+        float degrees[3]{radians.x * kDegrees + 0.0f, radians.y * kDegrees + 0.0f, radians.z * kDegrees + 0.0f};
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::DragFloat3("##orientation", degrees, 0.5f, 0.0f, 0.0f, mixed ? "--" : "%.1f\xC2\xB0")) {
+            const core::Mat3 turned =
+                core::fromEulerYxz(core::Vec3{degrees[0] / kDegrees, degrees[1] / kDegrees, degrees[2] / kDegrees});
+            for (const core::InstanceId target : targets) {
+                if (!world.alive(target))
+                    continue;
+                const std::optional<scene::Value> own = world.getProperty(target, descriptor.name);
+                const core::CFrameD* current = own.has_value() ? std::get_if<core::CFrameD>(&*own) : nullptr;
+                core::CFrameD next = current != nullptr ? *current : value;
+                next.rotation = turned;
+                inspector.enqueue(target, descriptor.name, scene::Value{next});
             }
-            ImGui::Text("%.3f %.3f %.3f", static_cast<f64>(value.rotation.m[axis][0]),
-                        static_cast<f64>(value.rotation.m[axis][1]), static_cast<f64>(value.rotation.m[axis][2]));
         }
+        ImGui::SetItemTooltip("orientation, in degrees about X, Y and Z (applied Y, then X, then Z)");
         break;
     }
     case EditorKind::Color: {

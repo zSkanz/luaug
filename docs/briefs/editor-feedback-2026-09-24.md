@@ -18,6 +18,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **A model or stamp moves as far as the pointer.** Reported again after
       the arrow fix: "a light drag moved it a lot" -- on a model.
 - [x] **A CharacterBody is drawn as the capsule it moves as**, not as a box.
+- [x] **A CFrame's rotation is editable in Properties**, as the three angles
+      `Orientation` uses, beside its position -- it was nine read-only numbers.
 - [x] **WASD flies without a held mouse button.** While the viewport has focus
       and no text field does, W/A/S/D/Q/E move the camera; the right button
       still looks around.
@@ -155,3 +157,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 14. **A CharacterBody has no Shape**, being a `BasePart` and not a `Part`, so
     the renderer drew the default block around a capsule the physics swept.
     The renderer asks what a part is drawn as (`drawnShape`).
+15. **`streaming_soak` is intermittent on the Linux tier**, as the Orbit
+    shell's QA had already recorded: one run of this pass saw the circuit come
+    back to a place with 1691 instances where the first visit had 1552, and
+    the same tree passed on the next run and in every gate before and after.
+    Recorded as found, not fixed; it is a streaming question, not an editor one.
