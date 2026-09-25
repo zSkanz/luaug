@@ -276,6 +276,29 @@ TEST_CASE("script, its parent and its siblings are typed from the tree")
     CHECK(check.diagnostics.empty());
 }
 
+TEST_CASE("the shortest word that completes what was typed comes first: else before elseif")
+{
+    // **The owner**: typing `els` offered `elseif` first, "the complicated one"
+    // -- the list should make the likely word the easy one to take.
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    std::string main = "local a = true\nif a then\n\tprint(1)\nels|\n";
+    const Position caret = caretAt(main, "|");
+    (void)builder.add(service, "Main", "Script", main);
+    core.update(builder.tree);
+
+    std::vector<app::Completion> shown;
+    app::mergeCompletions(shown, core.complete("game.ScriptService.Main", caret).items, false, "els");
+    std::string order;
+    for (const app::Completion& row : shown)
+        order += row.label + " ";
+    MESSAGE(order);
+    REQUIRE(shown.size() >= 2);
+    CHECK(shown[0].label == "else");
+    CHECK(shown[1].label == "elseif");
+}
+
 TEST_CASE("the tree a require walks is the scripts and their ancestors")
 {
     app::testing::Fixture fixture;

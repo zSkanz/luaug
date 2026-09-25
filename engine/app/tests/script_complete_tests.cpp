@@ -1019,3 +1019,25 @@ TEST_CASE("a name that does not exist yet is not offered")
     app::collectCompletions(loop, above, fixture.classes, fixture.atoms, app::CompletionWorld{}, offered);
     CHECK(find(offered, "map") == nullptr);
 }
+
+TEST_CASE("the likely word first: its own case, then the shortest")
+{
+    // **The owner**: "`els` offered `elseif` first ... it should make things
+    // easier" -- and "this applies to everything".
+    Reflection fixture;
+    const std::vector<Completion> keywords = at(fixture, "if a then\nels");
+    REQUIRE(keywords.size() >= 2);
+    CHECK(keywords[0].label == "else");
+    CHECK(keywords[1].label == "elseif");
+
+    // A file's own names: the shorter one that finishes the word comes first.
+    const std::vector<Completion> names = at(fixture, "local position = 1\nlocal pos = 2\nprint(position, pos)\npo");
+    const auto place = [&names](std::string_view label) {
+        const auto found =
+            std::find_if(names.begin(), names.end(), [&label](const Completion& c) { return c.label == label; });
+        return static_cast<std::size_t>(found - names.begin());
+    };
+    REQUIRE(place("pos") < names.size());
+    REQUIRE(place("position") < names.size());
+    CHECK(place("pos") < place("position"));
+}

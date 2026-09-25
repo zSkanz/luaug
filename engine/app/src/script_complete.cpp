@@ -453,14 +453,29 @@ void collectServices(const scene::ClassRegistry& classes, const core::AtomTable&
 // somebody typing `Workspace.` is far more often reaching for something in
 // their own tree than for `ClassName`, and the members are still one keystroke
 // of filtering away.
-void sortCompletions(std::vector<Completion>& out)
+//
+// **Then the likely word first** (the owner: "`els` offered `elseif` first --
+// it should make things easier, not harder", and "this applies to
+// everything"). Within where a name stands: the rows that begin with what was
+// typed in its own case, then the SHORTEST -- the word the fewest keystrokes
+// finish -- and only then the kind and the alphabet.
+void sortCompletions(std::vector<Completion>& out, std::string_view prefix)
 {
     const auto rank = [](CompletionKind kind) {
         return kind == CompletionKind::Instance ? 0 : static_cast<int>(kind) + 1;
     };
-    std::sort(out.begin(), out.end(), [&rank](const Completion& a, const Completion& b) {
+    const auto exact = [prefix](const Completion& row) {
+        return !prefix.empty() && std::string_view(row.label).starts_with(prefix);
+    };
+    std::stable_sort(out.begin(), out.end(), [&](const Completion& a, const Completion& b) {
         if (a.scope != b.scope)
             return a.scope < b.scope;
+        if (exact(a) != exact(b))
+            return exact(a);
+        // Only once something is typed: a bare `part.` is a list somebody
+        // reads by name, and ordering it by length would scatter it.
+        if (!prefix.empty() && a.label.size() != b.label.size())
+            return a.label.size() < b.label.size();
         if (a.kind != b.kind)
             return rank(a.kind) < rank(b.kind);
         return a.label < b.label;
@@ -492,7 +507,7 @@ void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completi
         }
     }
     shown = std::move(merged);
-    sortCompletions(shown);
+    sortCompletions(shown, prefix);
 }
 
 std::span<const std::string_view> engineGlobals() noexcept
@@ -585,14 +600,14 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
     // of a child, which only the tree knows.
     if (request.quoted == CompletionQuoted::Service) {
         collectServices(classes, atoms, request, out);
-        sortCompletions(out);
+        sortCompletions(out, request.prefix);
         return;
     }
     if (request.quoted == CompletionQuoted::Child) {
         std::vector<std::string> path = request.path;
         (void)expandLocals(document, path);
         collectChildren(tree, atoms, resolvePath(tree, atoms, path), request, out);
-        sortCompletions(out);
+        sortCompletions(out, request.prefix);
         return;
     }
     if (request.quoted == CompletionQuoted::Other)
@@ -605,7 +620,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         if (request.path[0] == "task") {
             for (const std::string_view member : kTaskMembers)
                 push(out, request, std::string(member), "function", "", CompletionKind::Library);
-            sortCompletions(out);
+            sortCompletions(out, request.prefix);
             return;
         }
         for (const script::StdLibrary& library : script::stdLibraries()) {
@@ -613,7 +628,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                 continue;
             for (const script::StdName& member : library.members)
                 push(out, request, std::string(member.name), std::string(member.type), "", CompletionKind::Library);
-            sortCompletions(out);
+            sortCompletions(out, request.prefix);
             return;
         }
     }
@@ -637,7 +652,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                      member.callable ? CompletionKind::Method : CompletionKind::Property);
             }
             if (!out.empty()) {
-                sortCompletions(out);
+                sortCompletions(out, request.prefix);
                 return;
             }
         }
@@ -666,7 +681,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
             }
             // Nothing else: a module's table has no class and no children, and
             // adding either would be describing the wrong object.
-            sortCompletions(out);
+            sortCompletions(out, request.prefix);
             return;
         }
         const scene::ClassId id = at.valid() && tree.world != nullptr ? tree.world->classOf(at)
@@ -760,7 +775,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         }
     }
 
-    sortCompletions(out);
+    sortCompletions(out, request.prefix);
 }
 
 // --- Assigning to a live child's name, at edit time (ADR 0078) ---------------
