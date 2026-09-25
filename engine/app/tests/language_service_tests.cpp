@@ -256,6 +256,26 @@ TEST_CASE("a vector has what a Vector3 has: X, Y, Z, Magnitude and the methods")
     CHECK(check.diagnostics.empty());
 }
 
+TEST_CASE("script, its parent and its siblings are typed from the tree")
+{
+    // **The owner's report**: `require(script.Parent.Music)` was "value of
+    // type 'Instance?' could be nil" -- the tree knows the parent is there.
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    const core::u32 folder = builder.add(service, "Server", "Folder");
+    (void)builder.add(folder, "Music", "ModuleScript", "return { volume = 1 }\n");
+    (void)builder.add(folder, "Main", "Script",
+                      "--!strict\nlocal music = require(script.Parent.Music)\n"
+                      "local folder: Folder = script.Parent\nprint(music.volume, folder, script.Parent.Parent)\n");
+    core.update(builder.tree);
+
+    const app::LanguageCheck check = core.check("game.ScriptService.Server.Main");
+    for (const app::Diagnostic& diagnostic : check.diagnostics)
+        MESSAGE(diagnostic.message);
+    CHECK(check.diagnostics.empty());
+}
+
 TEST_CASE("the tree a require walks is the scripts and their ancestors")
 {
     app::testing::Fixture fixture;

@@ -886,3 +886,25 @@ TEST_CASE("indentation is tabs: four cells wide, and old space indents become ta
     CHECK(document.columnOfCell(0, 1) == 0);
     CHECK(document.columnOfCell(0, 3) == 1);
 }
+
+TEST_CASE("a value returned from a Promise.new executor is a warning")
+{
+    // **The owner's module loader**: `return result` inside `Promise.new`
+    // left every promise pending. The same return from `Promise.try`, or from
+    // a helper defined inside the executor, is fine.
+    ScriptDocument document("local p = Promise.new(function(resolve)\n"
+                            "\tlocal function helper() return 1 end\n"
+                            "\treturn helper()\n"
+                            "end)\n"
+                            "local q = Promise.try(function() return 2 end)\n"
+                            "local r = Promise.new(function(resolve) resolve(3) return end)\n"
+                            "print(p, q, r)\n");
+    document.refreshDiagnostics();
+    std::vector<core::u32> lines;
+    for (const app::Diagnostic& diagnostic : document.diagnostics()) {
+        if (diagnostic.message.find("ignores what its executor returns") != std::string::npos)
+            lines.push_back(diagnostic.at.line);
+    }
+    REQUIRE(lines.size() == 1);
+    CHECK(lines.front() == 2);
+}

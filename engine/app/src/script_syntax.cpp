@@ -530,10 +530,63 @@ void styleLine(std::string_view text, std::span<const Token> tokens, std::vector
 // way: a function's parameters, and a loop variable. Both are unused constantly
 // and on purpose, which is why `_` exists -- and a warning somebody learns to
 // ignore has made every other warning worth less.
+// The `return`s of one function body that carry values, not those of the
+// functions nested inside it -- a helper defined in an executor returns to
+// its own caller.
+class ValueReturns : public Luau::AstVisitor
+{
+public:
+    std::vector<const Luau::AstStatReturn*> found;
+
+    bool visit(Luau::AstExprFunction*) override { return false; }
+    bool visit(Luau::AstStatReturn* node) override
+    {
+        if (node->list.size > 0)
+            found.push_back(node);
+        return true;
+    }
+};
+
 class Lints : public Luau::AstVisitor
 {
 public:
     explicit Lints(std::vector<Diagnostic>& out) : m_out(out) {}
+
+    // **A value returned from a `Promise.new` executor goes nowhere** (the
+    // owner's module loader: every promise stayed pending, so `Promise.all`
+    // never ran what came after). The promise settles when `resolve` is
+    // called; `Promise.try` is the form whose return value resolves it. The
+    // reference library behaves the same, which is what makes this easy to
+    // write and hard to see.
+    bool visit(Luau::AstExprCall* node) override
+    {
+        const auto* index = node->func->as<Luau::AstExprIndexName>();
+        const auto* owner = index != nullptr ? index->expr->as<Luau::AstExprGlobal>() : nullptr;
+        if (owner == nullptr || std::string_view(owner->name.value) != "Promise" || node->args.size < 1)
+            return true;
+        const std::string_view method = index->index.value;
+        if (method != "new" && method != "defer")
+            return true;
+        const auto* executor = node->args.data[0]->as<Luau::AstExprFunction>();
+        if (executor == nullptr || executor->body == nullptr)
+            return true;
+        ValueReturns returns;
+        for (Luau::AstStat* statement : executor->body->body)
+            statement->visit(&returns);
+        for (const Luau::AstStatReturn* returned : returns.found) {
+            const Luau::Location where = returned->location;
+            m_out.push_back(Diagnostic{
+                .at = Position{static_cast<core::u32>(where.begin.line), static_cast<core::u32>(where.begin.column)},
+                .length = where.begin.line == where.end.line && where.end.column > where.begin.column
+                              ? static_cast<core::u32>(where.end.column - where.begin.column)
+                              : 0,
+                .message = std::string("Promise.") + std::string(method) +
+                           " ignores what its executor returns: call resolve(...), or use Promise.try",
+                .severity = Severity::Warning,
+            });
+        }
+        return true;
+    }
 
     bool visit(Luau::AstExprGlobal* node) override
     {

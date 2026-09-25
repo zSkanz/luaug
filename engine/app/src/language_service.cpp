@@ -337,8 +337,18 @@ struct TreeResolver final : Luau::FileResolver
     if (Luau::get<Luau::SyntaxError>(error) != nullptr || Luau::get<Luau::UnknownRequire>(error) != nullptr)
         return false;
     if (const auto* unknown = Luau::get<Luau::UnknownProperty>(error); unknown != nullptr) {
-        if (Luau::get<Luau::ExternType>(Luau::follow(unknown->table)) != nullptr)
+        const Luau::TypeId table = Luau::follow(unknown->table);
+        if (Luau::get<Luau::ExternType>(table) != nullptr)
             return false;
+        // An instance typed from the tree (`Impl::typeTheTree`) is its class
+        // and its known children; a name that is neither is a child the
+        // snapshot did not carry, which is still the tree's to know.
+        if (const auto* parts = Luau::get<Luau::IntersectionType>(table); parts != nullptr) {
+            for (const Luau::TypeId part : parts->parts) {
+                if (Luau::get<Luau::ExternType>(Luau::follow(part)) != nullptr)
+                    return false;
+            }
+        }
     }
     return true;
 }
@@ -582,6 +592,21 @@ struct LanguageCore::Impl
     std::unordered_map<std::string, std::string> docs;
     std::string loadError;
 
+    // **Every instance of the tree as a type** (the owner: `script.Parent.Music`
+    // was "value of type 'Instance?' could be nil" -- the definitions only
+    // know a script's parent is some Instance or nothing, and the tree knows
+    // exactly which). Each is its class and a table of its `Parent` and its
+    // children by name; `script`, `game` and `workspace` are bound to them in
+    // every module's own scope, which is how the reference editor types the
+    // same code. Rebuilt when the tree's SHAPE changes, never on a keystroke,
+    // and the arenas stay alive because a module checked earlier still points
+    // into them until it is checked again.
+    std::vector<std::unique_ptr<Luau::TypeArena>> treeArenas;
+    std::unordered_map<std::string, Luau::TypeId> treeTypes;
+    Luau::TypeId gameType = nullptr;
+    Luau::TypeId workspaceType = nullptr;
+    std::string treeShape;
+
     static Luau::FrontendOptions options()
     {
         Luau::FrontendOptions out;
@@ -601,6 +626,19 @@ struct LanguageCore::Impl
         : frontend(Luau::SolverMode::New, &resolver, &config, options())
     {
         resolver.tree = &tree;
+        frontend.prepareModuleScope = [this](const Luau::ModuleName& name, const Luau::ScopePtr& scope, bool) {
+            const auto bind = [&scope](const char* global, Luau::TypeId type) {
+                Luau::Binding binding;
+                binding.typeId = type;
+                scope->bindings[Luau::AstName(global)] = binding;
+            };
+            if (const auto found = treeTypes.find(name); found != treeTypes.end())
+                bind("script", found->second);
+            if (gameType != nullptr)
+                bind("game", gameType);
+            if (workspaceType != nullptr)
+                bind("workspace", workspaceType);
+        };
         Luau::registerBuiltinGlobals(frontend, frontend.globals, false);
         const CreatableClasses creatable = withoutInstanceOverloads(definitions);
         {
@@ -678,6 +716,84 @@ struct LanguageCore::Impl
             if (found != vector->props.end() && vector->props.count(upper) == 0)
                 vector->props[upper] = found->second;
         }
+    }
+
+    // The tree's shape: what a type built from it depends on. The sources are
+    // not in it -- a keystroke does not rebuild the types.
+    [[nodiscard]] static std::string shapeOf(const LanguageTree& snapshot)
+    {
+        std::string shape;
+        for (const LanguageTree::Node& node : snapshot.nodes) {
+            shape += node.path;
+            shape += '\x1f';
+            shape += node.className;
+            shape += '\x1e';
+        }
+        return shape;
+    }
+
+    // Builds `treeTypes`, `gameType` and `workspaceType` from `tree` (see
+    // `treeArenas`). Answers whether it rebuilt, which makes every module
+    // dirty: each one's `script` and `game` are new types.
+    bool typeTheTree()
+    {
+        std::string shape = shapeOf(tree);
+        if (shape == treeShape)
+            return false;
+        treeShape = std::move(shape);
+        treeTypes.clear();
+        gameType = nullptr;
+        workspaceType = nullptr;
+
+        auto arena = std::make_unique<Luau::TypeArena>();
+        const Luau::ScopePtr& globalsScope = frontend.globals.globalScope;
+        const Luau::TypeId instanceType = [&]() -> Luau::TypeId {
+            const std::optional<Luau::TypeFun> declared = globalsScope->lookupType("Instance");
+            return declared.has_value() ? declared->type : frontend.builtinTypes->anyType;
+        }();
+        // A member of the class, anywhere up its chain: a child of the same
+        // name is shadowed by it, as it is when the code runs.
+        const auto classHas = [](Luau::TypeId classType, const std::string& member) {
+            for (const Luau::ExternType* at = Luau::get<Luau::ExternType>(Luau::follow(classType)); at != nullptr;
+                 at = at->parent.has_value() ? Luau::get<Luau::ExternType>(Luau::follow(*at->parent)) : nullptr) {
+                if (at->props.count(member) != 0)
+                    return true;
+            }
+            return false;
+        };
+
+        const std::size_t count = tree.nodes.size();
+        std::vector<Luau::TypeId> tables(count);
+        std::vector<Luau::TypeId> classes(count);
+        std::vector<Luau::TypeId> nodes(count);
+        for (std::size_t index = 0; index < count; ++index) {
+            const std::optional<Luau::TypeFun> declared = globalsScope->lookupType(tree.nodes[index].className);
+            classes[index] = declared.has_value() ? declared->type : instanceType;
+            tables[index] = arena->addType(Luau::TableType{Luau::TableState::Sealed, Luau::TypeLevel{}});
+            nodes[index] = arena->addType(Luau::IntersectionType{{classes[index], tables[index]}});
+        }
+        for (std::size_t index = 0; index < count; ++index) {
+            const LanguageTree::Node& node = tree.nodes[index];
+            auto* table = Luau::getMutable<Luau::TableType>(tables[index]);
+            if (node.parent >= 0)
+                table->props["Parent"] =
+                    Luau::Property::create(nodes[static_cast<std::size_t>(node.parent)], std::nullopt);
+            for (const core::u32 child : node.children) {
+                const std::string& name = tree.nodes[child].name;
+                if (name.empty() || table->props.count(name) != 0 || classHas(classes[index], name))
+                    continue;
+                table->props[name] = Luau::Property::create(nodes[child], std::nullopt);
+            }
+            if (node.script)
+                treeTypes.emplace(node.path, nodes[index]);
+            if (node.parent < 0)
+                gameType = nodes[index];
+            else if (node.parent == 0 && node.className == "Workspace")
+                workspaceType = nodes[index];
+        }
+        Luau::freeze(*arena);
+        treeArenas.push_back(std::move(arena));
+        return true;
     }
 
     // Hands `Instance.new` its magic (see `MagicInstanceNew`): each creatable
@@ -837,6 +953,13 @@ void LanguageCore::update(LanguageTree tree)
         dirty.push_back(path);
 
     m_impl->tree = std::move(tree);
+    if (m_impl->typeTheTree()) {
+        dirty.clear();
+        for (const LanguageTree::Node& node : m_impl->tree.nodes) {
+            if (node.script)
+                dirty.push_back(node.path);
+        }
+    }
     for (const std::string& path : dirty)
         m_impl->frontend.markDirty(path);
 }
