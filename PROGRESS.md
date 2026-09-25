@@ -305,6 +305,12 @@ What this section used to hold, resolved, for whoever remembers it:
 
 ## Decisions taken
 
+- **Atmosphere, post effects and a skybox are instances under `Lighting`**
+  (the owner, 2026-09-24; [ADR 0096](docs/decisions/0096-atmosphere-post-effects-and-a-sky-are-instances-under-lighting.md)).
+  `Atmosphere`, a six-image `Sky` with clouds, and bloom, colour correction,
+  blur, depth of field and sun rays. A world with none of them draws as
+  before, and the sun stays on the clock. It folds in the mandate's M1. The
+  ledger is [`docs/briefs/atmosphere-post-kickoff.md`](docs/briefs/atmosphere-post-kickoff.md).
 - **A material is an asset, not an instance** (the owner, 2026-09-24;
   [ADR 0090](docs/decisions/0090-a-material-is-an-asset-a-part-wears-one-and-a-script-clones-one.md),
   superseding 0060). `.material.json` in `content/`, variants by parent, a part
@@ -312,6 +318,12 @@ What this section used to hold, resolved, for whoever remembers it:
   material declares -- and `Clone()` for the copy a running script changes. It
   is a breaking API change, so the release carrying it is a major version, and
   tagging it is the owner's.
+- **A material may name a surface shader the user writes** (the owner,
+  2026-09-24; [ADR 0091](docs/decisions/0091-a-material-may-name-a-surface-shader-the-user-writes.md)).
+  Two HLSL functions against a versioned `surface.hlsli`, from which the engine
+  builds every pass, and the editor ships a DXC built from source. The owner
+  approved that dependency in the same message. The ocean becomes user code
+  over it, and a node graph is the second tier, later.
 - **`churn10k`'s 7.32 ms/tick is accepted** (the owner, 2026-09-24). Two
   thirds of its anchored parts are written every tick, so D031 makes them
   kinematic, and Jolt re-fits that broadphase layer every tick. That is the
@@ -343,6 +355,12 @@ public API, so the release that carries it is a major version, and tagging it
 is the owner's.** The mandate's unstarted stages are next, built against
 protocol 12.
 
+**User surface shaders (ADR 0091) follow the materials work**, since they
+build on the material asset and its panel. Their Stage 0 -- verifying that a
+source-built DXC emits DXIL retail D3D12 accepts (`U-64`) -- depends on
+nothing and may run at any time. The ledger is
+[`docs/briefs/user-shaders-kickoff.md`](docs/briefs/user-shaders-kickoff.md).
+
 ## Session Log
 
 Entries for the planning session, for M0 through M4, and for sessions 11 and 19
@@ -358,6 +376,23 @@ and a block world -- went to
 [`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
 2026-09-23.
 
+- **Session 35 — a user's game, and the script editor, 2026-09-24/25.**
+  D182-D185 from benchmarking the owner's friend's game, each row closed
+  with its commit and how it was verified: the SDL D3D12 descriptor heap
+  patch (`605c2995`, R13, upstream still had it), the GPU debug layer kept
+  to `debug`/`dev` or `--gpu-debug`, a UTF-8 byte-order mark in `luaug.toml`
+  (`7a572239`), and instancing by material FAMILY (`7929c198`), which took
+  the game from 756 draws to 4 and did not move its frame time -- the A/B and
+  the likely reason are in the baselines. Two lessons worth keeping: **the
+  D3D12 debug layer does not catch every out-of-bounds descriptor write**,
+  only those that land outside every heap, so a scene that runs clean
+  unpatched proves nothing (D182's row); and **a windowed frame here is its
+  presentation** -- ~8.6 ms with nothing drawn -- so only headless numbers
+  measure work. Around it, the script editor the owner and a friend were
+  using: multi-cursor, user colours and keys, tabs, scoped completion, the
+  automatic `end` after a return type; and lights that stand on their own
+  (ADR 0095). One full gate for the whole batch, at the owner's request
+  rather than one per commit.
 - **Session 34 — materials as assets, 2026-09-24.** ADR 0090's eight
   stages, each green on the local gate before it was pushed and on all three
   CI tiers before the next push.
