@@ -17,6 +17,7 @@
 #include "luaug/scene/pivot.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
+#include "luaug/ui/ui.h"
 
 #include <algorithm>
 #include <array>
@@ -5868,4 +5869,51 @@ TEST_CASE("Ctrl+S in a script's tab writes that script into the scene, and nothi
     CHECK(editor.status().message.find("whole scene") != std::string::npos);
 
     std::filesystem::remove_all(scratch, ec);
+}
+
+TEST_CASE("with the UI selected, a click in the viewport reaches the UI under it first")
+{
+    // **The owner**: while somebody arranges a screen, the click is aimed at
+    // the screen -- and with anything else selected, at the world, or a menu
+    // over the scene would make every part behind it unreachable.
+    BrushRig rig;
+    luaug::ui::generated::registerClasses(rig.classes, rig.atoms);
+    const auto make = [&](std::string_view className, std::string_view name, core::InstanceId parent) {
+        const core::InstanceId id = rig.world.create(rig.classes.findId(rig.atoms.intern(className)));
+        rig.world.setName(id, rig.atoms.intern(name));
+        REQUIRE_FALSE(rig.world.setParent(id, parent).has_value());
+        return id;
+    };
+    const core::InstanceId uiService = make("UIService", "UIService", rig.root);
+    const core::InstanceId screen = make("ScreenGui", "Hud", uiService);
+    const core::InstanceId panel = make("Frame", "Panel", screen);
+    (void)rig.world.setProperty(panel, rig.atoms.intern("Size"),
+                                scene::Value{core::UDim2{{0.0f, 200.0f}, {0.0f, 200.0f}}});
+    ui::layout(rig.world, uiService, core::Vec2{800.0f, 600.0f});
+
+    Editor editor;
+    Inspector inspector;
+    aimEditor(editor);
+
+    // The screen selected: a click on the panel selects the panel.
+    inspector.select(screen);
+    editor.requestPick({100.0f, 100.0f});
+    const auto onUi = editor.resolvePick(rig.world, rig.workspace, inspector);
+    REQUIRE(onUi.has_value());
+    CHECK(onUi->instance == panel);
+    CHECK(inspector.selection() == panel);
+
+    // Nothing of the UI selected: the same click is the world's, and there is
+    // nothing there.
+    inspector.select(core::InstanceId{});
+    editor.requestPick({100.0f, 100.0f});
+    const auto onWorld = editor.resolvePick(rig.world, rig.workspace, inspector);
+    CHECK_FALSE(onWorld.has_value());
+
+    // And off the panel, with the UI selected, the click falls through to the
+    // world as it always did.
+    inspector.select(panel);
+    editor.requestPick({600.0f, 500.0f});
+    const auto beside = editor.resolvePick(rig.world, rig.workspace, inspector);
+    CHECK_FALSE(beside.has_value());
 }

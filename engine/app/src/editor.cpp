@@ -13,6 +13,7 @@
 #include <luaug/scene/scene_file.h>
 #include <luaug/scene/voxel_fluid.h>
 #include <luaug/scene/world.h>
+#include <luaug/ui/ui.h>
 
 #include <algorithm>
 #include <cmath>
@@ -4744,58 +4745,87 @@ std::optional<PickHit> Editor::resolvePick(const scene::World& world, core::Inst
     if (!m_hasCamera)
         return std::nullopt;
 
-    const PickRay ray = rayThrough(request.pixel);
-    std::optional<PickHit> hit = pickNearest(world, root, ray);
-
-    // **What is not a part** (S5.1). Picking walked the part pool and nothing
-    // else, so a `Camera`, a `PointLight`, an `Attachment` and a `Ragdoll` could
-    // be reached only through the Explorer -- and the one you want to move is
-    // the one you can see.
-    //
-    // A marker wins over geometry when the ray passes within its radius AND it
-    // is not behind the solid hit: a marker is an aiming target rather than a
-    // shape, so being smaller must not make it harder to click, and being behind
-    // a wall must still make it unreachable.
-    static std::vector<PickMarker> markers;
-    collectPickMarkers(world, root, markers);
-    // Not the one the eye is inside (`eyeInsideMarker`).
-    std::erase_if(markers, [&ray](const PickMarker& marker) { return eyeInsideMarker(ray.origin, marker.at); });
-    if (const std::optional<PickHit> marker = pickMarker(
-            markers, ray, kPickMarkerRadius, hit.has_value() ? hit->distance : std::numeric_limits<f32>::infinity());
-        marker.has_value()) {
-        hit = marker;
-    }
-
-    // **A click selects the thing, not the part it is made of** (S5.3). A
-    // `Model` is something somebody made in order to move it as one, so
-    // selecting the wheel of a car hands back the opposite of what the grouping
-    // was for. Double-clicking drills in, and a click outside what was drilled
-    // comes back out.
-    if (hit.has_value() && request.direct) {
-        // **Alt: the part itself.** No resolution and no drill: the model stays
-        // closed, so the next plain click selects it whole again.
-    }
-    else if (hit.has_value()) {
-        const core::InstanceId resolved = resolveSelection(world, root, hit->instance, m_drilled);
-
-        if (request.opening) {
-            // **Opening what was RESOLVED, not what was hit.** Double-clicking a
-            // wheel opens the car it is part of; a second double-click then
-            // opens whatever is inside that, one level per gesture.
-            m_drilled = resolved != hit->instance ? resolved : hit->instance;
+    // **The UI first, while the UI is what is being worked on** (the owner:
+    // with something under `UIService` selected, a click in the viewport should
+    // reach the UI under it). The screen's UI is drawn over the world, so while
+    // somebody arranges it, it is what they are aiming at -- and with anything
+    // else selected the world is, or a menu over the scene would make every
+    // part behind it unreachable. The viewport IS the target the UI is laid out
+    // against, so the click's pixel is the UI's.
+    core::InstanceId uiHit;
+    {
+        core::InstanceId top = root;
+        while (world.parentOf(top).valid())
+            top = world.parentOf(top);
+        const scene::ClassId uiServiceClass = world.classes().findId(world.atoms().lookup("UIService"));
+        core::InstanceId uiService;
+        for (core::InstanceId child = world.firstChild(top); child.valid(); child = world.nextSibling(child)) {
+            if (world.classOf(child) == uiServiceClass) {
+                uiService = child;
+                break;
+            }
         }
-        else if (m_drilled.valid() && !world.isAncestorOf(m_drilled, resolved) && resolved != m_drilled) {
-            // Clicked outside what was open, so it is closed. Otherwise a drill
-            // would be permanent and the rule would be off for the rest of the
-            // session.
+        const core::InstanceId selected = inspector.selection();
+        if (uiService.valid() && selected.valid() && (selected == uiService || world.isAncestorOf(uiService, selected)))
+            uiHit = ui::hitTest(world, uiService, request.pixel);
+    }
+
+    const PickRay ray = rayThrough(request.pixel);
+    std::optional<PickHit> hit =
+        uiHit.valid() ? std::optional<PickHit>(PickHit{uiHit, 0.0f}) : pickNearest(world, root, ray);
+    if (!uiHit.valid()) {
+
+        // **What is not a part** (S5.1). Picking walked the part pool and nothing
+        // else, so a `Camera`, a `PointLight`, an `Attachment` and a `Ragdoll` could
+        // be reached only through the Explorer -- and the one you want to move is
+        // the one you can see.
+        //
+        // A marker wins over geometry when the ray passes within its radius AND it
+        // is not behind the solid hit: a marker is an aiming target rather than a
+        // shape, so being smaller must not make it harder to click, and being behind
+        // a wall must still make it unreachable.
+        static std::vector<PickMarker> markers;
+        collectPickMarkers(world, root, markers);
+        // Not the one the eye is inside (`eyeInsideMarker`).
+        std::erase_if(markers, [&ray](const PickMarker& marker) { return eyeInsideMarker(ray.origin, marker.at); });
+        if (const std::optional<PickHit> marker =
+                pickMarker(markers, ray, kPickMarkerRadius,
+                           hit.has_value() ? hit->distance : std::numeric_limits<f32>::infinity());
+            marker.has_value()) {
+            hit = marker;
+        }
+
+        // **A click selects the thing, not the part it is made of** (S5.3). A
+        // `Model` is something somebody made in order to move it as one, so
+        // selecting the wheel of a car hands back the opposite of what the grouping
+        // was for. Double-clicking drills in, and a click outside what was drilled
+        // comes back out.
+        if (hit.has_value() && request.direct) {
+            // **Alt: the part itself.** No resolution and no drill: the model stays
+            // closed, so the next plain click selects it whole again.
+        }
+        else if (hit.has_value()) {
+            const core::InstanceId resolved = resolveSelection(world, root, hit->instance, m_drilled);
+
+            if (request.opening) {
+                // **Opening what was RESOLVED, not what was hit.** Double-clicking a
+                // wheel opens the car it is part of; a second double-click then
+                // opens whatever is inside that, one level per gesture.
+                m_drilled = resolved != hit->instance ? resolved : hit->instance;
+            }
+            else if (m_drilled.valid() && !world.isAncestorOf(m_drilled, resolved) && resolved != m_drilled) {
+                // Clicked outside what was open, so it is closed. Otherwise a drill
+                // would be permanent and the rule would be off for the rest of the
+                // session.
+                m_drilled = core::InstanceId{};
+            }
+
+            hit = PickHit{resolveSelection(world, root, hit->instance, m_drilled), hit->distance};
+        }
+        else if (!request.additive) {
+            // Empty space closes it too, for the same reason it deselects.
             m_drilled = core::InstanceId{};
         }
-
-        hit = PickHit{resolveSelection(world, root, hit->instance, m_drilled), hit->distance};
-    }
-    else if (!request.additive) {
-        // Empty space closes it too, for the same reason it deselects.
-        m_drilled = core::InstanceId{};
     }
 
     // **Ctrl adds and removes; a plain click replaces.** The same gesture the
