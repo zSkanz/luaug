@@ -48,6 +48,13 @@ struct BodyRecord
     bool collides = true;
 };
 
+struct JointRecord
+{
+    b2JointId id = b2_nullJointId;
+    u32 generation = 0;
+    bool alive = false;
+};
+
 struct WorldRecord
 {
     b2WorldId id = b2_nullWorldId;
@@ -55,6 +62,8 @@ struct WorldRecord
     bool alive = false;
     std::vector<BodyRecord> bodies;
     std::vector<u32> freeBodies;
+    std::vector<JointRecord> joints;
+    std::vector<u32> freeJoints;
     std::vector<Contact2D> contacts;
     // Which groups each group collides with: a bit per group, all set.
     std::array<u64, kMaxCollisionGroups2D> collides{};
@@ -102,6 +111,7 @@ public:
         b2DestroyWorld(record->id);
         record->alive = false;
         record->bodies.clear();
+        record->joints.clear();
         record->contacts.clear();
         m_freeWorlds.push_back(world.index);
     }
@@ -323,6 +333,112 @@ public:
             for (int at = 0; at < count; ++at)
                 b2Shape_SetFilter(shapes[static_cast<std::size_t>(at)], filter);
         }
+    }
+
+    Joint2DHandle createJoint(World2DHandle world, const Joint2DDesc& desc) override
+    {
+        WorldRecord* record = resolve(world);
+        const BodyRecord* first = record != nullptr ? resolve(*record, desc.first) : nullptr;
+        const BodyRecord* second = record != nullptr ? resolve(*record, desc.second) : nullptr;
+        if (first == nullptr || second == nullptr || desc.first == desc.second)
+            return {};
+
+        // The bodies' relative angle now, which the weld holds and the hinge's
+        // limits are measured from (ADR 0102).
+        const float reference =
+            b2Rot_GetAngle(b2Body_GetRotation(second->id)) - b2Rot_GetAngle(b2Body_GetRotation(first->id));
+
+        b2JointId id = b2_nullJointId;
+        switch (desc.type) {
+        case Joint2DType::Hinge: {
+            b2RevoluteJointDef def = b2DefaultRevoluteJointDef();
+            def.bodyIdA = first->id;
+            def.bodyIdB = second->id;
+            def.localAnchorA = toBox(desc.anchorFirst);
+            def.localAnchorB = toBox(desc.anchorSecond);
+            def.referenceAngle = reference;
+            def.enableLimit = desc.limitsEnabled;
+            def.lowerAngle = std::min(desc.lowerAngle, desc.upperAngle);
+            def.upperAngle = std::max(desc.lowerAngle, desc.upperAngle);
+            def.enableMotor = desc.motorEnabled;
+            def.motorSpeed = desc.motorSpeed;
+            def.maxMotorTorque = std::max(0.0f, desc.maxMotorTorque);
+            def.collideConnected = desc.collideConnected;
+            id = b2CreateRevoluteJoint(record->id, &def);
+            break;
+        }
+        case Joint2DType::Spring: {
+            b2DistanceJointDef def = b2DefaultDistanceJointDef();
+            def.bodyIdA = first->id;
+            def.bodyIdB = second->id;
+            def.localAnchorA = toBox(desc.anchorFirst);
+            def.localAnchorB = toBox(desc.anchorSecond);
+            def.length = std::max(desc.length, 0.005f);
+            // Zero stiffness is a rigid rod: the spring is off, not infinitely
+            // soft, which is what a hertz of zero would otherwise mean.
+            def.enableSpring = desc.stiffness > 0.0f;
+            def.hertz = std::max(0.0f, desc.stiffness);
+            def.dampingRatio = std::max(0.0f, desc.damping);
+            def.enableLimit = true;
+            def.minLength = std::max(0.0f, std::min(desc.minLength, desc.maxLength));
+            def.maxLength = std::max(desc.minLength, desc.maxLength);
+            def.collideConnected = desc.collideConnected;
+            id = b2CreateDistanceJoint(record->id, &def);
+            break;
+        }
+        case Joint2DType::Weld: {
+            b2WeldJointDef def = b2DefaultWeldJointDef();
+            def.bodyIdA = first->id;
+            def.bodyIdB = second->id;
+            def.localAnchorA = toBox(desc.anchorFirst);
+            def.localAnchorB = toBox(desc.anchorSecond);
+            def.referenceAngle = reference;
+            def.collideConnected = desc.collideConnected;
+            id = b2CreateWeldJoint(record->id, &def);
+            break;
+        }
+        }
+        if (!b2Joint_IsValid(id))
+            return {};
+
+        u32 index = 0;
+        if (!record->freeJoints.empty()) {
+            index = record->freeJoints.back();
+            record->freeJoints.pop_back();
+        }
+        else {
+            index = static_cast<u32>(record->joints.size());
+            record->joints.emplace_back();
+        }
+        JointRecord& held = record->joints[index];
+        held.id = id;
+        held.generation = ++m_generation;
+        held.alive = true;
+        return Joint2DHandle{index, held.generation};
+    }
+
+    void destroyJoint(World2DHandle world, Joint2DHandle joint) override
+    {
+        WorldRecord* record = resolve(world);
+        if (record == nullptr || joint.index >= record->joints.size())
+            return;
+        JointRecord& held = record->joints[joint.index];
+        if (!held.alive || held.generation != joint.generation)
+            return;
+        // Already gone with one of its bodies, which Box2D does itself.
+        if (b2Joint_IsValid(held.id))
+            b2DestroyJoint(held.id);
+        held.alive = false;
+        record->freeJoints.push_back(joint.index);
+    }
+
+    [[nodiscard]] bool jointAlive(World2DHandle world, Joint2DHandle joint) const override
+    {
+        const WorldRecord* record = resolve(world);
+        if (record == nullptr || joint.index >= record->joints.size())
+            return false;
+        const JointRecord& held = record->joints[joint.index];
+        return held.alive && held.generation == joint.generation && b2Joint_IsValid(held.id);
     }
 
 private:

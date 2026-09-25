@@ -32,6 +32,7 @@ luaug_add_module(scene
         src/physics_sync_2d.cpp
         src/players.cpp
         src/ragdoll_build.cpp
+        src/sprite_animation.cpp
         src/streaming_glue.cpp
         src/tile_outline.cpp
         src/voxel_fluid.cpp
@@ -78,6 +79,7 @@ luaug_add_module_tests(scene
         tests/physics_sync_tests.cpp
         tests/physics_sync_2d_tests.cpp
         tests/ragdoll_build_tests.cpp
+        tests/sprite_animation_tests.cpp
         tests/streaming_glue_tests.cpp
         tests/voxel_fluid_tests.cpp
 )

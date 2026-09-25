@@ -1854,6 +1854,369 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     tilemap2DDesc.detachComponents = native::detachTilemap2DComponents;
     classes.registerClass(tilemap2DDesc);
 
+    // --- Constraint2D ---
+    static std::array<PropertyDesc, 6> constraint2DProperties;
+    constraint2DProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Part0"),
+            .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Part2D"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "One of the two parts it holds.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getConstraint2DPart0,
+            .set = native::setConstraint2DPart0,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Part1"),
+            .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Part2D"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The other.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getConstraint2DPart1,
+            .set = native::setConstraint2DPart1,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Anchor0"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where the joint is on `Part0`, in metres from its middle, in its own frame, so it turns with the part.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getConstraint2DAnchor0,
+            .set = native::setConstraint2DAnchor0,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Anchor1"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where the joint is on `Part1`, the same way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getConstraint2DAnchor1,
+            .set = native::setConstraint2DAnchor1,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the joint holds. A disabled joint stays in the world holding nothing.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getConstraint2DEnabled,
+            .set = native::setConstraint2DEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("CollideConnected"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the two parts still collide with each other. False is what a chain of links or a limb wants, where the parts overlap at the joint by construction.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getConstraint2DCollideConnected,
+            .set = native::setConstraint2DCollideConnected,
+        },
+    }};
+    ClassDescriptor constraint2DDesc;
+    constraint2DDesc.name = atoms.intern("Constraint2D");
+    constraint2DDesc.super = instanceClass;
+    constraint2DDesc.flags = ClassFlags::Abstract | ClassFlags::NotCreatable;
+    constraint2DDesc.defaultName = atoms.intern("Constraint2D");
+    constraint2DDesc.doc = "The base of a joint between two `Part2D`s (ADR 0102): the 2D solver holds them together, and a rope bridge, a door on a hinge or a swinging lamp is what comes of it.\012\012**Two parts and a point on each**, not two attachments: a 2D joint is a point, and each part's is in that part's own metres from its middle. A joint that cannot hold -- a part that is missing or is not in the world, or two anchored parts -- holds nothing and is not an error.";
+    static constexpr std::array<std::string_view, 5> constraint2DParents{{"Workspace", "Model", "Part2D", "ReplicatedStorage", "ServerStorage"}};
+    constraint2DDesc.parents = constraint2DParents;
+    constraint2DDesc.properties = constraint2DProperties;
+    constraint2DDesc.attachComponents = native::attachConstraint2DComponents;
+    constraint2DDesc.detachComponents = native::detachConstraint2DComponents;
+    const ClassId constraint2DClass = classes.registerClass(constraint2DDesc);
+
+    // --- HingeConstraint2D ---
+    static std::array<PropertyDesc, 6> hingeConstraint2DProperties;
+    hingeConstraint2DProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("LimitsEnabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether `LowerAngle` and `UpperAngle` apply. Off turns freely.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getHingeConstraint2DLimitsEnabled,
+            .set = native::setHingeConstraint2DLimitsEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("LowerAngle"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far `Part1` may turn clockwise, in degrees, from how the two stood when the joint was made.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getHingeConstraint2DLowerAngle,
+            .set = native::setHingeConstraint2DLowerAngle,
+        },
+        PropertyDesc{
+            .name = atoms.intern("UpperAngle"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How far it may turn counter-clockwise, the same way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getHingeConstraint2DUpperAngle,
+            .set = native::setHingeConstraint2DUpperAngle,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MotorEnabled"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the hinge drives itself towards `MotorSpeed`: a wheel, a fan, a windmill.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getHingeConstraint2DMotorEnabled,
+            .set = native::setHingeConstraint2DMotorEnabled,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MotorSpeed"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The speed the motor drives to, in degrees per second, counter-clockwise positive.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getHingeConstraint2DMotorSpeed,
+            .set = native::setHingeConstraint2DMotorSpeed,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MotorMaxTorque"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The most torque the motor applies, in newton metres. What stops it is anything that needs more.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getHingeConstraint2DMotorMaxTorque,
+            .set = native::setHingeConstraint2DMotorMaxTorque,
+        },
+    }};
+    ClassDescriptor hingeConstraint2DDesc;
+    hingeConstraint2DDesc.name = atoms.intern("HingeConstraint2D");
+    hingeConstraint2DDesc.super = constraint2DClass;
+    hingeConstraint2DDesc.flags = ClassFlags::None;
+    hingeConstraint2DDesc.defaultName = atoms.intern("HingeConstraint2D");
+    hingeConstraint2DDesc.doc = "A point both parts turn about: a door, a wheel, a pendulum, a lever. With `Anchor0` and `Anchor1` at the same place in the world, the parts stay together there and turn freely, limited or driven as below.";
+    hingeConstraint2DDesc.properties = hingeConstraint2DProperties;
+    hingeConstraint2DDesc.attachComponents = native::attachHingeConstraint2DComponents;
+    hingeConstraint2DDesc.detachComponents = native::detachHingeConstraint2DComponents;
+    classes.registerClass(hingeConstraint2DDesc);
+
+    // --- SpringConstraint2D ---
+    static std::array<PropertyDesc, 5> springConstraint2DProperties;
+    springConstraint2DProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Length"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The rest length, in metres.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getSpringConstraint2DLength,
+            .set = native::setSpringConstraint2DLength,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Stiffness"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How quickly it springs back, in hertz. 0 makes it rigid.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getSpringConstraint2DStiffness,
+            .set = native::setSpringConstraint2DStiffness,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Damping"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The damping ratio: 0 bounces for ever, 1 settles without overshooting.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getSpringConstraint2DDamping,
+            .set = native::setSpringConstraint2DDamping,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MinLength"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The shortest it may be squeezed to, in metres, however hard it is pushed.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getSpringConstraint2DMinLength,
+            .set = native::setSpringConstraint2DMinLength,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MaxLength"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The longest it may be stretched to, in metres: the end of a bungee.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getSpringConstraint2DMaxLength,
+            .set = native::setSpringConstraint2DMaxLength,
+        },
+    }};
+    ClassDescriptor springConstraint2DDesc;
+    springConstraint2DDesc.name = atoms.intern("SpringConstraint2D");
+    springConstraint2DDesc.super = constraint2DClass;
+    springConstraint2DDesc.flags = ClassFlags::None;
+    springConstraint2DDesc.defaultName = atoms.intern("SpringConstraint2D");
+    springConstraint2DDesc.doc = "A distance between two points, held softly: a spring, a bungee, a suspension. At a `Stiffness` of 0 it is a rigid rod of `Length`, which is what a rope bridge's links are.";
+    springConstraint2DDesc.properties = springConstraint2DProperties;
+    springConstraint2DDesc.attachComponents = native::attachSpringConstraint2DComponents;
+    springConstraint2DDesc.detachComponents = native::detachSpringConstraint2DComponents;
+    classes.registerClass(springConstraint2DDesc);
+
+    // --- WeldConstraint2D ---
+    ClassDescriptor weldConstraint2DDesc;
+    weldConstraint2DDesc.name = atoms.intern("WeldConstraint2D");
+    weldConstraint2DDesc.super = constraint2DClass;
+    weldConstraint2DDesc.flags = ClassFlags::None;
+    weldConstraint2DDesc.defaultName = atoms.intern("WeldConstraint2D");
+    weldConstraint2DDesc.doc = "The two parts held rigidly together, in the placement they had when the weld was made: a sword in a hand, a crate's lid, a vehicle's body on its frame.";
+    weldConstraint2DDesc.attachComponents = native::attachWeldConstraint2DComponents;
+    weldConstraint2DDesc.detachComponents = native::detachWeldConstraint2DComponents;
+    classes.registerClass(weldConstraint2DDesc);
+
+    // --- SpriteAnimator ---
+    static std::array<PropertyDesc, 9> spriteAnimatorProperties;
+    spriteAnimatorProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("FrameSize"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "One frame's size in the sheet, in pixels.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.size2_positive"),
+            .get = native::getSpriteAnimatorFrameSize,
+            .set = native::setSpriteAnimatorFrameSize,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Columns"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How many frames make one row of the sheet.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.whole_number_at_least_one"),
+            .get = native::getSpriteAnimatorColumns,
+            .set = native::setSpriteAnimatorColumns,
+        },
+        PropertyDesc{
+            .name = atoms.intern("SheetOffset"),
+            .type = ValueType::Vector2,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where frame 0 starts, in pixels from the sheet's top left, so one sheet can hold several animations one under another.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector2"),
+            .get = native::getSpriteAnimatorSheetOffset,
+            .set = native::setSpriteAnimatorSheetOffset,
+        },
+        PropertyDesc{
+            .name = atoms.intern("FirstFrame"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The frame this animation starts on, counted from `SheetOffset`.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.whole_number_at_least_zero"),
+            .get = native::getSpriteAnimatorFirstFrame,
+            .set = native::setSpriteAnimatorFirstFrame,
+        },
+        PropertyDesc{
+            .name = atoms.intern("FrameCount"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How many frames it plays.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.whole_number_at_least_one"),
+            .get = native::getSpriteAnimatorFrameCount,
+            .set = native::setSpriteAnimatorFrameCount,
+        },
+        PropertyDesc{
+            .name = atoms.intern("FramesPerSecond"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How fast, on the simulation clock.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getSpriteAnimatorFramesPerSecond,
+            .set = native::setSpriteAnimatorFramesPerSecond,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Looped"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it starts over at the end. Off stops on the last frame.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getSpriteAnimatorLooped,
+            .set = native::setSpriteAnimatorLooped,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Playing"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it advances. Setting it true starts from `FirstFrame` when it had stopped at the end, and carries on from where it was when it had been paused.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getSpriteAnimatorPlaying,
+            .set = native::setSpriteAnimatorPlaying,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Frame"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = true,
+            .inert = false,
+            .doc = "The frame it is on, from 0 at `FirstFrame`.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
+            .get = native::getSpriteAnimatorFrame,
+            .set = nullptr,
+        },
+    }};
+    ClassDescriptor spriteAnimatorDesc;
+    spriteAnimatorDesc.name = atoms.intern("SpriteAnimator");
+    spriteAnimatorDesc.super = instanceClass;
+    spriteAnimatorDesc.flags = ClassFlags::None;
+    spriteAnimatorDesc.defaultName = atoms.intern("SpriteAnimator");
+    spriteAnimatorDesc.doc = "Plays frames of its parent `Part2D`'s sprite sheet on the simulation clock (ADR 0102), so a walk cycle is data instead of script. Each tick it is playing, it writes the parent's `ImageRectOffset` and `ImageRectSize` for the frame it is on; the picture, the undo and the wire all see that as they see any write.\012\012Frames are counted along the sheet's rows from `SheetOffset`, `Columns` to a row. A non-looped animation that reaches its end stops and writes `Playing = false`, which is its end event: listen with `GetPropertyChangedSignal(\"Playing\")`.";
+    static constexpr std::array<std::string_view, 3> spriteAnimatorParents{{"Part2D", "ReplicatedStorage", "ServerStorage"}};
+    spriteAnimatorDesc.parents = spriteAnimatorParents;
+    spriteAnimatorDesc.properties = spriteAnimatorProperties;
+    spriteAnimatorDesc.attachComponents = native::attachSpriteAnimatorComponents;
+    spriteAnimatorDesc.detachComponents = native::detachSpriteAnimatorComponents;
+    classes.registerClass(spriteAnimatorDesc);
+
     // --- NavigationArea ---
     static std::array<PropertyDesc, 1> navigationAreaProperties;
     navigationAreaProperties = {{

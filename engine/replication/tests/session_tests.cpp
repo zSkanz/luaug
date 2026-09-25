@@ -17,6 +17,7 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <cmath>
 #include <doctest/doctest.h>
 #include <span>
 #include <string>
@@ -1427,11 +1428,98 @@ TEST_CASE("a sprite on the authority is a sprite on the replica, frame and facin
     sprite->position = core::Vec2{4.0f, -2.25f};
     sprite->imageRectOffset = core::Vec2{0.0f, 0.0f};
     sprite->flipX = false;
-    match.run(3);
+    // Long enough for the interpolation buffer to reach the newest sample
+    // (ADR 0103): a remote sprite is drawn a few ticks behind.
+    match.run(8);
     copy = match.client.world.parts2d().find(seen);
     CHECK((copy->position == core::Vec2{4.0f, -2.25f}));
     CHECK((copy->imageRectOffset == core::Vec2{0.0f, 0.0f}));
     CHECK_FALSE(copy->flipX);
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a remote sprite is drawn between snapshots, and turns through 180 the short way")
+{
+    PlayedMatch match;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    match.server.world.players().find(match.remote())->character = racer;
+    const core::InstanceId kite =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("Part2D")));
+    match.server.world.parts2d().find(kite)->rotation = 170.0f;
+    REQUIRE_FALSE(match.server.world.setParent(kite, match.server.workspace).has_value());
+    match.run(3);
+    const core::InstanceId seen = match.copyOf(kite);
+    REQUIRE(seen.valid());
+
+    // A metre and two degrees a tick, counter-clockwise through 180, as the
+    // solver reports it: 170, 172 ... 178, then -180, -178.
+    std::vector<float> xs;
+    std::vector<float> turns;
+    for (int frame = 1; frame <= 40; ++frame) {
+        match.tick += 1;
+        match.authority->receive(match.server.world, match.server.workspace);
+        scene::Part2DComponent& sprite = *match.server.world.parts2d().find(kite);
+        sprite.position.x += 1.0f;
+        sprite.rotation += 2.0f;
+        if (sprite.rotation > 180.0f)
+            sprite.rotation -= 360.0f;
+        if (match.tick % 2 == 0)
+            match.authority->send(match.server.world, match.server.workspace, match.tick);
+        match.replica->receive(match.client.world, match.client.workspace);
+        const scene::Part2DComponent& copy = *match.client.world.parts2d().find(seen);
+        xs.push_back(copy.position.x);
+        turns.push_back(copy.rotation);
+    }
+    for (std::size_t at = 20; at < xs.size(); ++at) {
+        CHECK(std::fabs(xs[at] - xs[at - 1] - 1.0f) < 1.0e-4f);
+        // Two degrees a tick, however the angle wrapped: never the long way.
+        float turned = std::fmod(turns[at] - turns[at - 1] + 540.0f, 360.0f) - 180.0f;
+        CHECK(std::fabs(turned - 2.0f) < 1.0e-3f);
+    }
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a tilemap reaches a replica whole, and an edit on the authority reaches it by blocks")
+{
+    PlayedMatch match;
+    const core::InstanceId level =
+        match.server.world.create(match.server.classes.findId(match.server.atoms.intern("Tilemap2D")));
+    REQUIRE(level.valid());
+    scene::Tilemap2DComponent* tilemap = match.server.world.tilemaps2d().find(level);
+    tilemap->cellSize = 0.5f;
+    for (core::i32 x = -20; x < 20; ++x)
+        (void)tilemap->setCell(x, 0, 3);
+    (void)tilemap->setCell(100, -40, 7);
+    // Four blocks of floor, and one far off for the lone tile.
+    REQUIRE(tilemap->chunks.size() == 5);
+    REQUIRE_FALSE(match.server.world.setParent(level, match.server.workspace).has_value());
+    match.run(4);
+
+    const core::InstanceId seen = match.copyOf(level);
+    REQUIRE(seen.valid());
+    const scene::Tilemap2DComponent* copy = match.client.world.tilemaps2d().find(seen);
+    REQUIRE(copy != nullptr);
+    CHECK(copy->cellSize == 0.5f);
+    CHECK(copy->chunks == match.server.world.tilemaps2d().find(level)->chunks);
+    const core::u64 before = copy->revision;
+
+    // A wall broken, a floor built, and a lone tile's block emptied.
+    tilemap = match.server.world.tilemaps2d().find(level);
+    (void)tilemap->setCell(-20, 0, 0);
+    (void)tilemap->setCell(5, 5, 9);
+    (void)tilemap->setCell(100, -40, 0);
+    match.run(2);
+    copy = match.client.world.tilemaps2d().find(seen);
+    CHECK(copy->cell(-20, 0) == 0);
+    CHECK(copy->cell(5, 5) == 9);
+    CHECK(copy->chunks.size() == 4);
+    CHECK(copy->chunks == tilemap->chunks);
+    CHECK(copy->revision > before);
+
+    // Quiet, it sends no blocks at all.
+    const core::u64 revision = copy->revision;
+    match.run(4);
+    CHECK(match.client.world.tilemaps2d().find(seen)->revision == revision);
     CHECK(match.replica->checksumFailures() == 0);
 }
 

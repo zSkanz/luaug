@@ -11,6 +11,11 @@
 // It is a second mirror and not a mode of the first because the two share no
 // state: a 3D body and a 2D body never touch. A world may hold both kinds, and
 // each is stepped by its own library on the same fixed tick.
+//
+// A `Constraint2D` is a joint between two of the bodies (ADR 0102), built
+// after them and rebuilt whenever either is -- a body rebuilt for a change of
+// shape takes its joints with it -- or whenever the joint's own description
+// changes. Nothing is adjusted in place, for the reason bodies are not.
 #pragma once
 
 #include "luaug/core/id.h"
@@ -60,6 +65,8 @@ public:
 
     // Bodies in the simulation now, tilemaps' outlines included.
     [[nodiscard]] core::usize bodyCount() const noexcept;
+    // Joints holding now.
+    [[nodiscard]] core::usize jointCount() const noexcept;
 
 private:
     // Everything that, changed, makes the body another body: rebuilt rather
@@ -112,7 +119,17 @@ private:
         bool seen = false;
     };
 
+    struct JointRecord
+    {
+        physics::Joint2DHandle joint;
+        // What it was built from: the two bodies' handles and the whole
+        // description, so a rebuilt body or an edited property is noticed.
+        physics::Joint2DDesc desc;
+        bool seen = false;
+    };
+
     void applyScene(core::f32 fixedDt);
+    void applyJoints();
     void writeBack();
     void publishContacts();
     [[nodiscard]] core::u16 groupOf(core::NameAtom name) const noexcept;
@@ -131,6 +148,7 @@ private:
     // world (R10).
     std::map<core::u64, PartRecord> m_parts;
     std::map<core::u64, TilemapRecord> m_tilemaps;
+    std::map<core::u64, JointRecord> m_joints;
 };
 
 } // namespace luaug::scene

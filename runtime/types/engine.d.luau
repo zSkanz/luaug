@@ -1932,6 +1932,77 @@ declare extern type Tilemap2D extends Instance with
     function Clear(self): ()
 end
 
+declare extern type Constraint2D extends Instance with
+    --- One of the two parts it holds.
+    Part0: Part2D?
+    --- The other.
+    Part1: Part2D?
+    --- Where the joint is on `Part0`, in metres from its middle, in its own frame, so it turns with the
+    --- part.
+    Anchor0: Vector2
+    --- Where the joint is on `Part1`, the same way.
+    Anchor1: Vector2
+    --- Whether the joint holds. A disabled joint stays in the world holding nothing.
+    Enabled: boolean
+    --- Whether the two parts still collide with each other. False is what a chain of links or a limb
+    --- wants, where the parts overlap at the joint by construction.
+    CollideConnected: boolean
+end
+
+declare extern type HingeConstraint2D extends Constraint2D with
+    --- Whether `LowerAngle` and `UpperAngle` apply. Off turns freely.
+    LimitsEnabled: boolean
+    --- How far `Part1` may turn clockwise, in degrees, from how the two stood when the joint was made.
+    LowerAngle: number
+    --- How far it may turn counter-clockwise, the same way.
+    UpperAngle: number
+    --- Whether the hinge drives itself towards `MotorSpeed`: a wheel, a fan, a windmill.
+    MotorEnabled: boolean
+    --- The speed the motor drives to, in degrees per second, counter-clockwise positive.
+    MotorSpeed: number
+    --- The most torque the motor applies, in newton metres. What stops it is anything that needs more.
+    MotorMaxTorque: number
+end
+
+declare extern type SpringConstraint2D extends Constraint2D with
+    --- The rest length, in metres.
+    Length: number
+    --- How quickly it springs back, in hertz. 0 makes it rigid.
+    Stiffness: number
+    --- The damping ratio: 0 bounces for ever, 1 settles without overshooting.
+    Damping: number
+    --- The shortest it may be squeezed to, in metres, however hard it is pushed.
+    MinLength: number
+    --- The longest it may be stretched to, in metres: the end of a bungee.
+    MaxLength: number
+end
+
+declare extern type WeldConstraint2D extends Constraint2D with
+end
+
+declare extern type SpriteAnimator extends Instance with
+    --- One frame's size in the sheet, in pixels.
+    FrameSize: Vector2
+    --- How many frames make one row of the sheet.
+    Columns: number
+    --- Where frame 0 starts, in pixels from the sheet's top left, so one sheet can hold several
+    --- animations one under another.
+    SheetOffset: Vector2
+    --- The frame this animation starts on, counted from `SheetOffset`.
+    FirstFrame: number
+    --- How many frames it plays.
+    FrameCount: number
+    --- How fast, on the simulation clock.
+    FramesPerSecond: number
+    --- Whether it starts over at the end. Off stops on the last frame.
+    Looped: boolean
+    --- Whether it advances. Setting it true starts from `FirstFrame` when it had stopped at the end,
+    --- and carries on from where it was when it had been paused.
+    Playing: boolean
+    --- The frame it is on, from 0 at `FirstFrame`.
+    read Frame: number
+end
+
 declare extern type NavigationArea extends Instance with
     --- The name its cost is set by. Areas that share a label share a cost.
     Label: string
@@ -3252,6 +3323,10 @@ declare Instance: {
         & (("AnimationPlayer") -> AnimationPlayer)
         & (("Part2D") -> Part2D)
         & (("Tilemap2D") -> Tilemap2D)
+        & (("HingeConstraint2D") -> HingeConstraint2D)
+        & (("SpringConstraint2D") -> SpringConstraint2D)
+        & (("WeldConstraint2D") -> WeldConstraint2D)
+        & (("SpriteAnimator") -> SpriteAnimator)
         & (("NavigationArea") -> NavigationArea)
         & (("NavigationLink") -> NavigationLink)
         & (("NavigationAgent") -> NavigationAgent)

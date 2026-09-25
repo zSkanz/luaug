@@ -708,6 +708,37 @@ using generated::Source;
         return true;
     }
 
+    // A tilemap's properties (ADR 0103). Its cells are not fields: they travel
+    // in `TilemapBlocks`.
+    if (field.pool == "tilemaps2d") {
+        const scene::Tilemap2DComponent* tilemap = world.tilemaps2d().find(id);
+        if (tilemap == nullptr) {
+            return false;
+        }
+        const auto flat = [](core::Vec2 value) { return core::Vec3{value.x, value.y, 0.0f}; };
+        if (field.name == "Position")
+            setVec3(out, flat(tilemap->position));
+        else if (field.name == "CellSize")
+            setF32(out, tilemap->cellSize);
+        else if (field.name == "Tileset")
+            setU32(out, tilemap->tileset.id);
+        else if (field.name == "TileSize")
+            setVec3(out, flat(tilemap->tileSize));
+        else if (field.name == "ZIndex")
+            setI32(out, tilemap->zIndex);
+        else if (field.name == "Color")
+            setVec3(out, core::Vec3{tilemap->color.r, tilemap->color.g, tilemap->color.b});
+        else if (field.name == "Filter")
+            setI32(out, tilemap->filter);
+        else if (field.name == "Collides")
+            setBool(out, tilemap->collides);
+        else if (field.name == "Friction")
+            setF32(out, tilemap->friction);
+        else
+            return false;
+        return true;
+    }
+
     return false;
 }
 
@@ -1259,6 +1290,40 @@ using generated::Source;
             sprite->imageRectSize = plane(value);
         else if (field.name == "Filter")
             sprite->filter = asI32(value);
+        else
+            return false;
+        return true;
+    }
+
+    if (field.pool == "tilemaps2d") {
+        scene::Tilemap2DComponent* tilemap = world.tilemaps2d().find(id);
+        if (tilemap == nullptr) {
+            return false;
+        }
+        const auto plane = [](const FieldValue& cell) {
+            const core::Vec3 value = asVec3(cell);
+            return core::Vec2{value.x, value.y};
+        };
+        if (field.name == "Position")
+            tilemap->position = plane(value);
+        else if (field.name == "CellSize")
+            tilemap->cellSize = asF32(value);
+        else if (field.name == "Tileset")
+            tilemap->tileset = core::NameAtom{asU32(value)};
+        else if (field.name == "TileSize")
+            tilemap->tileSize = plane(value);
+        else if (field.name == "ZIndex")
+            tilemap->zIndex = asI32(value);
+        else if (field.name == "Color") {
+            const core::Vec3 colour = asVec3(value);
+            tilemap->color = core::Color3{colour.x, colour.y, colour.z};
+        }
+        else if (field.name == "Filter")
+            tilemap->filter = asI32(value);
+        else if (field.name == "Collides")
+            tilemap->collides = asBool(value);
+        else if (field.name == "Friction")
+            tilemap->friction = asF32(value);
         else
             return false;
         return true;

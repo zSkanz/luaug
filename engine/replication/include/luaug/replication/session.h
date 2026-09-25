@@ -33,6 +33,7 @@
 #include "luaug/replication/extract.h"
 #include "luaug/replication/types.h"
 #include "luaug/scene/character_replay.h"
+#include "luaug/scene/components.h"
 
 #include <deque>
 #include <functional>
@@ -199,6 +200,20 @@ private:
     [[nodiscard]] Peer* peerFor(net::PeerId id) noexcept;
     // The instance a network id names in the last capture, or an invalid id.
     [[nodiscard]] core::InstanceId instanceOfNet(const scene::World& world, u32 netId) const noexcept;
+    // Every tilemap's blocks against its shadow, into `m_tilemapEdits`.
+    void diffTilemaps(const scene::World& world);
+
+    using TileBlock = std::pair<scene::TileChunkKey, scene::TileChunk>;
+    // One tilemap's cells as last sent to every peer (ADR 0103): one copy
+    // per tilemap and not per peer, so the cost does not grow with players.
+    struct TilemapShadow
+    {
+        std::map<scene::TileChunkKey, scene::TileChunk> blocks;
+        u64 revision = 0;
+        // `World::restores` when it was last compared: a restore rewinds
+        // revisions, so after one a matching revision proves nothing.
+        u64 restores = 0;
+    };
 
     net::ITransport& m_transport;
     std::vector<Peer> m_peers;
@@ -221,6 +236,10 @@ private:
     // `send`, which is the only caller that can need it.
     // The last capture's walk, in pre-order.
     std::vector<Captured> m_order;
+    std::map<u32, TilemapShadow> m_tilemapShadows;
+    // This send's changed blocks, by tilemap network id; an emptied block
+    // is all zeros.
+    std::map<u32, std::vector<TileBlock>> m_tilemapEdits;
     const scene::World* m_world = nullptr;
     u64 m_tick = 0;
     Stats m_stats;
@@ -299,6 +318,7 @@ private:
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
     void resolveCharacters(scene::World& world, core::InstanceId root);
     void onOwnership(scene::World& world, std::span<const u8> bytes);
+    void onTilemapBlocks(scene::World& world, std::span<const u8> bytes);
     void sendOwned(const scene::World& world, u64 tick);
     void reconcile(scene::World& world, core::InstanceId character, const scene::CharacterReplayStart& authority);
     void interpolate(scene::World& world);
@@ -358,6 +378,15 @@ private:
     // Interpolation: every remote part's last few snapshot transforms, by
     // server tick, and the server clock they are drawn against.
     std::map<u32, std::deque<Sample>> m_samples;
+    // The same for every remote `Part2D` (ADR 0103): where it was and how it
+    // was turned, in degrees, at one snapshot tick.
+    struct Sample2D
+    {
+        u64 tick = 0;
+        core::Vec2 position{0.0f, 0.0f};
+        core::f32 rotation = 0.0f;
+    };
+    std::map<u32, std::deque<Sample2D>> m_samples2d;
     u64 m_serverClock = 0;
     u32 m_interpolationDelay = DefaultInterpolationDelay;
 

@@ -51,6 +51,18 @@ constexpr f32 DegreesPerRadian = 180.0f / std::numbers::pi_v<f32>;
     return shape;
 }
 
+// Everything a joint is built from. Compared whole: a joint whose inputs
+// have not changed is the joint it was.
+[[nodiscard]] bool sameJoint(const physics::Joint2DDesc& a, const physics::Joint2DDesc& b) noexcept
+{
+    return a.type == b.type && a.first == b.first && a.second == b.second && a.anchorFirst == b.anchorFirst &&
+           a.anchorSecond == b.anchorSecond && a.collideConnected == b.collideConnected &&
+           a.limitsEnabled == b.limitsEnabled && a.lowerAngle == b.lowerAngle && a.upperAngle == b.upperAngle &&
+           a.motorEnabled == b.motorEnabled && a.motorSpeed == b.motorSpeed && a.maxMotorTorque == b.maxMotorTorque &&
+           a.length == b.length && a.stiffness == b.stiffness && a.damping == b.damping && a.minLength == b.minLength &&
+           a.maxLength == b.maxLength;
+}
+
 } // namespace
 
 PhysicsSync2D::PhysicsSync2D(World& world, physics::IPhysics2D& backend) : m_scene(world), m_backend(backend)
@@ -247,6 +259,80 @@ void PhysicsSync2D::applyScene(f32 fixedDt)
             m_backend.destroyBody(m_world, body);
         at = m_tilemaps.erase(at);
     }
+
+    applyJoints();
+}
+
+void PhysicsSync2D::applyJoints()
+{
+    const auto inWorld = [this](core::InstanceId id) {
+        return m_workspace.valid() && m_scene.isAncestorOf(m_workspace, id);
+    };
+    // The body a sprite has this tick, if it has one and it is one the solver
+    // moves -- or ground, which a joint may hang from.
+    const auto bodyOf = [this](core::InstanceId part, bool& anchored) -> physics::Body2DHandle {
+        if (!part.valid() || !m_scene.alive(part))
+            return {};
+        const auto found = m_parts.find(packInstance(part));
+        if (found == m_parts.end())
+            return {};
+        anchored = found->second.shape.anchored;
+        return found->second.body;
+    };
+
+    for (auto& [packed, record] : m_joints)
+        record.seen = false;
+    m_scene.constraints2d().forEach([&](core::InstanceId id, const Constraint2DComponent& joint) {
+        if (!joint.enabled || !inWorld(id))
+            return;
+        bool firstAnchored = false;
+        bool secondAnchored = false;
+        physics::Joint2DDesc desc;
+        desc.first = bodyOf(joint.part0, firstAnchored);
+        desc.second = bodyOf(joint.part1, secondAnchored);
+        // Two pieces of ground held together hold nothing: neither moves.
+        if (!desc.first.valid() || !desc.second.valid() || desc.first == desc.second ||
+            (firstAnchored && secondAnchored))
+            return;
+
+        desc.type = static_cast<physics::Joint2DType>(joint.kind);
+        desc.anchorFirst = joint.anchor0;
+        desc.anchorSecond = joint.anchor1;
+        desc.collideConnected = joint.collideConnected;
+        if (desc.type == physics::Joint2DType::Hinge) {
+            desc.limitsEnabled = joint.limitsEnabled;
+            desc.lowerAngle = joint.lowerAngle / DegreesPerRadian;
+            desc.upperAngle = joint.upperAngle / DegreesPerRadian;
+            desc.motorEnabled = joint.motorEnabled;
+            desc.motorSpeed = joint.motorSpeed / DegreesPerRadian;
+            desc.maxMotorTorque = joint.motorMaxTorque;
+        }
+        else if (desc.type == physics::Joint2DType::Spring) {
+            desc.length = joint.length;
+            desc.stiffness = joint.stiffness;
+            desc.damping = joint.damping;
+            desc.minLength = joint.minLength;
+            desc.maxLength = joint.maxLength;
+        }
+
+        JointRecord& record = m_joints[packInstance(id)];
+        record.seen = true;
+        if (m_backend.jointAlive(m_world, record.joint) && sameJoint(record.desc, desc))
+            return;
+        if (record.joint.valid())
+            m_backend.destroyJoint(m_world, record.joint);
+        record.joint = m_backend.createJoint(m_world, desc);
+        record.desc = desc;
+    });
+    for (auto at = m_joints.begin(); at != m_joints.end();) {
+        if (at->second.seen) {
+            ++at;
+            continue;
+        }
+        if (at->second.joint.valid())
+            m_backend.destroyJoint(m_world, at->second.joint);
+        at = m_joints.erase(at);
+    }
 }
 
 void PhysicsSync2D::writeBack()
@@ -354,6 +440,14 @@ core::usize PhysicsSync2D::bodyCount() const noexcept
         count += record.body.valid() ? 1 : 0;
     for (const auto& [packed, record] : m_tilemaps)
         count += record.bodies.size();
+    return count;
+}
+
+core::usize PhysicsSync2D::jointCount() const noexcept
+{
+    core::usize count = 0;
+    for (const auto& [packed, record] : m_joints)
+        count += m_backend.jointAlive(m_world, record.joint) ? 1 : 0;
     return count;
 }
 

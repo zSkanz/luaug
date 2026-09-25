@@ -10,6 +10,7 @@
 #include "luaug/scene/tile_outline.h"
 #include "luaug/scene/world.h"
 
+#include <cmath>
 #include <doctest/doctest.h>
 #include <ostream>
 #include <vector>
@@ -56,7 +57,15 @@ public:
         bodies.push_back(body);
         return Body2DHandle{static_cast<core::u32>(bodies.size() - 1), 1};
     }
-    void destroyBody(World2DHandle, Body2DHandle body) override { bodies[body.index].alive = false; }
+    void destroyBody(World2DHandle, Body2DHandle body) override
+    {
+        bodies[body.index].alive = false;
+        // As Box2D does: a body takes its joints with it.
+        for (JointEntry& joint : joints) {
+            if (joint.desc.first == body || joint.desc.second == body)
+                joint.alive = false;
+        }
+    }
     void setBodyTransform(World2DHandle, Body2DHandle body, core::Vec2 position, core::f32 angle) override
     {
         bodies[body.index].state.position = position;
@@ -84,6 +93,37 @@ public:
         return std::nullopt;
     }
     void setGroupsCollidable(World2DHandle, physics::CollisionGroup2D, physics::CollisionGroup2D, bool) override {}
+
+    // Joints (ADR 0102): recorded, so a test can see what the mirror asked for.
+    [[nodiscard]] physics::Joint2DHandle createJoint(World2DHandle, const physics::Joint2DDesc& desc) override
+    {
+        joints.push_back(JointEntry{desc, true});
+        return physics::Joint2DHandle{static_cast<core::u32>(joints.size() - 1), 1};
+    }
+    void destroyJoint(World2DHandle, physics::Joint2DHandle joint) override
+    {
+        if (joint.index < joints.size())
+            joints[joint.index].alive = false;
+    }
+    [[nodiscard]] bool jointAlive(World2DHandle, physics::Joint2DHandle joint) const override
+    {
+        return joint.valid() && joint.index < joints.size() && joints[joint.index].alive;
+    }
+
+    struct JointEntry
+    {
+        physics::Joint2DDesc desc;
+        bool alive = true;
+    };
+    std::vector<JointEntry> joints;
+
+    [[nodiscard]] int aliveJoints() const
+    {
+        int count = 0;
+        for (const JointEntry& joint : joints)
+            count += joint.alive ? 1 : 0;
+        return count;
+    }
 
     [[nodiscard]] int alive() const
     {
@@ -124,6 +164,19 @@ struct Mirror
     {
         const core::InstanceId id = fixture.folder("Tilemap2D");
         fixture.world.tilemaps2d().add(id, Tilemap2DComponent{});
+        REQUIRE(fixture.world.setParent(id, workspace) == std::nullopt);
+        return id;
+    }
+
+    [[nodiscard]] core::InstanceId joint(core::InstanceId first, core::InstanceId second,
+                                         physics::Joint2DType kind = physics::Joint2DType::Hinge)
+    {
+        const core::InstanceId id = fixture.folder("Constraint2D");
+        Constraint2DComponent joint;
+        joint.part0 = first;
+        joint.part1 = second;
+        joint.kind = static_cast<core::i32>(kind);
+        fixture.world.constraints2d().add(id, joint);
         REQUIRE(fixture.world.setParent(id, workspace) == std::nullopt);
         return id;
     }
@@ -360,6 +413,95 @@ TEST_CASE("a world with nothing on the plane never steps it")
     Mirror mirror;
     mirror.step();
     CHECK(mirror.backend.steps == 0);
+}
+
+TEST_CASE("a 2D joint is built after its two bodies, in radians")
+{
+    Mirror mirror;
+    const core::InstanceId door = mirror.part(core::Vec2{1.0f, 0.0f});
+    const core::InstanceId frame = mirror.part(core::Vec2{0.0f, 0.0f}, true);
+    const core::InstanceId id = mirror.joint(frame, door);
+    Constraint2DComponent& hinge = *mirror.fixture.world.constraints2d().find(id);
+    hinge.anchor1 = core::Vec2{-1.0f, 0.0f};
+    hinge.limitsEnabled = true;
+    hinge.upperAngle = 90.0f;
+    hinge.motorSpeed = 180.0f;
+    mirror.step();
+
+    REQUIRE(mirror.backend.aliveJoints() == 1);
+    CHECK(mirror.sync.jointCount() == 1);
+    const physics::Joint2DDesc& desc = mirror.backend.joints[0].desc;
+    CHECK(desc.type == physics::Joint2DType::Hinge);
+    // Part0 is the first body: the frame, created second.
+    CHECK(desc.first == Body2DHandle{1, 1});
+    CHECK(desc.second == Body2DHandle{0, 1});
+    CHECK(desc.anchorSecond == core::Vec2{-1.0f, 0.0f});
+    CHECK(desc.limitsEnabled);
+    CHECK(std::fabs(desc.upperAngle - 1.5707963f) < 1.0e-5f);
+    CHECK(std::fabs(desc.motorSpeed - 3.1415926f) < 1.0e-5f);
+
+    // Nothing changed: the same joint.
+    mirror.step();
+    CHECK(mirror.backend.joints.size() == 1);
+}
+
+TEST_CASE("a 2D joint is rebuilt when a body is, or when it is edited, and only then")
+{
+    Mirror mirror;
+    const core::InstanceId first = mirror.part(core::Vec2{0.0f, 0.0f});
+    const core::InstanceId second = mirror.part(core::Vec2{2.0f, 0.0f});
+    const core::InstanceId id = mirror.joint(first, second, physics::Joint2DType::Spring);
+    mirror.step();
+    REQUIRE(mirror.backend.joints.size() == 1);
+
+    // A new size is a new body, which took the joint with it.
+    mirror.fixture.world.parts2d().find(second)->size = core::Vec2{2.0f, 1.0f};
+    mirror.step();
+    CHECK(mirror.backend.joints.size() == 2);
+    CHECK(mirror.backend.aliveJoints() == 1);
+    CHECK(mirror.backend.joints[1].desc.second == Body2DHandle{2, 1});
+
+    mirror.fixture.world.constraints2d().find(id)->stiffness = 10.0f;
+    mirror.step();
+    CHECK(mirror.backend.joints.size() == 3);
+    CHECK(mirror.backend.joints[2].desc.stiffness == 10.0f);
+    CHECK(mirror.backend.aliveJoints() == 1);
+}
+
+TEST_CASE("a 2D joint that cannot hold holds nothing")
+{
+    Mirror mirror;
+    const core::InstanceId first = mirror.part(core::Vec2{0.0f, 0.0f});
+    const core::InstanceId ground = mirror.part(core::Vec2{0.0f, -1.0f}, true);
+    const core::InstanceId wall = mirror.part(core::Vec2{3.0f, -1.0f}, true);
+    const core::InstanceId id = mirror.joint(first, ground, physics::Joint2DType::Weld);
+    Constraint2DComponent& joint = *mirror.fixture.world.constraints2d().find(id);
+    mirror.step();
+    REQUIRE(mirror.backend.aliveJoints() == 1);
+
+    joint.enabled = false;
+    mirror.step();
+    CHECK(mirror.backend.aliveJoints() == 0);
+
+    // Two pieces of ground: neither moves, so nothing to hold.
+    joint.enabled = true;
+    joint.part0 = wall;
+    mirror.step();
+    CHECK(mirror.backend.aliveJoints() == 0);
+
+    // One end missing.
+    joint.part0 = core::InstanceId{};
+    mirror.step();
+    CHECK(mirror.backend.aliveJoints() == 0);
+
+    // Back, then out of the world.
+    joint.part0 = first;
+    mirror.step();
+    CHECK(mirror.backend.aliveJoints() == 1);
+    REQUIRE(mirror.fixture.world.setParent(id, core::InstanceId{}) == std::nullopt);
+    mirror.step();
+    CHECK(mirror.backend.aliveJoints() == 0);
+    CHECK(mirror.sync.jointCount() == 0);
 }
 
 } // namespace luaug::scene

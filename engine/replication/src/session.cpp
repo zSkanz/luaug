@@ -340,6 +340,84 @@ InstanceId AuthoritySession::instanceOfNet(const scene::World& world, u32 netId)
     return {};
 }
 
+namespace {
+
+// A tilemap's blocks to one peer (ADR 0103), 64 to a message so a large map
+// is several messages of a size every transport carries.
+constexpr usize TileBlocksPerMessage = 64;
+constexpr usize TileBlockCells = static_cast<usize>(scene::TileChunkEdge * scene::TileChunkEdge);
+
+void sendTileBlocks(net::ITransport& transport, net::PeerId peer, u32 netId,
+                    const std::vector<std::pair<scene::TileChunkKey, scene::TileChunk>>& blocks, Stats& stats)
+{
+    for (usize first = 0; first < blocks.size(); first += TileBlocksPerMessage) {
+        const usize last = std::min(blocks.size(), first + TileBlocksPerMessage);
+        Writer out;
+        out.u8v(static_cast<u8>(MessageType::TilemapBlocks));
+        out.u32v(netId);
+        out.u16v(static_cast<u16>(last - first));
+        for (usize at = first; at < last; ++at) {
+            const auto& [key, cells] = blocks[at];
+            out.u32v(static_cast<u32>(key.x));
+            out.u32v(static_cast<u32>(key.y));
+            out.u16v(static_cast<u16>(TileBlockCells));
+            for (const u16 tile : cells)
+                out.u16v(tile);
+        }
+        sendBytes(transport, peer, out.bytes, net::Delivery::Reliable, ControlChannel, stats);
+    }
+}
+
+} // namespace
+
+void AuthoritySession::diffTilemaps(const scene::World& world)
+{
+    m_tilemapEdits.clear();
+    std::set<u32> present;
+    for (const Captured& entry : m_order) {
+        const scene::Tilemap2DComponent* tilemap = world.tilemaps2d().find(entry.id);
+        if (tilemap == nullptr)
+            continue;
+        present.insert(entry.netId);
+        const auto found = m_tilemapShadows.find(entry.netId);
+        if (found == m_tilemapShadows.end()) {
+            // New this send: every peer is sent it whole with its spawn.
+            m_tilemapShadows.emplace(entry.netId, TilemapShadow{tilemap->chunks, tilemap->revision, world.restores()});
+            continue;
+        }
+        TilemapShadow& shadow = found->second;
+        if (shadow.revision == tilemap->revision && shadow.restores == world.restores())
+            continue;
+        // Both sorted by block: one merge walk finds every changed, added and
+        // emptied block, in block order (R10).
+        std::vector<TileBlock> edits;
+        auto now = tilemap->chunks.begin();
+        auto was = shadow.blocks.begin();
+        while (now != tilemap->chunks.end() || was != shadow.blocks.end()) {
+            if (was == shadow.blocks.end() || (now != tilemap->chunks.end() && now->first < was->first)) {
+                edits.emplace_back(now->first, now->second);
+                ++now;
+            }
+            else if (now == tilemap->chunks.end() || was->first < now->first) {
+                edits.emplace_back(was->first, scene::TileChunk{});
+                ++was;
+            }
+            else {
+                if (now->second != was->second)
+                    edits.emplace_back(now->first, now->second);
+                ++now;
+                ++was;
+            }
+        }
+        shadow.blocks = tilemap->chunks;
+        shadow.revision = tilemap->revision;
+        shadow.restores = world.restores();
+        if (!edits.empty())
+            m_tilemapEdits.emplace(entry.netId, std::move(edits));
+    }
+    std::erase_if(m_tilemapShadows, [&](const auto& entry) { return !present.contains(entry.first); });
+}
+
 void AuthoritySession::sendMessages(scene::World& world)
 {
     std::vector<scene::RemoteMessage> outbox;
@@ -715,6 +793,7 @@ void AuthoritySession::send(const scene::World& world, InstanceId root, u64 tick
     m_world = &world;
     m_tick = tick;
     capture(world, root, tick);
+    diffTilemaps(world);
     const WorldState& current = *m_history.back();
 
     // Everybody taking part, in join order -- the children of `NetworkService`,
@@ -911,6 +990,21 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const st
         sendBytes(m_transport, peer.id, spawn.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
         m_stats.spawned += static_cast<u32>(entering.size());
     }
+
+    // --- Tilemaps' cells (ADR 0103), after the spawns that name them: every
+    // block of one entering, and what this send's edits changed of the rest.
+    for (const u32 id : entering) {
+        const InstanceId instance = instanceOfNet(*m_world, id);
+        const scene::Tilemap2DComponent* tilemap = instance.valid() ? m_world->tilemaps2d().find(instance) : nullptr;
+        if (tilemap == nullptr || tilemap->chunks.empty())
+            continue;
+        const std::vector<TileBlock> blocks(tilemap->chunks.begin(), tilemap->chunks.end());
+        sendTileBlocks(m_transport, peer.id, id, blocks, m_stats);
+    }
+    for (const auto& [id, edits] : m_tilemapEdits) {
+        if (std::binary_search(now.begin(), now.end(), id) && !std::binary_search(entering.begin(), entering.end(), id))
+            sendTileBlocks(m_transport, peer.id, id, edits, m_stats);
+    }
     peer.known = std::move(now);
 
     // --- What this peer owns, whole, when it changed -- after the spawns, so
@@ -1096,6 +1190,9 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
         case MessageType::Ownership:
             onOwnership(world, event.payload);
             break;
+        case MessageType::TilemapBlocks:
+            onTilemapBlocks(world, event.payload);
+            break;
         case MessageType::RemoteToReplica: {
             Reader reader(event.payload);
             (void)reader.u8v();
@@ -1214,6 +1311,44 @@ void ReplicaSession::interpolate(scene::World& world)
         const f64 alpha = static_cast<f64>(target - before->tick) / static_cast<f64>(after->tick - before->tick);
         part->cframe = core::lerp(before->cframe, after->cframe, alpha);
     }
+
+    // **Sprites the same way** (ADR 0103), by the same rules: past the newest
+    // sample the newest, and nothing this machine owns.
+    for (auto& [netId, samples] : m_samples2d) {
+        if (samples.empty() || netId == m_owned || m_ownedParts.contains(netId))
+            continue;
+        const auto local = m_locals.find(netId);
+        scene::Part2DComponent* sprite =
+            local != m_locals.end() && world.alive(local->second) ? world.parts2d().find(local->second) : nullptr;
+        if (sprite == nullptr)
+            continue;
+        const Sample2D* before = &samples.front();
+        const Sample2D* after = nullptr;
+        for (const Sample2D& sample : samples) {
+            if (sample.tick <= target)
+                before = &sample;
+            else if (after == nullptr)
+                after = &sample;
+        }
+        if (after == nullptr || target <= before->tick || after->tick <= before->tick) {
+            const Sample2D& held = target < samples.front().tick ? samples.front() : *before;
+            sprite->position = held.position;
+            sprite->rotation = held.rotation;
+            continue;
+        }
+        const core::f32 alpha = static_cast<core::f32>(static_cast<f64>(target - before->tick) /
+                                                       static_cast<f64>(after->tick - before->tick));
+        sprite->position = before->position + (after->position - before->position) * alpha;
+        // **The short way round.** The solver answers in (-180, 180], so a
+        // sprite turning through 180 goes from 179 to -179; a plain lerp would
+        // spin it the long way, through zero.
+        core::f32 turn = std::fmod(after->rotation - before->rotation, 360.0f);
+        if (turn > 180.0f)
+            turn -= 360.0f;
+        else if (turn < -180.0f)
+            turn += 360.0f;
+        sprite->rotation = before->rotation + turn * alpha;
+    }
 }
 
 void ReplicaSession::resolveCharacters(scene::World& world, InstanceId root)
@@ -1259,6 +1394,43 @@ void ReplicaSession::resolveCharacters(scene::World& world, InstanceId root)
     }
 }
 
+void ReplicaSession::onTilemapBlocks(scene::World& world, std::span<const u8> bytes)
+{
+    Reader reader(bytes);
+    (void)reader.u8v();
+    const u32 netId = reader.u32v();
+    const u16 count = reader.u16v();
+    // Read whole before any is applied: a message cut short changes nothing.
+    std::vector<std::pair<scene::TileChunkKey, scene::TileChunk>> blocks;
+    blocks.reserve(count);
+    for (u16 at = 0; at < count && reader.ok(); ++at) {
+        scene::TileChunkKey key{static_cast<core::i32>(reader.u32v()), static_cast<core::i32>(reader.u32v())};
+        if (reader.u16v() != TileBlockCells)
+            return;
+        scene::TileChunk cells{};
+        for (u16& tile : cells)
+            tile = reader.u16v();
+        blocks.emplace_back(key, cells);
+    }
+    if (!reader.ok() || !reader.done())
+        return;
+    const auto local = m_locals.find(netId);
+    scene::Tilemap2DComponent* tilemap =
+        local != m_locals.end() && world.alive(local->second) ? world.tilemaps2d().find(local->second) : nullptr;
+    if (tilemap == nullptr)
+        return;
+    for (const auto& [key, cells] : blocks) {
+        const bool empty = std::all_of(cells.begin(), cells.end(), [](u16 tile) { return tile == 0; });
+        if (empty)
+            tilemap->chunks.erase(key);
+        else
+            tilemap->chunks[key] = cells;
+    }
+    // What rebuilds from the cells -- the colliders and the drawing -- watches
+    // this, as it does for an edit made here.
+    tilemap->revision += 1;
+}
+
 void ReplicaSession::onOwnership(scene::World& world, std::span<const u8> bytes)
 {
     Reader reader(bytes);
@@ -1292,8 +1464,10 @@ void ReplicaSession::onOwnership(scene::World& world, std::span<const u8> bytes)
                 part->cframe = asCFrame(held->fields[at]);
         }
     }
-    for (const u32 netId : owned)
+    for (const u32 netId : owned) {
         m_samples.erase(netId);
+        m_samples2d.erase(netId);
+    }
     m_ownedParts = std::move(owned);
 }
 
@@ -1509,6 +1683,7 @@ void ReplicaSession::resetForRejoin(scene::World& world)
     m_names.clear();
     m_states.clear();
     m_samples.clear();
+    m_samples2d.clear();
     m_characters.clear();
     m_teams.clear();
     m_ownedParts.clear();
@@ -1523,6 +1698,7 @@ void ReplicaSession::forget(u32 id)
 {
     m_departed.insert(id);
     m_samples.erase(id);
+    m_samples2d.erase(id);
     m_ownedParts.erase(id);
     m_locals.erase(id);
     m_written.erase(id);
@@ -1774,6 +1950,7 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
         // the same transform tick after tick: compared only on a change, the
         // prediction was never corrected and walked on through the wall.
         const bool answered = entity.id.value == m_owned && m_owned != 0 && m_ackedIntent != m_reconciledAck;
+        bool sampled2d = false;
 
         for (usize at = 0; at < entity.fields.size(); ++at) {
             const FieldValue& value = entity.fields[at];
@@ -1804,6 +1981,9 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
             }
             const generated::FieldDesc* field = fieldAt(desc, at);
             const bool cframe = field != nullptr && field->name == "CFrame" && field->pool == "parts";
+            const bool placed2d = field != nullptr && field->pool == "parts2d" &&
+                                  (field->name == "Position" || field->name == "Rotation") &&
+                                  !m_ownedParts.contains(entity.id.value);
             // A name-shaped component field arrives as the authority's atom,
             // and is this machine's own atom by the time it is written.
             if (field != nullptr && field->encoding == generated::Encoding::NameAtom) {
@@ -1852,6 +2032,31 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
                 samples.push_back(Sample{state.tick, asCFrame(value), std::nullopt});
                 while (samples.size() > InterpolationSamples)
                     samples.pop_front();
+                continue;
+            }
+            else if (placed2d && m_interpolationDelay > 0) {
+                // Both halves of where a sprite is, from the whole state, once
+                // per snapshot however many of the two changed (ADR 0103).
+                if (!sampled2d) {
+                    sampled2d = true;
+                    Sample2D sample{state.tick, {}, 0.0f};
+                    for (usize other = 0; other < entity.fields.size(); ++other) {
+                        const generated::FieldDesc* half = fieldAt(desc, other);
+                        if (half == nullptr || half->pool != "parts2d")
+                            continue;
+                        if (half->name == "Position") {
+                            const core::Vec3 place = asVec3(entity.fields[other]);
+                            sample.position = core::Vec2{place.x, place.y};
+                        }
+                        else if (half->name == "Rotation") {
+                            sample.rotation = asF32(entity.fields[other]);
+                        }
+                    }
+                    std::deque<Sample2D>& samples = m_samples2d[entity.id.value];
+                    samples.push_back(sample);
+                    while (samples.size() > InterpolationSamples)
+                        samples.pop_front();
+                }
                 continue;
             }
             (void)applyField(world, local->second, desc, FieldDelta{wireIdAt(desc, at), value});

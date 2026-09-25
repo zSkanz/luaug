@@ -773,6 +773,60 @@ struct Tilemap2DComponent
     }
 };
 
+// `Constraint2D` and its three classes (ADR 0102): a joint between two
+// `Part2D`s. One component for the three, as `ConstraintComponent` is for the
+// 3D ones, with the kind stamped by the class's own hook.
+struct Constraint2DComponent
+{
+    core::InstanceId part0;
+    core::InstanceId part1;
+    // Part-local metres from each part's middle.
+    core::Vec2 anchor0{0.0f, 0.0f};
+    core::Vec2 anchor1{0.0f, 0.0f};
+    // `physics::Joint2DType`'s value: 0 Hinge, 1 Spring, 2 Weld.
+    i32 kind = 2;
+    bool enabled = true;
+    bool collideConnected = false;
+
+    // Hinge. Degrees and degrees per second, as authored; the mirror converts.
+    bool limitsEnabled = false;
+    f32 lowerAngle = -90.0f;
+    f32 upperAngle = 90.0f;
+    bool motorEnabled = false;
+    f32 motorSpeed = 0.0f;
+    f32 motorMaxTorque = 0.0f;
+
+    // Spring. Metres, hertz and a damping ratio.
+    f32 length = 2.0f;
+    f32 stiffness = 4.0f;
+    f32 damping = 0.5f;
+    f32 minLength = 0.0f;
+    f32 maxLength = 1000.0f;
+};
+
+// `SpriteAnimator` (ADR 0102): frames of its parent sprite's sheet, played on
+// the simulation clock.
+struct SpriteAnimatorComponent
+{
+    // Pixels.
+    core::Vec2 frameSize{16.0f, 16.0f};
+    core::Vec2 sheetOffset{0.0f, 0.0f};
+    i32 columns = 1;
+    i32 firstFrame = 0;
+    i32 frameCount = 1;
+    f32 framesPerSecond = 8.0f;
+    bool looped = true;
+    bool playing = false;
+    // The frame it is on, from 0 at `firstFrame`, and how far into it: the
+    // clock is a phase in frames rather than seconds, so a change of speed
+    // mid-animation does not jump.
+    i32 frame = 0;
+    f64 phase = 0.0;
+    // Stopped at the end of a non-looped run: the next `Playing = true` starts
+    // over rather than resuming on the last frame.
+    bool finished = false;
+};
+
 // `NavigationService`'s agent (ADR 0089): the one body size its walkable mesh
 // is built for. The mesh itself is not state -- it is built from the world
 // where queries ask, and a restored world rebuilds it -- so this is all of the

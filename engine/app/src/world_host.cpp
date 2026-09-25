@@ -12,6 +12,7 @@
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/scene_types.h"
 #include "luaug/scene/players.h"
+#include "luaug/scene/sprite_animation.h"
 #include "luaug/scene/voxel_fluid.h"
 #include "luaug/script/instance_binding.h"
 #include "luaug/script/net_module.h"
@@ -900,6 +901,9 @@ void WorldHost::tick()
     m_animation->sample(state.fixedTimestep);
     m_runtime->fireAnimationEnded(m_animation->drainEnded());
     m_animation->retire(*m_world);
+    // Sprite sheets too (ADR 0102): the same clock, the same place, and the
+    // same reason to be after the drain.
+    scene::stepSpriteAnimators(*m_world, state.fixedTimestep);
 
     // What stands in the world is gathered at most once per tick, however
     // many paths the tick's scripts ask for.

@@ -27,7 +27,7 @@ local Wire = {}
 --- Bumped by hand, in the commit that changes the wire, and `wirecheck` has
 --- nothing to say about it because no tool can tell an intentional break from an
 --- accidental one.
-Wire.ProtocolVersion = 14
+Wire.ProtocolVersion = 15
 
 Wire.Definition = State
 Wire.validate = Schema.validate

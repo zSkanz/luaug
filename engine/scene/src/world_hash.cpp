@@ -371,6 +371,12 @@ u64 World::worldHash() const
                     hasher.pod(tile);
             }
         }
+        // How far into its frame an animator is, which decides the tick it turns
+        // the page on, and whether it ran out -- neither is a property.
+        if (const SpriteAnimatorComponent* animator = m_spriteAnimators.find(id); animator != nullptr) {
+            hasher.number(animator->phase);
+            hasher.flag(animator->finished);
+        }
 
         // **The terrain field, which no property can carry** (ADR 0082). It is
         // megabytes of samples, so it is not in the walk below and has to be

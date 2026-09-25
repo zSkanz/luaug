@@ -313,6 +313,8 @@ struct NameIndex
     X(DecalComponent, decals)                                                                                          \
     X(Part2DComponent, parts2d)                                                                                        \
     X(Tilemap2DComponent, tilemaps2d)                                                                                  \
+    X(Constraint2DComponent, constraints2d)                                                                            \
+    X(SpriteAnimatorComponent, spriteAnimators)                                                                        \
     X(NavigationComponent, navigation)                                                                                 \
     X(NavigationAreaComponent, navigationAreas)                                                                        \
     X(NavigationLinkComponent, navigationLinks)                                                                        \
@@ -872,6 +874,13 @@ public:
     }
     [[nodiscard]] ComponentPool<Tilemap2DComponent>& tilemaps2d() noexcept { return m_tilemaps2d; }
     [[nodiscard]] const ComponentPool<Tilemap2DComponent>& tilemaps2d() const noexcept { return m_tilemaps2d; }
+    [[nodiscard]] ComponentPool<Constraint2DComponent>& constraints2d() noexcept { return m_constraints2d; }
+    [[nodiscard]] const ComponentPool<Constraint2DComponent>& constraints2d() const noexcept { return m_constraints2d; }
+    [[nodiscard]] ComponentPool<SpriteAnimatorComponent>& spriteAnimators() noexcept { return m_spriteAnimators; }
+    [[nodiscard]] const ComponentPool<SpriteAnimatorComponent>& spriteAnimators() const noexcept
+    {
+        return m_spriteAnimators;
+    }
     [[nodiscard]] ComponentPool<ParticleEmitterComponent>& particleEmitters() noexcept { return m_particleEmitters; }
     [[nodiscard]] const ComponentPool<ParticleEmitterComponent>& particleEmitters() const noexcept
     {

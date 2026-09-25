@@ -3,6 +3,7 @@
 // Every write is checked here, where a refusal becomes a keyed error, rather
 // than in the solver or the renderer, where it would be a body that leaves the
 // world or a sprite of no size.
+#include "luaug/physics/physics2d.h"
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
@@ -660,6 +661,518 @@ bool setTilemap2DCollisionGroup(World& world, core::InstanceId id, const Value& 
 {
     Tilemap2DComponent* c = world.tilemaps2d().find(id);
     return c != nullptr && takeGroup(world, value, c->collisionGroup);
+}
+
+// --- Constraint2D (ADR 0102) ------------------------------------------------
+
+void attachConstraint2DComponents(World& world, core::InstanceId id)
+{
+    world.constraints2d().add(id, Constraint2DComponent{});
+}
+
+void detachConstraint2DComponents(World& world, core::InstanceId id)
+{
+    world.constraints2d().remove(id);
+}
+
+// The three below stamp the kind onto the component the base already added,
+// as the 3D constraints do: the joint's type is its class.
+
+void attachHingeConstraint2DComponents(World& world, core::InstanceId id)
+{
+    if (Constraint2DComponent* joint = world.constraints2d().find(id); joint != nullptr)
+        joint->kind = static_cast<i32>(physics::Joint2DType::Hinge);
+}
+
+void detachHingeConstraint2DComponents(World&, core::InstanceId)
+{}
+
+void attachSpringConstraint2DComponents(World& world, core::InstanceId id)
+{
+    if (Constraint2DComponent* joint = world.constraints2d().find(id); joint != nullptr)
+        joint->kind = static_cast<i32>(physics::Joint2DType::Spring);
+}
+
+void detachSpringConstraint2DComponents(World&, core::InstanceId)
+{}
+
+void attachWeldConstraint2DComponents(World& world, core::InstanceId id)
+{
+    if (Constraint2DComponent* joint = world.constraints2d().find(id); joint != nullptr)
+        joint->kind = static_cast<i32>(physics::Joint2DType::Weld);
+}
+
+void detachWeldConstraint2DComponents(World&, core::InstanceId)
+{}
+
+namespace {
+
+// A `Part2D`, or nil. Any live sprite is accepted, one outside the world
+// included: the joint holds nothing until both are in it, which is not an
+// error to set.
+[[nodiscard]] bool setJointPart(World& world, core::InstanceId id, const Value& value, bool isFirst)
+{
+    Constraint2DComponent* joint = world.constraints2d().find(id);
+    if (joint == nullptr)
+        return false;
+    core::InstanceId target;
+    if (const auto* reference = std::get_if<core::InstanceId>(&value); reference != nullptr) {
+        if (!world.alive(*reference) || world.parts2d().find(*reference) == nullptr)
+            return false;
+        target = *reference;
+    }
+    else if (valueType(value) != ValueType::Nil) {
+        return false;
+    }
+    (isFirst ? joint->part0 : joint->part1) = target;
+    return true;
+}
+
+[[nodiscard]] Value jointPart(const World& world, core::InstanceId part)
+{
+    return part.valid() && world.alive(part) ? Value{part} : Value{};
+}
+
+} // namespace
+
+// Constraint2D.Part0
+Value getConstraint2DPart0(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : jointPart(world, c->part0);
+}
+
+bool setConstraint2DPart0(World& world, core::InstanceId id, const Value& value)
+{
+    return setJointPart(world, id, value, true);
+}
+
+// Constraint2D.Part1
+Value getConstraint2DPart1(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : jointPart(world, c->part1);
+}
+
+bool setConstraint2DPart1(World& world, core::InstanceId id, const Value& value)
+{
+    return setJointPart(world, id, value, false);
+}
+
+// Constraint2D.Anchor0
+Value getConstraint2DAnchor0(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{c->anchor0};
+}
+
+bool setConstraint2DAnchor0(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    core::Vec2 next;
+    if (c == nullptr || !takeVec2(value, next) || !(true))
+        return false;
+    c->anchor0 = next;
+    return true;
+}
+
+// Constraint2D.Anchor1
+Value getConstraint2DAnchor1(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{c->anchor1};
+}
+
+bool setConstraint2DAnchor1(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    core::Vec2 next;
+    if (c == nullptr || !takeVec2(value, next) || !(true))
+        return false;
+    c->anchor1 = next;
+    return true;
+}
+
+// Constraint2D.Enabled
+Value getConstraint2DEnabled(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{c->enabled};
+}
+
+bool setConstraint2DEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* next = std::get_if<bool>(&value);
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    if (next == nullptr || c == nullptr)
+        return false;
+    c->enabled = *next;
+    return true;
+}
+
+// Constraint2D.CollideConnected
+Value getConstraint2DCollideConnected(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{c->collideConnected};
+}
+
+bool setConstraint2DCollideConnected(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* next = std::get_if<bool>(&value);
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    if (next == nullptr || c == nullptr)
+        return false;
+    c->collideConnected = *next;
+    return true;
+}
+
+// HingeConstraint2D.LimitsEnabled
+Value getHingeConstraint2DLimitsEnabled(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{c->limitsEnabled};
+}
+
+bool setHingeConstraint2DLimitsEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* next = std::get_if<bool>(&value);
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    if (next == nullptr || c == nullptr)
+        return false;
+    c->limitsEnabled = *next;
+    return true;
+}
+
+// HingeConstraint2D.LowerAngle
+Value getHingeConstraint2DLowerAngle(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->lowerAngle)};
+}
+
+bool setHingeConstraint2DLowerAngle(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(true))
+        return false;
+    c->lowerAngle = next;
+    return true;
+}
+
+// HingeConstraint2D.UpperAngle
+Value getHingeConstraint2DUpperAngle(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->upperAngle)};
+}
+
+bool setHingeConstraint2DUpperAngle(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(true))
+        return false;
+    c->upperAngle = next;
+    return true;
+}
+
+// HingeConstraint2D.MotorEnabled
+Value getHingeConstraint2DMotorEnabled(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{c->motorEnabled};
+}
+
+bool setHingeConstraint2DMotorEnabled(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* next = std::get_if<bool>(&value);
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    if (next == nullptr || c == nullptr)
+        return false;
+    c->motorEnabled = *next;
+    return true;
+}
+
+// HingeConstraint2D.MotorSpeed
+Value getHingeConstraint2DMotorSpeed(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->motorSpeed)};
+}
+
+bool setHingeConstraint2DMotorSpeed(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(true))
+        return false;
+    c->motorSpeed = next;
+    return true;
+}
+
+// HingeConstraint2D.MotorMaxTorque
+Value getHingeConstraint2DMotorMaxTorque(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->motorMaxTorque)};
+}
+
+bool setHingeConstraint2DMotorMaxTorque(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next >= 0.0f))
+        return false;
+    c->motorMaxTorque = next;
+    return true;
+}
+
+// SpringConstraint2D.Length
+Value getSpringConstraint2DLength(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->length)};
+}
+
+bool setSpringConstraint2DLength(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next > 0.0f))
+        return false;
+    c->length = next;
+    return true;
+}
+
+// SpringConstraint2D.Stiffness
+Value getSpringConstraint2DStiffness(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->stiffness)};
+}
+
+bool setSpringConstraint2DStiffness(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next >= 0.0f))
+        return false;
+    c->stiffness = next;
+    return true;
+}
+
+// SpringConstraint2D.Damping
+Value getSpringConstraint2DDamping(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->damping)};
+}
+
+bool setSpringConstraint2DDamping(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next >= 0.0f))
+        return false;
+    c->damping = next;
+    return true;
+}
+
+// SpringConstraint2D.MinLength
+Value getSpringConstraint2DMinLength(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->minLength)};
+}
+
+bool setSpringConstraint2DMinLength(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next >= 0.0f))
+        return false;
+    c->minLength = next;
+    return true;
+}
+
+// SpringConstraint2D.MaxLength
+Value getSpringConstraint2DMaxLength(const World& world, core::InstanceId id)
+{
+    const Constraint2DComponent* c = world.constraints2d().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->maxLength)};
+}
+
+bool setSpringConstraint2DMaxLength(World& world, core::InstanceId id, const Value& value)
+{
+    Constraint2DComponent* c = world.constraints2d().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next >= 0.0f))
+        return false;
+    c->maxLength = next;
+    return true;
+}
+
+// --- SpriteAnimator (ADR 0102) ----------------------------------------------
+
+void attachSpriteAnimatorComponents(World& world, core::InstanceId id)
+{
+    world.spriteAnimators().add(id, SpriteAnimatorComponent{});
+}
+
+void detachSpriteAnimatorComponents(World& world, core::InstanceId id)
+{
+    world.spriteAnimators().remove(id);
+}
+
+// SpriteAnimator.FrameSize
+Value getSpriteAnimatorFrameSize(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{c->frameSize};
+}
+
+bool setSpriteAnimatorFrameSize(World& world, core::InstanceId id, const Value& value)
+{
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    core::Vec2 next;
+    if (c == nullptr || !takeVec2(value, next) || !(next.x > 0.0f && next.y > 0.0f))
+        return false;
+    c->frameSize = next;
+    return true;
+}
+
+// SpriteAnimator.Columns
+Value getSpriteAnimatorColumns(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->columns)};
+}
+
+bool setSpriteAnimatorColumns(World& world, core::InstanceId id, const Value& value)
+{
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    i32 next = 0;
+    if (c == nullptr || !takeInteger(value, next) || !(next >= 1))
+        return false;
+    c->columns = next;
+    return true;
+}
+
+// SpriteAnimator.SheetOffset
+Value getSpriteAnimatorSheetOffset(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{c->sheetOffset};
+}
+
+bool setSpriteAnimatorSheetOffset(World& world, core::InstanceId id, const Value& value)
+{
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    core::Vec2 next;
+    if (c == nullptr || !takeVec2(value, next) || !(true))
+        return false;
+    c->sheetOffset = next;
+    return true;
+}
+
+// SpriteAnimator.FirstFrame
+Value getSpriteAnimatorFirstFrame(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->firstFrame)};
+}
+
+bool setSpriteAnimatorFirstFrame(World& world, core::InstanceId id, const Value& value)
+{
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    i32 next = 0;
+    if (c == nullptr || !takeInteger(value, next) || !(next >= 0))
+        return false;
+    c->firstFrame = next;
+    return true;
+}
+
+// SpriteAnimator.FrameCount
+Value getSpriteAnimatorFrameCount(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->frameCount)};
+}
+
+bool setSpriteAnimatorFrameCount(World& world, core::InstanceId id, const Value& value)
+{
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    i32 next = 0;
+    if (c == nullptr || !takeInteger(value, next) || !(next >= 1))
+        return false;
+    c->frameCount = next;
+    return true;
+}
+
+// SpriteAnimator.FramesPerSecond
+Value getSpriteAnimatorFramesPerSecond(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->framesPerSecond)};
+}
+
+bool setSpriteAnimatorFramesPerSecond(World& world, core::InstanceId id, const Value& value)
+{
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    f32 next = 0.0f;
+    if (c == nullptr || !takeF32(value, next) || !(next > 0.0f))
+        return false;
+    c->framesPerSecond = next;
+    return true;
+}
+
+// SpriteAnimator.Looped
+Value getSpriteAnimatorLooped(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{c->looped};
+}
+
+bool setSpriteAnimatorLooped(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* next = std::get_if<bool>(&value);
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    if (next == nullptr || c == nullptr)
+        return false;
+    c->looped = *next;
+    return true;
+}
+
+// SpriteAnimator.Playing
+Value getSpriteAnimatorPlaying(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{c->playing};
+}
+
+bool setSpriteAnimatorPlaying(World& world, core::InstanceId id, const Value& value)
+{
+    const auto* next = std::get_if<bool>(&value);
+    SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    if (next == nullptr || c == nullptr)
+        return false;
+    // Started again after it ran out: from the top, not from the last frame.
+    if (*next && !c->playing && c->finished) {
+        c->frame = 0;
+        c->phase = 0.0;
+        c->finished = false;
+    }
+    c->playing = *next;
+    return true;
+}
+
+// SpriteAnimator.Frame
+Value getSpriteAnimatorFrame(const World& world, core::InstanceId id)
+{
+    const SpriteAnimatorComponent* c = world.spriteAnimators().find(id);
+    return c == nullptr ? Value{} : Value{static_cast<f64>(c->frame)};
 }
 
 } // namespace luaug::scene::native

@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 14;
+inline constexpr u32 ProtocolVersion = 15;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -203,6 +203,18 @@ inline constexpr FieldDesc Part2DFields[] = {
     {"Filter", 18, Encoding::I32, Source::Component, "parts2d"},
 };
 
+inline constexpr FieldDesc Tilemap2DFields[] = {
+    {"Position", 1, Encoding::Vector3, Source::Component, "tilemaps2d"},
+    {"CellSize", 2, Encoding::F32, Source::Component, "tilemaps2d"},
+    {"Tileset", 3, Encoding::NameAtom, Source::Component, "tilemaps2d"},
+    {"TileSize", 4, Encoding::Vector3, Source::Component, "tilemaps2d"},
+    {"ZIndex", 5, Encoding::I32, Source::Component, "tilemaps2d"},
+    {"Color", 6, Encoding::Color3, Source::Component, "tilemaps2d"},
+    {"Filter", 7, Encoding::I32, Source::Component, "tilemaps2d"},
+    {"Collides", 8, Encoding::Bool, Source::Component, "tilemaps2d"},
+    {"Friction", 9, Encoding::F32, Source::Component, "tilemaps2d"},
+};
+
 inline constexpr FieldDesc BloomEffectFields[] = {
     {"Enabled", 1, Encoding::Bool, Source::Component, "postEffects"},
     {"Intensity", 2, Encoding::F32, Source::Component, "bloomEffects"},
@@ -283,6 +295,7 @@ inline constexpr ClassDesc Classes[] = {
     {"ReplicatedStorage", {}, -1, true, true},
     {"RemoteFunction", {}, -1, false, false},
     {"Part2D", Part2DFields, -1, false, false},
+    {"Tilemap2D", Tilemap2DFields, -1, false, false},
     {"BloomEffect", BloomEffectFields, -1, false, false},
     {"ColorCorrectionEffect", ColorCorrectionEffectFields, -1, false, false},
     {"BlurEffect", BlurEffectFields, -1, false, false},
@@ -332,6 +345,7 @@ enum class MessageType : u8
     RemoteToReplica = 10,
     Ownership = 11,
     OwnedState = 12,
+    TilemapBlocks = 13,
 };
 
 // Which direction a message may travel. A server that accepted a
@@ -364,6 +378,7 @@ inline constexpr MessageDesc Messages[] = {
     {"RemoteToReplica", MessageType::RemoteToReplica, 0, Direction::ToReplica},
     {"Ownership", MessageType::Ownership, 0, Direction::ToReplica},
     {"OwnedState", MessageType::OwnedState, 3, Direction::ToAuthority},
+    {"TilemapBlocks", MessageType::TilemapBlocks, 0, Direction::ToReplica},
 };
 
 } // namespace luaug::replication::generated

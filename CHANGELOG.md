@@ -46,6 +46,18 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **2D joints** (ADR 0102): `HingeConstraint2D` (limits and a motor),
+  `SpringConstraint2D` (a soft or rigid distance) and `WeldConstraint2D`, each
+  joining `Part0` and `Part1` at `Anchor0` and `Anchor1`, under the abstract
+  `Constraint2D`.
+- **`SpriteAnimator`** (ADR 0102): frames of a `Part2D`'s sprite sheet played on
+  the simulation clock -- `FrameSize`, `Columns`, `SheetOffset`, `FirstFrame`,
+  `FrameCount`, `FramesPerSecond`, `Looped`, `Playing` and the read-only
+  `Frame`.
+- **2D on the wire, completed** (ADR 0103, protocol 15): remote sprites are
+  interpolated between snapshots, and `Tilemap2D` is replicated, its cells sent
+  whole on arrival and then by changed blocks. A peer on protocol 14 is refused.
+
 - **Sides and network ownership** (ADR 0099, protocol 14).
   - `Team` (`Color`, `AutoAssign`, `GetPlayers()`) under the new `TeamService`
     (`GetTeams()`), whose teams reach every replica. `Player.Team` is a

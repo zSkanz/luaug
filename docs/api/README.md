@@ -60,6 +60,7 @@ guided tour.
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
 | [`ColorCorrectionEffect`](colorcorrectioneffect.md) | [`PostEffect`](posteffect.md) | A grade over the whole picture: brighter or darker, flatter or punchier, greyer or more vivid, and tinted. |
 | [`Constraint`](constraint.md) | [`Instance`](instance.md) | The base of anything the SOLVER holds together. |
+| [`Constraint2D`](constraint2d.md) | [`Instance`](instance.md) | The base of a joint between two `Part2D`s (ADR 0102): the 2D solver holds them together, and a rope bridge, a door on a hinge or a swinging lamp is what comes of it. |
 | [`DataModel`](datamodel.md) | [`Instance`](instance.md) | The root of the instance tree, reached through the `game` global. |
 | [`Decal`](decal.md) | [`Instance`](instance.md) | An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, a crack. |
 | [`DepthOfFieldEffect`](depthoffieldeffect.md) | [`PostEffect`](posteffect.md) | Focus by distance, as a camera lens has it: a band of the world in focus, and what is nearer or further softening away from it. |
@@ -67,6 +68,7 @@ guided tour.
 | [`Folder`](folder.md) | [`Instance`](instance.md) | A node with no behaviour of its own, for grouping instances; mounting src/scripts also builds one per subdirectory. |
 | [`Frame`](frame.md) | [`UIObject`](uiobject.md) | A rectangle and nothing else: a background, a border of children, and the layout it imposes on them. |
 | [`HingeConstraint`](hingeconstraint.md) | [`Constraint`](constraint.md) | A joint free to rotate about one axis: a door, a lid, an elbow. |
+| [`HingeConstraint2D`](hingeconstraint2d.md) | [`Constraint2D`](constraint2d.md) | A point both parts turn about: a door, a wheel, a pendulum, a lever. |
 | [`ImageButton`](imagebutton.md) | [`ImageLabel`](imagelabel.md) | An `ImageLabel` that is meant to be pressed, and the same argument `TextButton` carries: it adds nothing, and it is the class a reader recognizes. |
 | [`ImageLabel`](imagelabel.md) | [`UIObject`](uiobject.md) | A picture in a box (§2.2). |
 | [`InputAction`](inputaction.md) | [`Instance`](instance.md) | A named thing the player can do, decoupled from the input that does it (§2.4, ADR 0029). |
@@ -95,6 +97,8 @@ guided tour.
 | [`Sky`](sky.md) | [`Instance`](instance.md) | What the sky shows: six images around the world, the sun's and the moon's look, stars and clouds. |
 | [`Sound`](sound.md) | [`Instance`](instance.md) | One sound, playing or not (§2.2). |
 | [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its forward direction -- its holder's, turned by its own `CFrame`, or its own alone when nothing holds it (ADR 0095). |
+| [`SpringConstraint2D`](springconstraint2d.md) | [`Constraint2D`](constraint2d.md) | A distance between two points, held softly: a spring, a bungee, a suspension. |
+| [`SpriteAnimator`](spriteanimator.md) | [`Instance`](instance.md) | Plays frames of its parent `Part2D`'s sprite sheet on the simulation clock (ADR 0102), so a walk cycle is data instead of script. |
 | [`SunRaysEffect`](sunrayseffect.md) | [`PostEffect`](posteffect.md) | Shafts of light streaming from the sun past whatever stands in front of it. |
 | [`SurfaceGui`](surfacegui.md) | [`Instance`](instance.md) | A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. |
 | [`Team`](team.md) | [`Instance`](instance.md) | A side (ADR 0099): a name -- its `Name` -- a colour, and the players whose `Player.Team` is it. |
@@ -109,3 +113,4 @@ guided tour.
 | [`UIPadding`](uipadding.md) | [`Instance`](instance.md) | Insets its parent's content on each side (§2.2). |
 | [`Weld`](weld.md) | [`Instance`](instance.md) | Holds one part at a fixed offset from another. |
 | [`WeldConstraint`](weldconstraint.md) | [`Instance`](instance.md) | The same joint, with the offset CAPTURED rather than authored. |
+| [`WeldConstraint2D`](weldconstraint2d.md) | [`Constraint2D`](constraint2d.md) | The two parts held rigidly together, in the placement they had when the weld was made: a sword in a hand, a crate's lid, a vehicle's body on its frame. |

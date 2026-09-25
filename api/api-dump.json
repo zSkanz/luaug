@@ -586,6 +586,41 @@
       "Events": []
     },
     {
+      "Name": "Constraint2D",
+      "Extends": "Instance",
+      "Tags": ["Abstract", "NotCreatable"],
+      "Properties": [
+        {
+          "Name": "Anchor0",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "Anchor1",
+          "Type": "Vector2"
+        },
+        {
+          "Name": "CollideConnected",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Part0",
+          "Type": "Part2D?"
+        },
+        {
+          "Name": "Part1",
+          "Type": "Part2D?"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "DataModel",
       "Extends": "Instance",
       "Tags": ["NotCreatable"],
@@ -893,6 +928,45 @@
           "Name": "UpperAngle",
           "Type": "number",
           "Default": "180"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "HingeConstraint2D",
+      "Extends": "Constraint2D",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "LimitsEnabled",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "LowerAngle",
+          "Type": "number",
+          "Default": "-90"
+        },
+        {
+          "Name": "MotorEnabled",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "MotorMaxTorque",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "MotorSpeed",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "UpperAngle",
+          "Type": "number",
+          "Default": "90"
         }
       ],
       "Methods": [],
@@ -2910,6 +2984,93 @@
       "Events": []
     },
     {
+      "Name": "SpringConstraint2D",
+      "Extends": "Constraint2D",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Damping",
+          "Type": "number",
+          "Default": "0.5"
+        },
+        {
+          "Name": "Length",
+          "Type": "number",
+          "Default": "2"
+        },
+        {
+          "Name": "MaxLength",
+          "Type": "number",
+          "Default": "1000"
+        },
+        {
+          "Name": "MinLength",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Stiffness",
+          "Type": "number",
+          "Default": "4"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "SpriteAnimator",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Columns",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "FirstFrame",
+          "Type": "number",
+          "Default": "0"
+        },
+        {
+          "Name": "Frame",
+          "Type": "number",
+          "ReadOnly": true
+        },
+        {
+          "Name": "FrameCount",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "FrameSize",
+          "Type": "Vector2",
+          "Default": "Vector2.new(16, 16)"
+        },
+        {
+          "Name": "FramesPerSecond",
+          "Type": "number",
+          "Default": "8"
+        },
+        {
+          "Name": "Looped",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Playing",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "SheetOffset",
+          "Type": "Vector2"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "StreamingService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -4240,6 +4401,14 @@
           "Type": "BasePart?"
         }
       ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "WeldConstraint2D",
+      "Extends": "Constraint2D",
+      "Tags": [],
+      "Properties": [],
       "Methods": [],
       "Events": []
     },

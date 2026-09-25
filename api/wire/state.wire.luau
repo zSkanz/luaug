@@ -1045,6 +1045,84 @@ local Part2DFields: { Schema.Field } = {
     },
 }
 
+--- A tilemap on the 2D plane (ADR 0103, protocol 15). Its properties are fields
+--- like any other class's; its cells are not a property and travel in
+--- `TilemapBlocks`, a block at a time.
+local Tilemap2DFields: { Schema.Field } = {
+    {
+        Name = "Position",
+        Id = 1,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "Where cell (0, 0) is, on the plane. A `Vector2` as a `Vector3`, as a `Part2D`'s is.",
+    },
+    {
+        Name = "CellSize",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "How big a cell is, in metres: the ground a replica stands on is this size.",
+    },
+    {
+        Name = "Tileset",
+        Id = 3,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "The picture the tiles are cut from, by URN, through the string table.",
+    },
+    {
+        Name = "TileSize",
+        Id = 4,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "One tile's size in the tileset, in pixels.",
+    },
+    {
+        Name = "ZIndex",
+        Id = 5,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "Which of it and a sprite is in front.",
+    },
+    {
+        Name = "Color",
+        Id = 6,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "What the tiles are multiplied by.",
+    },
+    {
+        Name = "Filter",
+        Id = 7,
+        Encoding = "I32",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "`Enum.TextureFilter`, raw.",
+    },
+    {
+        Name = "Collides",
+        Id = 8,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "Whether its solid tiles are ground: a replica's own character stands on them.",
+    },
+    {
+        Name = "Friction",
+        Id = 9,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "tilemaps2d",
+        Doc = "How the ground grips, for the same reason.",
+    },
+}
+
 local Classes: { Schema.Class } = {
     {
         Name = "BasePart",
@@ -1126,8 +1204,16 @@ local Classes: { Schema.Class } = {
         Name = "Part2D",
         Doc = "The 2D layer's moving half (ADR 0088, protocol 11): where a sprite is, how it is turned "
             .. "and which frame of its sheet it shows. A replica drives it kinematically, as it drives a "
-            .. "`BasePart`.",
+            .. "`BasePart`, and draws a remote one between snapshots, its rotation the short way round "
+            .. "(ADR 0103, protocol 15).",
         Fields = Part2DFields,
+    },
+    {
+        Name = "Tilemap2D",
+        Doc = "A level on the plane (ADR 0103, protocol 15): its properties as fields, and its cells in "
+            .. "`TilemapBlocks` -- every block after the spawn, then each block an edit changed. What a "
+            .. "wall broken or a floor built on the authority is on every replica.",
+        Fields = Tilemap2DFields,
     },
     {
         Name = "BloomEffect",
@@ -1242,6 +1328,17 @@ local Excluded: { Schema.Excluded } = {
         Reason = "A ragdoll is parts and constraints, and the parts replicate. The ragdoll instance "
             .. "is the recipe rather than the result.",
     },
+    {
+        Name = "Constraint2D",
+        Reason = "The same as `BallSocketConstraint`, on the plane (ADR 0102): a replica's sprites are "
+            .. "moved to where the authority's joints put them, and `Part2D.Position` is what arrives. "
+            .. "The one entry covers its three classes.",
+    },
+    {
+        Name = "SpriteAnimator",
+        Reason = "What it does is write its sprite's `ImageRectOffset`, and that property replicates "
+            .. "(ADR 0102). Sending the animator too would play the sheet twice on a replica.",
+    },
 
     {
         Name = "Camera",
@@ -1314,13 +1411,6 @@ local Excluded: { Schema.Excluded } = {
             .. "replicated -- the character and its name.",
     },
     { Name = "SurfaceGui", Reason = "World-space UI. The same as `BillboardGui`." },
-    {
-        Name = "Tilemap2D",
-        Reason = "Its bulk is its painted cells, which are not a property, as a `Terrain`'s field is not "
-            .. "(ADR 0069, decision 7; ADR 0088): a level arrives with the world -- from the scene, or from "
-            .. "a script that builds it the same way on both ends -- and a live edit would be a message of "
-            .. "its own, which no game has asked for yet.",
-    },
     {
         Name = "NavigationArea",
         Reason = "What it says is a question only the authority's navigation asks (ADR 0098): a path is "
@@ -1764,6 +1854,48 @@ local Messages: { Schema.Message } = {
         Doc = "One tick of the parts a replica owns: for each, its network id, its transform and its "
             .. "linear and angular velocity, as the owner's solver left them. The authority takes a state "
             .. "only for a part the sender owns at the moment it arrives, and moves the part there.",
+    },
+    {
+        Name = "TilemapBlocks",
+        Id = 13,
+        Channel = "Control",
+        Direction = "ToReplica",
+        Layout = {
+            { Name = "netId", Type = "u32", Doc = "The `Tilemap2D`. One the replica does not have is skipped." },
+            { Name = "count", Type = "u16", Doc = "At most 64 blocks a message; a larger map takes several." },
+            {
+                Name = "blocks",
+                Type = "repeat",
+                Count = "count",
+                Each = {
+                    {
+                        Name = "x",
+                        Type = "u32",
+                        Doc = "The block's column, two's complement: a block may be left of the origin.",
+                    },
+                    { Name = "y", Type = "u32", Doc = "Its row, the same way." },
+                    {
+                        Name = "cellCount",
+                        Type = "u16",
+                        Doc = "Always 256, 16 by 16; a block of any other size is refused.",
+                    },
+                    {
+                        Name = "cells",
+                        Type = "repeat",
+                        Count = "cellCount",
+                        Doc = "Row after row from the block's bottom left.",
+                        Each = {
+                            { Name = "tile", Type = "u16", Doc = "The tile, 0 for empty." },
+                        },
+                    },
+                },
+            },
+        },
+        Doc = "A tilemap's cells, a block of 16 by 16 at a time (ADR 0103, protocol 15). Every block it "
+            .. "holds after its spawn, then every block an edit changed, added or emptied. **A block of all "
+            .. "zeros is an empty one**, and the replica drops it. Whole blocks, so a block received twice is "
+            .. "simply the truth; reliable and after the spawns, so it never names a tilemap the replica has "
+            .. "not been sent.",
     },
 }
 

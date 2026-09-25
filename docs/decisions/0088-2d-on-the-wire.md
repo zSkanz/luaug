@@ -39,7 +39,9 @@ showing the frame of their walk cycle they are on.
 5. **Interest measures a sprite on the plane.** A `Part2D` is positioned at
    `(x, y, 0)` for the streaming radius, and a 2D `Player.Character` is a
    focus, as a 3D one is.
-6. **`Tilemap2D` stays off the wire**, for `Terrain`'s reason (ADR 0069,
+6. *(Superseded by [0103](0103-2d-on-the-wire-is-interpolated-and-a-tilemap-replicates-by-blocks.md):
+   a tilemap is replicated, and its cells travel by blocks.)*
+   **`Tilemap2D` stays off the wire**, for `Terrain`'s reason (ADR 0069,
    decision 7). Its bulk is its painted cells, which are not a property. A
    level arrives with the world: from the scene, or from a script that builds
    it the same way on both ends, as `examples/20-platformer` does. A live

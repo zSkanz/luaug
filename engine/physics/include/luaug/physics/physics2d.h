@@ -173,6 +173,54 @@ struct Raycast2DHit
     f32 fraction = 0.0f;
 };
 
+struct Joint2DHandle
+{
+    u32 index = 0;
+    u32 generation = 0;
+
+    [[nodiscard]] constexpr bool valid() const noexcept { return generation != 0; }
+    [[nodiscard]] constexpr bool operator==(const Joint2DHandle&) const noexcept = default;
+};
+
+// What holds two bodies together (ADR 0102).
+enum class Joint2DType : core::u8
+{
+    // A point both bodies turn about.
+    Hinge,
+    // A distance, held softly: a spring with a rest length.
+    Spring,
+    // The two bodies' relative placement, rigidly.
+    Weld,
+};
+
+struct Joint2DDesc
+{
+    Joint2DType type = Joint2DType::Weld;
+    Body2DHandle first;
+    Body2DHandle second;
+    // Where the joint is on each body, in that body's own frame.
+    core::Vec2 anchorFirst{0.0f, 0.0f};
+    core::Vec2 anchorSecond{0.0f, 0.0f};
+    bool collideConnected = false;
+
+    // Hinge. Angles are radians, relative to how the bodies stood when the
+    // joint was made; speed is radians per second.
+    bool limitsEnabled = false;
+    f32 lowerAngle = 0.0f;
+    f32 upperAngle = 0.0f;
+    bool motorEnabled = false;
+    f32 motorSpeed = 0.0f;
+    f32 maxMotorTorque = 0.0f;
+
+    // Spring. `stiffness` is in hertz and 0 makes the distance rigid;
+    // `damping` is the damping ratio.
+    f32 length = 1.0f;
+    f32 stiffness = 0.0f;
+    f32 damping = 0.0f;
+    f32 minLength = 0.0f;
+    f32 maxLength = 1.0e6f;
+};
+
 class IPhysics2D
 {
 public:
@@ -211,6 +259,16 @@ public:
     // otherwise; a body created after the change sees it, and one created before
     // is refiltered.
     virtual void setGroupsCollidable(World2DHandle world, CollisionGroup2D a, CollisionGroup2D b, bool collidable) = 0;
+
+    // A joint between two bodies of one world, or an invalid handle when either
+    // body is not there or both are the same. The weld and the hinge take the
+    // bodies' angles at this moment as their reference.
+    //
+    // **Destroying a body destroys its joints**, and the handle then answers
+    // `jointAlive` false. Destroying such a joint again is a no-op.
+    [[nodiscard]] virtual Joint2DHandle createJoint(World2DHandle world, const Joint2DDesc& desc) = 0;
+    virtual void destroyJoint(World2DHandle world, Joint2DHandle joint) = 0;
+    [[nodiscard]] virtual bool jointAlive(World2DHandle world, Joint2DHandle joint) const = 0;
 };
 
 } // namespace luaug::physics

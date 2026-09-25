@@ -3611,6 +3611,237 @@ local Classes: { Schema.Class } = {
         } :: { Schema.Method },
     },
     {
+        Name = "Constraint2D",
+        Extends = "Instance",
+        Module = "scene",
+        Parents = under("Workspace", "Model", "Part2D"),
+        Storage = "Constraint2D",
+        Tags = { "Abstract", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "The base of a joint between two `Part2D`s (ADR 0102): the 2D solver holds them together, "
+            .. "and a rope bridge, a door on a hinge or a swinging lamp is what comes of it.\n\n"
+            .. "**Two parts and a point on each**, not two attachments: a 2D joint is a point, and each "
+            .. "part's is in that part's own metres from its middle. A joint that cannot hold -- a part that "
+            .. "is missing or is not in the world, or two anchored parts -- holds nothing and is not an "
+            .. "error.",
+        Properties = {
+            {
+                Name = "Part0",
+                Type = "Part2D?",
+                Doc = "One of the two parts it holds.",
+            },
+            {
+                Name = "Part1",
+                Type = "Part2D?",
+                Doc = "The other.",
+            },
+            {
+                Name = "Anchor0",
+                Type = "Vector2",
+                Doc = "Where the joint is on `Part0`, in metres from its middle, in its own frame, so it turns "
+                    .. "with the part.",
+            },
+            {
+                Name = "Anchor1",
+                Type = "Vector2",
+                Doc = "Where the joint is on `Part1`, the same way.",
+            },
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the joint holds. A disabled joint stays in the world holding nothing.",
+            },
+            {
+                Name = "CollideConnected",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the two parts still collide with each other. False is what a chain of links "
+                    .. "or a limb wants, where the parts overlap at the joint by construction.",
+            },
+        },
+    },
+    {
+        Name = "HingeConstraint2D",
+        Extends = "Constraint2D",
+        Module = "scene",
+        -- A hook of its own that stamps the kind onto the one `Constraint2D`
+        -- component, as the 3D constraints do: the type is the class.
+        Storage = "HingeConstraint2D",
+        Doc = "A point both parts turn about: a door, a wheel, a pendulum, a lever. With `Anchor0` and "
+            .. "`Anchor1` at the same place in the world, the parts stay together there and turn freely, "
+            .. "limited or driven as below.",
+        Properties = {
+            {
+                Name = "LimitsEnabled",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether `LowerAngle` and `UpperAngle` apply. Off turns freely.",
+            },
+            {
+                Name = "LowerAngle",
+                Type = "number",
+                Default = "-90",
+                Doc = "How far `Part1` may turn clockwise, in degrees, from how the two stood when the joint "
+                    .. "was made.",
+            },
+            {
+                Name = "UpperAngle",
+                Type = "number",
+                Default = "90",
+                Doc = "How far it may turn counter-clockwise, the same way.",
+            },
+            {
+                Name = "MotorEnabled",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether the hinge drives itself towards `MotorSpeed`: a wheel, a fan, a windmill.",
+            },
+            {
+                Name = "MotorSpeed",
+                Type = "number",
+                Default = "0",
+                Doc = "The speed the motor drives to, in degrees per second, counter-clockwise positive.",
+            },
+            {
+                Name = "MotorMaxTorque",
+                Type = "number",
+                Default = "0",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The most torque the motor applies, in newton metres. What stops it is anything that "
+                    .. "needs more.",
+            },
+        },
+    },
+    {
+        Name = "SpringConstraint2D",
+        Extends = "Constraint2D",
+        Module = "scene",
+        Storage = "SpringConstraint2D",
+        Doc = "A distance between two points, held softly: a spring, a bungee, a suspension. At a "
+            .. "`Stiffness` of 0 it is a rigid rod of `Length`, which is what a rope bridge's links are.",
+        Properties = {
+            {
+                Name = "Length",
+                Type = "number",
+                Default = "2",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "The rest length, in metres.",
+            },
+            {
+                Name = "Stiffness",
+                Type = "number",
+                Default = "4",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How quickly it springs back, in hertz. 0 makes it rigid.",
+            },
+            {
+                Name = "Damping",
+                Type = "number",
+                Default = "0.5",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The damping ratio: 0 bounces for ever, 1 settles without overshooting.",
+            },
+            {
+                Name = "MinLength",
+                Type = "number",
+                Default = "0",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The shortest it may be squeezed to, in metres, however hard it is pushed.",
+            },
+            {
+                Name = "MaxLength",
+                Type = "number",
+                Default = "1000",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The longest it may be stretched to, in metres: the end of a bungee.",
+            },
+        },
+    },
+    {
+        Name = "WeldConstraint2D",
+        Extends = "Constraint2D",
+        Module = "scene",
+        Storage = "WeldConstraint2D",
+        Doc = "The two parts held rigidly together, in the placement they had when the weld was made: "
+            .. "a sword in a hand, a crate's lid, a vehicle's body on its frame.",
+    },
+    {
+        Name = "SpriteAnimator",
+        Extends = "Instance",
+        Module = "scene",
+        Parents = under("Part2D"),
+        Storage = "SpriteAnimator",
+        Doc = "Plays frames of its parent `Part2D`'s sprite sheet on the simulation clock (ADR 0102), so a "
+            .. "walk cycle is data instead of script. Each tick it is playing, it writes the parent's "
+            .. "`ImageRectOffset` and `ImageRectSize` for the frame it is on; the picture, the undo and the "
+            .. "wire all see that as they see any write.\n\n"
+            .. "Frames are counted along the sheet's rows from `SheetOffset`, `Columns` to a row. A "
+            .. "non-looped animation that reaches its end stops and writes `Playing = false`, which is its "
+            .. 'end event: listen with `GetPropertyChangedSignal("Playing")`.',
+        Properties = {
+            {
+                Name = "FrameSize",
+                Type = "Vector2",
+                Default = "Vector2.new(16, 16)",
+                ErrorKey = "scene.err.size2_positive",
+                Doc = "One frame's size in the sheet, in pixels.",
+            },
+            {
+                Name = "Columns",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.whole_number_at_least_one",
+                Doc = "How many frames make one row of the sheet.",
+            },
+            {
+                Name = "SheetOffset",
+                Type = "Vector2",
+                Doc = "Where frame 0 starts, in pixels from the sheet's top left, so one sheet can hold several "
+                    .. "animations one under another.",
+            },
+            {
+                Name = "FirstFrame",
+                Type = "number",
+                Default = "0",
+                ErrorKey = "scene.err.whole_number_at_least_zero",
+                Doc = "The frame this animation starts on, counted from `SheetOffset`.",
+            },
+            {
+                Name = "FrameCount",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.whole_number_at_least_one",
+                Doc = "How many frames it plays.",
+            },
+            {
+                Name = "FramesPerSecond",
+                Type = "number",
+                Default = "8",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "How fast, on the simulation clock.",
+            },
+            {
+                Name = "Looped",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether it starts over at the end. Off stops on the last frame.",
+            },
+            {
+                Name = "Playing",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether it advances. Setting it true starts from `FirstFrame` when it had stopped at the "
+                    .. "end, and carries on from where it was when it had been paused.",
+            },
+            {
+                Name = "Frame",
+                Type = "number",
+                ReadOnly = true,
+                Doc = "The frame it is on, from 0 at `FirstFrame`.",
+            },
+        },
+    },
+    {
         Name = "NavigationArea",
         Extends = "Instance",
         Module = "scene",

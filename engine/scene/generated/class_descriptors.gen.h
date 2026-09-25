@@ -334,6 +334,77 @@ bool setTilemap2DCollisionGroup(World& world, core::InstanceId id, const Value& 
 void attachTilemap2DComponents(World& world, core::InstanceId id);
 void detachTilemap2DComponents(World& world, core::InstanceId id);
 
+// Constraint2D
+Value getConstraint2DPart0(const World& world, core::InstanceId id);
+bool setConstraint2DPart0(World& world, core::InstanceId id, const Value& value);
+Value getConstraint2DPart1(const World& world, core::InstanceId id);
+bool setConstraint2DPart1(World& world, core::InstanceId id, const Value& value);
+Value getConstraint2DAnchor0(const World& world, core::InstanceId id);
+bool setConstraint2DAnchor0(World& world, core::InstanceId id, const Value& value);
+Value getConstraint2DAnchor1(const World& world, core::InstanceId id);
+bool setConstraint2DAnchor1(World& world, core::InstanceId id, const Value& value);
+Value getConstraint2DEnabled(const World& world, core::InstanceId id);
+bool setConstraint2DEnabled(World& world, core::InstanceId id, const Value& value);
+Value getConstraint2DCollideConnected(const World& world, core::InstanceId id);
+bool setConstraint2DCollideConnected(World& world, core::InstanceId id, const Value& value);
+void attachConstraint2DComponents(World& world, core::InstanceId id);
+void detachConstraint2DComponents(World& world, core::InstanceId id);
+
+// HingeConstraint2D
+Value getHingeConstraint2DLimitsEnabled(const World& world, core::InstanceId id);
+bool setHingeConstraint2DLimitsEnabled(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraint2DLowerAngle(const World& world, core::InstanceId id);
+bool setHingeConstraint2DLowerAngle(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraint2DUpperAngle(const World& world, core::InstanceId id);
+bool setHingeConstraint2DUpperAngle(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraint2DMotorEnabled(const World& world, core::InstanceId id);
+bool setHingeConstraint2DMotorEnabled(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraint2DMotorSpeed(const World& world, core::InstanceId id);
+bool setHingeConstraint2DMotorSpeed(World& world, core::InstanceId id, const Value& value);
+Value getHingeConstraint2DMotorMaxTorque(const World& world, core::InstanceId id);
+bool setHingeConstraint2DMotorMaxTorque(World& world, core::InstanceId id, const Value& value);
+void attachHingeConstraint2DComponents(World& world, core::InstanceId id);
+void detachHingeConstraint2DComponents(World& world, core::InstanceId id);
+
+// SpringConstraint2D
+Value getSpringConstraint2DLength(const World& world, core::InstanceId id);
+bool setSpringConstraint2DLength(World& world, core::InstanceId id, const Value& value);
+Value getSpringConstraint2DStiffness(const World& world, core::InstanceId id);
+bool setSpringConstraint2DStiffness(World& world, core::InstanceId id, const Value& value);
+Value getSpringConstraint2DDamping(const World& world, core::InstanceId id);
+bool setSpringConstraint2DDamping(World& world, core::InstanceId id, const Value& value);
+Value getSpringConstraint2DMinLength(const World& world, core::InstanceId id);
+bool setSpringConstraint2DMinLength(World& world, core::InstanceId id, const Value& value);
+Value getSpringConstraint2DMaxLength(const World& world, core::InstanceId id);
+bool setSpringConstraint2DMaxLength(World& world, core::InstanceId id, const Value& value);
+void attachSpringConstraint2DComponents(World& world, core::InstanceId id);
+void detachSpringConstraint2DComponents(World& world, core::InstanceId id);
+
+// WeldConstraint2D
+void attachWeldConstraint2DComponents(World& world, core::InstanceId id);
+void detachWeldConstraint2DComponents(World& world, core::InstanceId id);
+
+// SpriteAnimator
+Value getSpriteAnimatorFrameSize(const World& world, core::InstanceId id);
+bool setSpriteAnimatorFrameSize(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorColumns(const World& world, core::InstanceId id);
+bool setSpriteAnimatorColumns(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorSheetOffset(const World& world, core::InstanceId id);
+bool setSpriteAnimatorSheetOffset(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorFirstFrame(const World& world, core::InstanceId id);
+bool setSpriteAnimatorFirstFrame(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorFrameCount(const World& world, core::InstanceId id);
+bool setSpriteAnimatorFrameCount(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorFramesPerSecond(const World& world, core::InstanceId id);
+bool setSpriteAnimatorFramesPerSecond(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorLooped(const World& world, core::InstanceId id);
+bool setSpriteAnimatorLooped(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorPlaying(const World& world, core::InstanceId id);
+bool setSpriteAnimatorPlaying(World& world, core::InstanceId id, const Value& value);
+Value getSpriteAnimatorFrame(const World& world, core::InstanceId id);
+void attachSpriteAnimatorComponents(World& world, core::InstanceId id);
+void detachSpriteAnimatorComponents(World& world, core::InstanceId id);
+
 // NavigationArea
 Value getNavigationAreaLabel(const World& world, core::InstanceId id);
 bool setNavigationAreaLabel(World& world, core::InstanceId id, const Value& value);

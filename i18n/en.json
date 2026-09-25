@@ -366,6 +366,8 @@
   "scene.err.nav_slope": "Cannot set {className}.{property}: it takes an angle from 0 to 89 degrees.",
   "scene.err.size2_positive": "Cannot set {className}.{property}: it takes a size greater than zero on both axes.",
   "scene.err.number_at_least_zero": "Cannot set {className}.{property}: it takes a number that is zero or more.",
+  "scene.err.whole_number_at_least_zero": "Cannot set {className}.{property}: it takes a whole number that is zero or more.",
+  "scene.err.whole_number_at_least_one": "Cannot set {className}.{property}: it takes a whole number that is one or more.",
   "scene.err.number_above_zero": "Cannot set {className}.{property}: it takes a number greater than zero.",
   "scene.err.number_zero_to_one": "Cannot set {className}.{property}: it takes a number from 0 to 1.",
   "scene.err.number_cone_degrees": "Cannot set {className}.{property}: it takes an angle in degrees, greater than 0 and less than 180.",
