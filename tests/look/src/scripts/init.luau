@@ -163,6 +163,25 @@ local Variants: { [string]: () -> () } = {
         blur.Size = 80
         blur.Parent = Lighting
     end,
+    ["focus-near"] = function()
+        -- Sharp on the coloured blocks, twenty metres out; the pillars behind
+        -- and the far valley soften.
+        local focus = Instance.new("DepthOfFieldEffect")
+        focus.FocusDistance = 20
+        focus.InFocusRadius = 4
+        focus.NearIntensity = 0.5
+        focus.FarIntensity = 1
+        focus.Parent = Lighting
+    end,
+    ["focus-far"] = function()
+        -- Sharp on the far valley; the frame and the blocks in front soften.
+        local focus = Instance.new("DepthOfFieldEffect")
+        focus.FocusDistance = 150
+        focus.InFocusRadius = 60
+        focus.NearIntensity = 1
+        focus.FarIntensity = 0
+        focus.Parent = Lighting
+    end,
 }
 
 local apply = Variants[Variant]

@@ -89,10 +89,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 4 — `DepthOfFieldEffect`
 
-- [ ] `FocusDistance`, `InFocusRadius`, `NearIntensity`, `FarIntensity`. A
+- [x] `FocusDistance`, `InFocusRadius`, `NearIntensity`, `FarIntensity`. A
       circle of confusion from the scene depth, a gather at half resolution, and
       a composite. The sky counts as infinitely far.
-- [ ] Budget ≤ 0.6 ms. The machine switch `depth_of_field` in `luaug.toml`
+- [~] Budget ≤ 0.6 ms (measured with the others on the packaged build). The machine switch `depth_of_field` in `luaug.toml`
       (ADR 0044) turns it off.
 
 ## Stage 5 — `SunRaysEffect`
@@ -231,3 +231,12 @@ here*.
    sun blurred stays a bright disc, as it does through a real lens, rather
    than spreading into a grey smudge. It is the choice the stage-3 captures ask
    the owner to judge.
+11. **Depth of field is three passes, and what is behind may not bleed forward**
+   (Stage 4). Half resolution with each texel's circle of confusion from the
+   NEAREST of the four depths it covers; a thirty-two-tap sunflower gather in
+   which a farther neighbour contributes only as far as this texel's own
+   circle reaches; and a full-resolution composite that recomputes the circle
+   from depth, so the line between a sharp object and its blurred background
+   is drawn at the frame's own resolution. A blurred foreground spreads over
+   what is behind it, as through a lens. The machine switch landed here rather
+   than in Stage 10, with the Low and Medium presets off.

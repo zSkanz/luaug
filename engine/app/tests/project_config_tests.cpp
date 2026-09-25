@@ -222,3 +222,18 @@ size = [1280, 720]
     REQUIRE(luaug::platform::readTextFile(project.path / "luaug.toml", text));
     CHECK(text.find("[1920, 1080]") != std::string::npos);
 }
+
+TEST_CASE("depth of field is the machine's to turn off, by preset or by key (ADR 0096)")
+{
+    // The presets: a weak machine does not draw it, and the engine's own level
+    // does -- a world that asks for it there gets it.
+    CHECK_FALSE(render::settingsFor(render::QualityLevel::Low).depthOfField);
+    CHECK_FALSE(render::settingsFor(render::QualityLevel::Medium).depthOfField);
+    CHECK(render::settingsFor(render::QualityLevel::High).depthOfField);
+
+    const ProjectDir project("[graphics]\n"
+                             "quality = \"high\"\n"
+                             "depth_of_field = false\n");
+    const app::ProjectConfig config = app::loadProjectConfig(project.path, {});
+    CHECK_FALSE(config.graphics.depthOfField);
+}

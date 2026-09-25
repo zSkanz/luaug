@@ -42,3 +42,15 @@ through the unchanged tonemap. The command-stream goldens did not move.
 | `blur-pair.png` | two of `Size` 8, one under `Lighting` and one on the camera | They combine by their squares: one blur of about 11.3, not 16 |
 | `blur-menu.png` | a `BlurEffect` of `Size` 24 **on the camera**, with a "Paused" label | The pause-menu case: the world is soft and the label over it is sharp |
 | `blur-wide.png` | a `BlurEffect` of `Size` 80 | The largest kind of blur. **Worth judging**: very bright lights -- the lamp, the sun -- stay bright round discs, because the blur works on the light before the tone curve, as a lens does. The alternative (blurring the finished picture) would turn them into grey smudges |
+
+## Stage 4 -- `DepthOfFieldEffect`
+
+| File | What is in the world | What to look at |
+|---|---|---|
+| `none.png` | nothing | The "before" |
+| `focus-near.png` | focus at 20 m, 4 m either side sharp, `FarIntensity` 1 | The coloured blocks and the pillar beside them are sharp; the frame, the far pillars and the valley soften with distance, and the sky is as soft as the furthest thing |
+| `focus-far.png` | focus at 150 m, 60 m either side sharp, `NearIntensity` 1, `FarIntensity` 0 | The far valley is sharp; the blocks and the near pillar soften, and **their blur spreads over the sharp background behind them** -- a near object out of focus covers a little of what it stands in front of, as through a lens |
+
+The widest blur, at an intensity of 1, is 16 pixels of a 1080-line picture.
+A machine whose graphics settings turn `depth_of_field` off -- the Low and
+Medium presets do -- draws these pictures sharp.

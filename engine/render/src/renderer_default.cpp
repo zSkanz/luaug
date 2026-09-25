@@ -110,6 +110,9 @@ constexpr u32 kLookBlurLevels = 5;
 // chosen to stay under: wide enough that a bilinear resample back to the frame
 // shows no steps, narrow enough that the kernel is a dozen taps.
 constexpr f32 kLookBlurLevelSigma = 4.0f;
+// The widest circle of confusion `DepthOfFieldEffect` draws, in pixels of a
+// 1080-line picture: what `NearIntensity` or `FarIntensity` of 1 reaches.
+constexpr f32 kFocusWidestPixels = 16.0f;
 
 // The most instances one frame may draw through the instanced path, and the one
 // vertex buffer they all live in. Five megabytes, allocated once: the alternative
@@ -667,11 +670,15 @@ private:
     // to another.
     LookPipeline blur_;
     LookPipeline resample_;
+    // Depth of field's three passes.
+    LookPipeline focusPrepare_;
+    LookPipeline focusGather_;
+    LookPipeline focusComposite_;
 
     // Every look pipeline, for `destroy`.
-    [[nodiscard]] std::array<LookPipeline*, 3> lookPipelines() noexcept
+    [[nodiscard]] std::array<LookPipeline*, 6> lookPipelines() noexcept
     {
-        return {&gradedTonemap_, &blur_, &resample_};
+        return {&gradedTonemap_, &blur_, &resample_, &focusPrepare_, &focusGather_, &focusComposite_};
     }
 
     // **The look's own images, made the first frame one is needed** and
@@ -683,6 +690,10 @@ private:
     rhi::TextureHandle lookColor_{};
     rhi::TextureHandle blurLevels_[kLookBlurLevels]{};
     rhi::TextureHandle blurPong_[kLookBlurLevels]{};
+    // Depth of field at half resolution: the frame with each texel's circle,
+    // and what the gather made of it.
+    rhi::TextureHandle focusPrepared_{};
+    rhi::TextureHandle focusGathered_{};
     u32 lookWidth_ = 0;
     u32 lookHeight_ = 0;
     [[nodiscard]] bool lookTexture(rhi::IDevice& device, rhi::TextureHandle& slot, u32 width, u32 height,
@@ -690,6 +701,10 @@ private:
     void releaseLookTextures(rhi::IDevice& device);
     // Blurs `image` in place by `size` pixels of a 1080-line picture.
     void blurImage(rhi::IDevice& device, rhi::ICmdList& cmd, rhi::TextureHandle image, f32 size);
+    // Focuses `image` by distance into the other full-resolution image, and
+    // returns that one -- or `image` itself when the passes cannot be made.
+    [[nodiscard]] rhi::TextureHandle focusImage(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
+                                                rhi::TextureHandle image);
 };
 
 } // namespace
@@ -2222,6 +2237,58 @@ void DefaultRenderer::releaseLookTextures(rhi::IDevice& device)
         release(level);
     for (rhi::TextureHandle& level : blurPong_)
         release(level);
+    release(focusPrepared_);
+    release(focusGathered_);
+}
+
+rhi::TextureHandle DefaultRenderer::focusImage(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
+                                               rhi::TextureHandle image)
+{
+    if (!ensureLookPipeline(device, focusPrepare_, "look_focus_prepare", kHdrFormat) ||
+        !ensureLookPipeline(device, focusGather_, "look_focus_gather", kHdrFormat) ||
+        !ensureLookPipeline(device, focusComposite_, "look_focus_composite", kHdrFormat))
+        return image;
+    const u32 halfWidth = renderWidth_ > 1 ? renderWidth_ / 2 : 1;
+    const u32 halfHeight = renderHeight_ > 1 ? renderHeight_ / 2 : 1;
+    rhi::TextureHandle& output = image == lookColor_ ? hdr_ : lookColor_;
+    if (!lookTexture(device, focusPrepared_, halfWidth, halfHeight, "look-focus") ||
+        !lookTexture(device, focusGathered_, halfWidth, halfHeight, "look-focus-gathered") ||
+        !lookTexture(device, output, renderWidth_, renderHeight_, "look-color"))
+        return image;
+
+    const RenderLook& look = world.look;
+    const f32 widest = kFocusWidestPixels * static_cast<f32>(renderHeight_) / 1080.0f;
+    GpuLookFocusUniforms focus;
+    focus.band[0] = look.focusDistance;
+    focus.band[1] = look.inFocusRadius;
+    focus.band[2] = look.nearIntensity;
+    focus.band[3] = look.farIntensity;
+    focus.lens[0] = world.camera.nearPlane;
+    focus.lens[1] = world.camera.farPlane;
+    focus.lens[2] = widest * 0.5f;
+    focus.lens[3] = widest;
+    focus.texel[0] = 1.0f / static_cast<f32>(renderWidth_);
+    focus.texel[1] = 1.0f / static_cast<f32>(renderHeight_);
+    focus.texel[2] = 1.0f / static_cast<f32>(halfWidth);
+    focus.texel[3] = 1.0f / static_cast<f32>(halfHeight);
+
+    cmd.pushDebugGroup("depth-of-field");
+    const std::array<rhi::TextureBinding, 2> prepare{rhi::TextureBinding{image, environmentSampler_},
+                                                     rhi::TextureBinding{depth_, pointSampler_}};
+    fullscreenPass(cmd, focusPrepare_.handle, focusPrepared_, halfWidth, halfHeight, "focus-prepare", prepare,
+                   asBytes(&focus, sizeof(focus)));
+    // Point-sampled: a circle of confusion averaged with its neighbour's is a
+    // circle nobody's depth has.
+    const std::array<rhi::TextureBinding, 1> gather{rhi::TextureBinding{focusPrepared_, pointSampler_}};
+    fullscreenPass(cmd, focusGather_.handle, focusGathered_, halfWidth, halfHeight, "focus-gather", gather,
+                   asBytes(&focus, sizeof(focus)));
+    const std::array<rhi::TextureBinding, 3> composite{rhi::TextureBinding{image, pointSampler_},
+                                                       rhi::TextureBinding{focusGathered_, environmentSampler_},
+                                                       rhi::TextureBinding{depth_, pointSampler_}};
+    fullscreenPass(cmd, focusComposite_.handle, output, renderWidth_, renderHeight_, "focus-composite", composite,
+                   asBytes(&focus, sizeof(focus)));
+    cmd.popDebugGroup();
+    return output;
 }
 
 void DefaultRenderer::blurImage(rhi::IDevice& device, rhi::ICmdList& cmd, rhi::TextureHandle image, f32 size)
@@ -3483,7 +3550,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // one of these effects, which is what keeps that frame's command stream the
     // one it always was.
     const RenderLook& look = world.look;
-    const rhi::TextureHandle sceneColor = hdr_;
+    rhi::TextureHandle sceneColor = hdr_;
+
+    // **Depth of field**, first: it reads the depth the opaque world wrote,
+    // and a blur or a shaft of light added before it would be focused as though
+    // it stood where the surface behind it does. Not under an orthographic
+    // camera, whose depth is not a distance a lens focuses by -- the 2D layer's
+    // view -- and not on a machine that has turned it off (ADR 0044).
+    if (look.depthOfField && settings_.depthOfField && world.camera.valid && !orthographic)
+        sceneColor = focusImage(device, cmd, world, sceneColor);
 
     // **The blur**, last of them: it softens whatever the others made. On the
     // HDR image and before exposure, so a highlight blurs as light does -- a

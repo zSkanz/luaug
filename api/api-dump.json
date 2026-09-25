@@ -818,26 +818,22 @@
         {
           "Name": "FarIntensity",
           "Type": "number",
-          "Default": "0.5",
-          "Inert": true
+          "Default": "0.5"
         },
         {
           "Name": "FocusDistance",
           "Type": "number",
-          "Default": "25",
-          "Inert": true
+          "Default": "25"
         },
         {
           "Name": "InFocusRadius",
           "Type": "number",
-          "Default": "10",
-          "Inert": true
+          "Default": "10"
         },
         {
           "Name": "NearIntensity",
           "Type": "number",
-          "Default": "0.5",
-          "Inert": true
+          "Default": "0.5"
         }
       ],
       "Methods": [],

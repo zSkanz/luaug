@@ -79,6 +79,13 @@ struct GraphicsSettings
     // away, recovered from the depth buffer.
     bool contactShadows = true;
     bool antiAliasing = true;
+    // Whether a world's `DepthOfFieldEffect` is drawn (ADR 0096). **The machine
+    // wins over the world**, as it does for bloom: a scene that asks for focus
+    // on a machine that cannot afford it draws sharp. `BlurEffect` and
+    // `ColorCorrectionEffect` have no switch here, because a game uses them to
+    // SAY something -- a pause, a flash of damage -- and turning them off would
+    // change what the picture means rather than what it costs.
+    bool depthOfField = true;
 
     // False holds the exposure at the calibration key instead of metering the
     // frame. The scene still tonemaps and `ExposureCompensation` still applies;

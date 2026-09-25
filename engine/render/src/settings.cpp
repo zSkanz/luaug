@@ -28,6 +28,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.contactShadows = false;
         settings.antiAliasing = true;
         settings.autoExposure = true;
+        settings.depthOfField = false;
         break;
 
     case QualityLevel::Medium:
@@ -41,6 +42,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.contactShadows = true;
         settings.antiAliasing = true;
         settings.autoExposure = true;
+        settings.depthOfField = false;
         break;
 
     case QualityLevel::High:

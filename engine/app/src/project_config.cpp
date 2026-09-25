@@ -52,6 +52,8 @@ void applyFile(const core::TomlDocument& document, GraphicsSettings& settings)
         settings.antiAliasing = *value;
     if (const std::optional<bool> value = document.boolean("graphics.auto_exposure"))
         settings.autoExposure = *value;
+    if (const std::optional<bool> value = document.boolean("graphics.depth_of_field"))
+        settings.depthOfField = *value;
 }
 
 void applyOverrides(const GraphicsOverrides& overrides, GraphicsSettings& settings)

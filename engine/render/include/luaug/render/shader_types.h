@@ -331,6 +331,21 @@ struct GpuLookBlurUniforms
 };
 static_assert(sizeof(GpuLookBlurUniforms) == 32, "GpuLookBlurUniforms is mirrored by look_blur.hlsl");
 
+// `luaug_look.hlsli`'s focus block (ADR 0096), shared by depth of field's three
+// passes.
+struct GpuLookFocusUniforms
+{
+    // The sharpest distance, how far either side stays sharp, the near side's
+    // softness and the far side's.
+    f32 band[4]{};
+    // Near plane, far plane, the widest circle in half-resolution texels, and
+    // the same in full-resolution pixels.
+    f32 lens[4]{};
+    // One full-resolution texel, then one half-resolution texel.
+    f32 texel[4]{};
+};
+static_assert(sizeof(GpuLookFocusUniforms) == 48, "GpuLookFocusUniforms is mirrored by luaug_look.hlsli");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

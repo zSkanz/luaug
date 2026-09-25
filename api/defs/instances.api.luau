@@ -1920,7 +1920,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FocusDistance",
                 Type = "number",
-                Inert = true,
                 Default = "25",
                 ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "The distance from the camera, in metres, that is sharpest.",
@@ -1928,7 +1927,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "InFocusRadius",
                 Type = "number",
-                Inert = true,
                 Default = "10",
                 ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How many metres either side of `FocusDistance` stay fully sharp before the softening "
@@ -1937,7 +1935,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "NearIntensity",
                 Type = "number",
-                Inert = true,
                 Default = "0.5",
                 ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How soft what is nearer than the sharp band becomes, from 0 (not at all) to 1.",
@@ -1945,7 +1942,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FarIntensity",
                 Type = "number",
-                Inert = true,
                 Default = "0.5",
                 ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How soft what is further than the sharp band becomes, from 0 (not at all) to 1.",

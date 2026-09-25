@@ -15,7 +15,7 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `FarIntensity` | `number` | `0.5` | read/write, **inert** | How soft what is further than the sharp band becomes, from 0 (not at all) to 1. |
-| `FocusDistance` | `number` | `25` | read/write, **inert** | The distance from the camera, in metres, that is sharpest. |
-| `InFocusRadius` | `number` | `10` | read/write, **inert** | How many metres either side of `FocusDistance` stay fully sharp before the softening begins. |
-| `NearIntensity` | `number` | `0.5` | read/write, **inert** | How soft what is nearer than the sharp band becomes, from 0 (not at all) to 1. |
+| `FarIntensity` | `number` | `0.5` | read/write | How soft what is further than the sharp band becomes, from 0 (not at all) to 1. |
+| `FocusDistance` | `number` | `25` | read/write | The distance from the camera, in metres, that is sharpest. |
+| `InFocusRadius` | `number` | `10` | read/write | How many metres either side of `FocusDistance` stay fully sharp before the softening begins. |
+| `NearIntensity` | `number` | `0.5` | read/write | How soft what is nearer than the sharp band becomes, from 0 (not at all) to 1. |
