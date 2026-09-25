@@ -8,9 +8,31 @@
 // something advances.
 #pragma once
 
+#include "luaug/core/id.h"
 #include "luaug/core/math.h"
 
+#include <optional>
+
+namespace luaug::scene {
+class World;
+}
+
 namespace luaug::render {
+
+// **Where a light shines from** (api-design.md §2.2, ADR 0095): the `BasePart`
+// it hangs off, then -- under an `Attachment` -- the attachment's offset from
+// that part, then the light's own `CFrame`. A light with no part above it
+// stands on its own: `part` is invalid, `partFrame` the identity, and the
+// offset is its own `CFrame` in the world. The renderer interpolates the part
+// and applies the offset after; the editor's gizmo reads the same answer, so
+// its cone is where the light is.
+struct LightAnchor
+{
+    core::InstanceId part;
+    core::CFrameD partFrame;
+    core::CFrameD offset;
+};
+[[nodiscard]] std::optional<LightAnchor> lightAnchorOf(const scene::World& world, core::InstanceId light) noexcept;
 
 // The unit vector pointing **from the world towards the sun** -- so at noon on
 // the equator it is straight up, and shading dots it against a surface normal

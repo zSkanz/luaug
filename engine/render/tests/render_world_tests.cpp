@@ -1552,3 +1552,77 @@ TEST_CASE("a character is drawn as the capsule it moves as, not as a block")
     CHECK(capsules == 1);
     (void)block;
 }
+
+TEST_CASE("parts that differ only by colour are one material family, sorted together (D184)")
+{
+    // A snake of differently tinted segments was one material, and therefore
+    // one draw, per segment. They now share a family: the sort key groups by
+    // it so the instancer can make them one call, each colour in its instance.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+
+    const core::NameAtom content = fixture.atoms.intern("asset://models/box.glb");
+    render::MeshLibrary meshes;
+    render::MeshLibrary::Entry entry;
+    entry.mesh = render::MeshHandle{0, 1};
+    entry.bounds = core::AABB::fromCenterSize(core::Vec3{}, core::Vec3{1.0f, 1.0f, 1.0f});
+    entry.sectionCount = 1;
+    meshes.set(content, entry);
+
+    const core::InstanceId red = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -10.0}, content);
+    const core::InstanceId green = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -20.0}, content);
+    const core::InstanceId blue = fixture.meshPartAt(workspace, core::DVec3{0.0, 0.0, -30.0}, content);
+    setColorOverride(fixture.world, red, core::Color3{1.0f, 0.0f, 0.0f});
+    setColorOverride(fixture.world, green, core::Color3{0.0f, 1.0f, 0.0f});
+    setColorOverride(fixture.world, blue, core::Color3{0.0f, 0.0f, 1.0f});
+
+    render::RenderWorld snapshot;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, snapshot);
+    REQUIRE(snapshot.draws.size() == 3);
+    // Three materials -- the colours are real and a draw drawn alone still
+    // binds its own -- in one family.
+    REQUIRE(snapshot.materials.size() == 3);
+    const core::u32 family = snapshot.familyOf(snapshot.draws[0].material);
+    for (const render::DrawItem& draw : snapshot.draws)
+        CHECK(snapshot.familyOf(draw.material) == family);
+    // Sorted near to far across the colours, as one material would be.
+    CHECK(snapshot.draws[0].sortKey < snapshot.draws[1].sortKey);
+    CHECK(snapshot.draws[1].sortKey < snapshot.draws[2].sortKey);
+    CHECK(nearly(snapshot.draws[0].transform.m[3][2], -10.0f));
+    CHECK(nearly(snapshot.draws[2].transform.m[3][2], -30.0f));
+}
+
+TEST_CASE("a light with no part shines from its own CFrame; in a part, relative to it (ADR 0095)")
+{
+    // **The owner's call**: a light dropped into the Workspace shines, from
+    // where its `CFrame` puts it. Held by a part, the identity is the part.
+    Fixture fixture;
+    fixture.registerRenderClasses();
+    const core::InstanceId workspace = fixture.world.create(fixture.workspaceClass);
+    (void)fixture.cameraLookingDownNegativeZ(workspace);
+    render::MeshLibrary meshes;
+
+    const core::InstanceId free = fixture.world.create(fixture.pointLightClass);
+    (void)fixture.world.setParent(free, workspace);
+    fixture.world.pointLights().find(free)->cframe.position = core::DVec3{3.0, 2.0, -8.0};
+
+    render::RenderWorld world;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, world);
+    REQUIRE(world.lights.size() == 1);
+    CHECK(nearly(world.lights[0].position.x, 3.0f));
+    CHECK(nearly(world.lights[0].position.y, 2.0f));
+    CHECK(nearly(world.lights[0].position.z, -8.0f));
+
+    // In a part, the light's CFrame is an offset from it.
+    const core::InstanceId host = fixture.part(workspace);
+    fixture.world.parts().find(host)->cframe.position = core::DVec3{0.0, 0.0, -5.0};
+    (void)fixture.world.setParent(free, host);
+    fixture.world.pointLights().find(free)->cframe.position = core::DVec3{0.0, 1.0, 0.0};
+    render::RenderWorld held;
+    render::extract(fixture.world, workspace, core::InstanceId{}, meshes, 1.0f, 0.0f, nullptr, 0.0f, nullptr, held);
+    REQUIRE(held.lights.size() == 1);
+    CHECK(nearly(held.lights[0].position.y, 1.0f));
+    CHECK(nearly(held.lights[0].position.z, -5.0f));
+}

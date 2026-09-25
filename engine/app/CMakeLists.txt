@@ -23,6 +23,7 @@ luaug_add_module(app
         src/script_document.cpp
         src/script_syntax.cpp
         src/script_editor.cpp
+        src/script_editor_settings.cpp
         src/script_editor_panel.cpp
         src/script_complete.cpp
         src/streaming_host.cpp
@@ -229,6 +230,12 @@ add_custom_command(TARGET luaug_host POST_BUILD
     # root and this reads them from content, which is the same tree copied to two
     # places by `tools/repo/package.luau` -- and the test that compares what the
     # two scaffolders produce is what keeps that from being two answers.
+    #
+    # **Removed first, because a copy only adds.** A file that left a template
+    # stayed in the staged one, and the launcher scaffolded it: the old
+    # starter's `src/scripts/main.luau` beside the new scene's `Main`, two
+    # scripts in a fresh project.
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:luaug_host>/content/templates"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/templates"
         "$<TARGET_FILE_DIR:luaug_host>/content/templates"
@@ -269,6 +276,7 @@ luaug_add_module_tests(app
         tests/ui_text_tests.cpp
         tests/thumbnail_tests.cpp
         tests/script_document_tests.cpp
+        tests/script_editor_settings_tests.cpp
         tests/script_editor_tests.cpp
         tests/script_complete_tests.cpp
 )
@@ -398,6 +406,19 @@ if(LUAUG_BUILD_TESTS)
     set_tests_properties(host_headless_frames PROPERTIES
         PASS_REGULAR_EXPRESSION "Ran 5 frames"
         TIMEOUT 60)
+
+    # **D182: a frame of many draws must not write past a GPU descriptor heap.**
+    # Real device, debug layer asked for by name (`--gpu-debug`), because the
+    # layer is what turns the out-of-bounds write into a failure instead of a
+    # silent corruption -- without the SDL patch this dies on D3D12 with
+    # EXECUTION ERROR #646. A machine with no device skips rather than fails.
+    add_test(NAME descriptor_heap_overflow
+        COMMAND luaug_host "${CMAKE_SOURCE_DIR}/tests/descriptorheap/transparent_crowd.luau"
+                --headless --frames=8 --exit --rhi=sdlgpu --gpu-debug)
+    set_tests_properties(descriptor_heap_overflow PROPERTIES
+        PASS_REGULAR_EXPRESSION "Ran 8 frames"
+        SKIP_REGULAR_EXPRESSION "Could not create a graphics device"
+        TIMEOUT 120)
 
     # A headless run with no budget has no window to close, so it would never
     # stop. Rejected up front rather than left to a CI timeout to discover.

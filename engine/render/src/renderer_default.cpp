@@ -1541,8 +1541,10 @@ void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshC
         core::usize last = index + 1;
         while (last < world.draws.size()) {
             const DrawItem& next = world.draws[last];
+            // By FAMILY, not by material: a run of parts that differ only by
+            // colour is one call, each colour in its instance (D184).
             if (!instanceable(next) || !(next.mesh == first.mesh) || next.section != first.section ||
-                next.material != first.material)
+                world.familyOf(next.material) != world.familyOf(first.material))
                 break;
             if (selectMeshLod(*resolved, next.transform, pixelsPerUnit) != lod)
                 break;
@@ -1573,7 +1575,11 @@ void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshC
 
             GpuInstance instance;
             instance.model = draw.transform;
-            instance.alphaUnused[0] = draw.alpha;
+            instance.alphaTint[0] = draw.alpha;
+            const GpuMaterialUniforms& own = world.materials[draw.material].uniforms;
+            instance.alphaTint[1] = own.baseColor[0];
+            instance.alphaTint[2] = own.baseColor[1];
+            instance.alphaTint[3] = own.baseColor[2];
             instanceStaging_.push_back(instance);
 
             const Vec3 offset = draw.boundsCenter - batch.boundsCenter;

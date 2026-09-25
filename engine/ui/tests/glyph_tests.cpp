@@ -12,6 +12,7 @@
 #include <doctest/doctest.h>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -286,4 +287,24 @@ TEST_CASE("the rasterised face is Regular weight rather than the thinnest master
     // around an eighth, and for Black close to two thirds.
     CHECK(coverage > 0.28);
     CHECK(coverage < 0.50);
+}
+
+TEST_CASE("scaled text steps through a few sizes, never past what fits, and stops at 100 px")
+{
+    // A label whose handles are dragged asks for the size that fills it on
+    // every frame. On a ladder, a drag from 10 px to 300 px is a few dozen
+    // sizes in the glyph cache rather than one per frame (the flood reported).
+    std::set<float> sizes;
+    for (float fits = 10.0f; fits <= 300.0f; fits += 0.37f) {
+        const float size = luaug::ui::scaledTextSize(fits);
+        CHECK(size <= std::fmax(fits, 1.0f));
+        CHECK(size <= luaug::ui::kMaxScaledTextSize);
+        sizes.insert(size);
+    }
+    CHECK(sizes.size() < 50);
+    CHECK(luaug::ui::scaledTextSize(17.9f) == 17.0f);
+    CHECK(luaug::ui::scaledTextSize(47.0f) == 46.0f);
+    CHECK(luaug::ui::scaledTextSize(99.0f) == 96.0f);
+    CHECK(luaug::ui::scaledTextSize(640.0f) == 100.0f);
+    CHECK(luaug::ui::scaledTextSize(0.2f) == 1.0f);
 }

@@ -6,6 +6,7 @@
 #include <luaug/core/json_writer.h>
 #include <luaug/platform/file.h>
 #include <luaug/render/debug_draw.h>
+#include <luaug/render/lighting.h>
 #include <luaug/rhi/device.h>
 #include <luaug/scene/class_registry.h>
 #include <luaug/scene/pivot.h>
@@ -1017,12 +1018,33 @@ bool Editor::createInstance(scene::World& world, scene::ClassId classId, core::I
                                 scene::Value{core::UDim2{core::UDim{0.0f, 50.0f}, core::UDim{0.0f, 50.0f}}});
     }
 
+    // **A script made in the editor starts with something in it** (the
+    // owner's call, and the reference editor's): a `Script` says hello, and a
+    // `ModuleScript` is the table it returns, with nothing else. A script's
+    // own `Instance.new` still gives an empty `Source` -- that is the class's
+    // default, and code asking for a script asked for exactly that.
+    if (isClass(world, made, "ModuleScript")) {
+        (void)world.setProperty(made, world.atoms().intern("Source"),
+                                scene::Value{std::string("local module = {}\n\nreturn module\n")});
+    }
+    else if (const scene::ClassId baseScript = world.classes().findId(world.atoms().lookup("BaseScript"));
+             baseScript != scene::InvalidClass && world.classes().isA(classId, baseScript)) {
+        (void)world.setProperty(made, world.atoms().intern("Source"),
+                                scene::Value{std::string("print(\"Hello World!\")\n")});
+    }
+
     // **In front of the camera rather than at the origin.** In a streamed world
     // the origin is not where anybody is standing, and a part created four
     // kilometres from the view is one nobody finds. Through `setProperty`
     // rather than into the component, so a class with no `CFrame` needs no
     // special case here -- it simply refuses and nothing is placed.
-    if (m_cameraAdopted) {
+    //
+    // Not for something whose `CFrame` is RELATIVE to the part or attachment it
+    // was made in -- a light, an attachment, a decal -- where the world place
+    // in front of the camera would be read as an offset from the holder.
+    const bool heldRelative = world.parts().find(made) == nullptr &&
+                              (world.parts().find(parent) != nullptr || world.attachments().find(parent) != nullptr);
+    if (m_cameraAdopted && !heldRelative) {
         const core::Mat3& basis = m_cameraCFrame.rotation;
         const core::Vec3 forward{-basis.m[2][0], -basis.m[2][1], -basis.m[2][2]};
         // Far enough to be whole in the view and near enough to be reachable.
@@ -3002,6 +3024,9 @@ namespace {
         return attachment->worldCFrame;
     if (world.models().find(id) != nullptr)
         return scene::pivotOf(world, id);
+    // A light is wherever it shines from (ADR 0095).
+    if (const std::optional<render::LightAnchor> light = render::lightAnchorOf(world, id); light.has_value())
+        return light->partFrame * light->offset;
     // A sprite is on the plane and turns about Z, so its frame is that.
     if (const scene::Part2DComponent* sprite = world.parts2d().find(id); sprite != nullptr) {
         core::CFrameD frame;
@@ -4180,6 +4205,19 @@ bool Editor::driveGizmo(scene::World& world, Inspector& inspector)
             }
             else if (world.parts2d().find(id) != nullptr) {
                 kind = DragKind::Part2D;
+            }
+            else if (const std::optional<render::LightAnchor> light = render::lightAnchorOf(world, id);
+                     light.has_value()) {
+                // **A light moves the way an attachment does** (ADR 0095): its
+                // `CFrame` is relative to what holds it, the identity when
+                // nothing does, so the drag is divided back through that.
+                kind = DragKind::Attachment;
+                core::CFrameD own;
+                if (const scene::PointLightComponent* point = world.pointLights().find(id); point != nullptr)
+                    own = point->cframe;
+                else if (const scene::SpotLightComponent* spot = world.spotLights().find(id); spot != nullptr)
+                    own = spot->cframe;
+                parent = light->partFrame * light->offset * core::inverse(own);
             }
             else if (world.attachments().find(id) != nullptr) {
                 kind = DragKind::Attachment;

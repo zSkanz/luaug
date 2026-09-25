@@ -9,106 +9,106 @@
   },
   "children": [
    {
-    "class": "Camera",
-    "name": "MainCamera",
-    "properties": {
-     "CFrame": [
-      0.0,
-      4.0,
-      12.0,
-      1.0,
-      0.0,
-      0.0,
-      0.0,
-      0.9848,
-      -0.1736,
-      0.0,
-      0.1736,
-      0.9848
-     ],
-     "FieldOfView": 70.0
-    }
+	"class": "Camera",
+	"name": "MainCamera",
+	"properties": {
+	 "CFrame": [
+	  0.0,
+	  4.0,
+	  12.0,
+	  1.0,
+	  0.0,
+	  0.0,
+	  0.0,
+	  0.9848,
+	  -0.1736,
+	  0.0,
+	  0.1736,
+	  0.9848
+	 ],
+	 "FieldOfView": 70.0
+	}
    },
    {
-    "class": "Model",
-    "name": "Level",
-    "children": [
-     {
-      "class": "Part",
-      "name": "Ground",
-      "properties": {
-       "CFrame": [
-        0.0,
-        -0.5,
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0
-       ],
-       "Size": [
-        24.0,
-        1.0,
-        24.0
-       ],
-       "MaterialParameters": {
-        "Color": [
-         0.24,
-         0.3,
-         0.18
-        ]
-       },
-       "Anchored": true
-      }
-     },
-     {
-      "class": "Part",
-      "name": "Spinner",
-      "properties": {
-       "CFrame": [
-        0.0,
-        2.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0
-       ],
-       "Size": [
-        2.0,
-        2.0,
-        2.0
-       ],
-       "MaterialParameters": {
-        "Color": [
-         0.4706,
-         0.7451,
-         1.0
-        ]
-       },
-       "Anchored": true
-      },
-      "children": [
-       {
-        "class": "Script",
-        "name": "Spin",
-        "properties": {
-         "Source": "--!strict\n-- A script lives in the instance it is put in: this one is inside the part it\n-- turns, so `script.Parent` is that part. It runs when you press Play.\n\nlocal ReplicatedStorage = game:GetService(\"ReplicatedStorage\")\nlocal RunService = game:GetService(\"RunService\")\n\nlocal Settings = require(ReplicatedStorage:WaitForChild(\"Settings\"))\n\nlocal part = script.Parent :: Part\nlocal origin = part.CFrame.Position\nlocal elapsed = 0\n\nRunService.Heartbeat:Connect(function(delta: number)\n    elapsed += delta\n    part.CFrame = CFrame.new(origin) * CFrame.fromEuler(0, elapsed * Settings.SpinSpeed, 0)\nend)\n"
-        }
-       }
-      ]
-     }
-    ]
+	"class": "Model",
+	"name": "Level",
+	"children": [
+	 {
+	  "class": "Part",
+	  "name": "Ground",
+	  "properties": {
+	   "CFrame": [
+		0.0,
+		-0.5,
+		0.0,
+		1.0,
+		0.0,
+		0.0,
+		0.0,
+		1.0,
+		0.0,
+		0.0,
+		0.0,
+		1.0
+	   ],
+	   "Size": [
+		24.0,
+		1.0,
+		24.0
+	   ],
+	   "MaterialParameters": {
+		"Color": [
+		 0.24,
+		 0.3,
+		 0.18
+		]
+	   },
+	   "Anchored": true
+	  }
+	 },
+	 {
+	  "class": "Part",
+	  "name": "Spinner",
+	  "properties": {
+	   "CFrame": [
+		0.0,
+		2.0,
+		0.0,
+		1.0,
+		0.0,
+		0.0,
+		0.0,
+		1.0,
+		0.0,
+		0.0,
+		0.0,
+		1.0
+	   ],
+	   "Size": [
+		2.0,
+		2.0,
+		2.0
+	   ],
+	   "MaterialParameters": {
+		"Color": [
+		 0.4706,
+		 0.7451,
+		 1.0
+		]
+	   },
+	   "Anchored": true
+	  },
+	  "children": [
+	   {
+		"class": "Script",
+		"name": "Spin",
+		"properties": {
+		 "Source": "--!strict\n-- A script lives in the instance it is put in: this one is inside the part it\n-- turns, so `script.Parent` is that part. It runs when you press Play.\n\nlocal ReplicatedStorage = game:GetService(\"ReplicatedStorage\")\nlocal RunService = game:GetService(\"RunService\")\n\nlocal Settings = require(ReplicatedStorage:WaitForChild(\"Settings\"))\n\nlocal part = script.Parent :: Part\nlocal origin = part.CFrame.Position\nlocal elapsed = 0\n\nRunService.Heartbeat:Connect(function(delta: number)\n    elapsed += delta\n    part.CFrame = CFrame.new(origin) * CFrame.fromEuler(0, elapsed * Settings.SpinSpeed, 0)\nend)\n"
+		}
+	   }
+	  ]
+	 }
+	]
    }
   ]
  },
@@ -117,26 +117,26 @@
    "class": "ReplicatedStorage",
    "name": "ReplicatedStorage",
    "children": [
-    {
-     "class": "ModuleScript",
-     "name": "Settings",
-     "properties": {
-      "Source": "--!strict\n-- A ModuleScript runs once, the first time something requires it, and returns\n-- what the scripts that require it share. In ReplicatedStorage, any script can\n-- reach it.\n\nlocal Settings = {\n    -- Radians per second.\n    SpinSpeed = 1.5,\n}\n\nreturn Settings\n"
-     }
-    }
+	{
+	 "class": "ModuleScript",
+	 "name": "Settings",
+	 "properties": {
+	  "Source": "--!strict\n-- A ModuleScript runs once, the first time something requires it, and returns\n-- what the scripts that require it share. In ReplicatedStorage, any script can\n-- reach it.\n\nlocal Settings = {\n    -- Radians per second.\n    SpinSpeed = 1.5,\n}\n\nreturn Settings\n"
+	 }
+	}
    ]
   },
   "ScriptService": {
    "class": "ScriptService",
    "name": "ScriptService",
    "children": [
-    {
-     "class": "Script",
-     "name": "Main",
-     "properties": {
-      "Source": "--!strict\n-- Runs when you press Play, and the world goes back to how you left it when you\n-- press Stop. Put scripts wherever they belong: this one is in ScriptService,\n-- and the Spinner's own script is inside the Spinner.\n\nprint(\"Hello from LuauG!\")\n"
-     }
-    }
+	{
+	 "class": "Script",
+	 "name": "Main",
+	 "properties": {
+	  "Source": "--!strict\n-- Runs when you press Play, and the world goes back to how you left it when you\n-- press Stop. Put scripts wherever they belong: this one is in ScriptService,\n-- and the Spinner's own script is inside the Spinner.\n\nprint(\"Hello from LuauG!\")\n"
+	 }
+	}
    ]
   }
  }

@@ -21,6 +21,7 @@
 #include <vector>
 
 using namespace luaug;
+using app::indentWithTabs;
 using app::Position;
 using app::Range;
 using app::ScriptDocument;
@@ -638,8 +639,10 @@ TEST_CASE("Ctrl+/ comments a block at its shallowest indent, and takes the comme
 TEST_CASE("the line edits every code editor has are one undo step each")
 {
     ScriptDocument document("a()\n    b()\nc()");
+    // A tab in (the owner: "tabs, not spaces"), and out again -- a tab or up
+    // to four spaces, so old space-indented code still outdents.
     REQUIRE(document.indentLines(0, 1, false));
-    CHECK(document.text() == "    a()\n        b()\nc()");
+    CHECK(document.text() == "\ta()\n\t    b()\nc()");
     REQUIRE(document.indentLines(0, 1, true));
     CHECK(document.text() == "a()\n    b()\nc()");
 
@@ -735,6 +738,17 @@ TEST_CASE("Enter after a line that opens a block writes its end, once")
     // A function passed as an argument closes the call too.
     CHECK(at("RunService.Heartbeat:Connect(function(dt)").closer == "end)");
     CHECK(at("task.spawn(pcall(function()").closer == "end))");
+    // **A return type still opens the block** (the owner's report): the line
+    // ends in the type, not in the `)`.
+    CHECK(at("function Snake.new(at: vector): Snake").closer == "end");
+    CHECK(at("local function sum(a: number, b: number): number").closer == "end");
+    CHECK(at("function M.pair(): (number, string?)").closer == "end");
+    CHECK(at("local f = function(x): { [string]: number }").closer == "end");
+    CHECK(at("list:Map(function(x): number").closer == "end)");
+    // What follows the parameters and is not an annotation is code, and a
+    // one-line function is closed already.
+    CHECK_FALSE(at("function f() print(x)").opens);
+    CHECK(at("local g = function(a) return a end").closer.empty());
 
     // Already closed: deeper, and nothing written.
     const auto closed = [](std::string_view text) {
@@ -800,4 +814,75 @@ TEST_CASE("find: every match, a regular expression, replace one or all")
     // All, as one step.
     CHECK(document.replaceAll("speed", "velocity", {.matchCase = true, .wholeWord = true}) == 2);
     CHECK(document.line(1) == "local Speed = velocity * 2");
+}
+
+TEST_CASE("the names offered are the ones the caret can see (scope)")
+{
+    // **The owner's report**: `matrix`, a local inside one function, offered at
+    // the top of the file where no such name exists.
+    const std::string source = "local NN = {}\n"                               // 0
+                               "local function createZeroMatrix(rows, cols)\n" // 1
+                               "    local matrix = {}\n"                       // 2
+                               "    for row = 1, rows do\n"                    // 3
+                               "        local values = {}\n"                   // 4
+                               "    end\n"                                     // 5
+                               "    return matrix\n"                           // 6
+                               "end\n"                                         // 7
+                               "\n"                                            // 8
+                               "function Build(size)\n"                        // 9
+                               "    return size\n"                             // 10
+                               "end\n"                                         // 11
+                               "local later = 1\n";                            // 12
+    std::vector<std::string> names;
+    const auto has = [&names](std::string_view name) {
+        return std::find(names.begin(), names.end(), name) != names.end();
+    };
+
+    // At the top: the module's own locals declared so far, and the global the
+    // file defines -- not what is inside a function, and not what comes later.
+    visibleNames(source, Position{8, 0}, names);
+    CHECK(has("NN"));
+    CHECK(has("createZeroMatrix"));
+    CHECK(has("Build"));
+    CHECK_FALSE(has("matrix"));
+    CHECK_FALSE(has("rows"));
+    CHECK_FALSE(has("values"));
+    CHECK_FALSE(has("later"));
+
+    // Inside the loop: the function's parameters, its local, the loop's own
+    // variable and the block's local after it is declared.
+    visibleNames(source, Position{4, 30}, names);
+    CHECK(has("matrix"));
+    CHECK(has("rows"));
+    CHECK(has("cols"));
+    CHECK(has("row"));
+    CHECK(has("values"));
+    CHECK(has("createZeroMatrix"));
+
+    // After the loop: its variable and its block's local are gone.
+    visibleNames(source, Position{6, 4}, names);
+    CHECK(has("matrix"));
+    CHECK_FALSE(has("row"));
+    CHECK_FALSE(has("values"));
+}
+
+TEST_CASE("indentation is tabs: four cells wide, and old space indents become tabs")
+{
+    // **The owner: "it uses spaces instead of tabs -- use tabs, and fix the old
+    // scripts automatically".**
+    CHECK(indentWithTabs("if a then\n    b()\n        c()\nend") == "if a then\n\tb()\n\t\tc()\nend");
+    // A remainder that is not a whole tab stays spaces; text inside the line is
+    // untouched; a whitespace-only line keeps what it had.
+    CHECK(indentWithTabs("      x = \"a    b\"") == "\t  x = \"a    b\"");
+    CHECK(indentWithTabs("\t    y()") == "\t\ty()");
+    CHECK(indentWithTabs("    \nz") == "    \nz");
+
+    // A tab is drawn to its stop, and a caret, a click and a width agree.
+    ScriptDocument document("\tab\n\t\tc");
+    CHECK(document.cellOf(0, 1) == 4);
+    CHECK(document.cellOf(0, 2) == 5);
+    CHECK(document.cellCount(1) == 9);
+    CHECK(document.columnOfCell(0, 4) == 1);
+    CHECK(document.columnOfCell(0, 1) == 0);
+    CHECK(document.columnOfCell(0, 3) == 1);
 }

@@ -75,7 +75,7 @@ guided tour.
 | [`Part2D`](part2d.md) | [`Instance`](instance.md) | A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D world. |
 | [`ParticleEmitter`](particleemitter.md) | [`Instance`](instance.md) | Sparks, smoke, dust and magic (F2). |
 | [`Player`](player.md) | [`Instance`](instance.md) | Somebody taking part in this world (N1). |
-| [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction from its parent's position. |
+| [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction. |
 | [`Ragdoll`](ragdoll.md) | [`Instance`](instance.md) | Makes a character's pose come from the simulation instead of from a clip. |
 | [`RemoteEvent`](remoteevent.md) | [`Instance`](instance.md) | A message a game sends between machines (ADR 0077): "I bought the sword" from a client to the server, "the round starts" from the server to everyone. |
 | [`RemoteFunction`](remotefunction.md) | [`Instance`](instance.md) | A question a client asks the server and waits for the answer to (ADR 0079): "what is in my inventory?", "may I open this door?". |
@@ -83,7 +83,7 @@ guided tour.
 | [`Script`](script.md) | [`BaseScript`](basescript.md) | Luau that RUNS. |
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |
 | [`Sound`](sound.md) | [`Instance`](instance.md) | One sound, playing or not (§2.2). |
-| [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its parent's forward direction. |
+| [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its forward direction -- its holder's, turned by its own `CFrame`, or its own alone when nothing holds it (ADR 0095). |
 | [`SurfaceGui`](surfacegui.md) | [`Instance`](instance.md) | A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. |
 | [`Terrain`](terrain.md) | [`Instance`](instance.md) | A sculpted, collidable landscape: ground you dig into rather than a floor made of parts. |
 | [`TextButton`](textbutton.md) | [`TextLabel`](textlabel.md) | A `TextLabel` that is meant to be pressed. |

@@ -231,6 +231,14 @@ struct Interpolants
     // `SV_Position`, which would need the projection this stage is not given --
     // and for a perspective matrix it is exactly the clip w.
     float ViewDepth : TEXCOORD5;
+#if defined(LUAUG_INSTANCE_TINT)
+    // The instance's own base colour (D184): a run of parts that differ only by
+    // colour shares one material, and each brings its colour in the instance
+    // stream. `nointerpolation` because it is one value per instance, and an
+    // interpolated constant is only nearly constant -- the pixels must be the
+    // ones the material's own factor gave.
+    nointerpolation float3 InstanceTint : TEXCOORD6;
+#endif
     float4 Position : SV_Position;
 };
 
@@ -338,6 +346,9 @@ float4 shadeForward(Interpolants input)
     const float alphaCutoff = MetallicRoughnessNormalCutoff.w;
 
     float4 baseColor = BaseColorFactor;
+#if defined(LUAUG_INSTANCE_TINT)
+    baseColor.rgb = input.InstanceTint;
+#endif
     const float4 sampledBase = BaseColorTexture.Sample(BaseColorSampler, input.Uv);
     baseColor *= lerp(float4(1.0f, 1.0f, 1.0f, 1.0f), sampledBase, TextureFlags.x);
     // The two sources of transparency multiply: a glTF material can be

@@ -231,6 +231,16 @@ void setImageProvider(ImageProvider provider, void* user) noexcept;
 // caller that swaps a face at runtime -- which is the case the key exists for.
 void resetGlyphCache() noexcept;
 
+// **The size a `TextScaled` label draws at, from the size that would exactly
+// fill its box.** Never larger, so the text still fits, and on a ladder rather
+// than continuous: whole pixels up to 24, every 2 px up to 48, every 4 px up
+// to the cap -- so dragging a label's handles asks the glyph cache for a few
+// dozen sizes rather than one per frame. Capped at 100 px, which is where the
+// reference platform stops scaled text too; past it a glyph is bigger than
+// the atlas can hold a line of.
+[[nodiscard]] f32 scaledTextSize(f32 fits) noexcept;
+inline constexpr f32 kMaxScaledTextSize = 100.0f;
+
 // Measures a run at a size, optionally wrapped to a width.
 //
 // `maxWidth` of 0 means no wrapping. Wrapping breaks at spaces, and mid-word

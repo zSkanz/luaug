@@ -459,6 +459,8 @@ void sortCompletions(std::vector<Completion>& out)
         return kind == CompletionKind::Instance ? 0 : static_cast<int>(kind) + 1;
     };
     std::sort(out.begin(), out.end(), [&rank](const Completion& a, const Completion& b) {
+        if (a.scope != b.scope)
+            return a.scope < b.scope;
         if (a.kind != b.kind)
             return rank(a.kind) < rank(b.kind);
         return a.label < b.label;
@@ -480,8 +482,12 @@ void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completi
     if (!inType) {
         for (Completion& row : shown) {
             const auto same = [&row](const Completion& kept) { return kept.label == row.label; };
-            if (startsWith(row.label, prefix) && row.label != prefix &&
-                std::find_if(merged.begin(), merged.end(), same) == merged.end())
+            const auto kept = std::find_if(merged.begin(), merged.end(), same);
+            // The checker's row wins, but where the name stands is ours: it
+            // does not say whether a name is in scope, and the scan does.
+            if (kept != merged.end())
+                kept->scope = std::min(kept->scope, row.scope);
+            else if (startsWith(row.label, prefix) && row.label != prefix)
                 merged.push_back(std::move(row));
         }
     }
@@ -712,27 +718,50 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         // **And the words already in this file**, which is the completion a type
         // checker would not have improved on: a local somebody named four lines
         // up is the thing they are most likely to be typing next.
+        //
+        // **Only the ones the caret can see** (the owner: `matrix`, a local of
+        // another function, offered at the top of the file). This used to be
+        // every identifier the file contained -- a field name, a parameter of
+        // a function far away, a local of a block already closed -- and a
+        // suggestion that the code cannot use is worse than none.
+        //
+        // **Where a name can be seen decides its place, not whether it is
+        // offered** (the owner, on second thought: "it should only change the
+        // order -- scope, then out of scope, then global"). The names the
+        // caret can see come first; every other name the file writes follows.
         if (request.prefix.size() >= 2) {
-            std::vector<std::string> words;
+            static std::vector<std::string> visible;
+            visibleNames(document.text(), request.replace.begin, visible);
+            std::vector<std::string> elsewhere;
             for (u32 line = 0; line < document.lineCount(); ++line) {
                 for (const Token& token : document.tokens(line)) {
                     if (token.kind != TokenKind::Identifier)
                         continue;
                     std::string word(document.line(line).substr(token.column, token.length));
-                    if (word == request.prefix || !startsWith(word, request.prefix))
-                        continue;
-                    // **One row per name** (the owner's report: `print` offered
-                    // twice, "in this file" and "global"). A word the file uses
-                    // that the engine already offers is the engine's row.
-                    const auto offered = [&word](const Completion& row) { return row.label == word; };
-                    if (std::find_if(out.begin(), out.end(), offered) != out.end())
-                        continue;
-                    if (std::find(words.begin(), words.end(), word) == words.end())
-                        words.push_back(std::move(word));
+                    if (std::find(visible.begin(), visible.end(), word) == visible.end() &&
+                        std::find(elsewhere.begin(), elsewhere.end(), word) == elsewhere.end())
+                        elsewhere.push_back(std::move(word));
                 }
             }
-            for (std::string& word : words)
-                push(out, request, std::move(word), "in this file", "", CompletionKind::Identifier);
+            const auto offer = [&](const std::string& word, CompletionScope scope) {
+                if (word == request.prefix || !startsWith(word, request.prefix))
+                    return;
+                // **One row per name** (the owner's report: `print` offered
+                // twice, "in this file" and "global"). A name the engine
+                // already offers keeps the engine's row -- at this name's
+                // place in the order when the file declares it.
+                const auto offered = [&word](const Completion& row) { return row.label == word; };
+                if (const auto found = std::find_if(out.begin(), out.end(), offered); found != out.end()) {
+                    found->scope = std::min(found->scope, scope);
+                    return;
+                }
+                push(out, request, word, "in this file", "", CompletionKind::Identifier);
+                out.back().scope = scope;
+            };
+            for (const std::string& word : visible)
+                offer(word, CompletionScope::Visible);
+            for (const std::string& word : elsewhere)
+                offer(word, CompletionScope::Elsewhere);
         }
     }
 

@@ -293,3 +293,16 @@ What building ADR 0090 found that the ADR and this ledger did not say.
     (`World::adoptMaterialClone`).
 21. **A clone's map crosses the wire as a name**, so a script writing one
     interns it; the atom table the session already replicates carries it.
+22. **A per-part `Color` split instancing, one material per colour** (D184,
+    found benchmarking a user's game after this ledger closed). Parts that
+    differ only by `Color` were distinct materials, so a snake of 250
+    differently tinted segments was 250 draws. Materials now carry a FAMILY
+    (`RenderWorld::materialFamilies`) -- the same bind set but for the rgb of
+    the base colour -- the opaque sort key groups by it, and the instancer
+    batches by it with each instance's colour in the three floats `GpuInstance`
+    already had spare (`alphaTint.yzw`, read `nointerpolation` in
+    `pbr_instanced.hlsl` only). The stride, the pipelines and the RHI did not
+    change, and a draw drawn alone still binds its own material. Draws fell
+    756 → 4 on that game and 119 → 17 on `11-ocean`; the frame time did not
+    (`docs/perf-baselines.md`, "A user's game"), which is itself a finding: a
+    whole-world batch is drawn into every shadow cascade.

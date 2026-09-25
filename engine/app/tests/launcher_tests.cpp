@@ -11,6 +11,7 @@
 // ADR 0055: a CLI that needed a window to make a project would be a worse CLI.
 // What makes two safe is not care, it is the comparison at the bottom of this
 // file.
+#include "luaug/app/engine.h"
 #include "luaug/app/launcher.h"
 #include "luaug/core/i18n.h"
 #include "luaug/platform/file.h"
@@ -333,4 +334,18 @@ TEST_CASE("the launcher and the template it copies agree, file for file")
         }
         CHECK(expected == copied[i].second);
     }
+}
+
+// D183: a game somebody downloads never runs with the GPU debug layer unless it
+// was asked for, and the profiles engine work happens in always do.
+TEST_CASE("the GPU debug layer is the debug and dev profiles' and an opt-in's")
+{
+    CHECK(luaug::app::gpuValidationWanted("debug", false));
+    CHECK(luaug::app::gpuValidationWanted("dev", false));
+    CHECK_FALSE(luaug::app::gpuValidationWanted("player", false));
+    CHECK_FALSE(luaug::app::gpuValidationWanted("shipping", false));
+    CHECK_FALSE(luaug::app::gpuValidationWanted("editor", false));
+    CHECK_FALSE(luaug::app::gpuValidationWanted("profile", false));
+    CHECK(luaug::app::gpuValidationWanted("shipping", true));
+    CHECK(luaug::app::gpuValidationWanted("player", true));
 }

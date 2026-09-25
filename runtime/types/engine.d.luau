@@ -1150,6 +1150,11 @@ declare extern type Camera extends PVInstance with
 end
 
 declare extern type PointLight extends Instance with
+    --- Where the light is. **In the world when nothing holds it** -- a light dropped straight into the
+    --- Workspace shines from here, and turns with it -- and relative to the BasePart or Attachment it
+    --- sits in otherwise, which the identity leaves exactly where that is. The owner's call (ADR 0095):
+    --- a light can stand on its own.
+    CFrame: CFrame
     --- The light's colour, multiplied by Brightness. Not clamped, so a channel above one is a legal
     --- over-bright tint.
     Color: Color3
@@ -1230,6 +1235,11 @@ declare extern type ParticleEmitter extends Instance with
 end
 
 declare extern type SpotLight extends Instance with
+    --- Where the light is. **In the world when nothing holds it** -- a light dropped straight into the
+    --- Workspace shines from here, and turns with it -- and relative to the BasePart or Attachment it
+    --- sits in otherwise, which the identity leaves exactly where that is. The owner's call (ADR 0095):
+    --- a light can stand on its own.
+    CFrame: CFrame
     --- The light's colour, multiplied by Brightness.
     Color: Color3
     --- How much light this emits.

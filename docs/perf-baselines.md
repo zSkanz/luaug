@@ -868,3 +868,47 @@ body, about 46 ns each, and a dirty flag would save a fraction of half a
 millisecond at the price of a second source of truth. Engines that move ten thousand scripted objects a
 frame land in the same few milliseconds; the ones that do much better do it by
 not running a script per object, which is a game's decision and not a kernel's.
+
+## A user's game, and instancing by colour (D182–D184)
+
+Measured 2026-09-24 on the reference machine, from the `player`-and-`editor`
+package (`scripts/package.ps1`) -- **the GPU debug layer off (D183)**, which is
+the first time a windowed number here was taken without it. The scenes: the
+stress harness around the owner's friend's SNAKE game (8 snakes of 250
+segments, every segment its own `Color`), `examples/11-ocean`, and
+`tests/bench/instances500`. `--frames=1810 --exit --frame-stats`, median of the
+measured frames.
+
+**A/B, interleaved**: A is the package without D184, B with it, built from the
+same tree; four rounds A,B,A,B headless, two windowed runs each. The machine was
+shared with other work that evening (a Python process at a steady load, chat
+clients), so the rounds were interleaved to put the noise on both sides; the
+earlier before/after pairs taken an hour apart disagreed by more than the
+effect, which is why this table is the A/B and not those.
+
+| Scene | Draws A → B | Headless A | Headless B | Windowed A | Windowed B |
+|---|---|---|---|---|---|
+| SNAKE 8×250 (2013 objects) | 756 → **4** | 3.78 ms | 3.88 ms | 8.84 ms | 9.23 ms |
+| `11-ocean` (329 objects) | 119 → **17** | 3.35 ms | 3.44 ms | — | — |
+| `instances500` (no camera) | 0 → 0 | 0.87 ms | 0.85 ms | — | — |
+
+**The draw count is what D184 was for, and it fell by 150× and 7×.** The frame
+time did not follow. Headless the two are within the rounds' own spread (A's
+SNAKE medians ran 3.49–4.00 ms); windowed, B is about 4% slower in both pairs.
+The likely reason, and it is a hypothesis: an instanced batch is culled WHOLE
+(ADR 0043), and a run of two thousand segments across the whole map is now one
+batch that every shadow cascade draws in full, where 756 draws were each
+rejected by the cascades they missed. The follow-up is to split a run into
+spatial pieces before it becomes a batch, and to measure that against this row.
+
+**A windowed frame on this machine is its presentation, not its work.**
+`instances500` has no camera, draws nothing, and still sits at ~8.6 ms
+windowed, where the same run headless is 0.85 ms: the swap chain paces the loop.
+Every windowed number in this file before today was also taken with the D3D12
+debug layer on (D183) -- with it, the SNAKE row measured 8.70 ms against 8.63
+without, so the layer's CPU cost here is small; what made it matter was that a
+message from it was fatal.
+
+**D182 held**: the windowed SNAKE repro that died with EXECUTION ERROR #646 ran
+three times to the end with the layer asked for (`--gpu-debug`), 756 draws a
+frame, before D184 took the draws away.

@@ -209,6 +209,10 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
             options.frameStats = true;
             continue;
         }
+        if (arg == "--gpu-debug") {
+            options.gpuDebug = true;
+            continue;
+        }
 
         // M7's gate. The report path turns the recorder on; the ceiling is
         // separate because a soak that only wants the histogram should not have

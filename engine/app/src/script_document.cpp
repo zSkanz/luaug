@@ -357,7 +357,7 @@ bool ScriptDocument::indentLines(u32 first, u32 last, bool outdent)
             changed = changed || drop > 0;
         }
         else if (!row.empty()) {
-            row.insert(0, "    ");
+            row.insert(0, "\t");
             changed = true;
         }
         rewritten += row;
@@ -507,6 +507,49 @@ u32 ScriptDocument::indentOf(u32 index) const noexcept
     return column;
 }
 
+namespace {
+
+// The cell after a character that starts at `cells`: a tab runs to its stop.
+[[nodiscard]] u32 advanceCell(u32 cells, char c) noexcept
+{
+    return c == '\t' ? (cells / kTabWidth + 1) * kTabWidth : cells + 1;
+}
+
+} // namespace
+
+std::string indentWithTabs(std::string_view source)
+{
+    std::string out;
+    out.reserve(source.size());
+    std::size_t start = 0;
+    while (start <= source.size()) {
+        const std::size_t newline = source.find('\n', start);
+        const std::string_view row =
+            source.substr(start, newline == std::string_view::npos ? std::string_view::npos : newline - start);
+        std::size_t body = 0;
+        u32 cells = 0;
+        while (body < row.size() && (row[body] == ' ' || row[body] == '\t')) {
+            cells = advanceCell(cells, row[body]);
+            ++body;
+        }
+        // A line of nothing but whitespace keeps nothing: an indent with
+        // nothing after it is the trailing space every editor strips.
+        if (body < row.size()) {
+            out.append(cells / kTabWidth, '\t');
+            out.append(cells % kTabWidth, ' ');
+            out.append(row.substr(body));
+        }
+        else {
+            out.append(row);
+        }
+        if (newline == std::string_view::npos)
+            break;
+        out.push_back('\n');
+        start = newline + 1;
+    }
+    return out;
+}
+
 u32 ScriptDocument::cellOf(u32 index, u32 column) const noexcept
 {
     const std::string_view text = line(index);
@@ -514,7 +557,7 @@ u32 ScriptDocument::cellOf(u32 index, u32 column) const noexcept
     u32 cells = 0;
     for (std::size_t at = 0; at < limit; ++at) {
         if (!isContinuation(text[at]))
-            ++cells;
+            cells = advanceCell(cells, text[at]);
     }
     return cells;
 }
@@ -526,9 +569,16 @@ u32 ScriptDocument::columnOfCell(u32 index, u32 cell) const noexcept
     for (std::size_t at = 0; at < text.size(); ++at) {
         if (isContinuation(text[at]))
             continue;
-        if (cells == cell)
+        const u32 next = advanceCell(cells, text[at]);
+        // A cell inside a tab's span is the tab when it is nearer its start,
+        // and what follows it when nearer its end -- which is where a click
+        // there puts the caret in every editor.
+        if (cell < next) {
+            if (text[at] == '\t' && cell - cells >= (next - cells + 1) / 2)
+                return static_cast<u32>(at + 1);
             return static_cast<u32>(at);
-        ++cells;
+        }
+        cells = next;
     }
     // Past the end is the end, which is where a click to the right of the last
     // character should land.
@@ -598,7 +648,27 @@ Position ScriptDocument::applyEdit(Range range, std::string_view inserted)
     const Position after = positionAfter(span.begin, inserted);
     ++m_revision;
     propagate(span.begin.line, after.line);
+    // Bounded: a panel that never takes the log must not grow it forever.
+    if (m_editLog.size() < 4096)
+        m_editLog.push_back(EditSpan{span.begin, span.end, after});
     return after;
+}
+
+Position ScriptDocument::shifted(Position at, const EditSpan& edit) noexcept
+{
+    if (at < edit.begin || (at == edit.begin && !(edit.begin == edit.oldEnd)))
+        return at;
+    if (at < edit.oldEnd)
+        return edit.newEnd;
+    if (at.line == edit.oldEnd.line)
+        return Position{edit.newEnd.line, edit.newEnd.column + (at.column - edit.oldEnd.column)};
+    return Position{at.line + edit.newEnd.line - edit.oldEnd.line, at.column};
+}
+
+void ScriptDocument::beginGroup() noexcept
+{
+    m_group = ++m_groups;
+    m_coalescing = false;
 }
 
 void ScriptDocument::propagate(u32 first, u32 last)
@@ -672,8 +742,9 @@ Position ScriptDocument::replace(Range range, std::string_view text)
 void ScriptDocument::record(Edit edit, bool coalescable)
 {
     m_redo.clear();
+    edit.group = m_group;
 
-    if (coalescable && m_coalescing && !m_undo.empty()) {
+    if (m_group == 0 && coalescable && m_coalescing && !m_undo.empty()) {
         Edit& top = m_undo.back();
         if (top.removed.empty() && positionAfter(top.begin, top.inserted) == edit.begin) {
             m_undoBytes += edit.inserted.size();
@@ -683,7 +754,7 @@ void ScriptDocument::record(Edit edit, bool coalescable)
         }
     }
 
-    m_coalescing = coalescable;
+    m_coalescing = m_group == 0 && coalescable;
     m_undoBytes += edit.removed.size() + edit.inserted.size();
     m_undo.push_back(std::move(edit));
     trimHistory();
@@ -710,14 +781,18 @@ bool ScriptDocument::undo(Position& caret)
     if (m_undo.empty())
         return false;
 
-    Edit edit = std::move(m_undo.back());
-    m_undo.pop_back();
-    m_undoBytes -= edit.removed.size() + edit.inserted.size();
+    // A group comes back whole, newest edit first -- the reverse of the order
+    // it was made in, which is what keeps each edit's positions true.
+    const core::u64 group = m_undo.back().group;
+    do {
+        Edit edit = std::move(m_undo.back());
+        m_undo.pop_back();
+        m_undoBytes -= edit.removed.size() + edit.inserted.size();
+        applyEdit(Range{edit.begin, positionAfter(edit.begin, edit.inserted)}, edit.removed);
+        caret = clamp(edit.caretBefore);
+        m_redo.push_back(std::move(edit));
+    } while (group != 0 && !m_undo.empty() && m_undo.back().group == group);
     m_coalescing = false;
-
-    applyEdit(Range{edit.begin, positionAfter(edit.begin, edit.inserted)}, edit.removed);
-    caret = clamp(edit.caretBefore);
-    m_redo.push_back(std::move(edit));
     return true;
 }
 
@@ -726,13 +801,15 @@ bool ScriptDocument::redo(Position& caret)
     if (m_redo.empty())
         return false;
 
-    Edit edit = std::move(m_redo.back());
-    m_redo.pop_back();
+    const core::u64 group = m_redo.back().group;
+    do {
+        Edit edit = std::move(m_redo.back());
+        m_redo.pop_back();
+        caret = applyEdit(Range{edit.begin, positionAfter(edit.begin, edit.removed)}, edit.inserted);
+        m_undoBytes += edit.removed.size() + edit.inserted.size();
+        m_undo.push_back(std::move(edit));
+    } while (group != 0 && !m_redo.empty() && m_redo.back().group == group);
     m_coalescing = false;
-
-    caret = applyEdit(Range{edit.begin, positionAfter(edit.begin, edit.removed)}, edit.inserted);
-    m_undoBytes += edit.removed.size() + edit.inserted.size();
-    m_undo.push_back(std::move(edit));
     trimHistory();
     return true;
 }
@@ -886,19 +963,63 @@ ScriptDocument::BlockBreak ScriptDocument::blockBreakAt(Position caret) const
     // A function's parameter list closes with `)` on a line with `function`
     // on it, and how many `(` were still open at that keyword is how many `)`
     // follow its `end`: `x:Connect(function()` closes with `end)`.
+    //
+    // **And a return type after it still opens the block** (the owner: "the
+    // automatic end does not happen when I type a function's return"):
+    // `function Snake.new(at: vector): Snake` ends in a TYPE, not in `)`. So the
+    // `)` that closes the parameters is remembered, and what follows it counts
+    // when it is an annotation -- a `:` and then only type tokens.
     std::optional<core::u32> functionOpenParens;
+    const Token* paramsClose = nullptr;
+    bool awaitingParams = false;
+    bool annotated = false;
+    bool annotationOnly = true;
     core::u32 depth = 0;
     for (const Token& token : tokens) {
         if (token.column + token.length > caret.column)
             break;
+        if (token.kind == TokenKind::Text || token.kind == TokenKind::Comment)
+            continue;
         const std::string_view w = word(token);
-        if (token.kind == TokenKind::Keyword && w == "function")
+        if (paramsClose != nullptr && &token != paramsClose) {
+            // Everything after the parameters: the first must be the `:`, and
+            // the rest must be a type -- names, `nil`, and the punctuation a
+            // type is written with.
+            if (!annotated) {
+                annotated = token.kind == TokenKind::Operator && w == ":";
+                annotationOnly = annotationOnly && annotated;
+            }
+            else {
+                const bool typePunctuation =
+                    token.kind == TokenKind::Operator &&
+                    (w == "(" || w == ")" || w == "{" || w == "}" || w == "<" || w == ">" || w == "?" || w == "|" ||
+                     w == "&" || w == "," || w == "->" || w == ":" || w == "..." || w == "[" || w == "]");
+                const bool typeWord = token.kind == TokenKind::Type || token.kind == TokenKind::Identifier ||
+                                      token.kind == TokenKind::String ||
+                                      (token.kind == TokenKind::Keyword && (w == "nil" || w == "true" || w == "false"));
+                annotationOnly = annotationOnly && (typePunctuation || typeWord);
+            }
+        }
+        if (token.kind == TokenKind::Keyword && w == "function") {
             functionOpenParens = depth;
-        else if (token.kind == TokenKind::Operator && w == "(")
+            paramsClose = nullptr;
+            awaitingParams = true;
+            annotated = false;
+            annotationOnly = true;
+        }
+        else if (token.kind == TokenKind::Operator && w == "(") {
             ++depth;
-        else if (token.kind == TokenKind::Operator && w == ")" && depth > 0)
+        }
+        else if (token.kind == TokenKind::Operator && w == ")" && depth > 0) {
             --depth;
+            if (awaitingParams && functionOpenParens.has_value() && depth == *functionOpenParens) {
+                paramsClose = &token;
+                awaitingParams = false;
+            }
+        }
     }
+    const bool returnType = paramsClose != nullptr && last != paramsClose && annotated && annotationOnly &&
+                            functionOpenParens.has_value() && depth == *functionOpenParens;
 
     const std::string_view tail = word(*last);
     std::string closer;
@@ -908,8 +1029,7 @@ ScriptDocument::BlockBreak ScriptDocument::blockBreakAt(Position caret) const
         closer = "until ";
     else if (last->kind == TokenKind::Keyword && tail == "else")
         out.opens = true;
-    else if (last->kind == TokenKind::Operator && tail == ")" && functionOpenParens.has_value() &&
-             depth == *functionOpenParens)
+    else if ((last == paramsClose || returnType) && functionOpenParens.has_value() && depth == *functionOpenParens)
         closer = "end" + std::string(*functionOpenParens, ')');
     if (closer.empty())
         return out;

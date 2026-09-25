@@ -119,6 +119,8 @@ void attachCameraComponents(scene::World& world, core::InstanceId id);
 void detachCameraComponents(scene::World& world, core::InstanceId id);
 
 // PointLight
+scene::Value getPointLightCFrame(const scene::World& world, core::InstanceId id);
+bool setPointLightCFrame(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getPointLightColor(const scene::World& world, core::InstanceId id);
 bool setPointLightColor(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getPointLightBrightness(const scene::World& world, core::InstanceId id);
@@ -183,6 +185,8 @@ void attachParticleEmitterComponents(scene::World& world, core::InstanceId id);
 void detachParticleEmitterComponents(scene::World& world, core::InstanceId id);
 
 // SpotLight
+scene::Value getSpotLightCFrame(const scene::World& world, core::InstanceId id);
+bool setSpotLightCFrame(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getSpotLightColor(const scene::World& world, core::InstanceId id);
 bool setSpotLightColor(scene::World& world, core::InstanceId id, const scene::Value& value);
 scene::Value getSpotLightBrightness(const scene::World& world, core::InstanceId id);

@@ -23,6 +23,7 @@
 #define LUAUG_UNIFORMS_OBJECT
 #define LUAUG_UNIFORMS_FRAME
 #define LUAUG_UNIFORMS_MATERIAL
+#define LUAUG_INSTANCE_TINT
 #include "luaug_forward.hlsli"
 
 struct VertexInput
@@ -32,12 +33,12 @@ struct VertexInput
     float4 Tangent : TEXCOORD2;
     float2 Uv : TEXCOORD3;
     // Slot 1, per instance: the model matrix as four columns, then the
-    // instance's own alpha. `render::GpuInstance`, 80 bytes.
+    // instance's own alpha and base colour. `render::GpuInstance`, 80 bytes.
     float4 ModelColumn0 : TEXCOORD4;
     float4 ModelColumn1 : TEXCOORD5;
     float4 ModelColumn2 : TEXCOORD6;
     float4 ModelColumn3 : TEXCOORD7;
-    float4 InstanceAlphaUnused : TEXCOORD8;
+    float4 InstanceAlphaTint : TEXCOORD8;
 };
 
 // `core::Mat4` stores `m[column][row]`, so the four attributes ARE the matrix's
@@ -80,7 +81,8 @@ Interpolants VertexMain(VertexInput input)
     // the model matrix rather than on the cofactor one.
     output.Tangent = float4(mul((float3x3)model, input.Tangent.xyz), input.Tangent.w);
     output.Uv = input.Uv;
-    output.InstanceAlpha = input.InstanceAlphaUnused.x;
+    output.InstanceAlpha = input.InstanceAlphaTint.x;
+    output.InstanceTint = input.InstanceAlphaTint.yzw;
 
     return output;
 }

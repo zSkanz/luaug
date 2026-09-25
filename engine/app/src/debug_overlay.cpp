@@ -11,6 +11,7 @@
 #include "luaug/app/icons.h"
 #include "luaug/app/project_config.h"
 #include "luaug/app/script_editor.h"
+#include "luaug/app/script_editor_settings.h"
 #include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_theme.h"
 #include "luaug/core/build_info.h"
@@ -2534,7 +2535,7 @@ void strikeText(const char* text)
 // declares, each with its value and a revert when this part overrides it, and
 // below them any override the part keeps that this material does not declare.
 void drawMaterialParameters(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
-                            const scene::PropertyDesc& descriptor, bool mixed)
+                            const scene::PropertyDesc& descriptor, bool mixed, const IconAtlas* icons)
 {
     if (mixed || targets.size() != 1) {
         ImGui::TextDisabled(mixed ? "mixed" : "select one part to edit its parameters");
@@ -2583,7 +2584,7 @@ void drawMaterialParameters(scene::World& world, Inspector& inspector, std::span
                 ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "*");
             }
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(-(overridden ? ImGui::CalcTextSize("revert").x + 16.0f : 1.0f));
+            ImGui::SetNextItemWidth(-(overridden ? ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x : 1.0f));
             asset::MaterialProperties values = shown;
             if (drawParameterWidget(field, values)) {
                 asset::MaterialOverrides next = overrides;
@@ -2593,7 +2594,8 @@ void drawMaterialParameters(scene::World& world, Inspector& inspector, std::span
         }
         if (overridden) {
             ImGui::SameLine();
-            if (ImGui::SmallButton("revert")) {
+            if (iconButton(icons, icons::ActionRevert, ImGui::GetFontSize(), "revert", "revert",
+                           "Revert to material value")) {
                 asset::MaterialOverrides next = overrides;
                 asset::clearOverride(next, field);
                 write(next);
@@ -2618,6 +2620,7 @@ struct MaterialFieldRow
     bool variant = false;
     bool changed = false;
     bool continuing = false;
+    const IconAtlas* icons = nullptr;
 
     // Draws the row's label and, for a variant, its inherit control; returns
     // the values the widget should edit.
@@ -2630,7 +2633,8 @@ struct MaterialFieldRow
         ImGui::TextUnformatted(std::string(asset::materialFieldName(field)).c_str());
         if (variant && own) {
             ImGui::SameLine();
-            if (ImGui::SmallButton("inherit")) {
+            if (iconButton(icons, icons::ActionInherit, ImGui::GetFontSize(), "inherit", "inherit",
+                           "Inherit parent material value")) {
                 next.written = static_cast<asset::MaterialFieldMask>(next.written & ~asset::fieldBit(field));
                 asset::copyMaterialField(field, inherited, next.properties);
                 changed = true;
@@ -2708,7 +2712,7 @@ struct MaterialFieldRow
 // in every world as they are made and undone with the panel's own history -- an
 // edit to a file is not an edit to the scene. Closing without saving puts the
 // file's look back.
-void drawMaterialPanel(Editor& editor)
+void drawMaterialPanel(Editor& editor, const IconAtlas* icons)
 {
     const Editor::MaterialSession& session = editor.materialSession();
     if (!session.open())
@@ -2744,22 +2748,29 @@ void drawMaterialPanel(Editor& editor)
             }
         }
 
+        const auto nextAction = [](const char* label) {
+            ImGui::SameLine();
+            const float width = ImGui::CalcTextSize(label).x + ImGui::CalcTextSize(tabIconPad().c_str()).x +
+                                ImGui::GetStyle().FramePadding.x * 2.0f;
+            if (ImGui::GetContentRegionAvail().x < width)
+                ImGui::NewLine();
+        };
         ImGui::BeginDisabled(!session.dirty());
-        if (ImGui::Button("Save"))
+        if (labeledIconButton(icons, icons::ActionSave, "Save"))
             (void)editor.saveMaterial();
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        nextAction("Undo");
         ImGui::BeginDisabled(session.undo.empty());
-        if (ImGui::Button("Undo") && editor.undoMaterial() && g_thumbnails != nullptr)
+        if (labeledIconButton(icons, icons::ActionUndo, "Undo") && editor.undoMaterial() && g_thumbnails != nullptr)
             g_thumbnails->refresh(absolute);
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        nextAction("Redo");
         ImGui::BeginDisabled(session.redo.empty());
-        if (ImGui::Button("Redo") && editor.redoMaterial() && g_thumbnails != nullptr)
+        if (labeledIconButton(icons, icons::ActionRedo, "Redo") && editor.redoMaterial() && g_thumbnails != nullptr)
             g_thumbnails->refresh(absolute);
         ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button("Close"))
+        nextAction("Close");
+        if (labeledIconButton(icons, icons::ActionClose, "Close"))
             keepOpen = false;
         if (session.dirty() && ImGui::IsItemHovered())
             ImGui::SetTooltip("Closing without saving puts the file's own look back in every world.");
@@ -2767,6 +2778,7 @@ void drawMaterialPanel(Editor& editor)
 
         asset::MaterialAsset next = session.asset;
         MaterialFieldRow row{next, inherited, variant};
+        row.icons = icons;
         using F = asset::MaterialField;
         {
             asset::MaterialProperties& p = row.begin(F::Color);
@@ -2941,7 +2953,7 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
     }
     if (editorFor(descriptor) == EditorKind::MaterialParameters) {
         ImGui::PushID(static_cast<int>(descriptor.name.id));
-        drawMaterialParameters(world, inspector, targets, descriptor, mixed);
+        drawMaterialParameters(world, inspector, targets, descriptor, mixed, icons);
         ImGui::PopID();
         return;
     }
@@ -3728,6 +3740,13 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     s_rows.clear();
     for (const scene::PropertyDesc* descriptor : g_properties) {
         const std::string_view name = world.atoms().text(descriptor->name);
+        // **A script's code is not a row** (the owner: "the Properties is too
+        // cluttered"): the reference editor leaves `Source` out of its grid,
+        // because the code is read and written in the script editor that a
+        // double-click opens, and a one-line preview of it only pushed the
+        // rows that matter further down.
+        if (editorFor(*descriptor) == EditorKind::Code)
+            continue;
         if (propertyMatches(name, needle))
             s_rows.push_back(PropertyRow{descriptor, propertyCategory(name)});
     }
@@ -3738,17 +3757,22 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
         return;
     }
 
-    const bool stacked = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 22.0f;
     // A grid: one divider between the columns that drags, quiet alternate rows,
     // and no box around every cell -- the lines that say where a value starts
     // and nothing more.
+    //
+    // **Always two columns, however narrow the panel** (the owner, with a
+    // screenshot: "too cluttered, hard to find anything"). A narrow panel used
+    // to stack each name over its value, which doubled every row's height and
+    // made names and values look alike; a name that does not fit is clipped
+    // and says itself in full under the pointer, which is what a property grid
+    // in every editor does.
     const ImGuiTableFlags gridFlags = ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp |
                                       ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg;
-    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(ImGui::GetStyle().CellPadding.x * 2.0f, 2.0f));
-    if (ImGui::BeginTable(stacked ? "properties-stacked" : "properties-grid", stacked ? 1 : 2, gridFlags)) {
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(ImGui::GetStyle().CellPadding.x * 1.5f, 2.0f));
+    if (ImGui::BeginTable("properties-grid", 2, gridFlags)) {
         ImGui::TableSetupColumn("property", ImGuiTableColumnFlags_WidthStretch, 0.42f);
-        if (!stacked)
-            ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
 
         std::string_view heading;
         bool headingOpen = true;
@@ -3839,23 +3863,28 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
             // (`class_registry.h` says why it is prose and not a catalog key).
             // Wrapped, because these are paragraphs and an unwrapped tooltip is
             // one line as wide as the sentence.
-            if (descriptor->doc[0] != 0 && ImGui::IsItemHovered()) {
+            //
+            // **The name in full comes first**, since a narrow column clips it;
+            // then what the tag used to say beside the name -- read-only, or
+            // stored and not yet acted on -- which cost every such row a word
+            // of its width and is a fact somebody hovering asks about. A
+            // read-only value is already greyed, which is the part a glance
+            // needs.
+            if (ImGui::IsItemHovered()) {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
-                ImGui::TextUnformatted(descriptor->doc);
+                ImGui::TextUnformatted(nameLabel);
+                if (const char* tag = propertyTag(*descriptor); tag != nullptr) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", descriptor->readOnly ? "read-only"
+                                                                   : "stored; nothing in this build acts on it yet");
+                }
+                if (descriptor->doc[0] != 0) {
+                    ImGui::Separator();
+                    ImGui::TextUnformatted(descriptor->doc);
+                }
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
-            }
-
-            if (const char* tag = propertyTag(*descriptor); tag != nullptr) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("%s", tag);
-                // The tooltip carries the part a three-character tag cannot: an
-                // inert property is not broken and not read-only, it is waiting
-                // for the milestone that renders it.
-                if (descriptor->inert && ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("stored and read back faithfully; nothing in this build acts on it yet");
-                }
             }
 
             // Read once and handed to the editor. Asking twice would be two
@@ -3870,9 +3899,7 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
             }
 
             ImGui::Unindent(ImGui::GetStyle().IndentSpacing * 0.5f);
-            if (stacked)
-                ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(stacked ? 0 : 1);
+            ImGui::TableSetColumnIndex(1);
             drawEditor(world, root, inspector, targets, *descriptor, shared, tree, icons, audio, commands);
 
             // The rows a composite is actually edited in. Disabled with the
@@ -3902,10 +3929,21 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     // answer to "what is this"; attributes and tags are the answer to "what did
     // somebody decide about it", which is a question asked far less often and by
     // somebody who came looking.
+    //
+    // **Their headers are the grid's headings**, not ImGui's filled accent bar:
+    // two kinds of heading in one panel read as two different panels.
     if (const core::InstanceId primary = inspector.selection(); world.alive(primary)) {
         ImGui::Spacing();
+        const ImU32 headingBg = ImGui::GetColorU32(ImGuiCol_TableHeaderBg);
+        ImGui::PushStyleColor(ImGuiCol_Header, headingBg);
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.6f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, headingBg);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 2.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
         drawAttributes(world, inspector, primary, targets);
         drawTags(world, inspector, primary, targets);
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(3);
     }
 
     // **A drag in this panel is ONE edit**, and this is what tells the undo
@@ -4122,7 +4160,7 @@ void drawConsole(script::ScriptRuntime* runtime, ScriptEditorCommands* scriptCom
         cleared = true;
     ImGui::SameLine();
     // Everything the filter shows, as text, for pasting into a bug report.
-    const bool copyAll = ImGui::Button("Copy all");
+    const bool copyAll = labeledIconButton(icons, icons::ActionCopy, "Copy all");
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("copy every line shown here");
     ImGui::SameLine();
@@ -5475,6 +5513,157 @@ void buildDefaultLayout(ImGuiID dockspace)
     return true;
 }
 
+// --- The script editor's preferences ----------------------------------------
+//
+// Every colour and every command key `script_editor_settings.h` lists, written
+// back the moment it changes -- the rule the appearance already follows.
+
+void saveScriptPreferences()
+{
+    (void)saveScriptEditorSettings(scriptEditorSettingsFile(), scriptEditorSettings());
+}
+
+void drawScriptColourPreferences()
+{
+    ScriptEditorSettings& settings = scriptEditorSettings();
+    const Theme& theme = themeById(g_appearance.themeId);
+    ImGui::TextWrapped("Colours nobody changed follow the theme. Changed ones are kept for every project.");
+    if (ImGui::Button("Reset all colours")) {
+        settings.colors = {};
+        saveScriptPreferences();
+    }
+    ImGui::Spacing();
+
+    const float height = std::max(ImGui::GetFrameHeightWithSpacing() * 8.0f,
+                                  ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 2.0f);
+    if (ImGui::BeginTable("##script-colours", 3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerH,
+                          ImVec2(0.0f, std::min(height, ImGui::GetFrameHeightWithSpacing() * 16.0f)))) {
+        ImGui::TableSetupColumn("what", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("colour", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight() * 6.0f);
+        ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("theme").x * 1.6f);
+        for (std::size_t index = 0; index < kScriptColorCount; ++index) {
+            const auto which = static_cast<ScriptColor>(index);
+            const ScriptColorInfo& info = scriptColorInfo()[index];
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(std::string(info.label).c_str());
+            ImGui::TableSetColumnIndex(1);
+            const core::Color3 current = settings.color(which, theme);
+            float value[3]{current.r, current.g, current.b};
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::ColorEdit3("##colour", value, ImGuiColorEditFlags_DisplayHex))
+                settings.colors[index] = core::Color3{value[0], value[1], value[2]};
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                saveScriptPreferences();
+            ImGui::TableSetColumnIndex(2);
+            ImGui::BeginDisabled(!settings.colors[index].has_value());
+            if (ImGui::SmallButton("theme")) {
+                settings.colors[index].reset();
+                saveScriptPreferences();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("back to the theme's colour");
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
+// The command waiting for a chord, when somebody clicked one to rebind it.
+std::optional<ScriptAction> g_capturingChord;
+
+void drawScriptShortcutPreferences()
+{
+    ScriptEditorSettings& settings = scriptEditorSettings();
+    const ThemePalette& p = palette();
+    ImGui::TextWrapped("Click a shortcut and press the new keys. Escape cancels; Backspace leaves the command "
+                       "without a key.");
+    if (ImGui::Button("Reset all shortcuts")) {
+        settings.keys = {};
+        g_capturingChord.reset();
+        saveScriptPreferences();
+    }
+    ImGui::Spacing();
+
+    // The chord being recorded: the first key that is not a modifier, with the
+    // modifiers held at that moment.
+    if (g_capturingChord.has_value()) {
+        const ImGuiIO& io = ImGui::GetIO();
+        for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
+            const auto k = static_cast<ImGuiKey>(key);
+            const bool modifier = (k >= ImGuiKey_LeftCtrl && k <= ImGuiKey_RightSuper) ||
+                                  (k >= ImGuiKey_ReservedForModCtrl && k <= ImGuiKey_ReservedForModSuper);
+            if (modifier || !ImGui::IsKeyPressed(k, false))
+                continue;
+            if (k >= ImGuiKey_MouseLeft && k <= ImGuiKey_MouseWheelY)
+                continue;
+            const std::size_t index = static_cast<std::size_t>(*g_capturingChord);
+            if (k == ImGuiKey_Escape && !io.KeyCtrl && !io.KeyShift && !io.KeyAlt) {
+                g_capturingChord.reset();
+            }
+            else if (k == ImGuiKey_Backspace && !io.KeyCtrl && !io.KeyShift && !io.KeyAlt) {
+                settings.keys[index] = KeyChord{};
+                g_capturingChord.reset();
+                saveScriptPreferences();
+            }
+            else {
+                settings.keys[index] =
+                    KeyChord{.key = ImGui::GetKeyName(k), .ctrl = io.KeyCtrl, .shift = io.KeyShift, .alt = io.KeyAlt};
+                g_capturingChord.reset();
+                saveScriptPreferences();
+            }
+            break;
+        }
+    }
+
+    if (ImGui::BeginTable("##script-keys", 3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerH,
+                          ImVec2(0.0f, ImGui::GetFrameHeightWithSpacing() * 16.0f))) {
+        ImGui::TableSetupColumn("command", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("keys", ImGuiTableColumnFlags_WidthFixed,
+                                ImGui::CalcTextSize("Ctrl+Shift+Alt+Backslash").x);
+        ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("default").x * 1.6f);
+        for (std::size_t index = 0; index < kScriptActionCount; ++index) {
+            const auto which = static_cast<ScriptAction>(index);
+            const ScriptActionInfo& info = scriptActionInfo()[index];
+            const KeyChord chord = settings.chord(which);
+            const std::optional<ScriptAction> clash = settings.conflictOf(which, chord);
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(std::string(info.label).c_str());
+            if (clash.has_value()) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(p.danger.r, p.danger.g, p.danger.b, 1.0f), "also %s",
+                                   std::string(scriptActionInfo()[static_cast<std::size_t>(*clash)].label).c_str());
+            }
+            ImGui::TableSetColumnIndex(1);
+            const bool capturing = g_capturingChord == which;
+            const std::string shown = capturing           ? std::string("press keys...")
+                                      : chord.key.empty() ? std::string("(none)")
+                                                          : formatChord(chord);
+            if (ImGui::Button(shown.c_str(), ImVec2(-1.0f, 0.0f)))
+                g_capturingChord = capturing ? std::optional<ScriptAction>{} : std::optional<ScriptAction>{which};
+            ImGui::TableSetColumnIndex(2);
+            ImGui::BeginDisabled(!settings.keys[index].has_value());
+            if (ImGui::SmallButton("default")) {
+                settings.keys[index].reset();
+                saveScriptPreferences();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", std::string(info.chord).c_str());
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
 // Every modal has the same escape route. Closing is cancellation, never acceptance.
 // Cancel handlers clear pending requests that would otherwise reopen on the next frame.
 template <typename Cancel>
@@ -6645,102 +6834,122 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         ImGui::EndPopup();
     }
 
-    if (beginEditorDialog("Preferences", 520.0f, []() {})) {
-        // Deliberately small and deliberately real. An empty preferences window
-        // is a promise; one holding the setting somebody actually reaches for is
-        // a place the next setting knows where to go.
-        // **First, because it is the one setting that changes what every other
-        // panel looks like** -- and because a person who came here looking for
-        // one thing came looking for this.
-        ImGui::SeparatorText("Appearance");
-        const Theme& current = themeById(g_appearance.themeId);
-        ImGui::TextUnformatted("Theme");
-        ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::BeginCombo("##theme", std::string(current.name).c_str())) {
-            for (const Theme& theme : themes()) {
-                const bool selected = theme.id == current.id;
-                if (ImGui::Selectable(std::string(theme.name).c_str(), selected)) {
-                    g_appearance.themeId = std::string(theme.id);
-                    // Applied on the spot rather than on Close: a theme you
-                    // have to dismiss a dialog to see is a theme you choose by
-                    // trial and error.
-                    applyAppearance();
+    if (beginEditorDialog("Preferences", 680.0f, []() {})) {
+        // **Three pages**: the shell, and the script editor's colours and keys
+        // (the owner: "every colour the other editor lets you change, and the
+        // shortcuts, are the user's preferences").
+        const bool tabs = ImGui::BeginTabBar("##preferences-pages");
+        const bool general = tabs && ImGui::BeginTabItem("General");
+        if (general) {
+            // Deliberately small and deliberately real. An empty preferences window
+            // is a promise; one holding the setting somebody actually reaches for is
+            // a place the next setting knows where to go.
+            // **First, because it is the one setting that changes what every other
+            // panel looks like** -- and because a person who came here looking for
+            // one thing came looking for this.
+            ImGui::SeparatorText("Appearance");
+            const Theme& current = themeById(g_appearance.themeId);
+            ImGui::TextUnformatted("Theme");
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::BeginCombo("##theme", std::string(current.name).c_str())) {
+                for (const Theme& theme : themes()) {
+                    const bool selected = theme.id == current.id;
+                    if (ImGui::Selectable(std::string(theme.name).c_str(), selected)) {
+                        g_appearance.themeId = std::string(theme.id);
+                        // Applied on the spot rather than on Close: a theme you
+                        // have to dismiss a dialog to see is a theme you choose by
+                        // trial and error.
+                        applyAppearance();
+                    }
+                    if (selected)
+                        ImGui::SetItemDefaultFocus();
                 }
-                if (selected)
-                    ImGui::SetItemDefaultFocus();
+                ImGui::EndCombo();
             }
-            ImGui::EndCombo();
-        }
 
-        // Shown resolved rather than as the stored zero, so the slider says what
-        // the shell is actually drawn at. Committed on release: dragging it
-        // rewrites the whole style every frame, and writing the file that often
-        // is a file write per pixel of travel.
-        //
-        // **Applied when the slider is let go, not while it is dragged**
-        // (reported as the scale "not respecting" the hand on it): every step
-        // of a live drag resized the dialog and the slider itself, so the value
-        // under the pointer moved while the pointer did not, and the drag ran
-        // away. The number follows the drag; the interface follows the release.
-        static f32 s_draggedScale = 0.0f;
-        f32 scale = s_draggedScale > 0.0f ? s_draggedScale : resolveUiScale(g_appearance.scale, g_displayScale);
-        ImGui::TextUnformatted("Interface scale");
-        ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::SliderFloat("##interface-scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx"))
-            s_draggedScale = scale;
-        if (ImGui::IsItemDeactivatedAfterEdit() && s_draggedScale > 0.0f) {
-            g_appearance.scale = s_draggedScale;
-            s_draggedScale = 0.0f;
-            applyAppearance();
-        }
-        // The sizes people actually pick, one click each.
-        for (const f32 preset : {1.0f, 1.25f, 1.5f, 1.75f, 2.0f}) {
-            char label[16];
-            (void)std::snprintf(label, sizeof(label), "%d%%", static_cast<int>(std::lround(preset * 100.0f)));
-            if (preset != 1.0f)
-                ImGui::SameLine();
-            if (ImGui::Button(label)) {
-                g_appearance.scale = preset;
+            // Shown resolved rather than as the stored zero, so the slider says what
+            // the shell is actually drawn at. Committed on release: dragging it
+            // rewrites the whole style every frame, and writing the file that often
+            // is a file write per pixel of travel.
+            //
+            // **Applied when the slider is let go, not while it is dragged**
+            // (reported as the scale "not respecting" the hand on it): every step
+            // of a live drag resized the dialog and the slider itself, so the value
+            // under the pointer moved while the pointer did not, and the drag ran
+            // away. The number follows the drag; the interface follows the release.
+            static f32 s_draggedScale = 0.0f;
+            f32 scale = s_draggedScale > 0.0f ? s_draggedScale : resolveUiScale(g_appearance.scale, g_displayScale);
+            ImGui::TextUnformatted("Interface scale");
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::SliderFloat("##interface-scale", &scale, kMinimumUiScale, kMaximumUiScale, "%.2fx"))
+                s_draggedScale = scale;
+            if (ImGui::IsItemDeactivatedAfterEdit() && s_draggedScale > 0.0f) {
+                g_appearance.scale = s_draggedScale;
                 s_draggedScale = 0.0f;
                 applyAppearance();
             }
+            // The sizes people actually pick, one click each.
+            for (const f32 preset : {1.0f, 1.25f, 1.5f, 1.75f, 2.0f}) {
+                char label[16];
+                (void)std::snprintf(label, sizeof(label), "%d%%", static_cast<int>(std::lround(preset * 100.0f)));
+                if (preset != 1.0f)
+                    ImGui::SameLine();
+                if (ImGui::Button(label)) {
+                    g_appearance.scale = preset;
+                    s_draggedScale = 0.0f;
+                    applyAppearance();
+                }
+            }
+            if (labeledIconButton(icons, icons::ActionRefresh, "Match display")) {
+                // Zero is the stored spelling of "ask the display", which is what
+                // this button puts back -- not the number the display happens to
+                // report today, because that one is wrong the moment somebody
+                // changes monitors.
+                g_appearance.scale = 0.0f;
+                applyAppearance();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("Display: %.2fx", static_cast<double>(g_displayScale));
+
+            ImGui::Spacing();
+            ImGui::SeparatorText("Viewport");
+            f32 speed = editor.cameraSpeed();
+            ImGui::TextUnformatted("Camera speed (m/s)");
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::DragFloat("##camera-speed", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
+                editor.setCameraSpeed(speed);
+            ImGui::TextDisabled("The scroll wheel changes this while flying, too.");
+
+            ImGui::Spacing();
+            ImGui::SeparatorText("Icons");
+            if (icons != nullptr) {
+                bool tinting = icons->tinting();
+                if (ImGui::Checkbox("Colour icons by role", &tinting))
+                    icons->setTinting(tinting);
+                ImGui::TextWrapped("Use category colors, or turn this off for monochrome icons.");
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextWrapped("Theme and interface scale apply to all your projects.");
         }
-        if (labeledIconButton(icons, icons::ActionRefresh, "Match display")) {
-            // Zero is the stored spelling of "ask the display", which is what
-            // this button puts back -- not the number the display happens to
-            // report today, because that one is wrong the moment somebody
-            // changes monitors.
-            g_appearance.scale = 0.0f;
-            applyAppearance();
+        if (general)
+            ImGui::EndTabItem();
+        if (tabs && ImGui::BeginTabItem("Script editor")) {
+            drawScriptColourPreferences();
+            ImGui::EndTabItem();
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("Display: %.2fx", static_cast<double>(g_displayScale));
-
-        ImGui::Spacing();
-        ImGui::SeparatorText("Viewport");
-        f32 speed = editor.cameraSpeed();
-        ImGui::TextUnformatted("Camera speed (m/s)");
-        ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::DragFloat("##camera-speed", &speed, 0.5f, 0.1f, 2000.0f, "%.1f"))
-            editor.setCameraSpeed(speed);
-        ImGui::TextDisabled("The scroll wheel changes this while flying, too.");
-
-        ImGui::Spacing();
-        ImGui::SeparatorText("Icons");
-        if (icons != nullptr) {
-            bool tinting = icons->tinting();
-            if (ImGui::Checkbox("Colour icons by role", &tinting))
-                icons->setTinting(tinting);
-            ImGui::TextWrapped("Use category colors, or turn this off for monochrome icons.");
+        if (tabs && ImGui::BeginTabItem("Shortcuts")) {
+            drawScriptShortcutPreferences();
+            ImGui::EndTabItem();
         }
+        if (tabs)
+            ImGui::EndTabBar();
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextWrapped("Theme and interface scale apply to all your projects.");
-
-        ImGui::Spacing();
-        if (dialogButton("Close", ImVec2(120.0f, 0.0f)))
-            ImGui::CloseCurrentPopup();
+        // No Close button: the window's own X closes it, and a second way to
+        // do one thing at the bottom of a settings page is clutter (the
+        // owner's call). Everything here applies the moment it changes, so
+        // there is nothing for a button to confirm.
         ImGui::EndPopup();
     }
 
@@ -7230,25 +7439,19 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
                            ImVec2(x + size, y + size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
                            ImGui::GetColorU32(tint));
 
-            // **An unsaved script ends in a floppy**, in the gap its label
-            // leaves after the title (see `drawScriptEditor`).
+            // **An unsaved script ends in a dot**, in the gap its label leaves
+            // after the title (see `drawScriptEditor`). A floppy was tried and
+            // taken back (the owner: "the dot, as it was, looks better"): a
+            // dot is the mark every editor uses for this, and it reads at a
+            // glance where a picture has to be looked at.
             if (unsavedScript(item.Window->Name)) {
-                // Quieter than the class icon -- grey, and a little smaller --
-                // because it is a state of the tab and not what the tab is
-                // (the owner: "a less loud colour, like grey").
-                const float mark = std::floor(size * 0.8f);
-                const IconSprite save = icons->find(icons::ActionSave, static_cast<core::u32>(mark + 0.5f));
-                if (save.valid) {
-                    const std::string_view name = item.Window->Name;
-                    const std::string_view shown = name.substr(0, name.find("###"));
-                    const float gap = ImGui::CalcTextSize(tabIconPad().c_str()).x;
-                    const float end = x + ImGui::CalcTextSize(shown.data(), shown.data() + shown.size()).x;
-                    const float left = std::floor(end - gap + (gap - mark) * 0.5f);
-                    const float top = std::floor(y + (size - mark) * 0.5f);
-                    draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(left, top),
-                                   ImVec2(left + mark, top + mark), ImVec2(save.u0, save.v0), ImVec2(save.u1, save.v1),
-                                   ImGui::GetColorU32(themeColor(palette().textMuted)));
-                }
+                const std::string_view name = item.Window->Name;
+                const std::string_view shown = name.substr(0, name.find("###"));
+                const float gap = ImGui::CalcTextSize(tabIconPad().c_str()).x;
+                const float end = x + ImGui::CalcTextSize(shown.data(), shown.data() + shown.size()).x;
+                const float radius = std::max(2.5f, std::floor(size * 0.2f));
+                draw->AddCircleFilled(ImVec2(std::floor(end - gap * 0.5f), std::floor(y + size * 0.5f)), radius,
+                                      ImGui::GetColorU32(themeColor(palette().warning)));
             }
         }
 
@@ -7911,10 +8114,15 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
     // for and what a hand-rolled tab bar would have refused.
     if (scripts != nullptr) {
         const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspace);
+        const ScriptActionButton scriptButton = [icons](std::string_view id, const char* label, bool compact) {
+            if (compact)
+                return iconButton(icons, id, ImGui::GetFontSize(), label, label, label);
+            return labeledIconButton(icons, id, label);
+        };
         drawScriptEditor(*scripts, central != nullptr ? static_cast<core::u32>(central->ID) : 0u, debug, world, root,
-                         scriptCommands);
+                         scriptCommands, scriptButton);
         if (panels.debug)
-            drawDebugPanel(*scripts, debug, scriptCommands, panels.debug);
+            drawDebugPanel(*scripts, debug, scriptCommands, panels.debug, scriptButton);
     }
 
     // **While a stamp is open the tree is the STAMP's**, root row and all: no
@@ -7988,7 +8196,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
     if (editor != nullptr)
-        drawMaterialPanel(*editor);
+        drawMaterialPanel(*editor, icons);
 
     // Draws with no VM for the same reason it does in the overlay: the LOG half
     // is what somebody wants when the VM failed to boot.
@@ -8388,10 +8596,32 @@ terrainPanelDone:;
     // tab docked over it, or the keyboard in another panel, left somebody
     // pressing play and watching code while the game ran behind it. Once, on
     // the frame play begins, and only when there is a viewport to show.
+    //
+    // **And Stop gives it back to the script that had it** (the owner: "when I
+    // stop, the focus should go back to the script I was working on"). Which
+    // one is remembered by its instance and world rather than by tab index: a
+    // tab can close while the game runs.
     static bool s_wasPlaying = false;
+    static std::optional<std::pair<core::InstanceId, ScriptOrigin>> s_scriptBeforePlay;
     const bool playing = editor != nullptr && editor->inPlayMode();
-    if (playing && !s_wasPlaying && panels.viewport)
-        ImGui::SetWindowFocus("Viewport###Viewport");
+    if (playing && !s_wasPlaying) {
+        s_scriptBeforePlay.reset();
+        const ImGuiWindow* focused = ImGui::GetCurrentContext()->NavWindow;
+        if (scripts != nullptr && focused != nullptr &&
+            std::string_view(focused->Name).find("###script-") != std::string_view::npos) {
+            if (const OpenScript* tab = scripts->active(); tab != nullptr)
+                s_scriptBeforePlay = std::pair{tab->instance, tab->origin};
+        }
+        if (panels.viewport)
+            ImGui::SetWindowFocus("Viewport###Viewport");
+    }
+    if (!playing && s_wasPlaying && s_scriptBeforePlay.has_value() && scripts != nullptr) {
+        if (const std::optional<std::size_t> index =
+                scripts->indexOf(s_scriptBeforePlay->first, s_scriptBeforePlay->second);
+            index.has_value())
+            scripts->requestFocus(*index);
+        s_scriptBeforePlay.reset();
+    }
     s_wasPlaying = playing;
 
     // **Last, because it paints over a strip that has already been laid out.**
@@ -9046,6 +9276,7 @@ DebugOverlay::DebugOverlay(platform::Window& window, rhi::IDevice& device, Shell
     // -- which between them are most of the reason this editor read as an
     // overlay with panels rather than as an application.
     g_appearance = loadAppearance(appearanceFile());
+    scriptEditorSettings() = loadScriptEditorSettings(scriptEditorSettingsFile());
     // Read once, here, because it is the display the window OPENED on. Following
     // a monitor change would mean re-rasterising the atlas mid-frame, and a
     // person who drags the editor to a second screen can reopen it -- which is

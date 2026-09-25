@@ -110,7 +110,25 @@ struct OpenScript
     std::string title;
 
     ScriptDocument document;
+    // The PRIMARY caret: the one the view follows, completion answers at, and
+    // every command that is about one place acts on.
     Caret caret;
+    // **The secondary carets** (multi-cursor editing, as the reference editor
+    // and every code editor have it): what is typed at the primary is typed at
+    // each of these too. In the order they were added, so Ctrl+U takes back
+    // the most recent; Escape drops them all.
+    std::vector<Caret> extraCarets;
+
+    // **When and where the text was last typed into**, so a diagnostic on the
+    // line somebody is still writing waits until they stop (the owner: "it
+    // shows the error before I have finished writing"). Interface time, which
+    // R10 does not govern.
+    double lastEditTime = -1e9;
+    core::u32 lastEditLine = ~0u;
+
+    // **The line an error in the console was clicked through to**, marked in
+    // the debugger's error-line colour until the text is edited.
+    std::optional<core::u32> errorLine;
     // Kept so a tab comes back where it was left. The panel writes it; nothing
     // else reads it.
     core::f32 scroll = 0.0f;
@@ -187,6 +205,11 @@ struct OpenScript
     // caret on its first line, instead of waiting for a click.
     bool claimCaret = false;
 
+    // **Its indentation was made tabs when it was opened** (`indentWithTabs`),
+    // so the text differs from the instance's `Source`: the pane hands it over
+    // on its first draw, and the tab is unsaved until somebody saves it.
+    bool convertedIndent = false;
+
     [[nodiscard]] bool dirty() const noexcept { return document.revision() != savedRevision; }
 };
 
@@ -248,6 +271,17 @@ public:
     //
     // Drained rather than read, so the focus is taken on the frame it was asked
     // for and never fights somebody who has since clicked another tab.
+    // Asks for `index` to be brought to the front and to take the caret, on
+    // the next draw -- what Stop does for the script that had the keyboard
+    // before Play.
+    void requestFocus(std::size_t index) noexcept
+    {
+        if (index < m_tabs.size()) {
+            m_active = index;
+            m_focusRequest = index;
+        }
+    }
+
     [[nodiscard]] std::optional<std::size_t> takeFocusRequest() noexcept
     {
         const std::optional<std::size_t> taken = m_focusRequest;

@@ -32,23 +32,6 @@ constexpr f32 kDegreesToRadians = kPi / 180.0f;
     return false;
 }
 
-// A light hangs off a `BasePart` or an `Attachment` and takes its position from
-// it (api-design.md §2.2). A light with no such ancestor lights nothing, which
-// is why this returns false rather than defaulting to the origin -- a lamp that
-// silently moved to (0,0,0) is worse than a lamp that is off.
-[[nodiscard]] bool lightAnchor(const scene::World& world, core::InstanceId id, CFrameD& out,
-                               core::InstanceId& anchorId) noexcept
-{
-    for (core::InstanceId cursor = world.parentOf(id); cursor.valid(); cursor = world.parentOf(cursor)) {
-        if (const scene::PartComponent* part = world.parts().find(cursor); part != nullptr) {
-            out = part->cframe;
-            anchorId = cursor;
-            return true;
-        }
-    }
-    return false;
-}
-
 // The generated mesh for a `Part`'s shape, or null before the loader has
 // uploaded them -- which is the first frame of any run, and is why the debug
 // wire box is still reachable.
@@ -412,6 +395,22 @@ struct FrameMaterial
 // Emissive is tinted too: a red lamp made from a white glowing file is what
 // somebody expects `Color` to do, and leaving emissive untinted would make the
 // lit part red and the glow white.
+// Whether two materials are one bind set but for the rgb of their base colour
+// -- the one value the instanced stream carries per instance (D184).
+[[nodiscard]] bool sameFamily(const RenderMaterial& a, const RenderMaterial& b) noexcept
+{
+    const GpuMaterialUniforms& x = a.uniforms;
+    const GpuMaterialUniforms& y = b.uniforms;
+    for (int i = 0; i < 4; ++i) {
+        if (x.emissive[i] != y.emissive[i] ||
+            x.metallicRoughnessNormalCutoff[i] != y.metallicRoughnessNormalCutoff[i] ||
+            x.textureFlags[i] != y.textureFlags[i])
+            return false;
+    }
+    return x.baseColor[3] == y.baseColor[3] && a.baseColor == b.baseColor && a.normal == b.normal &&
+           a.metallicRoughness == b.metallicRoughness && a.emissive == b.emissive;
+}
+
 void tintBy(RenderMaterial& material, const Color3& color)
 {
     material.uniforms.baseColor[0] *= color.r;
@@ -638,11 +637,13 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             return;
         if (!inWorld(world, id, root))
             return;
-        CFrameD anchor;
-        core::InstanceId anchorId;
-        if (!lightAnchor(world, id, anchor, anchorId))
+        // Where it shines from (`lightAnchorOf`): the part, interpolated, then
+        // the attachment's offset from it.
+        const std::optional<LightAnchor> anchored = lightAnchorOf(world, id);
+        if (!anchored.has_value())
             return;
-        anchor = at(anchorId, anchor);
+        const CFrameD anchor =
+            (anchored->part.valid() ? at(anchored->part, anchored->partFrame) : anchored->partFrame) * anchored->offset;
         out.lights.push_back(RenderLight{
             .kind = LightKind::Point,
             .position = core::toVec3(anchor.position - origin),
@@ -662,11 +663,13 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             return;
         if (!inWorld(world, id, root))
             return;
-        CFrameD anchor;
-        core::InstanceId anchorId;
-        if (!lightAnchor(world, id, anchor, anchorId))
+        // Where it shines from (`lightAnchorOf`): the part, interpolated, then
+        // the attachment's offset from it.
+        const std::optional<LightAnchor> anchored = lightAnchorOf(world, id);
+        if (!anchored.has_value())
             return;
-        anchor = at(anchorId, anchor);
+        const CFrameD anchor =
+            (anchored->part.valid() ? at(anchored->part, anchored->partFrame) : anchored->partFrame) * anchored->offset;
         // A spot points along its anchor's LookVector, which is -Z (ADR
         // 0013's convention, stated in core/math.h).
         const Vec3 forward = core::transformDirection(anchor, Vec3{0.0f, 0.0f, -1.0f});
@@ -704,6 +707,30 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     std::vector<ResolvedMaterial> resolved;
     // The authored materials this frame draws, each resolved once.
     std::vector<FrameMaterial> frameMaterials;
+
+    // **Every material a part adds goes in through here**, which files it in
+    // its family (D184): the first earlier material that is the same bind set
+    // but for its base colour, or itself. A linear scan over the families,
+    // which are few -- one per authored material and one for the built-in look
+    // -- however many colours there are.
+    std::vector<u32> familyHeads;
+    const auto addMaterial = [&out, &familyHeads](const RenderMaterial& material) {
+        for (auto index = static_cast<u32>(out.materialFamilies.size()); index < out.materials.size(); ++index)
+            out.materialFamilies.push_back(index);
+        const auto slot = static_cast<u32>(out.materials.size());
+        u32 family = slot;
+        for (const u32 head : familyHeads) {
+            if (sameFamily(out.materials[head], material)) {
+                family = head;
+                break;
+            }
+        }
+        if (family == slot)
+            familyHeads.push_back(slot);
+        out.materials.push_back(material);
+        out.materialFamilies.push_back(family);
+        return slot;
+    };
 
     world.meshParts().forEach([&](core::InstanceId id, const scene::MeshPartComponent& meshPart) {
         if (!inWorld(world, id, root))
@@ -813,7 +840,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
                     tintBy(block, look.tint);
                 else
                     block = look.block;
-                out.materials.push_back(block);
+                (void)addMaterial(block);
                 resolved.push_back(ResolvedMaterial{meshPart.meshContent, localMaterial, materialSlot, look});
             }
 
@@ -841,8 +868,11 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
             out.draws.push_back(DrawItem{
                 // Zero for a transparent draw: see `drawSortKey`.
+                // The opaque pass sorts by the material's FAMILY, so parts
+                // that differ only by colour stay adjacent and batch (D184).
                 .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass,
-                                       boneCount > 0 ? kSkinnedPipeline : kStaticPipeline, materialSlot,
+                                       boneCount > 0 ? kSkinnedPipeline : kStaticPipeline,
+                                       transparent ? materialSlot : out.familyOf(materialSlot),
                                        transparent ? 0u : drawGeometryKey(entry->mesh.index, section), sortDepth),
                 .transform = transform,
                 .mesh = entry->mesh,
@@ -1274,8 +1304,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             else {
                 material = look.block;
             }
-            materialSlot = static_cast<u32>(out.materials.size());
-            out.materials.push_back(material);
+            materialSlot = addMaterial(material);
             partMaterials.push_back(ResolvedPartMaterial{look, materialSlot});
         }
 
@@ -1283,7 +1312,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         const f32 depth = core::length(core::center(worldBounds));
         const f32 sortDepth = transparent ? kMaxSortDepth - depth : depth;
         out.draws.push_back(DrawItem{
-            .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass, kStaticPipeline, materialSlot,
+            .sortKey = drawSortKey(transparent ? kTransparentPass : kOpaquePass, kStaticPipeline,
+                                   transparent ? materialSlot : out.familyOf(materialSlot),
                                    transparent ? 0u : drawGeometryKey(entry->mesh.index, 0), sortDepth),
             .transform = transform,
             .mesh = entry->mesh,

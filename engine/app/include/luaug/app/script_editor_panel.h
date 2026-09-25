@@ -14,8 +14,10 @@
 #include "luaug/core/types.h"
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace luaug::scene {
@@ -143,8 +145,11 @@ struct ScriptEditorCommands
 // `root` is the DataModel -- what `game` names -- and it is here because
 // autocomplete walks a dotted path through the real tree: `Workspace.MainCamera`
 // is a fact about this project, not about the `Workspace` class.
+// The shell supplies themed buttons; an empty callback keeps text-only controls.
+using ScriptActionButton = std::function<bool(std::string_view, const char*, bool)>;
+
 void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, const scene::World* world,
-                      core::InstanceId root, ScriptEditorCommands& out);
+                      core::InstanceId root, ScriptEditorCommands& out, const ScriptActionButton& actionButton = {});
 
 // **Gives the caret up when the mouse goes somewhere else, and it has to run
 // before any panel is submitted.**
@@ -166,6 +171,7 @@ void releaseScriptPaneFocus();
 // The stack, the variables and the transport. A panel of its own rather than a
 // strip inside the code pane, because it is worth looking at while looking at
 // the code -- which is what a dock node is for.
-void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands& out, bool& open);
+void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands& out, bool& open,
+                    const ScriptActionButton& actionButton = {});
 
 } // namespace luaug::app

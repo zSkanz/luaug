@@ -53,6 +53,7 @@
 #include "luaug/platform/window.h"
 #include "luaug/render/debug_draw.h"
 #include "luaug/render/debug_renderer.h"
+#include "luaug/render/lighting.h"
 #include "luaug/render/mesh_loader.h"
 #include "luaug/render/particles.h"
 #include "luaug/render/render_world.h"
@@ -376,6 +377,97 @@ void submitCameraVolumes(const scene::World& world, std::span<const core::Instan
     }
 }
 
+// **Where a selected light reaches, as a wireframe** (the owner: "a spot
+// should draw a cone like the camera's, showing where it hits, and a point
+// light a circle"). A point light is three rings of its `Range`; a spot is
+// its cone out to `Range`, with the rim where the cone meets that distance.
+// In the light's own colour, so two lamps side by side are told apart.
+//
+// Shown for a light that is selected and for the lights on a selected part --
+// directly or through one of its attachments -- because the part is what
+// somebody clicks in the viewport; the light itself has no shape to click.
+// From `lightAnchorOf`, the renderer's own answer, so the cone is where the
+// light is.
+void submitLightVolumes(const scene::World& world, std::span<const core::InstanceId> selection,
+                        core::DVec3 cameraOrigin, render::DebugDraw& draw)
+{
+    constexpr int kSegments = 32;
+    constexpr f32 kTau = 6.28318531f;
+    const auto drawLight = [&](core::InstanceId id) {
+        const scene::PointLightComponent* point = world.pointLights().find(id);
+        const scene::SpotLightComponent* spot = point == nullptr ? world.spotLights().find(id) : nullptr;
+        if (point == nullptr && spot == nullptr)
+            return;
+        const std::optional<render::LightAnchor> anchored = render::lightAnchorOf(world, id);
+        if (!anchored.has_value())
+            return;
+        const core::CFrameD anchor = anchored->partFrame * anchored->offset;
+        const core::Mat4 transform = core::toRenderMatrix(anchor, cameraOrigin);
+        const auto at = [&transform](f32 x, f32 y, f32 z) {
+            return core::transformPoint(transform, core::Vec3{x, y, z});
+        };
+        const core::Color3 tint = point != nullptr ? point->color : spot->color;
+        // Lifted towards white so a dark red lamp still shows on a dark world.
+        const render::DebugColor colour =
+            render::DebugColor::fromLinear(0.35f + 0.65f * tint.r, 0.35f + 0.65f * tint.g, 0.35f + 0.65f * tint.b);
+
+        // A ring of `radius` in the plane `axis` names, `depth` along -Z.
+        const auto ring = [&](f32 radius, int axis, f32 depth) {
+            for (int step = 0; step < kSegments; ++step) {
+                const f32 a0 = kTau * static_cast<f32>(step) / kSegments;
+                const f32 a1 = kTau * static_cast<f32>(step + 1) / kSegments;
+                const auto onRing = [&](f32 angle) {
+                    const f32 c = std::cos(angle) * radius;
+                    const f32 s2 = std::sin(angle) * radius;
+                    if (axis == 0)
+                        return at(0.0f, c, s2);
+                    if (axis == 1)
+                        return at(c, 0.0f, s2);
+                    return at(c, s2, -depth);
+                };
+                draw.line(onRing(a0), onRing(a1), colour);
+            }
+        };
+
+        if (point != nullptr) {
+            const f32 range = std::max(point->range, 0.0f);
+            ring(range, 0, 0.0f);
+            ring(range, 1, 0.0f);
+            ring(range, 2, 0.0f);
+            return;
+        }
+
+        // `Angle` is the full cone; the rim sits where a ray of length `Range`
+        // along the cone's edge ends, which keeps a wide spot's cone finite.
+        const f32 range = std::max(spot->range, 0.0f);
+        const f32 half = std::clamp(spot->angle, 0.0f, 179.0f) * 0.5f * kTau / 360.0f;
+        const f32 depth = range * std::cos(half);
+        const f32 radius = range * std::sin(half);
+        ring(radius, 2, depth);
+        const core::Vec3 apex = at(0.0f, 0.0f, 0.0f);
+        for (int edge = 0; edge < 8; ++edge) {
+            const f32 angle = kTau * static_cast<f32>(edge) / 8.0f;
+            draw.line(apex, at(std::cos(angle) * radius, std::sin(angle) * radius, -depth), colour);
+        }
+        // The axis, so which way it points reads from any side.
+        draw.line(apex, at(0.0f, 0.0f, -depth), colour);
+    };
+
+    for (const core::InstanceId id : selection) {
+        if (!id.valid() || !world.alive(id))
+            continue;
+        drawLight(id);
+        // The lights a selected part carries, and those on its attachments.
+        for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+            drawLight(child);
+            if (world.attachments().find(child) != nullptr) {
+                for (core::InstanceId inner = world.firstChild(child); inner.valid(); inner = world.nextSibling(inner))
+                    drawLight(inner);
+            }
+        }
+    }
+}
+
 void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 {
     for (const render::RenderPart& part : snapshot.parts) {
@@ -451,6 +543,11 @@ void submitWorld(const render::RenderWorld& snapshot, render::DebugDraw& draw)
 
 } // namespace
 
+bool gpuValidationWanted(std::string_view profile, bool optIn) noexcept
+{
+    return optIn || profile == "debug" || profile == "dev";
+}
+
 std::optional<core::EngineError> run(const EngineOptions& options)
 {
     // **The job pool, started here, and it had no caller until M7.5.** M7 built
@@ -486,7 +583,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     platform::WindowPtr window;
     core::EngineError error;
 
-    const rhi::DeviceResult device = createDevice({.backend = options.backend, .debug = true}, &error);
+    const bool gpuDebug = gpuValidationWanted(LUAUG_PROFILE_NAME, options.gpuDebug);
+    if (gpuDebug)
+        core::log(LogLevel::Info, LUAUG_TR("engine.info.gpu_debug"));
+    const rhi::DeviceResult device = createDevice({.backend = options.backend, .debug = gpuDebug}, &error);
     if (device == nullptr)
         return error;
 
@@ -1624,6 +1724,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             tab->caret.head = Position{line, 0};
                             tab->caret.collapse();
                             tab->caret.desiredColumn = 0;
+                            tab->extraCarets.clear();
+                            tab->errorLine = line;
                             // Stale on purpose, which is how the pane knows the
                             // caret moved and scrolls to it.
                             tab->shownCaret = Position{~0u, 0};
@@ -3650,9 +3752,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 const bool outlinedByRenderer = renderer != nullptr && renderer->valid() && snapshot.camera.valid;
                 if (!outlinedByRenderer)
                     submitSelection(host->world(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
-                if (editing(editor.runState()))
+                if (editing(editor.runState())) {
                     submitCameraVolumes(authored(), inspector.selectionSet(), snapshot.camera.origin, aspect,
                                         debugDraw);
+                    submitLightVolumes(authored(), inspector.selectionSet(), snapshot.camera.origin, debugDraw);
+                }
                 // The manipulator over the outline, because the outline says
                 // WHAT is selected and the manipulator is the thing being
                 // aimed at.

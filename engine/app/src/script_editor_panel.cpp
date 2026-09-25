@@ -27,10 +27,13 @@
 
 #include "luaug/app/language_service.h"
 #include "luaug/app/script_editor.h"
+#include "luaug/app/script_editor_settings.h"
 #include "luaug/app/ui_theme.h"
 #include "luaug/platform/file.h"
 #include "luaug/platform/platform.h"
 #include "luaug/scene/world.h"
+
+#include "icon_ids.gen.h"
 
 namespace luaug::app {
 
@@ -107,31 +110,45 @@ using core::u32;
     return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, alpha));
 }
 
-[[nodiscard]] ImU32 syntaxColor(const SyntaxPalette& s, const ThemePalette& p, TokenKind kind) noexcept
+// **Every colour the pane draws with, through the person's settings**
+// (`script_editor_settings.h`): what they chose, or the theme's.
+[[nodiscard]] core::Color3 scol(ScriptColor which) noexcept
 {
-    switch (kind) {
-    case TokenKind::Keyword:
-        return col(s.keyword);
-    case TokenKind::Identifier:
-        return col(s.identifier);
-    case TokenKind::Number:
-        return col(s.number);
-    case TokenKind::String:
-        return col(s.string);
-    case TokenKind::Comment:
-        return col(s.comment);
-    case TokenKind::Operator:
-        return col(s.operatorToken);
-    case TokenKind::Attribute:
-        return col(s.attribute);
-    case TokenKind::Error:
-        return col(s.errorToken);
-    case TokenKind::Type:
-        return col(s.typeName);
-    case TokenKind::Text:
-        break;
+    return scriptEditorSettings().color(which, currentTheme());
+}
+
+[[nodiscard]] ImU32 ecol(ScriptColor which, float alpha = 1.0f) noexcept
+{
+    return col(scol(which), alpha);
+}
+
+// --- Keys ----------------------------------------------------------------------
+
+// The ImGui key a settings file names, by ImGui's own name for it.
+[[nodiscard]] ImGuiKey keyNamed(std::string_view name)
+{
+    for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
+        if (name == ImGui::GetKeyName(static_cast<ImGuiKey>(key)))
+            return static_cast<ImGuiKey>(key);
     }
-    return col(p.text);
+    return ImGuiKey_None;
+}
+
+// **Whether this command's chord was pressed this frame**, through the
+// person's settings (`script_editor_settings.h`). The modifiers must match
+// EXACTLY, so Ctrl+D and Ctrl+Shift+D are two chords -- and AltGr, which is
+// Ctrl+Alt on Windows, cannot fire a Ctrl chord while somebody types a
+// bracket on a Brazilian keyboard.
+[[nodiscard]] bool pressed(ScriptAction action, bool repeat = false)
+{
+    const KeyChord chord = scriptEditorSettings().chord(action);
+    if (chord.key.empty())
+        return false;
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.KeyCtrl != chord.ctrl || io.KeyShift != chord.shift || io.KeyAlt != chord.alt)
+        return false;
+    const ImGuiKey key = keyNamed(chord.key);
+    return key != ImGuiKey_None && ImGui::IsKeyPressed(key, repeat);
 }
 
 // --- Metrics -----------------------------------------------------------------
@@ -221,6 +238,10 @@ ImGuiID g_dragging = 0;
 // gesture worth having.
 bool g_dragByWord = false;
 Range g_dragWord;
+// **A Shift+Alt drag selects a column**: where it began, as a line and a
+// CELL, since a column is what the eye sees and a byte offset is not.
+bool g_dragColumn = false;
+Position g_columnFrom;
 
 // **Who holds the caret, and what counts as inside it.** A pane keeps ImGui's
 // active id for as long as somebody is typing in it, and ImGui refuses to hover
@@ -302,6 +323,11 @@ void placeCaret(OpenScript& tab, Position to, bool select)
     // Moving by hand ends a typing run, so the next Ctrl+Z stops where somebody
     // moved rather than swallowing what came before.
     tab.document.breakUndoRun();
+    // **And ends the word being completed.** A list left open after a click
+    // somewhere else kept its range from where it was opened, and the next
+    // Enter accepted into THAT range -- far down the file -- and took the
+    // view with it (reported: "I press Enter and it jumps back down").
+    tab.completing = false;
 }
 
 // Vertical movement keeps the column somebody was aiming for, so passing through
@@ -446,12 +472,11 @@ bool typePaired(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
     return true;
 }
 
-void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
+// The characters that arrived this frame, taken once: with several carets the
+// same text is typed at each, and the queue can only be drained one time.
+[[nodiscard]] std::string takeTyped()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (io.InputQueueCharacters.Size == 0)
-        return;
-
     std::string typed;
     for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
         const unsigned int c = io.InputQueueCharacters[i];
@@ -461,6 +486,11 @@ void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
             encodeUtf8(c, typed);
     }
     io.InputQueueCharacters.resize(0);
+    return typed;
+}
+
+void typeText(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, std::string_view typed)
+{
     if (typed.size() == 1 && typePaired(tab, out, index, typed[0]))
         return;
     if (!typed.empty())
@@ -681,6 +711,12 @@ void acceptCompletion(OpenScript& tab, ScriptEditorCommands& out, std::size_t in
 {
     if (!tab.completing || tab.completionIndex >= tab.completions.size())
         return;
+    // Only where the list was opened: a caret that has left the word it was
+    // completing accepts nothing, and the list is closed.
+    if (!(tab.caret.head == tab.completionReplace.end) || tab.caret.hasSelection()) {
+        tab.completing = false;
+        return;
+    }
     const std::string& label = tab.completions[tab.completionIndex].label;
     tab.caret.head = tab.document.replace(tab.completionReplace, label);
     tab.caret.anchor = tab.caret.head;
@@ -1024,22 +1060,42 @@ void afterLineEdit(OpenScript& tab, u32 first, u32 last, u32 lineBefore)
     return std::nullopt;
 }
 
-void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m, float paneHeight)
+// **Which keys a pass answers.** With one caret, all of them. With several,
+// the keys that move or edit AT a caret run once per caret (`PerCaret`), and
+// the ones about the document as a whole -- save, find, undo, the line
+// commands -- run once, at the primary (`Global`), and put the carets back to
+// one where what they did would leave the others pointing at the wrong text.
+enum class KeyScope : core::u8
+{
+    All,
+    PerCaret,
+    Global,
+};
+
+void handleCaretKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m,
+                     float paneHeight);
+template <typename Collapse>
+void handleDocumentKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, bool multi,
+                        const Collapse& single);
+
+void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m, float paneHeight,
+                KeyScope scope)
 {
     ImGuiIO& io = ImGui::GetIO();
-    const bool shift = io.KeyShift;
-    // **AltGr is Ctrl+Alt on Windows, and it is how a Brazilian, German or
-    // Polish keyboard types half its punctuation.** Reading it as a Ctrl chord
-    // makes AltGr+something silently mean Select All, Paste, Undo or Save --
-    // characters that refuse to type and edits nobody asked for. A real Ctrl
-    // shortcut never has Alt held, so this one condition is the whole fix.
-    const bool ctrl = io.KeyCtrl && !io.KeyAlt;
+    const bool perCaret = scope != KeyScope::Global;
+    const bool global = scope != KeyScope::PerCaret;
+    const bool multi = scope != KeyScope::All;
+    // A document-wide command, run with several carets: the others go.
+    const auto single = [&tab, multi]() {
+        if (multi)
+            tab.extraCarets.clear();
+    };
     ScriptDocument& doc = tab.document;
 
     // **While the list is up it owns the keys that move through it.** Anything
     // else would make Enter insert a newline under a highlighted row, which is
     // the one thing nobody means by it.
-    if (tab.completing) {
+    if (global && tab.completing) {
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             tab.completing = false;
             return;
@@ -1061,10 +1117,10 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
 
     // **Alt+Shift+Up/Down copies the lines** above or below themselves, with
     // the caret on the copy the arrow points at.
-    if (io.KeyAlt && !io.KeyCtrl && shift &&
-        (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true) || ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))) {
+    if (global && (pressed(ScriptAction::CopyLineUp, true) || pressed(ScriptAction::CopyLineDown, true))) {
+        single();
         const auto [first, last] = selectedLines(tab);
-        const bool down = ImGui::IsKeyPressed(ImGuiKey_DownArrow, true);
+        const bool down = pressed(ScriptAction::CopyLineDown, true);
         if (doc.duplicateLines(first, last)) {
             if (down) {
                 const u32 span = last - first + 1;
@@ -1078,7 +1134,8 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
     }
 
     // **Shift+Alt+A: a block comment** around the selection, or out of one.
-    if (io.KeyAlt && !io.KeyCtrl && shift && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+    if (global && pressed(ScriptAction::BlockComment)) {
+        single();
         if (!tab.caret.hasSelection()) {
             const u32 line = tab.caret.head.line;
             tab.caret.anchor = Position{line, doc.indentOf(line)};
@@ -1099,16 +1156,35 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
     // **Before the plain arrows**, which would otherwise move the caret as well
     // as the line. Alt and not Ctrl+Alt: AltGr is Ctrl+Alt, and a Brazilian
     // keyboard would move a line every time somebody typed a bracket.
-    if (io.KeyAlt && !io.KeyCtrl && !shift) {
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+    if (global) {
+        if (pressed(ScriptAction::MoveLineUp, true)) {
+            single();
             moveLines(tab, out, index, -1);
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+        if (pressed(ScriptAction::MoveLineDown, true)) {
+            single();
             moveLines(tab, out, index, 1);
             return;
         }
     }
+
+    // Everything from here to the Tab key happens AT a caret. Alt with an
+    // arrow was a line command above, and must not also move the caret.
+    if (perCaret && !(io.KeyAlt && !io.KeyCtrl))
+        handleCaretKeys(tab, out, index, m, paneHeight);
+    if (!global)
+        return;
+    handleDocumentKeys(tab, out, index, multi, single);
+}
+
+void handleCaretKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, const PaneMetrics& m,
+                     float paneHeight)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    const bool shift = io.KeyShift;
+    const bool ctrl = io.KeyCtrl && !io.KeyAlt;
+    ScriptDocument& doc = tab.document;
 
     // Ctrl moves a word at a time, and Shift with it selects the words.
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
@@ -1175,14 +1251,17 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
 
-    const bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, true) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, true);
-    if (enter && ctrl) {
+    const bool below = pressed(ScriptAction::InsertLineBelow, true);
+    const bool above = pressed(ScriptAction::InsertLineAbove, true);
+    const bool enter = !io.KeyCtrl && !io.KeyAlt &&
+                       (ImGui::IsKeyPressed(ImGuiKey_Enter, true) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, true));
+    if (below || above) {
         // **Ctrl+Enter opens a line below, Ctrl+Shift+Enter one above**,
         // wherever the caret is on this one, at this line's indent.
         const u32 line = tab.caret.head.line;
         const std::string indent(doc.line(line).substr(0, doc.indentOf(line)));
         doc.breakUndoRun();
-        if (shift) {
+        if (above) {
             (void)doc.insert(Position{line, 0}, indent + "\n");
             tab.caret.head = Position{line, static_cast<u32>(indent.size())};
         }
@@ -1218,8 +1297,8 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
             // One replace, so one undo takes the whole of it back.
             doc.breakUndoRun();
             (void)doc.replace(Range{at, Position{at.line, doc.lineLength(at.line)}},
-                              "\n" + lineIndent + "    " + "\n" + lineIndent + block.closer);
-            tab.caret.head = Position{at.line + 1, static_cast<u32>(lineIndent.size() + 4)};
+                              "\n" + lineIndent + "\t" + "\n" + lineIndent + block.closer);
+            tab.caret.head = Position{at.line + 1, static_cast<u32>(lineIndent.size() + 1)};
             tab.caret.anchor = tab.caret.head;
             tab.caret.desiredColumn = tab.caret.head.column;
             tab.completing = false;
@@ -1229,7 +1308,7 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         std::string text = "\n";
         text.append(lineIndent);
         if (block.opens)
-            text.append("    ");
+            text.append("\t");
         insertText(tab, out, index, text);
     }
     // **Tab over lines indents them, Shift+Tab outdents** -- over a selection
@@ -1245,27 +1324,34 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
             }
         }
         else {
-            insertText(tab, out, index, "    ");
+            insertText(tab, out, index, "\t");
         }
     }
+}
 
-    if (!ctrl)
-        return;
+template <typename Collapse>
+void handleDocumentKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, bool multi,
+                        const Collapse& single)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    const bool shift = io.KeyShift;
+    ScriptDocument& doc = tab.document;
 
-    if (ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+    if (pressed(ScriptAction::SelectAll)) {
+        single();
         const u32 last = doc.lineCount() - 1;
         tab.caret.anchor = Position{0, 0};
         tab.caret.head = Position{last, doc.lineLength(last)};
     }
     // **Copy and cut with nothing selected take the whole line**, newline and
     // all, which is what every code editor does with them.
-    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+    if (!multi && pressed(ScriptAction::Copy)) {
         if (tab.caret.hasSelection())
             ImGui::SetClipboardText(doc.textIn(tab.caret.selection()).c_str());
         else
             ImGui::SetClipboardText((std::string(doc.line(tab.caret.head.line)) + "\n").c_str());
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+    if (!multi && pressed(ScriptAction::Cut)) {
         if (tab.caret.hasSelection()) {
             ImGui::SetClipboardText(doc.textIn(tab.caret.selection()).c_str());
             eraseSelection(tab, out, index);
@@ -1282,7 +1368,8 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
     // **Ctrl+Shift+K deletes the lines** the caret or selection is on.
-    if (shift && ImGui::IsKeyPressed(ImGuiKey_K, false)) {
+    if (pressed(ScriptAction::DeleteLine)) {
+        single();
         const auto [first, last] = selectedLines(tab);
         if (doc.deleteLines(first, last)) {
             tab.caret.head = doc.clamp(Position{first, 0});
@@ -1292,8 +1379,9 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
     // **Ctrl+] and Ctrl+[ indent and outdent** the lines, selected or not.
-    if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, false) || ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false)) {
-        const bool outdent = ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false);
+    if (pressed(ScriptAction::Indent) || pressed(ScriptAction::Outdent)) {
+        const bool outdent = pressed(ScriptAction::Outdent);
+        single();
         const auto [first, last] = selectedLines(tab);
         const u32 before = doc.lineLength(tab.caret.head.line);
         if (doc.indentLines(first, last, outdent)) {
@@ -1302,7 +1390,8 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
     // **Ctrl+L selects the line**, and again the next one.
-    if (ImGui::IsKeyPressed(ImGuiKey_L, false)) {
+    if (pressed(ScriptAction::SelectLine)) {
+        single();
         const Range span = tab.caret.selection();
         const bool wholeLines = tab.caret.hasSelection() && span.begin.column == 0 && span.end.column == 0;
         const u32 from = wholeLines ? span.begin.line : tab.caret.head.line;
@@ -1312,55 +1401,39 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
                                                    : Position{doc.lineCount() - 1, doc.lineLength(doc.lineCount() - 1)};
         tab.caret.desiredColumn = 0;
     }
-    // **Ctrl+D selects the word under the caret, then the next place it
-    // appears.** One caret, so the selection moves rather than growing.
-    if (ImGui::IsKeyPressed(ImGuiKey_D, false)) {
-        if (!tab.caret.hasSelection()) {
-            const Range word = doc.wordAt(tab.caret.head);
-            if (!word.empty()) {
-                tab.caret.anchor = word.begin;
-                tab.caret.head = word.end;
-            }
-        }
-        else {
-            const std::string needle = doc.textIn(tab.caret.selection());
-            const Range hit = doc.findNext(needle, tab.caret.selection().end, {.matchCase = true, .wholeWord = false});
-            if (!hit.empty()) {
-                tab.caret.anchor = hit.begin;
-                tab.caret.head = hit.end;
-            }
-        }
-        tab.caret.desiredColumn = tab.caret.head.column;
-    }
     // **Ctrl+Shift+\ jumps to the bracket that pairs with this one.**
-    if (shift && ImGui::IsKeyPressed(ImGuiKey_Backslash, false)) {
+    if (pressed(ScriptAction::JumpToBracket)) {
+        single();
         if (const std::optional<Position> pair = matchingBracket(doc, tab.caret.head); pair.has_value())
             placeCaret(tab, *pair, false);
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+    if (!multi && pressed(ScriptAction::Paste)) {
         if (const char* text = ImGui::GetClipboardText(); text != nullptr && *text != '\0')
             insertText(tab, out, index, text);
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        const bool ok = shift ? doc.redo(tab.caret.head) : doc.undo(tab.caret.head);
-        if (ok) {
+    // Ctrl+Shift+Z redoes as well as the redo chord: both are what hands
+    // already know, and neither can mean anything else.
+    const bool undo = pressed(ScriptAction::Undo);
+    const bool redo =
+        pressed(ScriptAction::Redo) || (io.KeyCtrl && shift && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Z, false));
+    if (undo || redo) {
+        single();
+        if (redo ? doc.redo(tab.caret.head) : doc.undo(tab.caret.head)) {
             tab.caret.anchor = tab.caret.head;
             edited(out, index);
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Y, false) && doc.redo(tab.caret.head)) {
-        tab.caret.anchor = tab.caret.head;
-        edited(out, index);
-    }
     // **Ctrl+S still saves; it just saves the script.** The shell's own Ctrl+S
     // is suppressed while the pane is active, which is what makes one key mean
     // one thing wherever somebody presses it.
-    if (ImGui::IsKeyPressed(ImGuiKey_S, false))
+    if (pressed(ScriptAction::Save))
         out.save = index;
 
     // **Ctrl+/ comments the line, or every line the selection touches**, and
     // uncomments them when they all are.
-    if (ImGui::IsKeyPressed(ImGuiKey_Slash, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadDivide, false)) {
+    if (pressed(ScriptAction::ToggleComment) ||
+        (io.KeyCtrl && !io.KeyAlt && !shift && ImGui::IsKeyPressed(ImGuiKey_KeypadDivide, false))) {
+        single();
         const Range span = tab.caret.selection();
         const u32 first = span.begin.line;
         const u32 last = span.end.line > first && span.end.column == 0 ? span.end.line - 1 : span.end.line;
@@ -1381,7 +1454,7 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         }
     }
 
-    if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+    if (pressed(ScriptAction::Find)) {
         tab.findOpen = true;
         tab.focusFind = true;
         // Seeded from the selection, which is what somebody who highlighted a
@@ -1389,13 +1462,257 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         if (tab.caret.hasSelection() && tab.caret.selection().begin.line == tab.caret.selection().end.line)
             tab.findText = doc.textIn(tab.caret.selection());
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_H, false)) {
+    if (pressed(ScriptAction::Replace)) {
         tab.findOpen = true;
         tab.replaceOpen = true;
         tab.focusFind = true;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_G, false))
+    if (pressed(ScriptAction::GoToLine))
         tab.findOpen = true;
+}
+
+// --- Multi-cursor editing ----------------------------------------------------
+//
+// The reference editor's gestures (its documentation's multi-cursor table),
+// which are also every code editor's: Alt+click adds or removes a caret,
+// Alt+drag adds one with a selection, Shift+Alt+drag selects a column,
+// Ctrl+Alt+Up/Down add one above or below, Ctrl+D adds the next match of the
+// selection, Shift+Alt+L every match, Shift+Alt+I splits a selection into its
+// lines, Ctrl+U takes back the last one added, and Escape leaves only the
+// primary.
+//
+// **One edit path, run once per caret.** Rather than teaching every key about
+// several carets, a pass puts each caret in turn into `tab.caret`, runs the
+// same single-caret code, and moves the carets it already visited by what the
+// edit changed (`ScriptDocument::takeEditLog`). The last caret in the
+// document goes first, so an edit never moves a caret still waiting its turn;
+// and the whole pass is one undo group, so Ctrl+Z takes back one keystroke at
+// every caret at once.
+
+// Every caret with the primary first, which is how the pass hands them back.
+[[nodiscard]] std::vector<Caret> allCarets(const OpenScript& tab)
+{
+    std::vector<Caret> all;
+    all.reserve(tab.extraCarets.size() + 1);
+    all.push_back(tab.caret);
+    all.insert(all.end(), tab.extraCarets.begin(), tab.extraCarets.end());
+    return all;
+}
+
+// **Carets that met become one.** Two carets typing at the same place would
+// type everything twice; two selections that overlap would each replace the
+// other's text. The primary wins a merge, so the view does not jump.
+void mergeCarets(OpenScript& tab)
+{
+    if (tab.extraCarets.empty())
+        return;
+    std::vector<Caret> kept;
+    for (const Caret& extra : tab.extraCarets) {
+        const Range mine = extra.selection();
+        const auto meets = [&mine](const Caret& other) {
+            const Range theirs = other.selection();
+            if (mine.empty() && theirs.empty())
+                return mine.begin == theirs.begin;
+            return mine.begin < theirs.end && theirs.begin < mine.end;
+        };
+        if (meets(tab.caret) || std::any_of(kept.begin(), kept.end(), meets))
+            continue;
+        kept.push_back(extra);
+    }
+    tab.extraCarets = std::move(kept);
+}
+
+// Runs `op(rank)` once at every caret, `rank` being the caret's place in the
+// document from the top -- what a paste of one line per caret hands out by.
+template <typename Op>
+void forEachCaret(OpenScript& tab, const Op& op)
+{
+    std::vector<Caret> all = allCarets(tab);
+    std::vector<std::size_t> order(all.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+        order[i] = i;
+    std::sort(order.begin(), order.end(),
+              [&all](std::size_t a, std::size_t b) { return all[b].selection().begin < all[a].selection().begin; });
+
+    ScriptDocument& doc = tab.document;
+    doc.beginGroup();
+    (void)doc.takeEditLog();
+    for (std::size_t step = 0; step < order.size(); ++step) {
+        const std::size_t at = order[step];
+        tab.caret = all[at];
+        op(order.size() - 1 - step);
+        all[at] = tab.caret;
+        const std::vector<ScriptDocument::EditSpan> log = doc.takeEditLog();
+        // The carets already visited sit below this one, and are moved by
+        // whatever it changed.
+        for (std::size_t done = 0; done < step; ++done) {
+            Caret& moved = all[order[done]];
+            for (const ScriptDocument::EditSpan& edit : log) {
+                moved.head = ScriptDocument::shifted(moved.head, edit);
+                moved.anchor = ScriptDocument::shifted(moved.anchor, edit);
+            }
+            moved.head = doc.clamp(moved.head);
+            moved.anchor = doc.clamp(moved.anchor);
+        }
+    }
+    doc.endGroup();
+
+    tab.caret = all.front();
+    tab.extraCarets.assign(all.begin() + 1, all.end());
+    mergeCarets(tab);
+}
+
+// Makes `added` the primary, the old primary one of the others: the view
+// follows the caret just added, and Ctrl+U takes back exactly that one.
+void addCaret(OpenScript& tab, Caret added)
+{
+    tab.extraCarets.push_back(tab.caret);
+    tab.caret = added;
+    tab.caret.desiredColumn = tab.document.cellOf(added.head.line, added.head.column);
+    mergeCarets(tab);
+}
+
+// What Ctrl+D, Shift+Alt+L and the find box look for: the primary's
+// selection, or -- when there is none -- the word under it, which the first
+// press selects.
+[[nodiscard]] std::optional<std::string> selectionNeedle(OpenScript& tab)
+{
+    if (tab.caret.hasSelection())
+        return tab.document.textIn(tab.caret.selection());
+    const Range word = tab.document.wordAt(tab.caret.head);
+    if (word.empty())
+        return std::nullopt;
+    tab.caret.anchor = word.begin;
+    tab.caret.head = word.end;
+    tab.caret.desiredColumn = word.end.column;
+    return std::nullopt;
+}
+
+// **The cursor commands.** Answers whether one of them took the keys this
+// frame, so the ordinary handlers do not act on the same press.
+bool handleCursorKeys(OpenScript& tab)
+{
+    ScriptDocument& doc = tab.document;
+    const ScriptDocument::SearchOptions exact{.matchCase = true, .wholeWord = false};
+
+    // Ctrl+D: the word under the caret, then the next place the selection
+    // appears, as a caret of its own.
+    if (pressed(ScriptAction::AddNextOccurrence)) {
+        const std::optional<std::string> needle = selectionNeedle(tab);
+        if (needle.has_value() && !needle->empty()) {
+            const Range hit = doc.findNext(*needle, tab.caret.selection().end, exact);
+            const bool taken =
+                hit == tab.caret.selection() || std::any_of(tab.extraCarets.begin(), tab.extraCarets.end(),
+                                                            [&hit](const Caret& c) { return c.selection() == hit; });
+            if (!hit.empty() && !taken)
+                addCaret(tab, Caret{.head = hit.end, .anchor = hit.begin});
+        }
+        return true;
+    }
+    // Shift+Alt+L: every place it appears.
+    if (pressed(ScriptAction::SelectAllOccurrences)) {
+        std::optional<std::string> needle = selectionNeedle(tab);
+        if (!needle.has_value() && tab.caret.hasSelection())
+            needle = doc.textIn(tab.caret.selection());
+        if (needle.has_value() && !needle->empty()) {
+            const Range primary = tab.caret.selection();
+            tab.extraCarets.clear();
+            for (const Range& hit : doc.findAll(*needle, exact)) {
+                if (!(hit == primary))
+                    tab.extraCarets.push_back(Caret{.head = hit.end, .anchor = hit.begin});
+            }
+        }
+        return true;
+    }
+    // Shift+Alt+I: a caret at the end of every line the selection covers.
+    if (pressed(ScriptAction::SplitIntoLines)) {
+        const Range span = tab.caret.selection();
+        if (span.begin.line != span.end.line) {
+            tab.extraCarets.clear();
+            for (u32 line = span.begin.line; line < span.end.line; ++line) {
+                const Position end{line, doc.lineLength(line)};
+                tab.extraCarets.push_back(Caret{.head = end, .anchor = end});
+            }
+            tab.caret = Caret{.head = span.end, .anchor = span.end};
+        }
+        return true;
+    }
+    // Ctrl+Alt+Up/Down: one more caret above the highest or below the lowest,
+    // at the column the primary is aiming for.
+    if (pressed(ScriptAction::AddCaretAbove, true) || pressed(ScriptAction::AddCaretBelow, true)) {
+        const bool up = pressed(ScriptAction::AddCaretAbove, true);
+        u32 edge = tab.caret.head.line;
+        for (const Caret& c : tab.extraCarets)
+            edge = up ? std::min(edge, c.head.line) : std::max(edge, c.head.line);
+        if (up ? edge > 0 : edge + 1 < doc.lineCount()) {
+            const u32 line = up ? edge - 1 : edge + 1;
+            const Position at = doc.clamp(Position{line, doc.columnOfCell(line, tab.caret.desiredColumn)});
+            const u32 wanted = tab.caret.desiredColumn;
+            addCaret(tab, Caret{.head = at, .anchor = at});
+            tab.caret.desiredColumn = wanted;
+        }
+        return true;
+    }
+    // Ctrl+U: take back the caret added last -- the primary -- and make the
+    // one before it primary again.
+    if (pressed(ScriptAction::RemoveLastCaret)) {
+        if (!tab.extraCarets.empty()) {
+            tab.caret = tab.extraCarets.back();
+            tab.extraCarets.pop_back();
+        }
+        return true;
+    }
+    return false;
+}
+
+// **Copy, cut and paste with several carets.** Copy joins what each caret
+// holds, top to bottom, one per line -- whole lines where a caret holds
+// nothing. A paste of exactly as many lines as there are carets hands one line
+// to each, which is what makes copy-at-three-carets, paste-at-three-carets do
+// the obvious thing; any other paste goes in whole at every caret.
+void handleMultiClipboard(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
+{
+    const bool copy = pressed(ScriptAction::Copy);
+    const bool cut = pressed(ScriptAction::Cut);
+    const bool paste = pressed(ScriptAction::Paste);
+    if (!copy && !cut && !paste)
+        return;
+    ScriptDocument& doc = tab.document;
+
+    if (copy || cut) {
+        std::vector<Caret> all = allCarets(tab);
+        std::sort(all.begin(), all.end(),
+                  [](const Caret& a, const Caret& b) { return a.selection().begin < b.selection().begin; });
+        const bool anySelection = std::any_of(all.begin(), all.end(), [](const Caret& c) { return c.hasSelection(); });
+        std::string joined;
+        for (std::size_t i = 0; i < all.size(); ++i) {
+            if (i > 0)
+                joined.push_back('\n');
+            joined += anySelection ? doc.textIn(all[i].selection()) : std::string(doc.line(all[i].head.line));
+        }
+        ImGui::SetClipboardText(joined.c_str());
+        if (cut && anySelection)
+            forEachCaret(tab, [&](std::size_t) { eraseSelection(tab, out, index); });
+        return;
+    }
+
+    const char* clip = ImGui::GetClipboardText();
+    if (clip == nullptr || *clip == '\0')
+        return;
+    const std::string text(clip);
+    std::vector<std::string> pieces;
+    for (std::size_t start = 0;;) {
+        const std::size_t newline = text.find('\n', start);
+        std::string piece = text.substr(start, newline == std::string::npos ? std::string::npos : newline - start);
+        if (!piece.empty() && piece.back() == '\r')
+            piece.pop_back();
+        pieces.push_back(std::move(piece));
+        if (newline == std::string::npos)
+            break;
+        start = newline + 1;
+    }
+    const bool spread = pieces.size() == tab.extraCarets.size() + 1;
+    forEachCaret(tab, [&](std::size_t rank) { insertText(tab, out, index, spread ? pieces[rank] : text); });
 }
 
 // --- Drawing -----------------------------------------------------------------
@@ -1420,7 +1737,7 @@ void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugVi
     // cells short of the code (see `metricsFor`).
     const float width = codeWidth(m, number);
     draw->AddText(m.font, m.size, ImVec2(origin.x + m.gutter - m.advance * 2.5f - width, y),
-                  col(current ? p.text : p.textMuted), number);
+                  current ? ecol(ScriptColor::Text) : ecol(ScriptColor::LineNumber), number);
 
     if (editor.hasBreakpoint(tab.chunk, line)) {
         // A filled dot on the left of the number, at the line's own height so it
@@ -1433,7 +1750,6 @@ void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugVi
 void drawLine(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImVec2 textOrigin, u32 line,
               float paneWidth)
 {
-    const Theme& theme = currentTheme();
     const std::string_view text = tab.document.line(line);
     if (text.empty())
         return;
@@ -1447,36 +1763,58 @@ void drawLine(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImV
     // `from` and `to` are BYTE columns; where a run is DRAWN is its CELL. The
     // two differ the moment a line holds anything outside ASCII, and treating
     // them as one is what put a space after every accented letter.
+    //
+    // A tab is not drawn: it is the gap to its stop, so a run is drawn a piece
+    // at a time between tabs, each piece at its own cell.
     const auto run = [&](u32 from, u32 to, ImU32 colour) {
-        if (to <= from)
-            return;
-        const u32 cell = tab.document.cellOf(line, from);
-        if (cell >= lastVisibleCell)
-            return;
-        draw->AddText(m.font, m.size, ImVec2(textOrigin.x + static_cast<float>(cell) * m.advance, y), colour,
-                      text.data() + from, text.data() + to);
+        while (from < to) {
+            while (from < to && text[from] == '\t')
+                ++from;
+            u32 end = from;
+            while (end < to && text[end] != '\t')
+                ++end;
+            if (end > from) {
+                const u32 cell = tab.document.cellOf(line, from);
+                if (cell >= lastVisibleCell)
+                    return;
+                draw->AddText(m.font, m.size, ImVec2(textOrigin.x + static_cast<float>(cell) * m.advance, y), colour,
+                              text.data() + from, text.data() + end);
+            }
+            from = end;
+        }
     };
 
-    const ImU32 plain = col(theme.palette.text);
+    // **Indentation guides**, in the whitespace colour: a thin line at each
+    // four-space step of the line's own indent, which is what makes a long
+    // block's shape readable at a glance.
+    const u32 indent = tab.document.cellOf(line, tab.document.indentOf(line));
+    for (u32 step = kTabWidth; step <= indent && step <= lastVisibleCell; step += kTabWidth) {
+        const float x = textOrigin.x + static_cast<float>(step - kTabWidth) * m.advance + 1.0f;
+        draw->AddLine(ImVec2(x, y), ImVec2(x, y + m.lineHeight), ecol(ScriptColor::Whitespace), 1.0f);
+    }
+
+    static std::vector<StyledRun> styled;
+    styleLine(text, tab.document.tokens(line), styled);
+    const ImU32 plain = ecol(ScriptColor::Text);
     u32 column = 0;
-    for (const Token& token : tab.document.tokens(line)) {
+    for (const StyledRun& piece : styled) {
         // The gaps between runs are whitespace the lexer did not name, drawn in
         // the pane's own foreground so a tab or a stray byte is still visible.
-        run(column, token.column, plain);
-        run(token.column, token.column + token.length, syntaxColor(theme.syntax, theme.palette, token.kind));
-        column = std::max(column, token.column + token.length);
+        run(column, piece.column, plain);
+        run(piece.column, piece.column + piece.length, ecol(piece.color));
+        column = std::max(column, piece.column + piece.length);
     }
     run(column, static_cast<u32>(text.size()), plain);
 }
 
-void drawSelection(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImVec2 textOrigin, u32 first,
-                   u32 last)
+void drawSelection(const OpenScript& tab, const Caret& caret, const PaneMetrics& m, ImDrawList* draw, ImVec2 textOrigin,
+                   u32 first, u32 last)
 {
-    if (!tab.caret.hasSelection())
+    if (!caret.hasSelection())
         return;
 
-    const Range span = tab.caret.selection();
-    const ImU32 colour = col(currentTheme().palette.accent, 0.30f);
+    const Range span = caret.selection();
+    const ImU32 colour = ecol(ScriptColor::Selection);
     for (u32 line = std::max(first, span.begin.line); line <= std::min(last, span.end.line); ++line) {
         const u32 from = tab.document.cellOf(line, line == span.begin.line ? span.begin.column : 0u);
         // A line in the middle of a selection is highlighted one cell past its
@@ -1489,15 +1827,52 @@ void drawSelection(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw
     }
 }
 
+// **How long a line has to sit still before what is wrong with it is shown.**
+//
+// The owner: "it shows the error on the line before I have finished writing
+// it". A half-typed `createM` IS an unknown global, and saying so while the
+// hand is still moving is noise; both reference editors analyse on a pause
+// rather than per keystroke. Other lines are shown at once -- an edit here can
+// break something there, and that is worth knowing now.
+constexpr double kDiagnosticSettleSeconds = 1.2;
+
+[[nodiscard]] bool settling(const OpenScript& tab, u32 line) noexcept
+{
+    return line == tab.lastEditLine && ImGui::GetTime() - tab.lastEditTime < kDiagnosticSettleSeconds;
+}
+
 void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImVec2 textOrigin, u32 first,
                      u32 last)
 {
-    const ImU32 colour = col(currentTheme().palette.danger);
-    const ImU32 warned = col(currentTheme().palette.warning, 0.75f);
-    u32 spokenLine = ~0u;
-    for (const Diagnostic& diagnostic : tab.document.diagnostics()) {
-        if (diagnostic.at.line < first || diagnostic.at.line > last)
+    const ImU32 colour = ecol(ScriptColor::ErrorUnderline);
+    const ImU32 warned = ecol(ScriptColor::WarningUnderline, 0.75f);
+    const std::span<const Diagnostic> all = tab.document.diagnostics();
+
+    // **One message per line, the worst first.** The list is the parser's,
+    // then the tree lint's, then the type checker's, so one line can appear in
+    // it more than once and far apart -- and each speaker drew at the same
+    // place, which is the overlap that was reported. Collected per line, the
+    // line says its most serious problem and how many more it has; the
+    // tooltip over each underline still says each one.
+    struct Spoken
+    {
+        u32 line = 0;
+        const Diagnostic* worst = nullptr;
+        u32 count = 0;
+    };
+    std::vector<Spoken> spoken;
+
+    for (const Diagnostic& diagnostic : all) {
+        if (diagnostic.at.line < first || diagnostic.at.line > last || settling(tab, diagnostic.at.line))
             continue;
+        // **The same mark twice is one mark**: the tree lint and the type
+        // checker both name an unknown global, at the same name.
+        const bool repeated = std::any_of(all.data(), &diagnostic, [&diagnostic](const Diagnostic& earlier) {
+            return earlier.at == diagnostic.at && earlier.length == diagnostic.length;
+        });
+        if (repeated)
+            continue;
+
         const float y = textOrigin.y + static_cast<float>(diagnostic.at.line + 1) * m.lineHeight - 2.0f;
         const float x0 = textOrigin.x +
                          static_cast<float>(tab.document.cellOf(diagnostic.at.line, diagnostic.at.column)) * m.advance;
@@ -1521,21 +1896,20 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
         // is a dotted line that reads as a rendering fault.
         draw->AddLine(ImVec2(x0, y), ImVec2(x1, y), mark, 1.0f);
 
-        // **What is wrong, at the end of the line** (the owner's report: "it
-        // underlines in red and does not say why"). The first diagnostic on a
-        // line speaks for it; three cells past the code, quieter than the code.
-        const float lineTop = textOrigin.y + static_cast<float>(diagnostic.at.line) * m.lineHeight;
-        if (diagnostic.at.line != spokenLine) {
-            spokenLine = diagnostic.at.line;
-            const float after =
-                textOrigin.x + static_cast<float>(tab.document.cellCount(diagnostic.at.line) + 3u) * m.advance;
-            const ThemePalette& p = currentTheme().palette;
-            draw->AddText(m.font, m.size, ImVec2(after, lineTop),
-                          col(diagnostic.severity == Severity::Warning ? p.warning : p.danger, 0.85f),
-                          diagnostic.message.c_str());
+        const auto found = std::find_if(spoken.begin(), spoken.end(),
+                                        [&diagnostic](const Spoken& s) { return s.line == diagnostic.at.line; });
+        if (found == spoken.end()) {
+            spoken.push_back(Spoken{diagnostic.at.line, &diagnostic, 1});
         }
+        else {
+            ++found->count;
+            if (diagnostic.severity == Severity::Error && found->worst->severity == Severity::Warning)
+                found->worst = &diagnostic;
+        }
+
         // And the whole message under the pointer, wrapped, for one too long
         // to fit beside the code.
+        const float lineTop = textOrigin.y + static_cast<float>(diagnostic.at.line) * m.lineHeight;
         const ImVec2 mouse = ImGui::GetIO().MousePos;
         if (ImGui::IsWindowHovered() && mouse.x >= x0 && mouse.x <= x1 && mouse.y >= lineTop &&
             mouse.y <= lineTop + m.lineHeight) {
@@ -1545,6 +1919,22 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
+    }
+
+    // **What is wrong, at the end of the line** (the owner's report: "it
+    // underlines in red and does not say why"): three cells past the code,
+    // quieter than the code.
+    for (const Spoken& line : spoken) {
+        const float lineTop = textOrigin.y + static_cast<float>(line.line) * m.lineHeight;
+        const float after = textOrigin.x + static_cast<float>(tab.document.cellCount(line.line) + 3u) * m.advance;
+        std::string text = line.worst->message;
+        if (line.count > 1)
+            text += "  (+" + std::to_string(line.count - 1) + " more)";
+        draw->AddText(m.font, m.size, ImVec2(after, lineTop),
+                      ecol(line.worst->severity == Severity::Warning ? ScriptColor::WarningUnderline
+                                                                     : ScriptColor::ErrorUnderline,
+                           0.85f),
+                      text.c_str());
     }
 }
 
@@ -1639,7 +2029,13 @@ bool findToggle(const char* label, const char* tip, bool& value)
 // query with its options, count and steps, and -- opened by the arrow or by
 // Ctrl+H -- the replacement with Replace and Replace All. Enter finds the next,
 // Shift+Enter the previous, Escape closes it and gives the code the keys back.
-void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, ImVec2 paneMin, float paneWidth)
+bool scriptAction(const ScriptActionButton& button, std::string_view id, const char* label, bool compact = false)
+{
+    return button ? button(id, label, compact) : ImGui::Button(label);
+}
+
+void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, ImVec2 paneMin, float paneWidth,
+                 const ScriptActionButton& actionButton)
 {
     if (!tab.findOpen)
         return;
@@ -1648,7 +2044,7 @@ void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, 
     const ThemePalette& p = currentTheme().palette;
     const ImGuiStyle& style = ImGui::GetStyle();
     const float rowHeight = ImGui::GetFrameHeight();
-    const float width = std::min(paneWidth - 24.0f, 470.0f);
+    const float width = std::min(paneWidth - 24.0f, ImGui::GetFontSize() * 34.0f);
     const float height = rowHeight * (tab.replaceOpen ? 2.0f : 1.0f) +
                          style.ItemSpacing.y * (tab.replaceOpen ? 1.0f : 0.0f) + style.WindowPadding.y * 2.0f;
     ImGui::SetCursorScreenPos(ImVec2(paneMin.x + paneWidth - width - 18.0f, paneMin.y + 6.0f));
@@ -1668,9 +2064,15 @@ void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, 
             ImGui::SetTooltip("replace  (Ctrl+H)");
         ImGui::SameLine();
 
-        // Sized to leave the options, the count and the steps their room.
-        const float trailing =
-            ImGui::CalcTextSize("Aa ab .* 999 of 999").x + rowHeight * 3.0f + style.ItemSpacing.x * 8.0f;
+        // **Sized to leave everything after the field its room, measured item
+        // by item** (reported: the close button hung outside the box). The
+        // three toggles are buttons with padding on both sides, the count is
+        // as wide as its longest text, and the two steps and the close are
+        // square -- seven items after the field, so seven gaps.
+        const float toggles = ImGui::CalcTextSize("Aa").x + ImGui::CalcTextSize("ab").x + ImGui::CalcTextSize(".*").x +
+                              style.FramePadding.x * 6.0f;
+        const float count = std::max(ImGui::CalcTextSize("999 of 999").x, ImGui::CalcTextSize("No results").x);
+        const float trailing = toggles + count + rowHeight * 3.0f + style.ItemSpacing.x * 7.0f + 2.0f;
         const float field = std::max(90.0f, ImGui::GetContentRegionAvail().x - trailing);
         if (!valid)
             ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(p.danger.r, p.danger.g, p.danger.b, 0.35f));
@@ -1719,7 +2121,19 @@ void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, 
             ImGui::SetTooltip("next  (Enter)");
         ImGui::EndDisabled();
         ImGui::SameLine();
-        bool close = ImGui::SmallButton("x");
+        // Square, the size of the two steps beside it, with the cross drawn
+        // in it: an icon at the text's size read as a speck at the edge of
+        // the box (reported).
+        bool close = ImGui::Button("##find-close", ImVec2(rowHeight, rowHeight));
+        {
+            const ImVec2 lo = ImGui::GetItemRectMin();
+            const ImVec2 hi = ImGui::GetItemRectMax();
+            const float inset = rowHeight * 0.32f;
+            const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->AddLine(ImVec2(lo.x + inset, lo.y + inset), ImVec2(hi.x - inset, hi.y - inset), ink, 1.5f);
+            draw->AddLine(ImVec2(hi.x - inset, lo.y + inset), ImVec2(lo.x + inset, hi.y - inset), ink, 1.5f);
+        }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("close  (Escape)");
 
@@ -1733,7 +2147,7 @@ void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, 
             // **Replace takes the match the caret is on**, then moves to the
             // next -- the first press only selects one, when the caret is on
             // none, so nothing is replaced that was never shown.
-            if (ImGui::Button("Replace")) {
+            if (scriptAction(actionButton, icons::ActionReplace, "Replace")) {
                 if (const std::optional<std::size_t> on = currentMatch(tab); on.has_value()) {
                     const Range done =
                         tab.document.replaceMatch(tab.matches[*on], tab.findText, tab.replaceText, options);
@@ -1744,7 +2158,7 @@ void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, 
                 stepMatch(tab, true);
             }
             ImGui::SameLine();
-            if (ImGui::Button("Replace all")) {
+            if (scriptAction(actionButton, icons::ActionReplaceAll, "Replace all")) {
                 if (tab.document.replaceAll(tab.findText, tab.replaceText, options) > 0) {
                     tab.caret = Caret{};
                     edited(out, index);
@@ -1789,17 +2203,25 @@ void drawMatches(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, 
             textOrigin.x + static_cast<float>(tab.document.cellOf(match.end.line, match.end.column)) * m.advance;
         const bool current = match == selected;
         draw->AddRectFilled(ImVec2(x0, y), ImVec2(x1, y + m.lineHeight),
-                            col(current ? p.accent : p.warning, current ? 0.45f : 0.22f), 2.0f);
+                            current ? col(p.accent, 0.45f) : ecol(ScriptColor::MatchingWord), 2.0f);
         if (current)
             draw->AddRect(ImVec2(x0, y), ImVec2(x1, y + m.lineHeight), col(p.accent, 0.9f), 2.0f);
     }
 }
 
 void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
-              core::InstanceId root, ScriptEditorCommands& out, std::size_t index)
+              core::InstanceId root, ScriptEditorCommands& out, std::size_t index,
+              const ScriptActionButton& actionButton)
 {
     const ThemePalette& p = currentTheme().palette;
     const PaneMetrics m = metricsFor(tab.document, editor.zoom());
+
+    // A tab whose indentation was made tabs on opening hands the text to the
+    // instance now, the way an edit would (see `OpenScript::convertedIndent`).
+    if (tab.convertedIndent) {
+        tab.convertedIndent = false;
+        edited(out, index);
+    }
 
     // **Parsed when the text is at rest**, which is one frame after the last
     // edit: per keystroke would re-parse a file per character, and a timer would
@@ -1827,7 +2249,8 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     }
     tab.idleRevision = tab.document.revision();
 
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(p.surface.r, p.surface.g, p.surface.b, 1.0f));
+    const core::Color3 ground = scol(ScriptColor::Background);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(ground.r, ground.g, ground.b, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     // The pane's rectangle, for the find box drawn over its top right.
     const ImVec2 paneTopLeft = ImGui::GetCursorScreenPos();
@@ -1930,10 +2353,44 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         ImGui::SetFocusID(id, window);
         ImGui::FocusWindow(window);
         active = true;
+        // A click in the text is a move, and a move ends the completion
+        // (see `placeCaret`) -- the double-click and Alt paths below do not
+        // go through it.
+        tab.completing = false;
         if (!overGutter) {
             g_dragging = id;
+            g_dragColumn = false;
             const Position at = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool alt = io.KeyAlt && !io.KeyCtrl;
+            if (alt && io.KeyShift) {
+                // Shift+Alt+drag: a column, one caret per line it crosses.
+                tab.extraCarets.clear();
+                placeCaret(tab, at, false);
+                g_dragColumn = true;
+                g_columnFrom = Position{at.line, tab.document.cellOf(at.line, at.column)};
+                g_dragByWord = false;
+            }
+            else if (alt) {
+                // Alt+click: a caret here, or -- on one already here -- none.
+                const auto same = [&at](const Caret& c) { return !c.hasSelection() && c.head == at; };
+                if (const auto found = std::find_if(tab.extraCarets.begin(), tab.extraCarets.end(), same);
+                    found != tab.extraCarets.end()) {
+                    tab.extraCarets.erase(found);
+                    g_dragging = 0;
+                }
+                else if (same(tab.caret) && !tab.extraCarets.empty()) {
+                    tab.caret = tab.extraCarets.back();
+                    tab.extraCarets.pop_back();
+                    g_dragging = 0;
+                }
+                else {
+                    addCaret(tab, Caret{.head = at, .anchor = at});
+                }
+                g_dragByWord = false;
+            }
+            else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                tab.extraCarets.clear();
                 const Range word = tab.document.wordAt(at);
                 tab.caret.anchor = word.begin;
                 tab.caret.head = word.end;
@@ -1941,6 +2398,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
                 g_dragWord = word;
             }
             else {
+                tab.extraCarets.clear();
                 placeCaret(tab, at, ImGui::GetIO().KeyShift);
                 g_dragByWord = false;
             }
@@ -1954,10 +2412,42 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && g_dragging == id) {
         g_dragging = 0;
         g_dragByWord = false;
+        g_dragColumn = false;
+        mergeCarets(tab);
     }
     if (g_dragging == id && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
         const Position at = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos);
-        if (!g_dragByWord) {
+        if (g_dragColumn) {
+            // The rectangle between where the drag began and the pointer, in
+            // cells: a caret per line, each selecting that line's share.
+            const u32 fromCell = g_columnFrom.column;
+            const u32 toCell = tab.document.cellOf(at.line, at.column);
+            const float pointerCell =
+                std::max(0.0f, std::round((ImGui::GetIO().MousePos.x - textOrigin.x) / m.advance));
+            const u32 wantCell = std::max(toCell, static_cast<u32>(pointerCell));
+            const u32 top = std::min(g_columnFrom.line, at.line);
+            const u32 bottom = std::max(g_columnFrom.line, at.line);
+            std::vector<Caret> rows;
+            for (u32 line = top; line <= bottom; ++line) {
+                const Position anchor = tab.document.clamp(Position{line, tab.document.columnOfCell(line, fromCell)});
+                const Position head = tab.document.clamp(Position{line, tab.document.columnOfCell(line, wantCell)});
+                // A line too short to reach the column is left out, as a
+                // column selection does everywhere.
+                if (tab.document.cellCount(line) < std::min(fromCell, wantCell) && line != g_columnFrom.line)
+                    continue;
+                rows.push_back(Caret{.head = head, .anchor = anchor, .desiredColumn = wantCell});
+            }
+            if (!rows.empty()) {
+                const bool downward = at.line >= g_columnFrom.line;
+                tab.caret = downward ? rows.back() : rows.front();
+                if (downward)
+                    rows.pop_back();
+                else
+                    rows.erase(rows.begin());
+                tab.extraCarets = std::move(rows);
+            }
+        }
+        else if (!g_dragByWord) {
             tab.caret.head = at;
         }
         else if (at < g_dragWord.begin) {
@@ -2014,7 +2504,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     if (active) {
         // **Ctrl+0 is the way back**, and the readout in the corner is what
         // tells somebody there is one.
-        if (ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt && ImGui::IsKeyPressed(ImGuiKey_0, false)) {
+        if (pressed(ScriptAction::ResetZoom)) {
             if (editor.setZoom(1.0f))
                 g_zoomShownFor = 0.0f;
         }
@@ -2067,21 +2557,47 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         ime.ViewportId = window->Viewport->ID;
 
         const core::u64 before = tab.document.revision();
-        handleTyping(tab, out, index);
-        handleKeys(tab, out, index, m, paneHeight);
+        const std::string typed = takeTyped();
+        if (!handleCursorKeys(tab)) {
+            if (tab.extraCarets.empty()) {
+                typeText(tab, out, index, typed);
+                handleKeys(tab, out, index, m, paneHeight, KeyScope::All);
+            }
+            else {
+                // No list with several carets: an accept is a choice made at
+                // one place, and would be typed at every other.
+                tab.completing = false;
+                handleMultiClipboard(tab, out, index);
+                forEachCaret(tab, [&](std::size_t) {
+                    typeText(tab, out, index, typed);
+                    handleKeys(tab, out, index, m, paneHeight, KeyScope::PerCaret);
+                });
+                handleKeys(tab, out, index, m, paneHeight, KeyScope::Global);
+            }
+        }
+        if (tab.document.revision() != before) {
+            tab.lastEditTime = ImGui::GetTime();
+            tab.lastEditLine = tab.caret.head.line;
+            tab.errorLine.reset();
+        }
 
         // **Offered after the text moved, not on a key.** Backspacing through a
         // word then narrows the list instead of dismissing it, and typing a `.`
         // opens it without anybody asking.
-        const bool ctrlSpace =
-            ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Space, false);
+        const bool ctrlSpace = pressed(ScriptAction::TriggerCompletion);
         // Not for the edit an accept just made (see `OpenScript::justAccepted`).
         const bool accepted = std::exchange(tab.justAccepted, false);
-        if ((tab.document.revision() != before && !accepted) || ctrlSpace)
+        if (((tab.document.revision() != before && !accepted) || ctrlSpace) && tab.extraCarets.empty())
             refreshCompletions(tab, world, root);
         // **Escape lets go of the pane rather than clearing the selection.** One
         // press to leave the code, and the second means what the shell says.
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        //
+        // With several carets the first press leaves only the primary, which is
+        // what the reference editor's Escape does.
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !tab.extraCarets.empty()) {
+            tab.extraCarets.clear();
+        }
+        else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             ImGui::ClearActiveID();
             active = false;
         }
@@ -2121,7 +2637,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         draw->AddRectFilled(
             ImVec2(origin.x + m.gutter, caretY),
             ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x), caretY + m.lineHeight),
-            col(p.surfaceRaised, 0.45f));
+            ecol(ScriptColor::CurrentLine));
     }
 
     if (debug.parked && debug.chunk == tab.chunk && debug.line > 0) {
@@ -2129,11 +2645,23 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         draw->AddRectFilled(
             ImVec2(origin.x + m.gutter, stopY),
             ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x), stopY + m.lineHeight),
-            col(p.warning, 0.22f));
+            ecol(ScriptColor::DebuggerCurrentLine));
+    }
+    // **The line an error in the console pointed at**, until somebody edits
+    // the script: where it went wrong, marked the way a stopped debugger marks
+    // where it is.
+    if (tab.errorLine.has_value() && *tab.errorLine < lineCount) {
+        const float errorY = textOrigin.y + static_cast<float>(*tab.errorLine) * m.lineHeight;
+        draw->AddRectFilled(
+            ImVec2(origin.x + m.gutter, errorY),
+            ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x), errorY + m.lineHeight),
+            ecol(ScriptColor::DebuggerErrorLine));
     }
 
     drawMatches(tab, m, draw, textOrigin, first, last);
-    drawSelection(tab, m, draw, textOrigin, first, last);
+    drawSelection(tab, tab.caret, m, draw, textOrigin, first, last);
+    for (const Caret& extra : tab.extraCarets)
+        drawSelection(tab, extra, m, draw, textOrigin, first, last);
     for (u32 line = first; line <= last && line < lineCount; ++line) {
         drawGutter(tab, editor, debug, m, draw, ImVec2(origin.x + ImGui::GetScrollX(), origin.y), line,
                    line == tab.caret.head.line);
@@ -2146,10 +2674,15 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         // blinks together.
         const float phase = std::fmod(static_cast<float>(ImGui::GetTime()), 1.06f);
         if (phase < 0.7f) {
-            const float x =
-                textOrigin.x +
-                static_cast<float>(tab.document.cellOf(tab.caret.head.line, tab.caret.head.column)) * m.advance;
-            draw->AddLine(ImVec2(x, caretY), ImVec2(x, caretY + m.lineHeight), col(p.accent), 1.5f);
+            const auto bar = [&](const Caret& caret) {
+                const float x = textOrigin.x +
+                                static_cast<float>(tab.document.cellOf(caret.head.line, caret.head.column)) * m.advance;
+                const float y = textOrigin.y + static_cast<float>(caret.head.line) * m.lineHeight;
+                draw->AddLine(ImVec2(x, y), ImVec2(x, y + m.lineHeight), ecol(ScriptColor::Caret), 1.5f);
+            };
+            bar(tab.caret);
+            for (const Caret& extra : tab.extraCarets)
+                bar(extra);
         }
     }
 
@@ -2226,12 +2759,13 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         out.toggleBreakpointLine = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
 
     ImGui::EndChild();
-    drawFindBox(tab, out, index, paneTopLeft, paneOuterWidth);
+    drawFindBox(tab, out, index, paneTopLeft, paneOuterWidth, actionButton);
 }
 
 } // namespace
 
-void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands& out, bool& open)
+void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands& out, bool& open,
+                    const ScriptActionButton& actionButton)
 {
     // **Beside the Console, even in a layout written before this panel
     // existed.** `buildDefaultLayout` docks it for a fresh arrangement, but a
@@ -2255,23 +2789,30 @@ void drawDebugPanel(ScriptEditor& editor, DebugView& debug, ScriptEditorCommands
     // File menu follows for Save.
     const auto nextControl = [](const char* label) {
         ImGui::SameLine();
-        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f)
+        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f +
+                                                   ImGui::CalcTextSize(tabIconPad().c_str()).x)
             ImGui::NewLine();
     };
     ImGui::BeginDisabled(!debug.parked);
-    if (ImGui::Button("Continue"))
+    if (scriptAction(actionButton, icons::ActionPlay, "Continue"))
         out.step = DebugStep::Continue;
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("let the script run on (F5)");
     nextControl("Over");
-    if (ImGui::Button("Over"))
+    if (scriptAction(actionButton, icons::ActionStepOver, "Over"))
         out.step = DebugStep::Over;
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Step over: execute the current line without entering calls (F10)");
     nextControl("Into");
-    if (ImGui::Button("Into"))
+    if (scriptAction(actionButton, icons::ActionStepInto, "Into"))
         out.step = DebugStep::Into;
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Step into: enter the next function call (F11)");
     nextControl("Out");
-    if (ImGui::Button("Out"))
+    if (scriptAction(actionButton, icons::ActionStepOut, "Out"))
         out.step = DebugStep::Out;
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Step out: finish the current function (Shift+F11)");
     ImGui::EndDisabled();
 
     if (debug.parked)
@@ -2382,7 +2923,7 @@ void releaseScriptPaneFocus()
 }
 
 void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug, const scene::World* world,
-                      core::InstanceId root, ScriptEditorCommands& out)
+                      core::InstanceId root, ScriptEditorCommands& out, const ScriptActionButton& actionButton)
 {
     const std::optional<std::size_t> focus = editor.takeFocusRequest();
     takeLanguageAnswers(editor);
@@ -2401,9 +2942,8 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         // gives: everything that identifies a window reads from the far side of
         // it.
         //
-        // **Unsaved, it ends in a gap the shell paints a floppy into** (the
-        // owner: "the save icon instead of the orange dot"), for the same
-        // reason the leading gap exists: a tab takes a string.
+        // **Unsaved, it ends in a gap the shell paints a dot into**, for the
+        // same reason the leading gap exists: a tab takes a string.
         char name[224]{};
         (void)std::snprintf(name, sizeof(name), "%s%s%s###script-%u", tabIconPad().c_str(), tab->title.c_str(),
                             tab->dirty() ? tabIconPad().c_str() : "", tab->instance.index);
@@ -2421,7 +2961,7 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         if (ImGui::Begin(name, &open, flags)) {
             if (ImGui::IsWindowAppearing() || ImGui::IsWindowFocused())
                 editor.setActive(index);
-            drawPane(*tab, editor, debug, world, root, out, index);
+            drawPane(*tab, editor, debug, world, root, out, index, actionButton);
         }
         ImGui::End();
 
@@ -2446,13 +2986,13 @@ namespace luaug::app {
 // ADR 0011: a shipping build has no ImGui, so the pane has no body. The
 // signature stays so the frame loop calls it without an #ifdef.
 void drawScriptEditor(ScriptEditor&, core::u32, DebugView&, const scene::World*, core::InstanceId,
-                      ScriptEditorCommands&)
+                      ScriptEditorCommands&, const ScriptActionButton&)
 {}
 
 void releaseScriptPaneFocus()
 {}
 
-void drawDebugPanel(ScriptEditor&, DebugView&, ScriptEditorCommands&, bool&)
+void drawDebugPanel(ScriptEditor&, DebugView&, ScriptEditorCommands&, bool&, const ScriptActionButton&)
 {}
 
 } // namespace luaug::app

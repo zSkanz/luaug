@@ -968,3 +968,25 @@ TEST_CASE("the checker's rows lead, the tree's children stay, and a type positio
     luaug::app::mergeCompletions(shown, {}, true, "");
     CHECK(shown.empty());
 }
+
+TEST_CASE("the list is in scope first, then the rest of the file, then the globals")
+{
+    // **The owner**: "scope, then out of scope, then global" -- and where a name
+    // stands changes its place in the list, never whether it is there.
+    Reflection fixture;
+    const std::vector<Completion> list = at(fixture, "local function build()\n"
+                                                     "\tlocal matrix = {}\n"
+                                                     "end\n"
+                                                     "local Matter = 1\n"
+                                                     "ma");
+    const auto position = [&list](std::string_view label) {
+        const auto found =
+            std::find_if(list.begin(), list.end(), [&label](const Completion& c) { return c.label == label; });
+        return found == list.end() ? list.size() : static_cast<std::size_t>(found - list.begin());
+    };
+    REQUIRE(position("Matter") < list.size());
+    REQUIRE(position("matrix") < list.size());
+    REQUIRE(position("math") < list.size());
+    CHECK(position("Matter") < position("matrix"));
+    CHECK(position("matrix") < position("math"));
+}

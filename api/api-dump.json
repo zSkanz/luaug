@@ -2013,6 +2013,10 @@
           "Type": "number"
         },
         {
+          "Name": "CFrame",
+          "Type": "CFrame"
+        },
+        {
           "Name": "Color",
           "Type": "Color3"
         },
@@ -2442,6 +2446,10 @@
         {
           "Name": "Brightness",
           "Type": "number"
+        },
+        {
+          "Name": "CFrame",
+          "Type": "CFrame"
         },
         {
           "Name": "Color",

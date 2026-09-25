@@ -198,13 +198,17 @@ float3 evaluatePunctualLight(Surface surface, GpuLight light, float shadow)
     const float distanceSquared = max(dot(toLight, toLight), LuaugEpsilon);
     const float3 lightDirection = toLight * rsqrt(distanceSquared);
 
-    // Inverse square, windowed so the light reaches exactly zero at its range
-    // rather than trailing off forever. Without the window a light's cost is
-    // unbounded and the bounding volume the culler uses is a lie.
+    // **`Brightness` is the light's strength at its source, and `Range` shapes
+    // the whole curve**: 1 / (1 + 25 (d / range)^2), the falloff engines made
+    // for authoring use, which is about an eighth of the strength at half the
+    // range. Physical inverse square made a lamp of Brightness 1 light a metre
+    // around itself and nothing else -- reported as "the PointLight does not
+    // work". Windowed as before, so it reaches exactly zero at its range and
+    // the bounding volume the culler uses stays true.
     const float range = max(light.PositionRange.w, LuaugEpsilon);
     const float ratio = distanceSquared / (range * range);
     const float window = saturate(1.0f - ratio * ratio);
-    const float attenuation = window * window / distanceSquared;
+    const float attenuation = window * window / (1.0f + 25.0f * ratio);
 
     // `shader_types.h` stores 1.0 in w for a point light and calls it the value
     // that makes the cone test pass everywhere. It is the opposite: cos(half

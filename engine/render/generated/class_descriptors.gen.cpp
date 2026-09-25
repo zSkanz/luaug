@@ -226,8 +226,19 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(cameraDesc);
 
     // --- PointLight ---
-    static std::array<scene::PropertyDesc, 5> pointLightProperties;
+    static std::array<scene::PropertyDesc, 6> pointLightProperties;
     pointLightProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("CFrame"),
+            .type = scene::ValueType::CFrame,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where the light is. **In the world when nothing holds it** -- a light dropped straight into the Workspace shines from here, and turns with it -- and relative to the BasePart or Attachment it sits in otherwise, which the identity leaves exactly where that is. The owner's call (ADR 0095): a light can stand on its own.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getPointLightCFrame,
+            .set = native::setPointLightCFrame,
+        },
         scene::PropertyDesc{
             .name = atoms.intern("Color"),
             .type = scene::ValueType::Color3,
@@ -289,7 +300,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     pointLightDesc.super = instanceClass;
     pointLightDesc.flags = scene::ClassFlags::None;
     pointLightDesc.defaultName = atoms.intern("PointLight");
-    pointLightDesc.doc = "A light radiating equally in every direction from its parent's position. Parent it to a BasePart or an Attachment; a light with no such ancestor lights nothing.";
+    pointLightDesc.doc = "A light radiating equally in every direction. Inside a BasePart or an Attachment it shines from there and moves with it; anywhere else it shines from its own `CFrame` (ADR 0095).";
     pointLightDesc.properties = pointLightProperties;
     pointLightDesc.attachComponents = native::attachPointLightComponents;
     pointLightDesc.detachComponents = native::detachPointLightComponents;
@@ -569,8 +580,19 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(particleEmitterDesc);
 
     // --- SpotLight ---
-    static std::array<scene::PropertyDesc, 6> spotLightProperties;
+    static std::array<scene::PropertyDesc, 7> spotLightProperties;
     spotLightProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("CFrame"),
+            .type = scene::ValueType::CFrame,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where the light is. **In the world when nothing holds it** -- a light dropped straight into the Workspace shines from here, and turns with it -- and relative to the BasePart or Attachment it sits in otherwise, which the identity leaves exactly where that is. The owner's call (ADR 0095): a light can stand on its own.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_cframe"),
+            .get = native::getSpotLightCFrame,
+            .set = native::setSpotLightCFrame,
+        },
         scene::PropertyDesc{
             .name = atoms.intern("Color"),
             .type = scene::ValueType::Color3,
@@ -643,7 +665,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     spotLightDesc.super = instanceClass;
     spotLightDesc.flags = scene::ClassFlags::None;
     spotLightDesc.defaultName = atoms.intern("SpotLight");
-    spotLightDesc.doc = "A light confined to a cone about its parent's forward direction. A sibling of PointLight rather than a subclass of it: the two share four properties and no behaviour.";
+    spotLightDesc.doc = "A light confined to a cone about its forward direction -- its holder's, turned by its own `CFrame`, or its own alone when nothing holds it (ADR 0095). A sibling of PointLight rather than a subclass of it: the two share their placement and a few properties, and no behaviour.";
     spotLightDesc.properties = spotLightProperties;
     spotLightDesc.attachComponents = native::attachSpotLightComponents;
     spotLightDesc.detachComponents = native::detachSpotLightComponents;

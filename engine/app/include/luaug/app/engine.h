@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace luaug::app {
 
@@ -165,6 +166,10 @@ struct EngineOptions
 
     bool frameStats = false;
 
+    // **`--gpu-debug`: the GPU debug layer, asked for by name** (D183). Off
+    // means whatever the profile decides -- see `gpuValidationWanted`.
+    bool gpuDebug = false;
+
     // **The posture, from the command line and from nowhere else** (ADR 0070):
     // `--host`, `--serve` or `--join`. Solo when none was given, which builds no
     // replication object at all.
@@ -201,6 +206,13 @@ struct EngineOptions
     i32 width = 1280;
     i32 height = 720;
 };
+
+// **Whether the GPU device is created with its debug layer** (D183). The
+// `debug` and `dev` profiles are where engine work happens, so they validate;
+// `player`, `shipping` and `editor` are what somebody downloads, and there the
+// layer only costs frame time and turns any message it has into a crash. An
+// explicit `--gpu-debug` asks for it in any profile.
+[[nodiscard]] bool gpuValidationWanted(std::string_view profile, bool optIn) noexcept;
 
 // Runs to completion. Returns the first error that stopped it, or nothing on a
 // clean exit.

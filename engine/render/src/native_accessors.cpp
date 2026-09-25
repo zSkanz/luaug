@@ -863,6 +863,38 @@ bool setSpotLightBrightness(scene::World& world, core::InstanceId id, const Valu
     return true;
 }
 
+Value getPointLightCFrame(const scene::World& world, core::InstanceId id)
+{
+    const scene::PointLightComponent* light = readPointLight(world, id);
+    return light == nullptr ? Value{} : Value{light->cframe};
+}
+
+bool setPointLightCFrame(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* cframe = std::get_if<core::CFrameD>(&value);
+    scene::PointLightComponent* light = writePointLight(world, id);
+    if (cframe == nullptr || light == nullptr)
+        return false;
+    light->cframe = *cframe;
+    return true;
+}
+
+Value getSpotLightCFrame(const scene::World& world, core::InstanceId id)
+{
+    const scene::SpotLightComponent* light = readSpotLight(world, id);
+    return light == nullptr ? Value{} : Value{light->cframe};
+}
+
+bool setSpotLightCFrame(scene::World& world, core::InstanceId id, const Value& value)
+{
+    const auto* cframe = std::get_if<core::CFrameD>(&value);
+    scene::SpotLightComponent* light = writeSpotLight(world, id);
+    if (cframe == nullptr || light == nullptr)
+        return false;
+    light->cframe = *cframe;
+    return true;
+}
+
 Value getSpotLightRange(const scene::World& world, core::InstanceId id)
 {
     const scene::SpotLightComponent* light = readSpotLight(world, id);

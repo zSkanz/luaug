@@ -32,8 +32,16 @@ OpenScript& ScriptEditor::open(core::InstanceId instance, ScriptOrigin origin, s
     tab.chunk = std::move(chunk);
     tab.file = std::move(file);
     tab.title = std::move(title);
-    (void)tab.document.setText(source);
+    // **Old scripts are indented with tabs on the way in** (the owner: "use
+    // tabs, and fix the old scripts automatically"). The text is what changed,
+    // so the tab says so: unsaved, and handed to `Source` on its first draw.
+    const std::string indented = indentWithTabs(source);
+    (void)tab.document.setText(indented);
     tab.savedRevision = tab.document.revision();
+    if (indented != source) {
+        tab.convertedIndent = true;
+        tab.savedRevision = ~0ull;
+    }
 
     m_tabs.push_back(std::move(tab));
     m_active = m_tabs.size() - 1;

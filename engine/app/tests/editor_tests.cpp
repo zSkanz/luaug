@@ -5761,3 +5761,25 @@ TEST_CASE("an interface element made in the editor starts 50 by 50 pixels")
     REQUIRE(size.has_value());
     CHECK(std::get<core::UDim2>(*size) == core::UDim2{core::UDim{0.0f, 50.0f}, core::UDim{0.0f, 50.0f}});
 }
+
+TEST_CASE("a script made in the editor starts with code, and a module with the table it returns")
+{
+    // **The owner's call, and the reference editor's.** `Instance.new` in code
+    // keeps the class's empty `Source`; only the editor's insert seeds it.
+    BrushRig rig;
+    const auto made = [&rig](const char* className) {
+        REQUIRE(rig.editor.createInstance(rig.world, rig.classes.findId(rig.atoms.intern(className)), rig.workspace,
+                                          rig.root, rig.inspector));
+        const std::optional<scene::Value> source =
+            rig.world.getProperty(rig.inspector.selection(), rig.atoms.intern("Source"));
+        REQUIRE(source.has_value());
+        return std::get<std::string>(*source);
+    };
+    CHECK(made("Script") == "print(\"Hello World!\")\n");
+    CHECK(made("ModuleScript") == "local module = {}\n\nreturn module\n");
+
+    const core::InstanceId coded = rig.world.create(rig.classes.findId(rig.atoms.intern("Script")));
+    const std::optional<scene::Value> empty = rig.world.getProperty(coded, rig.atoms.intern("Source"));
+    REQUIRE(empty.has_value());
+    CHECK(std::get<std::string>(*empty).empty());
+}

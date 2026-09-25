@@ -86,6 +86,18 @@ enum class CompletionKind : core::u8
     Instance,
 };
 
+// **Where a name is from, which is the first thing the list is ordered by**
+// (the owner: "scope, then out of scope, then global"). A name the caret can
+// see comes first, a name the file declares somewhere the caret cannot see
+// next -- still offered, because it may be what somebody is about to move --
+// and everything the language and the engine provide last.
+enum class CompletionScope : core::u8
+{
+    Visible,
+    Elsewhere,
+    Global,
+};
+
 struct Completion
 {
     std::string label;
@@ -96,6 +108,7 @@ struct Completion
     // that is not a reflected member.
     std::string doc;
     CompletionKind kind = CompletionKind::Identifier;
+    CompletionScope scope = CompletionScope::Global;
 };
 
 // Where the caret is, when it is inside a string that names something.

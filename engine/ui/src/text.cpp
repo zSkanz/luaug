@@ -573,6 +573,34 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
     entry.quadCount = 4;
 }
 
+// **Empties the store, and says so -- once, then at every doubling.**
+//
+// A clear is a signal rather than a routine eviction, which is why it is said
+// at all. But a clear that recurs recurs every frame -- somebody dragging a
+// `TextScaled` label's handles asks for a new size per frame (reported as a
+// console flooded with this line) -- and one line per frame buries every
+// other message while saying nothing new. So: the first clear, then the 2nd,
+// 4th, 8th..., each with how many there have been.
+void clearStore(GlyphStore& cache)
+{
+    ++cache.stats.clears;
+    const u64 clears = cache.stats.clears;
+    if ((clears & (clears - 1)) == 0) {
+        const core::I18nArg args[] = {{"entries", static_cast<core::i64>(cache.entries.size())},
+                                      {"clears", static_cast<core::i64>(clears)}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.glyph_cache_cleared"), args);
+    }
+    cache.entries.clear();
+    cache.quads.clear();
+    // The atlas goes with them. Its packer hands out places by cursor, so
+    // keeping the pixels while dropping the entries that name them would leave
+    // a megabyte of coverage nothing can find and no room for more.
+    cache.atlas.clear();
+    cache.packer = AtlasPacker{};
+    ++cache.atlasVersion;
+    cache.stats.entries = 0;
+}
+
 // The entry for one (face, size, codepoint), filling it if this is the first
 // time anything asked. Returns an INDEX rather than a pointer, because filling
 // may reallocate and a caller that held a pointer across the call would be
@@ -598,20 +626,7 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
     }
 
     if (cache.entries.size() >= MaxGlyphEntries) {
-        // See `MaxGlyphEntries`: reaching this is a signal rather than a routine
-        // eviction, so it says so once per clear instead of silently churning.
-        const core::I18nArg args[] = {{"entries", static_cast<core::i64>(cache.entries.size())}};
-        core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.glyph_cache_cleared"), args);
-        cache.entries.clear();
-        cache.quads.clear();
-        // The atlas goes with them. Its packer hands out places by cursor, so
-        // keeping the pixels while dropping the entries that name them would
-        // leave a megabyte of coverage nothing can find and no room for more.
-        cache.atlas.clear();
-        cache.packer = AtlasPacker{};
-        ++cache.atlasVersion;
-        ++cache.stats.clears;
-        cache.stats.entries = 0;
+        clearStore(cache);
         return glyphIndex(face, pixelSize, codepoint);
     }
 
@@ -622,18 +637,8 @@ void fillReplacementGlyph(GlyphEntry& entry, std::vector<GlyphQuad>& quads)
         filled = rasteriseGlyph(face, pixelSize, codepoint, entry, cache);
         if (!filled && !cache.atlas.empty() && cache.entries.size() > 0) {
             // The atlas is full rather than the codepoint being absent. Clearing
-            // is the same answer the entry limit gets and for the same reason:
-            // this is a signal that something is asking for a new size every
-            // frame, not a routine eviction.
-            const core::I18nArg args[] = {{"entries", static_cast<core::i64>(cache.entries.size())}};
-            core::log(core::LogLevel::Warn, LUAUG_TR("ui.warn.glyph_cache_cleared"), args);
-            cache.entries.clear();
-            cache.quads.clear();
-            cache.atlas.clear();
-            cache.packer = AtlasPacker{};
-            ++cache.atlasVersion;
-            ++cache.stats.clears;
-            cache.stats.entries = 0;
+            // is the same answer the entry limit gets and for the same reason.
+            clearStore(cache);
             return glyphIndex(face, pixelSize, codepoint);
         }
         if (!filled) {
@@ -1104,6 +1109,13 @@ void resetGlyphCache() noexcept
     cache.packer = AtlasPacker{};
     ++cache.atlasVersion;
     cache.stats = GlyphCacheStats{};
+}
+
+f32 scaledTextSize(f32 fits) noexcept
+{
+    const f32 capped = std::fmin(std::fmax(fits, 1.0f), kMaxScaledTextSize);
+    const f32 step = capped < 24.0f ? 1.0f : capped < 48.0f ? 2.0f : 4.0f;
+    return std::fmax(1.0f, std::floor(capped / step) * step);
 }
 
 TextRunMetrics measureText(std::string_view text, std::string_view font, f32 pixelSize, f32 maxWidth)

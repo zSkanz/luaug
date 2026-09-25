@@ -5,7 +5,7 @@
 - Inherits [`Instance`](instance.md)
 - Created with `Instance.new("PointLight")`
 
-A light radiating equally in every direction from its parent's position. Parent it to a BasePart or an Attachment; a light with no such ancestor lights nothing.
+A light radiating equally in every direction. Inside a BasePart or an Attachment it shines from there and moves with it; anywhere else it shines from its own `CFrame` (ADR 0095).
 
 **Members below are the ones this class DECLARES.** Everything its base
 offers is on the base's page, which is what keeps one added member on
@@ -16,6 +16,7 @@ offers is on the base's page, which is what keeps one added member on
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
 | `Brightness` | `number` | — | read/write | How much light this emits. Zero is off without the instance having to be destroyed. |
+| `CFrame` | `CFrame` | — | read/write | Where the light is. **In the world when nothing holds it** -- a light dropped straight into the Workspace shines from here, and turns with it -- and relative to the BasePart or Attachment it sits in otherwise, which the identity leaves exactly where that is. The owner's call (ADR 0095): a light can stand on its own. |
 | `Color` | `Color3` | — | read/write | The light's colour, multiplied by Brightness. Not clamped, so a channel above one is a legal over-bright tint. |
 | `Enabled` | `boolean` | `true` | read/write | Whether this light contributes anything. Off is not the same as a Brightness of zero: a disabled light is skipped before the renderer counts it against the light budget, so turning a room's lights off gives the rest of the scene the slots back. |
 | `Range` | `number` | — | read/write | The radius in metres beyond which this light contributes nothing, which is what lets the renderer skip it for distant geometry. |

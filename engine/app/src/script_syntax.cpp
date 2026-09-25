@@ -385,6 +385,130 @@ LineState lexLine(std::string_view text, core::u32 lineIndex, LineState entry, s
 #endif
 }
 
+namespace {
+
+[[nodiscard]] bool isBuiltinName(std::string_view name)
+{
+    // Built once: Luau's globals and libraries, and what the engine installs --
+    // the same names the completion offers and the lint accepts.
+    static const std::unordered_set<std::string_view> names = [] {
+        std::unordered_set<std::string_view> all;
+        for (const script::StdName& global : script::stdGlobals())
+            all.insert(global.name);
+        for (const script::StdLibrary& library : script::stdLibraries())
+            all.insert(library.name);
+        for (const std::string_view global : engineGlobals())
+            all.insert(global);
+        return all;
+    }();
+    return names.contains(name);
+}
+
+// A comment, with each `TODO` in it a run of its own.
+void styleComment(std::string_view text, const Token& token, std::vector<StyledRun>& out)
+{
+    constexpr std::string_view Marker = "TODO";
+    const std::string_view body = text.substr(token.column, token.length);
+    core::u32 from = 0;
+    for (std::size_t at = body.find(Marker); at != std::string_view::npos; at = body.find(Marker, at + 1)) {
+        const auto column = static_cast<core::u32>(at);
+        if (column > from)
+            out.push_back(StyledRun{token.column + from, column - from, ScriptColor::Comment});
+        out.push_back(StyledRun{token.column + column, static_cast<core::u32>(Marker.size()), ScriptColor::Todo});
+        from = column + static_cast<core::u32>(Marker.size());
+    }
+    if (from < token.length)
+        out.push_back(StyledRun{token.column + from, token.length - from, ScriptColor::Comment});
+}
+
+} // namespace
+
+void styleLine(std::string_view text, std::span<const Token> tokens, std::vector<StyledRun>& out)
+{
+    out.clear();
+    const auto word = [&text](const Token& token) { return text.substr(token.column, token.length); };
+    const auto isOp = [&](std::size_t at, std::string_view op) {
+        return at < tokens.size() && tokens[at].kind == TokenKind::Operator && word(tokens[at]) == op;
+    };
+    // `function a.b:c` and `local function c`: the names after `function`.
+    const auto declaresFunction = [&](std::size_t at) {
+        while (at > 0) {
+            --at;
+            const Token& before = tokens[at];
+            if (before.kind == TokenKind::Keyword)
+                return word(before) == "function";
+            if (before.kind != TokenKind::Identifier && !isOp(at, ".") && !isOp(at, ":"))
+                return false;
+        }
+        return false;
+    };
+
+    for (std::size_t at = 0; at < tokens.size(); ++at) {
+        const Token& token = tokens[at];
+        const std::string_view here = word(token);
+        ScriptColor color = ScriptColor::Text;
+        switch (token.kind) {
+        case TokenKind::Comment:
+            styleComment(text, token, out);
+            continue;
+        case TokenKind::Keyword:
+            if (here == "function")
+                color = ScriptColor::FunctionKeyword;
+            else if (here == "local")
+                color = ScriptColor::LocalKeyword;
+            else if (here == "nil")
+                color = ScriptColor::Nil;
+            else if (here == "true" || here == "false")
+                color = ScriptColor::Bool;
+            else if (here == "export" || here == "type" || here == "continue")
+                color = ScriptColor::LuauKeyword;
+            else
+                color = ScriptColor::Keyword;
+            break;
+        case TokenKind::Operator:
+            color = here == "(" || here == ")" || here == "[" || here == "]" || here == "{" || here == "}"
+                        ? ScriptColor::Bracket
+                        : ScriptColor::Operator;
+            break;
+        case TokenKind::Identifier: {
+            const bool afterColon = at > 0 && isOp(at - 1, ":");
+            const bool afterDot = at > 0 && isOp(at - 1, ".");
+            const bool called = isOp(at + 1, "(") || isOp(at + 1, "{") ||
+                                (at + 1 < tokens.size() && tokens[at + 1].kind == TokenKind::String);
+            if (here == "self")
+                color = ScriptColor::Self;
+            else if (declaresFunction(at))
+                color = ScriptColor::FunctionName;
+            else if (afterColon || (afterDot && called))
+                color = ScriptColor::Method;
+            else if (afterDot)
+                color = ScriptColor::Property;
+            else if (isBuiltinName(here))
+                color = ScriptColor::BuiltinFunction;
+            break;
+        }
+        case TokenKind::Number:
+            color = ScriptColor::Number;
+            break;
+        case TokenKind::String:
+            color = ScriptColor::String;
+            break;
+        case TokenKind::Attribute:
+            color = ScriptColor::Attribute;
+            break;
+        case TokenKind::Error:
+            color = ScriptColor::BrokenToken;
+            break;
+        case TokenKind::Type:
+            color = ScriptColor::Type;
+            break;
+        case TokenKind::Text:
+            break;
+        }
+        out.push_back(StyledRun{token.column, token.length, color});
+    }
+}
+
 #if LUAUG_LUAU_COMPILER
 
 // **The two lints a person actually wants, and no more.**
@@ -1068,6 +1192,113 @@ SourceMembers sourceMembersOf(const std::string& source, std::span<const std::st
     for (std::size_t step = 1; step < path.size() && shape.kind != Shape::Kind::None; ++step)
         shape = path[step] == kElementStep ? model.elementOf(shape, 0) : model.fieldOf(shape, path[step], 0);
     return model.membersOf(shape);
+#endif
+}
+
+#if LUAUG_LUAU_COMPILER
+namespace {
+
+// Walks every block and function and records, per name, where it can be seen.
+class ScopeCollector : public Luau::AstVisitor
+{
+public:
+    ScopeCollector(Position caret, std::vector<std::string>& out) : m_caret(caret), m_out(out) {}
+
+    bool visit(Luau::AstStatBlock* block) override
+    {
+        for (Luau::AstStat* statement : block->body) {
+            if (const auto* local = statement->as<Luau::AstStatLocal>(); local != nullptr) {
+                for (Luau::AstLocal* variable : local->vars)
+                    offer(variable->name.value, local->location.end, block->location.end);
+            }
+            else if (const auto* function = statement->as<Luau::AstStatLocalFunction>(); function != nullptr) {
+                offer(function->name->name.value, function->location.begin, block->location.end);
+            }
+        }
+        return true;
+    }
+
+    bool visit(Luau::AstExprFunction* function) override
+    {
+        const Luau::Location body = function->body->location;
+        if (function->self != nullptr)
+            offer(function->self->name.value, body.begin, body.end);
+        for (Luau::AstLocal* argument : function->args)
+            offer(argument->name.value, body.begin, body.end);
+        return true;
+    }
+
+    bool visit(Luau::AstStatFor* loop) override
+    {
+        offer(loop->var->name.value, loop->body->location.begin, loop->body->location.end);
+        return true;
+    }
+
+    bool visit(Luau::AstStatForIn* loop) override
+    {
+        for (Luau::AstLocal* variable : loop->vars)
+            offer(variable->name.value, loop->body->location.begin, loop->body->location.end);
+        return true;
+    }
+
+    // A global the file defines -- `function Name()` or `Name = ...` -- is
+    // everybody's, wherever it was written.
+    bool visit(Luau::AstStatFunction* function) override
+    {
+        if (const auto* global = function->name->as<Luau::AstExprGlobal>(); global != nullptr)
+            add(global->name.value);
+        return true;
+    }
+
+    bool visit(Luau::AstStatAssign* assign) override
+    {
+        for (Luau::AstExpr* target : assign->vars) {
+            if (const auto* global = target->as<Luau::AstExprGlobal>(); global != nullptr)
+                add(global->name.value);
+        }
+        return true;
+    }
+
+private:
+    void offer(const char* name, Luau::Position from, Luau::Position to)
+    {
+        const Position begin{static_cast<core::u32>(from.line), static_cast<core::u32>(from.column)};
+        const Position end{static_cast<core::u32>(to.line), static_cast<core::u32>(to.column)};
+        if (begin <= m_caret && m_caret <= end)
+            add(name);
+    }
+
+    void add(const char* name)
+    {
+        if (name == nullptr || *name == '\0')
+            return;
+        if (std::find(m_out.begin(), m_out.end(), name) == m_out.end())
+            m_out.emplace_back(name);
+    }
+
+    Position m_caret;
+    std::vector<std::string>& m_out;
+};
+
+} // namespace
+#endif
+
+void visibleNames(const std::string& source, Position caret, std::vector<std::string>& out)
+{
+    out.clear();
+#if !LUAUG_LUAU_COMPILER
+    (void)source;
+    (void)caret;
+#else
+    Luau::Allocator allocator;
+    Luau::AstNameTable names(allocator);
+    Luau::ParseOptions options;
+    options.captureComments = false;
+    const Luau::ParseResult result = Luau::Parser::parse(source.data(), source.size(), names, allocator, options);
+    if (result.root == nullptr)
+        return;
+    ScopeCollector collector(caret, out);
+    result.root->visit(&collector);
 #endif
 }
 

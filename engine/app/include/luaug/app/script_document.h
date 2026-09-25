@@ -47,6 +47,7 @@
 // states: the editor exists for whoever is building a game, never for a player.
 #pragma once
 
+#include "luaug/app/script_editor_settings.h"
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
@@ -55,6 +56,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace luaug::app {
@@ -179,6 +181,19 @@ struct Diagnostic
 inline constexpr std::size_t kMaxDocumentBytes = 8u * 1024u * 1024u;
 inline constexpr std::size_t kMaxLineBytes = 64u * 1024u;
 
+// **Code is indented with tabs, drawn four cells wide** (the owner: "it uses
+// spaces instead of tabs"), which is what the reference editor writes. A tab
+// advances to the next multiple of this many cells, so a caret, a click and a
+// selection over a tab all land where the eye sees it.
+inline constexpr core::u32 kTabWidth = 4;
+
+// **Old indentation, made tabs**: the leading whitespace of every line, read as
+// cells (a tab to its stop, a space one), written back as whole tabs and the
+// remainder as spaces. Only the INDENT -- a space inside a line is somebody's
+// alignment or somebody's string. A multi-line string's lines are indentation
+// too as far as this can tell; the reference editor makes the same trade.
+[[nodiscard]] std::string indentWithTabs(std::string_view source);
+
 // The text of one script, with everything derived from it.
 //
 // Not copyable: a document carries its own undo history, and a copy sharing one
@@ -286,6 +301,27 @@ public:
     void breakUndoRun() noexcept { m_coalescing = false; }
     void clearHistory() noexcept;
 
+    // **Every edit between these two is one undo step** -- what one keystroke
+    // typed at several carets is. Nesting is not supported and not needed: the
+    // panel opens one around each pass over its carets.
+    void beginGroup() noexcept;
+    void endGroup() noexcept { m_group = 0; }
+
+    // **Where each edit landed since the last take**, in the order they were
+    // made: what was replaced (`begin` to `oldEnd`) and where the new text ends.
+    // The panel moves its other carets by these, so a letter typed at the first
+    // caret does not leave the second one pointing at the wrong byte.
+    struct EditSpan
+    {
+        Position begin;
+        Position oldEnd;
+        Position newEnd;
+    };
+    [[nodiscard]] std::vector<EditSpan> takeEditLog() { return std::exchange(m_editLog, {}); }
+    // `at`, moved by one edit: before it, untouched; inside what it replaced,
+    // to the end of what replaced it; after it, shifted along.
+    [[nodiscard]] static Position shifted(Position at, const EditSpan& edit) noexcept;
+
     static constexpr std::size_t MaxUndoBytes = 4u * 1024u * 1024u;
 
     // --- What the panel colours ----------------------------------------------
@@ -355,6 +391,9 @@ public:
     [[nodiscard]] core::u32 columnOfCell(core::u32 line, core::u32 cell) const noexcept;
     // Cells in the whole line, which is its drawn width.
     [[nodiscard]] core::u32 cellCount(core::u32 line) const noexcept;
+    //
+    // A TAB is the exception to "a codepoint is a cell": it runs to the next
+    // multiple of `kTabWidth`, so these three count it that way.
 
     // --- Blocks ----------------------------------------------------------------
 
@@ -429,6 +468,9 @@ private:
         std::string removed;
         std::string inserted;
         Position caretBefore;
+        // Non-zero when the edit belongs to a group (`beginGroup`), which undo
+        // and redo take whole.
+        core::u64 group = 0;
     };
 
     // The one place text actually changes. Returns the position after the
@@ -446,6 +488,9 @@ private:
     std::vector<Edit> m_redo;
     std::size_t m_undoBytes = 0;
     bool m_coalescing = false;
+    core::u64 m_group = 0;
+    core::u64 m_groups = 0;
+    std::vector<EditSpan> m_editLog;
 
     std::vector<Diagnostic> m_diagnostics;
     core::u64 m_revision = 0;
@@ -466,6 +511,21 @@ private:
 // single `Text` run spanning the line -- a real fallback rather than a stub, so
 // that `script_document.cpp` and its tests never mention the option.
 [[nodiscard]] LineState lexLine(std::string_view text, core::u32 lineIndex, LineState entry, std::vector<Token>& out);
+
+// **What colour each run of a line is drawn in** -- finer than `TokenKind`,
+// which says what the lexer saw and is what completion and the automatic `end`
+// read. This says what the reference editor colours separately: `function`,
+// `local`, `nil`, `self`, a bool, a bracket, a built-in, a function's name
+// where it is declared, a method, a property, and a `TODO` inside a comment.
+// Worked out from a line's tokens when it is drawn, so no other reader of the
+// tokens can be surprised by it.
+struct StyledRun
+{
+    core::u32 column = 0;
+    core::u32 length = 0;
+    ScriptColor color = ScriptColor::Text;
+};
+void styleLine(std::string_view text, std::span<const Token> tokens, std::vector<StyledRun>& out);
 
 // Luau's parser over the whole document, for the squiggles and the gutter marks.
 // A failed parse still carries its errors -- `Parser::parse` catches its own
@@ -497,6 +557,16 @@ struct ModuleMember
 // Empty when the source does not parse, for the reason the lints stop there: a
 // half-typed module has a partial tree and would offer half-typed names.
 void moduleMembers(const std::string& source, std::vector<ModuleMember>& out);
+
+// **The names this file lets code at `caret` see** (the owner: "`matrix` is
+// offered where it does not exist -- a name in a function's scope should be
+// offered in that scope only"). Luau's own scoping, read off the AST: a local
+// from the end of its statement to the end of its block (a `local function`
+// from its own line, since it may call itself), a function's parameters and a
+// loop's variables inside that body, and a global the file assigns or defines
+// anywhere. In the order they are declared, each once. A document that does
+// not parse still has the partial tree the parser recovered.
+void visibleNames(const std::string& source, Position caret, std::vector<std::string>& out);
 
 // **What this file's own code says a dotted path is** (the owner's report:
 // `Snake.` offered nothing in a file that had just built `Snake`).

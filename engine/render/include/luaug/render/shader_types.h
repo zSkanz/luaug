@@ -197,18 +197,25 @@ static_assert(sizeof(GpuMaterialUniforms) == 64, "GpuMaterialUniforms is a cbuff
 
 // One entry of the per-INSTANCE vertex stream (ADR 0043), at slot 1.
 //
-// The model matrix as four columns and the instance's own alpha, and NOT the
-// cofactor normal matrix: that would be four more `float4` attributes, and a
-// vertex layout is capped at sixteen on the weakest conforming device. The
-// instanced shaders derive it with three cross products per vertex instead,
-// which is the cheaper half of the trade.
+// The model matrix as four columns, the instance's own alpha and its own base
+// colour, and NOT the cofactor normal matrix: that would be four more `float4`
+// attributes, and a vertex layout is capped at sixteen on the weakest
+// conforming device. The instanced shaders derive it with three cross products
+// per vertex instead, which is the cheaper half of the trade.
 struct GpuInstance
 {
     core::Mat4 model;
     // x is `1 - BasePart.Transparency`, for the same reason
     // `GpuObjectUniforms` carries it: a per-instance alpha written into the
     // material block would split one material into as many as there are values.
-    f32 alphaUnused[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    //
+    // **yzw is the instance's base colour** (D184), for the same reason again:
+    // parts that differ only by `Color` were each their own material, so a
+    // snake of two hundred differently tinted segments was two hundred draws.
+    // A run now shares a material FAMILY (`RenderWorld::materialFamilies`) and
+    // each member brings its own colour in the three floats this already had
+    // spare -- the stride and the pipelines did not change.
+    f32 alphaTint[4]{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 static_assert(sizeof(GpuInstance) == 80, "GpuInstance is a vertex stride; see pbr_instanced.hlsl");

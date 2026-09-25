@@ -386,6 +386,14 @@ struct RenderWorld
     std::vector<RenderPart> parts;
     std::vector<RenderLight> lights;
     std::vector<RenderMaterial> materials;
+    // **Which materials are one bind set but for their base colour** (D184): by
+    // material index, the index of the first material of its family -- equal
+    // for two materials whose textures and every uniform but the base colour's
+    // rgb agree. The opaque sort key groups by it and the instancer batches by
+    // it, with each instance's colour in its own stream. Shorter than
+    // `materials` where a path added materials without families: those are
+    // each their own (`familyOf`).
+    std::vector<u32> materialFamilies;
     std::vector<DrawItem> draws;
     // Every skinned draw's palette, concatenated. One vector rather than one per
     // draw because it is uploaded per draw anyway and a vector of vectors would
@@ -442,6 +450,11 @@ struct RenderWorld
     // discarded".
     u32 culledDraws = 0;
 
+    [[nodiscard]] u32 familyOf(u32 material) const noexcept
+    {
+        return material < materialFamilies.size() ? materialFamilies[material] : material;
+    }
+
     void clear() noexcept
     {
         camera = RenderCamera{};
@@ -449,6 +462,7 @@ struct RenderWorld
         parts.clear();
         lights.clear();
         materials.clear();
+        materialFamilies.clear();
         draws.clear();
         bones.clear();
         terrains.clear();

@@ -1495,9 +1495,17 @@ local Classes: { Schema.Class } = {
         Extends = "Instance",
         Module = "render",
         Storage = "PointLight",
-        Doc = "A light radiating equally in every direction from its parent's position. Parent it to a BasePart or "
-            .. "an Attachment; a light with no such ancestor lights nothing.",
+        Doc = "A light radiating equally in every direction. Inside a BasePart or an Attachment it shines from "
+            .. "there and moves with it; anywhere else it shines from its own `CFrame` (ADR 0095).",
         Properties = {
+            {
+                Name = "CFrame",
+                Type = "CFrame",
+                Doc = "Where the light is. **In the world when nothing holds it** -- a light dropped straight into "
+                    .. "the Workspace shines from here, and turns with it -- and relative to the BasePart or "
+                    .. "Attachment it sits in otherwise, which the identity leaves exactly where that is. The owner's "
+                    .. "call (ADR 0095): a light can stand on its own.",
+            },
             {
                 Name = "Color",
                 Type = "Color3",
@@ -1719,9 +1727,18 @@ local Classes: { Schema.Class } = {
         Extends = "Instance",
         Module = "render",
         Storage = "SpotLight",
-        Doc = "A light confined to a cone about its parent's forward direction. A sibling of PointLight rather than "
-            .. "a subclass of it: the two share four properties and no behaviour.",
+        Doc = "A light confined to a cone about its forward direction -- its holder's, turned by its own "
+            .. "`CFrame`, or its own alone when nothing holds it (ADR 0095). A sibling of PointLight rather than "
+            .. "a subclass of it: the two share their placement and a few properties, and no behaviour.",
         Properties = {
+            {
+                Name = "CFrame",
+                Type = "CFrame",
+                Doc = "Where the light is. **In the world when nothing holds it** -- a light dropped straight into "
+                    .. "the Workspace shines from here, and turns with it -- and relative to the BasePart or "
+                    .. "Attachment it sits in otherwise, which the identity leaves exactly where that is. The owner's "
+                    .. "call (ADR 0095): a light can stand on its own.",
+            },
             {
                 Name = "Color",
                 Type = "Color3",

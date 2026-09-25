@@ -1,5 +1,8 @@
 #include "luaug/render/lighting.h"
 
+#include "luaug/scene/components.h"
+#include "luaug/scene/world.h"
+
 #include <cmath>
 
 namespace luaug::render {
@@ -38,6 +41,35 @@ core::Vec3 sunDirection(f32 clockTime, f32 latitudeDegrees) noexcept
         std::cos(latitude) * cosHour,
         std::sin(latitude) * cosHour,
     };
+}
+
+std::optional<LightAnchor> lightAnchorOf(const scene::World& world, core::InstanceId light) noexcept
+{
+    // The nearest attachment on the way up is the offset; the first part above
+    // it is what the offset is from. A `Bone` lights from its REST offset: its
+    // animated pose is resolved by a tick, and following it is left for when a
+    // light on a moving joint is asked for.
+    core::CFrameD own;
+    if (const scene::PointLightComponent* point = world.pointLights().find(light); point != nullptr)
+        own = point->cframe;
+    else if (const scene::SpotLightComponent* spot = world.spotLights().find(light); spot != nullptr)
+        own = spot->cframe;
+    else
+        return std::nullopt;
+
+    core::CFrameD offset;
+    bool viaAttachment = false;
+    for (core::InstanceId cursor = world.parentOf(light); cursor.valid(); cursor = world.parentOf(cursor)) {
+        if (const scene::PartComponent* part = world.parts().find(cursor); part != nullptr)
+            return LightAnchor{cursor, part->cframe, offset * own};
+        if (const scene::AttachmentComponent* attachment = world.attachments().find(cursor);
+            attachment != nullptr && !viaAttachment) {
+            viaAttachment = true;
+            offset = attachment->cframe;
+        }
+    }
+    // Nothing holds it: it shines from its own place (ADR 0095).
+    return LightAnchor{core::InstanceId{}, core::CFrameD{}, own};
 }
 
 } // namespace luaug::render

@@ -434,7 +434,9 @@ void emit(const scene::World& world, const Entry& entry, DrawList& out)
             const TextRunMetrics unit =
                 rich ? measureRichText(text, label->font, 100.0f, 0.0f) : measureText(text, label->font, 100.0f, 0.0f);
             if (unit.size.x > 0.0f && unit.size.y > 0.0f) {
-                size = 100.0f * std::fmin(self->absoluteSize.x / unit.size.x, self->absoluteSize.y / unit.size.y);
+                const f32 fits =
+                    100.0f * std::fmin(self->absoluteSize.x / unit.size.x, self->absoluteSize.y / unit.size.y);
+                size = scaledTextSize(fits);
             }
         }
 

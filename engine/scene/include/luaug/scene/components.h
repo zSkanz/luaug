@@ -360,6 +360,9 @@ struct CameraComponent
 
 struct PointLightComponent
 {
+    // Where it is: in the world when nothing holds it, relative to the part or
+    // attachment above it otherwise (ADR 0095).
+    core::CFrameD cframe;
     core::Color3 color{1.0f, 1.0f, 1.0f};
     f32 brightness = 1.0f;
     f32 range = 16.0f;
@@ -433,6 +436,8 @@ struct DecalComponent
 
 struct SpotLightComponent
 {
+    // As on `PointLightComponent` (ADR 0095).
+    core::CFrameD cframe;
     core::Color3 color{1.0f, 1.0f, 1.0f};
     f32 brightness = 1.0f;
     f32 range = 16.0f;
