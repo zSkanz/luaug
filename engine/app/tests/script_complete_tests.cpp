@@ -926,3 +926,45 @@ TEST_CASE("an index is a step: a list's element offers its class's members")
     CHECK(request.path[2] == "[]");
     CHECK(request.prefix == "Po");
 }
+
+TEST_CASE("the checker's rows lead, the tree's children stay, and a type position is the checker's alone")
+{
+    using luaug::app::Completion;
+    using luaug::app::CompletionKind;
+    // What the tree and the file found: a live child, and a name the checker
+    // also knows.
+    const std::vector<Completion> found{
+        Completion{"Spinner", "Part", "", CompletionKind::Instance},
+        Completion{"Name", "string", "", CompletionKind::Property},
+    };
+    const std::vector<Completion> checked{
+        Completion{"Name", "string", "the checker's", CompletionKind::Property},
+        Completion{"Parent", "Instance?", "", CompletionKind::Property},
+        Completion{"Destroy", "(self) -> ()", "", CompletionKind::Method},
+    };
+
+    std::vector<Completion> shown = found;
+    luaug::app::mergeCompletions(shown, checked, false, "");
+    REQUIRE(shown.size() == 4);
+    CHECK(shown.front().label == "Spinner"); // a child still sorts first
+    const auto row = [&shown](std::string_view label) {
+        return std::find_if(shown.begin(), shown.end(), [label](const Completion& c) { return c.label == label; });
+    };
+    REQUIRE(row("Name") != shown.end());
+    CHECK(row("Name")->doc == "the checker's");
+
+    // Filtered by what is typed, and a row that IS what is typed is dropped.
+    shown = found;
+    luaug::app::mergeCompletions(shown, checked, false, "Pa");
+    REQUIRE(shown.size() == 1);
+    CHECK(shown.front().label == "Parent");
+
+    // Nothing from the checker leaves the list as it was...
+    shown = found;
+    luaug::app::mergeCompletions(shown, {}, false, "");
+    CHECK(shown.size() == 2);
+    // ...except where a type is written: there it is the whole answer.
+    shown = found;
+    luaug::app::mergeCompletions(shown, {}, true, "");
+    CHECK(shown.empty());
+}

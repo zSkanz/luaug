@@ -702,15 +702,14 @@ bool searchField(const IconAtlas* icons, const char* id, const char* hint, char*
 void drawBrandMark(ImVec2 origin, float size)
 {
     const float unit = size / 64.0f;
-    const ImVec2 center(origin.x + 30.0f * unit, origin.y + 33.0f * unit);
+    const ImVec2 center(origin.x + 32.0f * unit, origin.y + 32.0f * unit);
     const ImU32 color = ImGui::GetColorU32(themeColor(palette().accent));
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->PathArcTo(center, 21.0f * unit, -55.0f * 3.14159265f / 180.0f, -2.0f * 3.14159265f, 64);
-    draw->PathLineTo(ImVec2(origin.x + 37.0f * unit, center.y));
-    draw->PathStroke(color, ImDrawFlags_None, 7.0f * unit);
-    draw->AddCircleFilled(ImVec2(origin.x + 42.0451f * unit, origin.y + 15.7978f * unit), 3.5f * unit, color);
-    draw->AddCircleFilled(ImVec2(origin.x + 37.0f * unit, center.y), 3.5f * unit, color);
-    draw->AddCircleFilled(ImVec2(origin.x + 54.0f * unit, origin.y + 10.0f * unit), 4.5f * unit, color);
+    draw->PathArcTo(center, 20.0f * unit, -48.0f * 3.14159265f / 180.0f, -2.0f * 3.14159265f, 64);
+    draw->PathLineTo(ImVec2(origin.x + 34.0f * unit, center.y));
+    draw->PathStroke(color, ImDrawFlags_None, 9.0f * unit);
+    draw->AddCircleFilled(ImVec2(origin.x + 45.3826f * unit, origin.y + 17.1371f * unit), 4.5f * unit, color);
+    draw->AddCircleFilled(ImVec2(origin.x + 34.0f * unit, center.y), 4.5f * unit, color);
 }
 
 // One step of the content browser's path, as a control that looks like the text
@@ -4761,13 +4760,16 @@ void reportLookInput(Editor& editor, bool overViewport)
         const auto axis = [](ImGuiKey positive, ImGuiKey negative) -> f32 {
             return (ImGui::IsKeyDown(positive) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(negative) ? 1.0f : 0.0f);
         };
-        const f32 sprint = ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0f : 1.0f;
+        // **Shift is for precision, not speed** (the owner: "Left Shift should
+        // make the camera slower"): a quarter of the speed, for lining up on
+        // something small. The wheel is what changes the speed itself.
+        const f32 pace = ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 0.25f : 1.0f;
         // Not even with the button held: a shortcut pressed mid-turn is still a
         // shortcut, and the keys it shares with flying must not also fly.
         if (!shortcutHeld) {
             look.move =
                 core::Vec3{axis(ImGuiKey_D, ImGuiKey_A), axis(ImGuiKey_E, ImGuiKey_Q), axis(ImGuiKey_W, ImGuiKey_S)} *
-                sprint;
+                pace;
         }
     }
 
@@ -6978,6 +6980,18 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
         return id;
     };
 
+    const auto unsavedScript = [&](std::string_view name) {
+        if (scripts == nullptr)
+            return false;
+        for (const OpenScript& tab : scripts->tabs()) {
+            char suffix[48]{};
+            (void)std::snprintf(suffix, sizeof(suffix), "###script-%u", tab.instance.index);
+            if (name.ends_with(suffix))
+                return tab.dirty();
+        }
+        return false;
+    };
+
     const auto paintNode = [&](auto&& self, ImGuiDockNode* current) -> void {
         if (current == nullptr)
             return;
@@ -7008,6 +7022,27 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
             draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(x, y),
                            ImVec2(x + size, y + size), ImVec2(sprite.u0, sprite.v0), ImVec2(sprite.u1, sprite.v1),
                            ImGui::GetColorU32(tint));
+
+            // **An unsaved script ends in a floppy**, in the gap its label
+            // leaves after the title (see `drawScriptEditor`).
+            if (unsavedScript(item.Window->Name)) {
+                // Quieter than the class icon -- grey, and a little smaller --
+                // because it is a state of the tab and not what the tab is
+                // (the owner: "a less loud colour, like grey").
+                const float mark = std::floor(size * 0.8f);
+                const IconSprite save = icons->find(icons::ActionSave, static_cast<core::u32>(mark + 0.5f));
+                if (save.valid) {
+                    const std::string_view name = item.Window->Name;
+                    const std::string_view shown = name.substr(0, name.find("###"));
+                    const float gap = ImGui::CalcTextSize(tabIconPad().c_str()).x;
+                    const float end = x + ImGui::CalcTextSize(shown.data(), shown.data() + shown.size()).x;
+                    const float left = std::floor(end - gap + (gap - mark) * 0.5f);
+                    const float top = std::floor(y + (size - mark) * 0.5f);
+                    draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(native)), ImVec2(left, top),
+                                   ImVec2(left + mark, top + mark), ImVec2(save.u0, save.v0), ImVec2(save.u1, save.v1),
+                                   ImGui::GetColorU32(themeColor(palette().textMuted)));
+                }
+            }
         }
 
         draw->PopClipRect();

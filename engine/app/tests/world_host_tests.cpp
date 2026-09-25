@@ -12,6 +12,7 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <ostream>
 #include <string>
@@ -1464,4 +1465,47 @@ TEST_CASE("every global the editor offers and lints against is one the VM really
         CAPTURE(std::string(name));
         CHECK_FALSE(host.runtime().evaluate("assert(" + std::string(name) + " ~= nil)").has_value());
     }
+}
+
+TEST_CASE("the starter template plays: its scripts run from the scene and turn the spinner")
+{
+    // **The template a new project starts from, played** (ADR 0092). Its
+    // scripts live in its scene -- one inside the part it turns, a module in
+    // ReplicatedStorage, one in ScriptService -- which no `.luau` analysis in
+    // the gate reaches, so this is the check that they run.
+    Captured log;
+    Project project;
+    std::string scene;
+    {
+        std::ifstream file(std::filesystem::path(LUAUG_TEST_CATALOG).parent_path().parent_path() / "templates" /
+                               "starter" / "content" / "scenes" / "main.scene.json",
+                           std::ios::binary);
+        REQUIRE(file.good());
+        scene.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    }
+    project.write("content/scenes/main.scene.json", scene);
+
+    app::WorldHost host;
+    app::WorldHostOptions options = app::testing::bootOptions(project.root);
+    options.bootScene = project.root / "content" / "scenes" / "main.scene.json";
+    REQUIRE_FALSE(host.boot(options).has_value());
+    REQUIRE(host.bootSceneApplied());
+
+    const core::InstanceId level = bootChildNamed(host, "Level");
+    REQUIRE(level.valid());
+    const core::InstanceId spinner = host.world().findFirstChild(level, host.world().atoms().lookup("Spinner"));
+    REQUIRE(spinner.valid());
+    const core::NameAtom frame = host.world().atoms().lookup("CFrame");
+    const auto look = [&]() {
+        const std::optional<scene::Value> value = host.world().getProperty(spinner, frame);
+        REQUIRE(value.has_value());
+        return std::get<core::CFrameD>(*value).rotation.m[0][0];
+    };
+    const core::f32 before = look();
+    for (int tick = 0; tick < 30; ++tick)
+        host.tick();
+
+    CHECK_MESSAGE(log.firstError().empty(), log.firstError());
+    CHECK(log.contains("Hello from LuauG!"));
+    CHECK(look() != doctest::Approx(static_cast<double>(before)));
 }

@@ -139,6 +139,12 @@ struct WorldHostOptions
 
     scene::StampSource bootStamps;
     std::filesystem::path bootScene;
+    // **The scene's text, when it came from a content pack** rather than a
+    // file: a built game ships `content/` as a pack, and the scene -- which now
+    // carries the project's scripts (ADR 0092) -- is in it. `bootScene` still
+    // names it, for the report; this is what is read, and a scene read from a
+    // pack is not partitioned, because the grid's cache is keyed on a file.
+    std::string bootSceneText;
 
     // **Whether boot starts the entry scripts, or only mounts them** (ADR 0058).
     //
@@ -249,6 +255,10 @@ public:
     [[nodiscard]] const scene::SceneIoReport& bootSceneReport() const noexcept { return m_bootSceneReport; }
 
     [[nodiscard]] core::u64 mountedScriptCount() const;
+    // Every `Script` in the world, from a file or from the scene (ADR 0092):
+    // what "this project has behaviour" means now that a scene carries its
+    // scripts.
+    [[nodiscard]] core::u64 scriptCount() const;
 
     // **Mounts one more file of `src/scripts`**, while editing, exactly as the
     // project's open would have: a `Script` under `ScriptService` at the path
@@ -509,6 +519,9 @@ private:
     PreserveReport m_preserveReport;
     scene::SceneIoReport m_bootSceneReport;
     bool m_bootSceneApplied = false;
+    // The project was a directory, so "no scripts" is worth a warning; a lone
+    // file named on the command line is the script.
+    bool m_projectIsDirectory = false;
     render::DebugDraw* m_gizmos = nullptr;
 
     // Aliases from the project's `.luaurc`, read once at boot. Parsed with

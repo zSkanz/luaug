@@ -2,9 +2,11 @@
 
 Three templates, per `docs/api-design.md` §4 and §8:
 
-- `starter/` — the minimal tree: `luaug.toml`, strict `.luaurc`, pinned
-  `rokit.toml`, zero-config `.vscode/`, one entry script, one shared module,
-  one test.
+- `starter/` — the minimal project: `luaug.toml` and a scene. Its scripts
+  live in the scene, inside the instances they belong to (ADR 0092): the
+  Spinner's own script turns it, a `ModuleScript` in `ReplicatedStorage` holds
+  the settings it requires, and a `Script` in `ScriptService` greets you when
+  you press Play.
 - `obby/` — the idiom teacher: tags + `TagService` signals, `CharacterBody`
   respawn, IAS jump action, tweened platforms, `Signal.new`, a HUD, localized
   strings, a `.prefab.luau`.

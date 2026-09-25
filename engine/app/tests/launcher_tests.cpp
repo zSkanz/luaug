@@ -290,7 +290,8 @@ TEST_CASE("a created project is a project, with the name substituted and the def
     REQUIRE_MESSAGE(!result.error.has_value(), why);
 
     CHECK(app::isProjectDirectory(result.path));
-    CHECK(platform::fileExists(result.path / "src" / "scripts" / "main.luau"));
+    // The scene is the project: its scripts are in it (ADR 0092).
+    CHECK(platform::fileExists(result.path / "content" / "scenes" / "main.scene.json"));
     CHECK(platform::fileExists(result.path / ".luaug" / "types" / "engine.d.luau"));
 
     std::string config;

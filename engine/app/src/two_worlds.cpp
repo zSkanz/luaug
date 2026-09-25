@@ -117,6 +117,7 @@ openSession(Session& session, rhi::IDevice& device, const render::ShaderLibrary&
         // and nothing else (ADR 0049).
         .bootStamps = {},
         .bootScene = {},
+        .bootSceneText = {},
         .networkTopology = topology,
     };
     return session.host.boot(worldOptions);

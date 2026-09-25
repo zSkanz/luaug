@@ -97,6 +97,7 @@ struct Sample
             // and nothing else (ADR 0049).
             .bootStamps = {},
             .bootScene = {},
+            .bootSceneText = {},
         });
         error.has_value())
         return error;

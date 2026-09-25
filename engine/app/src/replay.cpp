@@ -238,6 +238,7 @@ std::optional<core::EngineError> runScenario(const ReplayScenario& scenario, Rep
             // and nothing else (ADR 0049).
             .bootStamps = {},
             .bootScene = {},
+            .bootSceneText = {},
         });
         error.has_value())
         return error;

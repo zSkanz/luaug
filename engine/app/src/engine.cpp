@@ -999,13 +999,32 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (sceneRelative.empty() || !platform::fileExists(contentRoot / std::filesystem::path(sceneRelative)))
         sceneRelative = options.startupScene;
 
+    // **From the content pack when there is no file**: a built game ships its
+    // `content/` as a pack, and the scene -- with the project's scripts in it
+    // (ADR 0092) -- is in the pack and nowhere else.
+    const auto packed = [&contentMounts](const std::string& relative) -> std::optional<std::string> {
+        std::string urn = "asset://" + relative;
+        std::replace(urn.begin(), urn.end(), '\\', '/');
+        const asset::ResolvedContent found = contentMounts.resolve(urn);
+        if (found.source != asset::ResolvedContent::Source::Pack)
+            return std::nullopt;
+        return std::string(reinterpret_cast<const char*>(found.bytes.data()), found.bytes.size());
+    };
+
     std::filesystem::path bootScene;
+    std::string bootSceneText;
     if (!options.scriptPath.empty() && !sceneRelative.empty()) {
         const std::filesystem::path candidate = contentRoot / std::filesystem::path(sceneRelative);
-        if (platform::fileExists(candidate))
+        if (platform::fileExists(candidate)) {
             bootScene = candidate;
-        else
+        }
+        else if (std::optional<std::string> text = packed(sceneRelative); text.has_value()) {
+            bootScene = candidate;
+            bootSceneText = std::move(*text);
+        }
+        else {
             sceneRelative.clear();
+        }
     }
 
     // **A conformance run's own content**, when the suite ships some: the specs
@@ -1059,13 +1078,16 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         // Where a stamp's text comes from. `contentRoot` is what the editor's
         // browser is rooted at too, so a scene names the same file whichever of
         // the two loads it.
-        .bootStamps = [contentRoot](std::string_view stamp) -> std::optional<std::string> {
+        // A file first, and the pack when there is none -- the same rule the
+        // scene is found by.
+        .bootStamps = [contentRoot, packed](std::string_view stamp) -> std::optional<std::string> {
             std::string text;
-            if (!platform::readTextFile(contentRoot / std::filesystem::path(stamp), text))
-                return std::nullopt;
-            return text;
+            if (platform::readTextFile(contentRoot / std::filesystem::path(stamp), text))
+                return text;
+            return packed(std::string(stamp));
         },
         .bootScene = bootScene,
+        .bootSceneText = bootSceneText,
         // **The editor mounts and does not start** (ADR 0058). Every other way
         // of running this binary starts scripts at boot exactly as it always
         // did, and that asymmetry is the whole decision: a tool shows the world

@@ -1,0 +1,52 @@
+local AudioService = game:GetService("AudioService")
+
+local Directions = {
+    W = CFrame.new(-1, 0, 0),
+    A = CFrame.new(0, 0, 1),
+    S = CFrame.new(1, 0, 0),
+    D = CFrame.new(0, 0, -1)
+}
+
+local function inst(class, props, parent)
+    local obj = Instance.new(class)
+    for key, value in props do
+        obj[key] = value
+    end
+    obj.Parent = parent
+    return obj
+end
+
+local Snake = {}
+Snake.__index = Snake
+
+function Snake.new(gridPos: Position, gridSize: Vector2): Snake
+    local snake = setmetatable({
+        gridPos = gridPos,
+        gridSize = gridSize,
+
+        Parent = inst("Folder", { Name = "SnakeClass" }, workspace),
+        LastAction = "A",
+        Direction = "A",
+        Body = {},
+        IsAlive = true,
+        Fruit = nil,
+        Points = 0,
+
+        Died = Signal.new(),
+        Scored = Signal.new()
+    }, Snake)
+
+    return snake
+end
+
+function Snake:SetDirection(key: "W" | "A" | "S" | "D")
+    if Directions[key] and self.IsAlive then
+        self.Direction = key
+    end
+end
+
+function Snake:Update(canMove: boolean)
+    AudioService.EatFruit:Play()
+end
+
+return Snake

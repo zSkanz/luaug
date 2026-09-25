@@ -1,47 +1,26 @@
-# The project file (api-design.md §4). TOML because it is what rokit.toml and
-# pesde.toml already are, it carries comments, and it is static.
+# The project file (api-design.md §4).
 
 [project]
 name = "{{name}}"
 # Reverse-DNS, so two games with the same name are still two games.
 id = "dev.local.{{name}}"
 version = "0.1.0"
-# The world a run of this project starts with, relative to `content/`. The
-# scene is what the project HAS and the scripts are what it does (ADR 0047) --
-# and in the editor the scene is the whole of what you see until you press
-# play, because a script runs then and not when the project is opened.
+# The world the project starts with, relative to `content/`. Its scripts are
+# in it too, inside the instances they belong to (ADR 0092).
 scene = "scenes/main.scene.json"
-# The engine series this project targets. `luaug doctor` compares it.
-engine = "0.1"
-# The game's own icon, embedded in the artifact by `luaug build` -- a multi-size
-# `.ico` on Windows. Without it a built game wears the engine's mark, which is
-# the fallback and not the intent: an engine whose games all wear the engine's
-# face is a template, not an engine.
+# The game's own icon, embedded by `luaug build` -- a multi-size `.ico` on
+# Windows. Without it a built game wears the engine's.
 # icon = "assets/icon.ico"
 
 [window]
 title = "{{name}}"
 size = [1280, 720]
 
-[dev]
-# The port `luaug dev` listens on. The engine dials out to it and never listens
-# itself (ADR 0035).
-port = 4560
-
 [graphics]
-# The quality family (ADR 0044). Three layers, each overriding the one before:
-# this preset, then the individual keys below it, then the host's own flags --
-# so `luaug run --quality=low` is a player saying "not on this machine".
-#
-# These are ENGINE settings and not `Lighting` properties: `Lighting` describes
-# the world, and these describe the machine it is being shown on.
+# The quality preset (ADR 0044): "low", "medium", "high" or "ultra". A key
+# below overrides the preset, and `luaug run --quality=...` overrides both.
 quality = "high"
 # render_scale = 1.0        # 0.5 to 1.0; the world renders at this fraction, the UI does not
-# shadow_resolution = 1024  # one cascade's tile, in texels
-# shadow_cascades = 4       # 0 through 4; 0 is "the sun casts no shadow"
 # shadow_distance = 120.0   # metres
-# light_budget = 256
 # bloom = true
 # ambient_occlusion = true
-# anti_aliasing = true
-# auto_exposure = true

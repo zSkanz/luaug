@@ -67,6 +67,9 @@ local function scaffold(name: string): (string, string)
     assert.eq(created, 0)
 
     local project = projectlib.joined(parent, name)
+    -- The starter has no `assets/` of its own (ADR 0092 left it a scene and
+    -- a project file), so the icon's directory is made here.
+    fs.createDirectory(projectlib.joined(project, "assets"), { makeParents = true })
     fs.copy(projectlib.joined(root, IconFixture), projectlib.joined(project, "assets", "icon.ico"))
 
     local config = projectlib.joined(project, "luaug.toml")
@@ -125,7 +128,12 @@ test.suite("packaging", function(suite)
         assert.that(fs.exists(projectlib.joined(output, "content", "i18n", "en.json")), "no engine catalog")
         assert.that(fs.exists(projectlib.joined(output, "content", "shaders")), "no engine shaders")
         assert.that(fs.exists(projectlib.joined(output, "game", "luaug.toml")), "no project file in the game")
-        assert.that(fs.exists(projectlib.joined(output, "game", "src", "scripts", "main.luau")), "no entry script")
+        -- The content pack, which carries the starter's scene -- and with it
+        -- its scripts (ADR 0092). The engine reads the scene out of it.
+        assert.that(
+            fs.exists(projectlib.joined(output, "game", ".luaug", "content.lpack")),
+            "no content pack in the game"
+        )
 
         -- **No arguments.** That is the claim: a packaged game is a folder whose
         -- executable mounts the `game/` directory beside it, so double-clicking

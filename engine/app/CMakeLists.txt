@@ -129,6 +129,14 @@ if(LUAUG_DEBUG_UI)
     # it includes and below `app` -- so this is an ordinary downward edge and
     # `scene`, `render` and `audio` still may not reach it.
     target_link_libraries(luaug_app PRIVATE luaug::imgui SDL3::SDL3-static luaug_assetc_lib)
+
+    # **Luau's own type checker, for the script editor** (ADR 0093), and only
+    # here: a shipped game carries no Analysis (ADR 0002). It is the vendored
+    # Luau at the pin, so this is a component of an approved dependency and not
+    # a new one; `cmake/luaug_luau.cmake` keeps it out of `all` so nothing else
+    # compiles it.
+    target_sources(luaug_app PRIVATE src/language_service.cpp)
+    target_link_libraries(luaug_app PRIVATE Luau.Analysis)
 endif()
 
 # PUBLIC rather than PRIVATE: debug_overlay.h describes a class that is inert in
@@ -267,6 +275,12 @@ luaug_add_module_tests(app
 
 # The wire and the world hash describe the same state: a gate that needs the
 # replication module's own field applier, so it is built where the module is.
+# The language service's own suite, where the service is (ADR 0093).
+if(LUAUG_BUILD_TESTS AND LUAUG_DEBUG_UI)
+    target_sources(luaug_app_tests PRIVATE tests/language_service_tests.cpp)
+    target_link_libraries(luaug_app_tests PRIVATE Luau.Analysis)
+endif()
+
 if(LUAUG_BUILD_TESTS AND LUAUG_ENABLE_REPLICATION)
     target_sources(luaug_app_tests PRIVATE tests/wire_hash_tests.cpp)
     target_link_libraries(luaug_app_tests PRIVATE luaug::replication)

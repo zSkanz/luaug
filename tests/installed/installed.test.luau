@@ -115,7 +115,11 @@ test.suite("installed", function(suite)
         local created = luaug("new", "installedtest")
         assert.eq(created.code, 0, created.output)
         local project = projectlib.joined(scratch, "installedtest")
-        assert.that(fs.exists(projectlib.joined(project, "src", "scripts", "main.luau")), "no entry script")
+        -- The starter's scripts live in its scene (ADR 0092).
+        assert.that(
+            fs.exists(projectlib.joined(project, "content", "scenes", "main.scene.json")),
+            "no scene in the scaffolded project"
+        )
         assert.that(
             fs.exists(projectlib.joined(project, ".luaug", "types", "engine.d.luau")),
             "no engine definitions in the scaffolded project"

@@ -467,6 +467,28 @@ void sortCompletions(std::vector<Completion>& out)
 
 } // namespace
 
+void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completion>& analyzed, bool inType,
+                      std::string_view prefix)
+{
+    std::vector<Completion> merged;
+    for (const Completion& row : analyzed) {
+        if (startsWith(row.label, prefix) && row.label != prefix)
+            merged.push_back(row);
+    }
+    if (!inType && merged.empty())
+        return;
+    if (!inType) {
+        for (Completion& row : shown) {
+            const auto same = [&row](const Completion& kept) { return kept.label == row.label; };
+            if (startsWith(row.label, prefix) && row.label != prefix &&
+                std::find_if(merged.begin(), merged.end(), same) == merged.end())
+                merged.push_back(std::move(row));
+        }
+    }
+    shown = std::move(merged);
+    sortCompletions(shown);
+}
+
 std::span<const std::string_view> engineGlobals() noexcept
 {
     return kEngineGlobals;

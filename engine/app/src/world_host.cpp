@@ -385,15 +385,15 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
         // comes back is what stayed authored; the rest is cells, and the
         // streaming host has been told about them by the same call.
         std::filesystem::path sceneFile = options.bootScene;
-        if (options.partitionScene) {
+        if (options.partitionScene && options.bootSceneText.empty()) {
             if (std::filesystem::path partitioned = options.partitionScene(*m_world, options.bootScene);
                 !partitioned.empty()) {
                 sceneFile = std::move(partitioned);
             }
         }
 
-        std::string sceneText;
-        if (!readFile(sceneFile, sceneText)) {
+        std::string sceneText = options.bootSceneText;
+        if (sceneText.empty() && !readFile(sceneFile, sceneText)) {
             core::log(LogLevel::Warn, LUAUG_TR("scene.err.scene_unreadable"));
         }
         else if (const std::optional<core::EngineError> sceneError =
@@ -417,6 +417,16 @@ std::optional<core::EngineError> WorldHost::boot(const WorldHostOptions& options
             if (!m_world->generated(child))
                 ++authoredByScene;
         }
+    }
+
+    // A project with no scripts boots, runs its frames and reports success
+    // while doing absolutely nothing -- which is how `examples/01-instances`
+    // came to render an empty screen with no diagnostic at all. Asked after the
+    // scene, because the scene carries scripts too (ADR 0092); a warning rather
+    // than an error, because an empty project is the user's mistake to make.
+    if (m_projectIsDirectory && scriptCount() == 0) {
+        const std::array<I18nArg, 1> args{I18nArg{"path", m_root.string()}};
+        core::log(LogLevel::Warn, LUAUG_TR("engine.project.warn.no_scripts"), args);
     }
 
     // **`Instance.stamp` reads from the same place a scene load does**, so a
@@ -625,18 +635,9 @@ std::optional<core::EngineError> WorldHost::mountProject(const std::filesystem::
         });
     }
 
-    // A project that mounts nothing boots, runs its frames and reports success
-    // while doing absolutely nothing -- which is how `examples/01-instances`
-    // came to render an empty screen with no diagnostic at all. Naming the
-    // directory that was searched turns five minutes of confusion into none.
-    //
-    // A warning rather than an error: an empty project is a mistake, but it is
-    // the user's mistake to make, and refusing to boot would also refuse the
-    // legitimate act of starting an engine and building the tree from a console.
-    if (entries.empty() && isDirectory) {
-        const std::array<I18nArg, 1> args{I18nArg{"path", (m_root / "src" / "scripts").string()}};
-        core::log(LogLevel::Warn, LUAUG_TR("engine.project.warn.no_scripts"), args);
-    }
+    // Whether a project with no scripts is worth a warning is decided after
+    // the scene has loaded, because a scene carries scripts too (ADR 0092).
+    m_projectIsDirectory = isDirectory;
 
     script::mountScripts(m_runtime->state(), entries);
     return std::nullopt;
@@ -725,6 +726,17 @@ void WorldHost::firePostReload()
 core::u64 WorldHost::mountedScriptCount() const
 {
     return static_cast<core::u64>(script::mountedScriptCount(m_runtime->state()));
+}
+
+core::u64 WorldHost::scriptCount() const
+{
+    const scene::ClassId scriptClass = m_world->classes().findId(m_world->atoms().lookup("Script"));
+    if (scriptClass == scene::InvalidClass)
+        return 0;
+    std::vector<core::InstanceId> all;
+    m_world->collectDescendants(m_runtime->dataModel(), all);
+    return static_cast<core::u64>(std::count_if(
+        all.begin(), all.end(), [&](core::InstanceId id) { return m_world->classOf(id) == scriptClass; }));
 }
 
 core::u64 WorldHost::scriptLoadFailures() const

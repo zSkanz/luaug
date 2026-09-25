@@ -48,6 +48,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace luaug::core {
@@ -204,7 +205,28 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
 void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegistry& classes,
                         const core::AtomTable& atoms, const CompletionWorld& tree, std::vector<Diagnostic>& out);
 
+// The signature of the function being called at the caret (ADR 0093).
+struct SignatureHelp
+{
+    // `Name(first: type, second: type): result`.
+    std::string label;
+    // Each parameter's span in `label`, in bytes.
+    std::vector<std::pair<core::u32, core::u32>> parameters;
+    core::u32 active = 0;
+    std::string doc;
+};
+
 [[nodiscard]] std::span<const std::string_view> engineGlobals() noexcept;
+
+// **What the type checker found, over what the tree and the file found**
+// (ADR 0093). The checker's rows are the answer wherever it has one; the rows
+// `collectCompletions` found that it does not have -- a live child of an
+// instance, which only the tree knows -- are kept beside them. Where a TYPE is
+// written (`inType`) the checker's rows are the whole answer, empty or not: a
+// value's members are wrong there. Filtered by `prefix` as `collectCompletions`
+// filters, and a row that is exactly the prefix is dropped.
+void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completion>& analyzed, bool inType,
+                      std::string_view prefix);
 
 // How many rows the popup shows before it scrolls. A list somebody has to scan
 // is a list they stop reading, and eight is what fits under a line of code

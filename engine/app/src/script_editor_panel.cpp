@@ -25,8 +25,11 @@
 // leaves the code and a second means what the shell says it means.
 #include "luaug/app/script_editor_panel.h"
 
+#include "luaug/app/language_service.h"
 #include "luaug/app/script_editor.h"
 #include "luaug/app/ui_theme.h"
+#include "luaug/platform/file.h"
+#include "luaug/platform/platform.h"
 #include "luaug/scene/world.h"
 
 namespace luaug::app {
@@ -460,6 +463,44 @@ void handleTyping(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
         insertText(tab, out, index, typed);
 }
 
+// --- The language service (ADR 0093) ------------------------------------------
+
+// One for the editor, made the first time a tab asks, from the definitions the
+// build stages beside the host. None when they are missing: completion then
+// answers from the tree and the file alone, as it did before.
+[[nodiscard]] LanguageService* languageService()
+{
+    static std::unique_ptr<LanguageService> service;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        std::string definitions;
+        if (platform::readTextFile(platform::paths().contentDir / "runtime" / "types" / "engine.d.luau", definitions))
+            service = std::make_unique<LanguageService>(std::move(definitions));
+    }
+    return service.get();
+}
+
+// The scripts a require can reach, from the top of `root`'s tree: a require
+// names `game`, so the walk starts above a stage's workspace too.
+//
+// **With this tab's text from its BUFFER**, not from the world: the pane's
+// writes to `Source` land through the inspector at the next frame's safe point,
+// so the world is a keystroke behind -- and a signature asked about a call the
+// checker could not yet see was never shown.
+[[nodiscard]] LanguageTree languageTreeOf(const scene::World& world, core::InstanceId root, const OpenScript& tab)
+{
+    core::InstanceId top = root;
+    while (world.alive(top) && world.parentOf(top).valid())
+        top = world.parentOf(top);
+    LanguageTree tree = captureLanguageTree(world, top);
+    for (LanguageTree::Node& node : tree.nodes) {
+        if (node.id == tab.instance && node.script)
+            node.source = tab.document.text();
+    }
+    return tree;
+}
+
 // Recomputes what is on offer. **Called after an edit rather than on a key**, so
 // that backspacing through a word narrows the list instead of dismissing it.
 void refreshCompletions(OpenScript& tab, const scene::World* world, core::InstanceId root)
@@ -490,6 +531,146 @@ void refreshCompletions(OpenScript& tab, const scene::World* world, core::Instan
     tab.completing = !tab.completions.empty();
     if (tab.completionIndex >= tab.completions.size())
         tab.completionIndex = 0;
+
+    // **And the type checker, which answers a frame or two later** (see
+    // `takeLanguageAnswers`). Not inside quotes: a string is the tree's.
+    if (LanguageService* service = languageService(); service != nullptr && request.quoted == CompletionQuoted::No) {
+        LanguageTree snapshot = languageTreeOf(*world, root, tab);
+        tab.module = snapshot.pathOf(tab.instance);
+        if (!tab.module.empty()) {
+            tab.askedRevision = tab.document.revision();
+            tab.askedAt = tab.caret.head;
+            tab.completionPrefix = request.prefix;
+            service->requestCompletion(std::move(snapshot), tab.module, tab.caret.head, tab.askedRevision);
+        }
+    }
+}
+
+// **The answers that have come back**, each given to the tab it was asked for
+// when that tab's text and caret are still where they were -- an answer about
+// a revision somebody has typed past is dropped, not shown.
+void takeLanguageAnswers(ScriptEditor& editor)
+{
+    LanguageService* service = languageService();
+    if (service == nullptr)
+        return;
+    const auto tabOf = [&editor](const std::string& module) -> OpenScript* {
+        for (std::size_t index = 0; index < editor.count(); ++index) {
+            OpenScript* tab = editor.at(index);
+            if (tab != nullptr && !tab->module.empty() && tab->module == module)
+                return tab;
+        }
+        return nullptr;
+    };
+
+    if (std::optional<LanguageService::CompletionAnswer> answer = service->takeCompletion()) {
+        OpenScript* tab = tabOf(answer->module);
+        if (tab != nullptr && answer->revision == tab->document.revision() && answer->revision == tab->askedRevision &&
+            answer->at == tab->caret.head && !tab->justAccepted) {
+            mergeCompletions(tab->completions, answer->completions.items, answer->completions.inType,
+                             tab->completionPrefix);
+            tab->completing = !tab->completions.empty();
+            if (tab->completionIndex >= tab->completions.size())
+                tab->completionIndex = 0;
+        }
+    }
+    if (std::optional<LanguageService::SignatureAnswer> answer = service->takeSignature()) {
+        OpenScript* tab = tabOf(answer->module);
+        if (tab != nullptr && answer->revision == tab->document.revision() && answer->at == tab->caret.head)
+            tab->signature = std::move(answer->signature);
+    }
+    if (std::optional<LanguageService::CheckAnswer> answer = service->takeCheck()) {
+        OpenScript* tab = tabOf(answer->module);
+        if (tab != nullptr && answer->revision == tab->document.revision() &&
+            tab->checkedRevision != answer->revision && !tab->document.diagnosticsStale()) {
+            tab->document.appendDiagnostics(answer->check.diagnostics);
+            tab->checkedRevision = answer->revision;
+        }
+    }
+}
+
+// **Asks for the signature of the call the caret is in**, whenever the text or
+// the caret moved -- the service answers nothing when it is in no call.
+void askSignature(OpenScript& tab, const scene::World* world, core::InstanceId root)
+{
+    LanguageService* service = languageService();
+    if (service == nullptr || world == nullptr)
+        return;
+    if (tab.signatureRevision == tab.document.revision() && tab.signatureAt == tab.caret.head)
+        return;
+    tab.signatureRevision = tab.document.revision();
+    tab.signatureAt = tab.caret.head;
+    // Kept while the answer is on its way, if the caret is still on its line:
+    // a box that blinks off at every keystroke is worse than one a letter late.
+    if (tab.signature.has_value() && tab.caret.head.line != tab.askedAt.line)
+        tab.signature.reset();
+    LanguageTree snapshot = languageTreeOf(*world, root, tab);
+    tab.module = snapshot.pathOf(tab.instance);
+    if (tab.module.empty())
+        return;
+    service->requestSignature(std::move(snapshot), tab.module, tab.caret.head, tab.document.revision());
+}
+
+// **The signature of the call being typed**, above the caret's line: the
+// function's parameters with the one the caret is on in the accent, and its
+// doc under them.
+void drawSignature(const OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigin)
+{
+    if (!tab.signature.has_value() || tab.signature->label.empty())
+        return;
+    const SignatureHelp& help = *tab.signature;
+    const ThemePalette& p = currentTheme().palette;
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+
+    const float caretX =
+        textOrigin.x + static_cast<float>(tab.document.cellOf(tab.caret.head.line, tab.caret.head.column)) * m.advance;
+    const float lineTop = textOrigin.y + static_cast<float>(tab.caret.head.line) * m.lineHeight;
+    const float padding = m.advance;
+    const float labelWidth = m.font->CalcTextSizeA(m.size, FLT_MAX, 0.0f, help.label.c_str()).x;
+    // The doc's first paragraph: the rest is for the Properties grid.
+    const std::string doc = help.doc.substr(0, help.doc.find("\n\n"));
+    const float wrap = std::max(labelWidth, m.advance * 60.0f);
+    const ImVec2 docSize = doc.empty() ? ImVec2(0.0f, 0.0f) : m.font->CalcTextSizeA(m.size, FLT_MAX, wrap, doc.c_str());
+    const float width = std::max(labelWidth, docSize.x) + padding * 2.0f;
+    const float height = m.lineHeight + (doc.empty() ? 0.0f : docSize.y + m.lineHeight * 0.4f) + padding * 0.6f;
+
+    // Above the line, or below it where there is no room above.
+    const ImGuiViewport* viewport = ImGui::GetWindowViewport();
+    float top = lineTop - height - 2.0f;
+    if (top < viewport->Pos.y)
+        top = lineTop + m.lineHeight + 2.0f;
+    const float left =
+        std::max(viewport->Pos.x, std::min(caretX - padding, viewport->Pos.x + viewport->Size.x - width));
+    const ImVec2 min(left, top);
+    const ImVec2 max(left + width, top + height);
+    draw->AddRectFilled(ImVec2(min.x + 3.0f, min.y + 4.0f), ImVec2(max.x + 3.0f, max.y + 4.0f), IM_COL32(0, 0, 0, 70),
+                        4.0f);
+    draw->AddRectFilled(min, max, col(p.surfaceRaised), 4.0f);
+    draw->AddRect(min, max, col(p.accent, 0.55f), 4.0f);
+
+    // The label in three runs: before the active parameter, it, after it.
+    const float y = min.y + padding * 0.3f;
+    float x = min.x + padding;
+    const auto run = [&](std::size_t from, std::size_t to, ImU32 colour) {
+        if (to <= from)
+            return;
+        const char* begin = help.label.c_str() + from;
+        const char* end = help.label.c_str() + to;
+        draw->AddText(m.font, m.size, ImVec2(x, y), colour, begin, end);
+        x += m.font->CalcTextSizeA(m.size, FLT_MAX, 0.0f, begin, end).x;
+    };
+    if (help.active < help.parameters.size()) {
+        const auto [from, to] = help.parameters[help.active];
+        run(0, from, col(p.text));
+        run(from, to, col(p.accent));
+        run(to, help.label.size(), col(p.text));
+    }
+    else {
+        run(0, help.label.size(), col(p.text));
+    }
+    if (!doc.empty())
+        draw->AddText(m.font, m.size, ImVec2(min.x + padding, y + m.lineHeight * 1.2f), col(p.textMuted), doc.c_str(),
+                      nullptr, wrap);
 }
 
 void acceptCompletion(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
@@ -1447,6 +1628,13 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             lintInstanceAccess(tab.document, world->classes(), world->atoms(),
                                CompletionWorld{world, root, tab.instance}, reached);
             tab.document.appendDiagnostics(reached);
+            // And the type checker's, which land when it answers (ADR 0093).
+            if (LanguageService* service = languageService(); service != nullptr) {
+                LanguageTree snapshot = languageTreeOf(*world, root, tab);
+                tab.module = snapshot.pathOf(tab.instance);
+                if (!tab.module.empty())
+                    service->requestCheck(std::move(snapshot), tab.module, tab.document.revision());
+            }
         }
     }
     tab.idleRevision = tab.document.revision();
@@ -1794,6 +1982,8 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     }
 
     drawZoomReadout(editor, m);
+    askSignature(tab, world, root);
+    drawSignature(tab, m, textOrigin);
     drawCompletions(tab, m, textOrigin);
 
     // **The swatch of the colour under the pointer**, or of the one whose
@@ -2002,6 +2192,7 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
                       core::InstanceId root, ScriptEditorCommands& out)
 {
     const std::optional<std::size_t> focus = editor.takeFocusRequest();
+    takeLanguageAnswers(editor);
 
     for (std::size_t index = 0; index < editor.count(); ++index) {
         OpenScript* tab = editor.at(index);
@@ -2016,9 +2207,13 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         // icon into, and they are before the `###` for the reason `tabIconPad`
         // gives: everything that identifies a window reads from the far side of
         // it.
+        //
+        // **Unsaved, it ends in a gap the shell paints a floppy into** (the
+        // owner: "the save icon instead of the orange dot"), for the same
+        // reason the leading gap exists: a tab takes a string.
         char name[224]{};
-        (void)std::snprintf(name, sizeof(name), "%s%s###script-%u", tabIconPad().c_str(), tab->title.c_str(),
-                            tab->instance.index);
+        (void)std::snprintf(name, sizeof(name), "%s%s%s###script-%u", tabIconPad().c_str(), tab->title.c_str(),
+                            tab->dirty() ? tabIconPad().c_str() : "", tab->instance.index);
 
         // Beside the Viewport on first appearance, and wherever somebody moved
         // it afterwards -- `FirstUseEver` is what lets the saved layout win.
@@ -2026,9 +2221,7 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
             ImGui::SetNextWindowDockID(static_cast<ImGuiID>(dockNode), ImGuiCond_FirstUseEver);
 
         bool open = true;
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
-        if (tab->dirty())
-            flags |= ImGuiWindowFlags_UnsavedDocument;
+        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 
         if (focus.has_value() && *focus == index)
             tab->claimCaret = true;

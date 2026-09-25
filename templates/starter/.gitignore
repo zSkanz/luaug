@@ -1,5 +1,3 @@
-# Generated. `luaug setup` rebuilds all of it from the pinned engine.
+# Generated: the engine types `luaug new` and `luaug setup` write, for an outside
+# editor. Rebuilt from the pinned engine.
 .luaug/
-
-# Installed by rokit and by the package manager.
-luau_packages/

@@ -162,6 +162,18 @@ struct OpenScript
     // reported as "Enter does not work on a suggestion".
     bool justAccepted = false;
 
+    // **What the language service was last asked for this tab** (ADR 0093),
+    // so an answer that arrives a frame or two later is matched to the text
+    // and the caret it was asked about -- or dropped, when either moved on.
+    std::string module;
+    core::u64 askedRevision = ~0ull;
+    Position askedAt;
+    std::string completionPrefix;
+    std::optional<SignatureHelp> signature;
+    core::u64 signatureRevision = ~0ull;
+    Position signatureAt;
+    core::u64 checkedRevision = ~0ull;
+
     // **Take the caret the next time the pane is drawn**: set when the tab is
     // opened or focused, so a script just made is typed into at once, with the
     // caret on its first line, instead of waiting for a click.

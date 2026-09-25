@@ -63,7 +63,7 @@ ReloadReport reloadWorld(std::unique_ptr<WorldHost>& host, const WorldHostOption
     // directory that stopped containing scripts, which means the developer just
     // broke or moved the whole tree. Keeping the world they had is more useful
     // than swapping in an empty one and calling it a reload.
-    if (report.mountedScripts == 0 && !options.projectPath.empty()) {
+    if (fresh->scriptCount() == 0 && !options.projectPath.empty()) {
         const std::array<I18nArg, 1> args{I18nArg{"path", options.projectPath.string()}};
         report.error = core::makeError(LUAUG_TR("engine.reload.err.no_scripts"), args);
         report.spanMs = elapsedMs(started);

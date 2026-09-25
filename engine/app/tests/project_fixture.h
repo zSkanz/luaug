@@ -119,6 +119,7 @@ struct Captured
         // and nothing else (ADR 0049).
         .bootStamps = {},
         .bootScene = {},
+        .bootSceneText = {},
     };
 }
 
