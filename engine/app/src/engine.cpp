@@ -1580,6 +1580,10 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         // them, so the first resumption lands in this frame's
                         // drain and `game.Loaded` is raised after all of them.
                         if (wasEditing && !editing(editor.runState())) {
+                            // Before the scripts start, so their first line is
+                            // the first line of the console.
+                            if (overlay.has_value())
+                                overlay->clearConsole();
                             script::startScripts(host->runtime().state());
                             // **Armed against the chunks play just loaded.**
                             // `startScripts` binds each chunk as it loads, so a
@@ -1597,6 +1601,31 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     }
                     else {
                         editor.stop(host->world(), inspector);
+
+                        // **What was typed during play survives the stop**
+                        // (the owner: a variable changed while playing stayed
+                        // changed in the tab, and the next play ran the old
+                        // text). The text went into the PLAYING world's
+                        // `Source`, and the restore just put back the one from
+                        // before play -- so the tabs, which are what is on the
+                        // screen, write it again. Only where it differs, so a
+                        // stop with nothing typed marks nothing unsaved.
+                        const core::NameAtom typedSourceKey = host->world().atoms().intern("Source");
+                        for (std::size_t typedIndex = 0; typedIndex < scripts.count(); ++typedIndex) {
+                            const OpenScript* typedTab = scripts.at(typedIndex);
+                            if (typedTab == nullptr || typedTab->origin != ScriptOrigin::Scene ||
+                                !host->world().alive(typedTab->instance))
+                                continue;
+                            const std::optional<scene::Value> restored =
+                                host->world().getProperty(typedTab->instance, typedSourceKey);
+                            const std::string* restoredText =
+                                restored.has_value() ? std::get_if<std::string>(&*restored) : nullptr;
+                            const std::string typed = typedTab->document.text();
+                            if (restoredText != nullptr && *restoredText == typed)
+                                continue;
+                            (void)host->world().setProperty(typedTab->instance, typedSourceKey, scene::Value{typed});
+                            editor.touch();
+                        }
 
                         // **And stop throws the VM away** (ADR 0058). The world
                         // is back where play was pressed, which is what the line
