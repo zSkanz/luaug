@@ -45,6 +45,7 @@
 #include "luaug/core/id.h"
 #include "luaug/core/types.h"
 
+#include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
@@ -141,6 +142,10 @@ enum class CompletionQuoted : core::u8
     Tag,
     // `FindFirstAncestor(`: the name of one of the instance's ancestors.
     Ancestor,
+    // **A path into the project's `content/`** (the owner: "autocomplete for
+    // asset paths"): any string that begins `asset:` -- or is on its way to it
+    // -- where nothing else claimed the string.
+    Asset,
     // Inside quotes that are nobody's argument -- a message, a path, a name
     // being built by hand. **Offers nothing**, which is a state of its own
     // rather than a fall-through: the alternative is a list of every keyword
@@ -199,7 +204,17 @@ struct CompletionWorld
     // What `script` names: the instance whose `Source` is in the tab. `nil` in
     // a context that is not editing one.
     core::InstanceId self;
+    // The files under the project's `content/`, relative and with forward
+    // slashes -- what an `asset://` path names (see `completionAssets`).
+    std::span<const std::string> assets{};
 };
+
+// **The project's content, for completing `asset://` paths.** The shell names
+// the folder once; the list is read from disk when asked, and again at most
+// every two seconds, so a file imported a moment ago is offered without a
+// directory walk per keystroke.
+void setCompletionAssetRoot(std::filesystem::path root);
+[[nodiscard]] std::span<const std::string> completionAssets();
 
 // Reads the document backwards from `caret`. Never fails: a caret in the middle
 // of nothing answers an empty prefix and an empty subject, which is the state

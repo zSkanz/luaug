@@ -1108,3 +1108,44 @@ TEST_CASE("a string that names something the engine knows is completed, in the s
     // Free text stays free: a message is nobody's name.
     CHECK(at(fixture, tree, "print(\"Pa").empty());
 }
+
+TEST_CASE("a name is found with letters missing, after the names that begin with what was typed")
+{
+    // **The owner**: `pint "ola"` should still offer `print`.
+    Reflection fixture;
+    const std::vector<Completion> typo = at(fixture, "pint");
+    CHECK(has(typo, "print"));
+    // The first letter has to be the name's: `rint` is not `print`.
+    CHECK_FALSE(has(at(fixture, "rint"), "print"));
+    // A prefix is the better answer and comes first.
+    const std::vector<Completion> begun = at(fixture, "pr");
+    REQUIRE_FALSE(begun.empty());
+    CHECK(begun.front().label.starts_with("pr"));
+}
+
+TEST_CASE("a string that begins asset: completes to the project's files")
+{
+    // **The owner**: "autocomplete for asset paths from the content".
+    Reflection fixture;
+    const std::vector<std::string> files{"sounds/hit.ogg", "textures/dirt.png", "textures/grass_top.png"};
+    const auto with = [&](std::string_view source) {
+        ScriptDocument document(source);
+        const core::u32 last = document.lineCount() - 1;
+        const CompletionRequest request = app::completionAt(document, Position{last, document.lineLength(last)});
+        std::vector<Completion> out;
+        app::CompletionWorld world;
+        world.assets = files;
+        app::collectCompletions(document, request, fixture.classes, fixture.atoms, world, out);
+        return out;
+    };
+
+    const std::vector<Completion> assigned = with("sky.SkyboxBack = \"asset://tex");
+    CHECK(has(assigned, "asset://textures/dirt.png"));
+    CHECK(has(assigned, "asset://textures/grass_top.png"));
+    CHECK_FALSE(has(assigned, "asset://sounds/hit.ogg"));
+    // Inside a call, and on the way to the scheme.
+    CHECK(has(with("voxels:SetBlockTextures(1, \"asset:"), "asset://sounds/hit.ogg"));
+    CHECK(has(with("local path = \"as"), "asset://textures/dirt.png"));
+    // A string that is somebody else's stays theirs.
+    CHECK_FALSE(has(with("game:GetService(\"as"), "asset://textures/dirt.png"));
+}

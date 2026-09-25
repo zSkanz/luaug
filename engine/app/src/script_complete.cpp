@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <filesystem>
 #include <span>
 
 namespace luaug::app {
@@ -39,6 +41,30 @@ using core::u32;
     for (std::size_t index = 0; index < prefix.size(); ++index) {
         if (lower(text[index]) != lower(prefix[index]))
             return false;
+    }
+    return true;
+}
+
+// **What was typed, found in a name even with letters missing** (the owner:
+// `pint "ola"` should still offer `print`). The first letter has to be the
+// name's first, and every other letter has to appear in the name in the order
+// typed -- `pint` is `p.int` in `print`, `gsv` is `GetService`'s G, S and v.
+// The first letter is what keeps the list short: without it every name holding
+// the same letters somewhere would answer. A prefix is still the better
+// answer, and `sortCompletions` puts those first.
+[[nodiscard]] bool matches(std::string_view text, std::string_view typed) noexcept
+{
+    if (startsWith(text, typed))
+        return true;
+    if (typed.size() < 2 || text.empty() || lower(text.front()) != lower(typed.front()))
+        return false;
+    std::size_t at = 1;
+    for (std::size_t index = 1; index < typed.size(); ++index) {
+        while (at < text.size() && lower(text[at]) != lower(typed[index]))
+            ++at;
+        if (at == text.size())
+            return false;
+        ++at;
     }
     return true;
 }
@@ -74,7 +100,7 @@ constexpr std::array<std::string_view, 5> kTaskMembers{
 void push(std::vector<Completion>& out, const CompletionRequest& request, std::string label, std::string detail,
           std::string doc, CompletionKind kind)
 {
-    if (!startsWith(label, request.prefix))
+    if (!matches(label, request.prefix))
         return;
     out.push_back(Completion{std::move(label), std::move(detail), std::move(doc), kind});
 }
@@ -487,7 +513,13 @@ void sortCompletions(std::vector<Completion>& out, std::string_view prefix)
     const auto exact = [prefix](const Completion& row) {
         return !prefix.empty() && std::string_view(row.label).starts_with(prefix);
     };
+    // **A name that begins with what was typed before one that only holds its
+    // letters** (see `matches`), wherever either stands: `pr` finds `print`
+    // before a local `pointer`, and a letter left out is the rarer case.
+    const auto prefixed = [prefix](const Completion& row) { return startsWith(row.label, prefix); };
     std::stable_sort(out.begin(), out.end(), [&](const Completion& a, const Completion& b) {
+        if (prefixed(a) != prefixed(b))
+            return prefixed(a);
         if (a.scope != b.scope)
             return a.scope < b.scope;
         if (exact(a) != exact(b))
@@ -519,7 +551,7 @@ void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completi
     }
     std::vector<Completion> merged;
     for (const Completion& row : analyzed) {
-        if (startsWith(row.label, prefix) && row.label != prefix)
+        if (matches(row.label, prefix) && row.label != prefix)
             merged.push_back(row);
     }
     if (!inType && merged.empty())
@@ -532,7 +564,7 @@ void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completi
             // does not say whether a name is in scope, and the scan does.
             if (kept != merged.end())
                 kept->scope = std::min(kept->scope, row.scope);
-            else if (startsWith(row.label, prefix) && row.label != prefix)
+            else if (matches(row.label, prefix) && row.label != prefix)
                 merged.push_back(std::move(row));
         }
     }
@@ -563,11 +595,25 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
         // Back over `(` to the method's own name. Anything else in between and
         // this is an ordinary string, which has no completion at all.
         request.quoted = CompletionQuoted::Other;
+        // **A path into the content**: `asset:` typed is one wherever it is,
+        // and on its way to it -- from two letters, `"as` -- where the string
+        // is nobody's argument, since a free string offers nothing else.
+        constexpr std::string_view scheme = "asset://";
+        const std::string_view typed = request.prefix;
+        const bool assetTyped = typed.starts_with("asset:");
+        const bool assetComing = typed.size() >= 2 && scheme.starts_with(typed);
+        if (assetTyped) {
+            request.quoted = CompletionQuoted::Asset;
+            return request;
+        }
         u32 at = open;
         while (at > 0 && line[at - 1] == ' ')
             --at;
-        if (at == 0 || line[at - 1] != '(')
+        if (at == 0 || line[at - 1] != '(') {
+            if (assetComing)
+                request.quoted = CompletionQuoted::Asset;
             return request;
+        }
         --at;
         while (at > 0 && line[at - 1] == ' ')
             --at;
@@ -599,8 +645,11 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
             request.quoted = named;
             return request;
         }
-        if (!namesAChild(method) && named == CompletionQuoted::No)
+        if (!namesAChild(method) && named == CompletionQuoted::No) {
+            if (assetComing)
+                request.quoted = CompletionQuoted::Asset;
             return request;
+        }
 
         // The chain the call hangs off. `nameStart - 1` is its `.` or `:`.
         if (nameStart == 0 || (line[nameStart - 1] != '.' && line[nameStart - 1] != ':'))
@@ -708,6 +757,12 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                     push(out, request, std::string(name), "ancestor", "", CompletionKind::Instance);
             }
         }
+        sortCompletions(out, request.prefix);
+        return;
+    }
+    if (request.quoted == CompletionQuoted::Asset) {
+        for (const std::string& path : tree.assets)
+            push(out, request, "asset://" + path, "asset", "", CompletionKind::Module);
         sortCompletions(out, request.prefix);
         return;
     }
@@ -855,7 +910,7 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
             static std::vector<std::string> elsewhere;
             visibleNames(document.text(), request.replace.begin, visible, &elsewhere);
             const auto offer = [&](const std::string& word, CompletionScope scope) {
-                if (word == request.prefix || !startsWith(word, request.prefix))
+                if (word == request.prefix || !matches(word, request.prefix))
                     return;
                 // **One row per name** (the owner's report: `print` offered
                 // twice, "in this file" and "global"). A name the engine
@@ -960,6 +1015,68 @@ void lintInstanceAccess(const ScriptDocument& document, const scene::ClassRegist
             });
         }
     }
+}
+
+namespace {
+
+struct AssetList
+{
+    std::filesystem::path root;
+    std::vector<std::string> files;
+    std::chrono::steady_clock::time_point read{};
+    bool fresh = false;
+};
+
+AssetList& assetList()
+{
+    static AssetList list;
+    return list;
+}
+
+} // namespace
+
+void setCompletionAssetRoot(std::filesystem::path root)
+{
+    AssetList& list = assetList();
+    list.root = std::move(root);
+    list.files.clear();
+    list.fresh = false;
+}
+
+std::span<const std::string> completionAssets()
+{
+    AssetList& list = assetList();
+    if (list.root.empty())
+        return {};
+    // Editor time, not the simulation's: this is a directory listing for a
+    // person typing, and nothing the world does depends on it.
+    const auto now = std::chrono::steady_clock::now();
+    if (list.fresh && now - list.read < std::chrono::seconds(2))
+        return list.files;
+    list.files.clear();
+    std::error_code ec;
+    // Hidden folders are the engine's (`.luaug`), and a cap keeps a project
+    // pointed at a huge folder from stalling a keystroke.
+    constexpr std::size_t kMostFiles = 20000;
+    auto walk = std::filesystem::recursive_directory_iterator(
+        list.root, std::filesystem::directory_options::skip_permission_denied, ec);
+    for (auto entry = walk; !ec && entry != std::filesystem::recursive_directory_iterator(); entry.increment(ec)) {
+        const std::string name = entry->path().filename().string();
+        if (!name.empty() && name.front() == '.') {
+            if (entry->is_directory(ec))
+                entry.disable_recursion_pending();
+            continue;
+        }
+        if (!entry->is_regular_file(ec))
+            continue;
+        list.files.push_back(std::filesystem::relative(entry->path(), list.root, ec).generic_string());
+        if (list.files.size() >= kMostFiles)
+            break;
+    }
+    std::sort(list.files.begin(), list.files.end());
+    list.read = now;
+    list.fresh = true;
+    return list.files;
 }
 
 } // namespace luaug::app

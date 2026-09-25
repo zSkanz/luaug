@@ -595,7 +595,7 @@ void refreshCompletions(OpenScript& tab, const scene::World* world, core::Instan
 
     // `script` is THIS tab's instance, which is the one thing about the request
     // only the tab knows.
-    const CompletionWorld tree{world, root, tab.instance};
+    const CompletionWorld tree{world, root, tab.instance, completionAssets()};
     collectCompletions(tab.document, request, world->classes(), world->atoms(), tree, tab.completions);
     // **A word already whole closes the list**, longer names and all: `Part`
     // typed is `Part`, and `Part2D` waits for the `2`. The exact row itself
