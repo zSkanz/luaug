@@ -566,6 +566,18 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     if (const auto error = platform::init({.headless = options.headless}); error.has_value())
         return error;
 
+    // **A windowless run that serves or measures asks to be scheduled ahead**
+    // (D193). A windowed game already is, by owning the foreground window; a
+    // headless one that nobody is waiting on -- a test, a capture -- has no frame
+    // time worth protecting at the desktop's expense.
+    {
+        const bool serving = options.network.topology == replication::Topology::Host ||
+                             options.network.topology == replication::Topology::Dedicated;
+        const bool measuring = options.frameStats || !options.soakReportPath.empty();
+        if (options.headless && (serving || measuring) && platform::raiseProcessPriority())
+            core::log(LogLevel::Info, LUAUG_TR("engine.info.priority_raised"));
+    }
+
     // Declaration order below IS the shutdown order, reversed, and it is not
     // arbitrary: SDL_GPU requires a window to be released from its device
     // before the window is destroyed. Declaring the window first means the

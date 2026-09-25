@@ -18,6 +18,10 @@
 #include <system_error>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 using luaug::core::engineCatalog;
 using luaug::core::EngineError;
 
@@ -760,4 +764,19 @@ TEST_CASE("setting the application id is safe to call with nothing to set")
     luaug::platform::setApplicationId("");
     luaug::platform::setApplicationId("dev.local.luaug-test");
     luaug::platform::setApplicationId("dev.local.luaug-test");
+}
+
+TEST_CASE("raising the process priority is honest about whether it happened")
+{
+    // D193: Windows is the one platform with a foreground boost for this to
+    // stand in for, and the only one that answers yes. The priority is put back
+    // afterwards so the rest of this run is not measured under it.
+    const bool raised = luaug::platform::raiseProcessPriority();
+#if defined(_WIN32)
+    CHECK(raised);
+    CHECK(::GetPriorityClass(::GetCurrentProcess()) == ABOVE_NORMAL_PRIORITY_CLASS);
+    ::SetPriorityClass(::GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
+#else
+    CHECK_FALSE(raised);
+#endif
 }

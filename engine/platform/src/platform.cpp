@@ -202,6 +202,17 @@ u64 residentBytes() noexcept
 #endif
 }
 
+bool raiseProcessPriority() noexcept
+{
+#if defined(_WIN32)
+    // ABOVE_NORMAL and not HIGH: enough to stop a busy desktop descheduling a
+    // frame, and short of the class that starves the desktop's own input.
+    return ::SetPriorityClass(::GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS) != 0;
+#else
+    return false;
+#endif
+}
+
 std::vector<std::byte> applicationIconBytes()
 {
 #if defined(_WIN32)

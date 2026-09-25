@@ -73,6 +73,22 @@ void shutdown();
 // asserts is that the curve flattens, not what the absolute figure is.
 [[nodiscard]] u64 residentBytes() noexcept;
 
+// Asks the OS to schedule this process ahead of ordinary work (D193). Returns
+// whether it did.
+//
+// **Because a windowless run is the one thing the OS does not favour.** Windows
+// boosts the process that owns the foreground window; a headless host has no
+// window at all. On a hybrid CPU under a parallel build, the same binary at plain
+// priority was descheduled into 45-212 ms frames, and at ABOVE_NORMAL held
+// 7-9.5 ms. So the host asks for this when it is headless AND serving or
+// measuring. Never for a windowed game, which is already favoured, and never for
+// a test run, which has nobody waiting on its frames.
+//
+// Windows only. Elsewhere there is no foreground boost for this to stand in for,
+// and lowering a Unix nice value needs a privilege a game does not have: it
+// returns false and changes nothing.
+[[nodiscard]] bool raiseProcessPriority() noexcept;
+
 // `setThreadName` from architecture.md §2 is absent on purpose: SDL3 has no
 // setter for it, only SDL_GetThreadName, so it would mean per-platform code
 // with no way to test it. This note used to say it would land with `jobs`, and

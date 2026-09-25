@@ -655,6 +655,10 @@ int main(int argc, char** argv)
     }
 
     if (!options.benchRoot.empty()) {
+        // A benchmark is a measuring run with no window (D193): see
+        // `platform::raiseProcessPriority` for what that protects it from.
+        if (luaug::platform::raiseProcessPriority())
+            luaug::core::log(LogLevel::Info, LUAUG_TR("engine.info.priority_raised"));
         std::vector<luaug::app::BenchResult> results;
         if (const std::optional<luaug::core::EngineError> error =
                 luaug::app::runBenchmarks(options.benchRoot, options.benchRepeats, results)) {
