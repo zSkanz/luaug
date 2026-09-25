@@ -172,6 +172,11 @@ struct Diagnostic
     core::u32 length = 0;
     std::string message;
     Severity severity = Severity::Error;
+    // The PARSER's, as opposed to a lint's or the type checker's. A line still
+    // being typed breaks the parse further down -- an open `(` is reported at
+    // the `end` below it -- so the pane holds these back below the line being
+    // edited too, until the typing stops.
+    bool syntax = false;
 };
 
 // **Refused rather than truncated.** A document past either bound is reported as
@@ -566,7 +571,13 @@ void moduleMembers(const std::string& source, std::vector<ModuleMember>& out);
 // loop's variables inside that body, and a global the file assigns or defines
 // anywhere. In the order they are declared, each once. A document that does
 // not parse still has the partial tree the parser recovered.
-void visibleNames(const std::string& source, Position caret, std::vector<std::string>& out);
+//
+// `earlier`, when given, receives the names declared BEFORE the caret that it
+// cannot see -- a local of a function already closed. A name declared after
+// the caret, or by the statement the caret is still inside (`local x = |`),
+// does not exist yet and is in neither list.
+void visibleNames(const std::string& source, Position caret, std::vector<std::string>& out,
+                  std::vector<std::string>* earlier = nullptr);
 
 // **What this file's own code says a dotted path is** (the owner's report:
 // `Snake.` offered nothing in a file that had just built `Snake`).

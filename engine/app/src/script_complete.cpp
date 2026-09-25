@@ -730,19 +730,14 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         // order -- scope, then out of scope, then global"). The names the
         // caret can see come first; every other name the file writes follows.
         if (request.prefix.size() >= 2) {
+            //
+            // **And nothing that does not exist yet** (the owner: `ServerInfo`
+            // offered inside `local ServerInfo = require(Ser|)`): a name the
+            // file declares after the caret, or in the statement the caret is
+            // still writing, is in neither list.
             static std::vector<std::string> visible;
-            visibleNames(document.text(), request.replace.begin, visible);
-            std::vector<std::string> elsewhere;
-            for (u32 line = 0; line < document.lineCount(); ++line) {
-                for (const Token& token : document.tokens(line)) {
-                    if (token.kind != TokenKind::Identifier)
-                        continue;
-                    std::string word(document.line(line).substr(token.column, token.length));
-                    if (std::find(visible.begin(), visible.end(), word) == visible.end() &&
-                        std::find(elsewhere.begin(), elsewhere.end(), word) == elsewhere.end())
-                        elsewhere.push_back(std::move(word));
-                }
-            }
+            static std::vector<std::string> elsewhere;
+            visibleNames(document.text(), request.replace.begin, visible, &elsewhere);
             const auto offer = [&](const std::string& word, CompletionScope scope) {
                 if (word == request.prefix || !startsWith(word, request.prefix))
                     return;

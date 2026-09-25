@@ -237,6 +237,25 @@ TEST_CASE("a field written twice is a warning, in a table type and in a table")
     CHECK(duplicateAt(4));
 }
 
+TEST_CASE("a vector has what a Vector3 has: X, Y, Z, Magnitude and the methods")
+{
+    // **The owner's report**: `size.X` on a part's `Size` was "key 'X' not
+    // found in external type 'vector'".
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    (void)builder.add(service, "Main", "Script",
+                      "--!strict\nlocal size = Vector3.new(1, 2, 3)\n"
+                      "local a: number = size.X + size.y + size.Z + size.Magnitude\n"
+                      "local b: number = size:Dot(size.Unit)\nprint(a, b)\n");
+    core.update(builder.tree);
+
+    const app::LanguageCheck check = core.check("game.ScriptService.Main");
+    for (const app::Diagnostic& diagnostic : check.diagnostics)
+        MESSAGE(diagnostic.message);
+    CHECK(check.diagnostics.empty());
+}
+
 TEST_CASE("the tree a require walks is the scripts and their ancestors")
 {
     app::testing::Fixture fixture;

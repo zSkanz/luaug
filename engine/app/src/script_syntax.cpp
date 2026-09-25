@@ -646,6 +646,7 @@ void parseDiagnostics(const std::string& text, std::vector<Diagnostic>& out)
             .length = 0,
             .message = error.getMessage(),
             .severity = Severity::Error,
+            .syntax = true,
         });
     }
 
@@ -1202,14 +1203,16 @@ namespace {
 class ScopeCollector : public Luau::AstVisitor
 {
 public:
-    ScopeCollector(Position caret, std::vector<std::string>& out) : m_caret(caret), m_out(out) {}
+    ScopeCollector(Position caret, std::vector<std::string>& out, std::vector<std::string>* earlier)
+        : m_caret(caret), m_out(out), m_earlier(earlier)
+    {}
 
     bool visit(Luau::AstStatBlock* block) override
     {
         for (Luau::AstStat* statement : block->body) {
             if (const auto* local = statement->as<Luau::AstStatLocal>(); local != nullptr) {
                 for (Luau::AstLocal* variable : local->vars)
-                    offer(variable->name.value, local->location.end, block->location.end);
+                    offer(variable->name.value, local->location.end, block->location.end, /*after*/ true);
             }
             else if (const auto* function = statement->as<Luau::AstStatLocalFunction>(); function != nullptr) {
                 offer(function->name->name.value, function->location.begin, block->location.end);
@@ -1260,12 +1263,20 @@ public:
     }
 
 private:
-    void offer(const char* name, Luau::Position from, Luau::Position to)
+    // `after`: the name exists only once the caret is PAST `from` -- a
+    // `local`'s own statement, which a half-typed line ends exactly at the
+    // caret (`local x = f(|`), declares nothing yet.
+    void offer(const char* name, Luau::Position from, Luau::Position to, bool after = false)
     {
         const Position begin{static_cast<core::u32>(from.line), static_cast<core::u32>(from.column)};
         const Position end{static_cast<core::u32>(to.line), static_cast<core::u32>(to.column)};
-        if (begin <= m_caret && m_caret <= end)
+        if (m_caret < begin || (after && m_caret == begin))
+            return; // not declared yet
+        if (m_caret <= end)
             add(name);
+        else if (m_earlier != nullptr && name != nullptr && *name != '\0' &&
+                 std::find(m_earlier->begin(), m_earlier->end(), name) == m_earlier->end())
+            m_earlier->emplace_back(name);
     }
 
     void add(const char* name)
@@ -1278,14 +1289,18 @@ private:
 
     Position m_caret;
     std::vector<std::string>& m_out;
+    std::vector<std::string>* m_earlier = nullptr;
 };
 
 } // namespace
 #endif
 
-void visibleNames(const std::string& source, Position caret, std::vector<std::string>& out)
+void visibleNames(const std::string& source, Position caret, std::vector<std::string>& out,
+                  std::vector<std::string>* earlier)
 {
     out.clear();
+    if (earlier != nullptr)
+        earlier->clear();
 #if !LUAUG_LUAU_COMPILER
     (void)source;
     (void)caret;
@@ -1297,8 +1312,12 @@ void visibleNames(const std::string& source, Position caret, std::vector<std::st
     const Luau::ParseResult result = Luau::Parser::parse(source.data(), source.size(), names, allocator, options);
     if (result.root == nullptr)
         return;
-    ScopeCollector collector(caret, out);
+    ScopeCollector collector(caret, out, earlier);
     result.root->visit(&collector);
+    // A name both visible and declared earlier elsewhere is visible.
+    if (earlier != nullptr)
+        std::erase_if(*earlier,
+                      [&out](const std::string& name) { return std::find(out.begin(), out.end(), name) != out.end(); });
 #endif
 }
 

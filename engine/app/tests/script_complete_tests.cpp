@@ -990,3 +990,32 @@ TEST_CASE("the list is in scope first, then the rest of the file, then the globa
     CHECK(position("Matter") < position("matrix"));
     CHECK(position("matrix") < position("math"));
 }
+
+TEST_CASE("a name that does not exist yet is not offered")
+{
+    // **The owner's report**: `local ServerInfo = require(Ser|)` offered
+    // `ServerInfo` -- the local that very line is still declaring -- and a name
+    // declared further down the file is no more real at the caret.
+    Reflection fixture;
+    const std::vector<Completion> list = at(fixture, "local ServerInfo = require(Ser");
+    CHECK(find(list, "ServerInfo") == nullptr);
+
+    ScriptDocument document("local x = Lat\nlocal Later = 1\n");
+    const CompletionRequest request = app::completionAt(document, Position{0, document.lineLength(0)});
+    std::vector<Completion> later;
+    app::collectCompletions(document, request, fixture.classes, fixture.atoms, app::CompletionWorld{}, later);
+    CHECK(find(later, "Later") == nullptr);
+
+    // And the second report: `map`, a local of a loop further down, offered
+    // while typing `Map.` above it.
+    ScriptDocument loop("function m:Spawn()\n"
+                        "\tlocal root = Ma\n"
+                        "\tfor i = 1, 3 do\n"
+                        "\t\tlocal map = 1\n"
+                        "\tend\n"
+                        "end\n");
+    const CompletionRequest above = app::completionAt(loop, Position{1, loop.lineLength(1)});
+    std::vector<Completion> offered;
+    app::collectCompletions(loop, above, fixture.classes, fixture.atoms, app::CompletionWorld{}, offered);
+    CHECK(find(offered, "map") == nullptr);
+}

@@ -617,9 +617,67 @@ struct LanguageCore::Impl
                                  std::to_string(loaded.module->errors.size()) + " error(s)";
             }
             attachInstanceNew(globals, creatable);
+            vectorIsVector3(globals);
             Luau::freeze(globals.globalTypes);
         }
         docs = indexDocs(definitions);
+    }
+
+    // **A `vector` is a `Vector3` to the checker** (the owner: "some values
+    // are still `vector` rather than `Vector3`" -- `size.X` was an error). A
+    // part's `Size` is the VM's native vector, whose Luau type declares only
+    // `x`, `y` and `z`; the definitions describe everything else a Vector3 has
+    // on a type of its own name, which no value ever has. So the members are
+    // copied onto the native type: `X`, `Y` and `Z` beside the lowercase ones --
+    // the interpreter answers either spelling -- and `Magnitude`, `Unit` and
+    // the methods, each method's `self` retyped from `Vector3` to `vector`.
+    static void vectorIsVector3(Luau::GlobalTypes& globals)
+    {
+        const auto native = globals.globalScope->exportedTypeBindings.find("vector");
+        const std::optional<Luau::TypeFun> declared = globals.globalScope->lookupType("Vector3");
+        if (native == globals.globalScope->exportedTypeBindings.end() || !declared.has_value())
+            return;
+        const Luau::TypeId vectorType = native->second.type;
+        auto* vector = Luau::getMutable<Luau::ExternType>(vectorType);
+        const auto* vector3 = Luau::get<Luau::ExternType>(Luau::follow(declared->type));
+        if (vector == nullptr || vector3 == nullptr)
+            return;
+        const Luau::TypeId vector3Type = Luau::follow(declared->type);
+        Luau::TypeArena& arena = globals.globalTypes;
+
+        // A method's `self`, and any other `Vector3` in its signature, is the
+        // native vector the value really is.
+        const auto retyped = [&](Luau::TypeId type) {
+            const auto* function = Luau::get<Luau::FunctionType>(Luau::follow(type));
+            if (function == nullptr)
+                return type;
+            const auto swap = [&](Luau::TypePackId pack) {
+                auto [types, tail] = Luau::flatten(pack);
+                for (Luau::TypeId& each : types) {
+                    if (Luau::follow(each) == vector3Type)
+                        each = vectorType;
+                }
+                return arena.addTypePack(Luau::TypePack{std::move(types), tail});
+            };
+            Luau::FunctionType copy = *function;
+            copy.argTypes = swap(function->argTypes);
+            copy.retTypes = swap(function->retTypes);
+            return arena.addType(std::move(copy));
+        };
+        for (const auto& [name, property] : vector3->props) {
+            if (vector->props.count(name) != 0 || !property.readTy.has_value())
+                continue;
+            Luau::Property copy = property;
+            copy.readTy = retyped(*property.readTy);
+            if (copy.writeTy.has_value())
+                copy.writeTy = copy.readTy;
+            vector->props[name] = copy;
+        }
+        for (const auto& [lower, upper] : {std::pair<const char*, const char*>{"x", "X"}, {"y", "Y"}, {"z", "Z"}}) {
+            const auto found = vector->props.find(lower);
+            if (found != vector->props.end() && vector->props.count(upper) == 0)
+                vector->props[upper] = found->second;
+        }
     }
 
     // Hands `Instance.new` its magic (see `MagicInstanceNew`): each creatable

@@ -1836,9 +1836,16 @@ void drawSelection(const OpenScript& tab, const Caret& caret, const PaneMetrics&
 // break something there, and that is worth knowing now.
 constexpr double kDiagnosticSettleSeconds = 1.2;
 
-[[nodiscard]] bool settling(const OpenScript& tab, u32 line) noexcept
+//
+// **And a syntax error anywhere below it** (the owner, with an open `(` still
+// being typed and "Expected ')' ... got 'end'" shown on the line after): the
+// parser reports a half-typed line where it gives up, which is later in the
+// file, so the line alone was not enough to hold back.
+[[nodiscard]] bool settling(const OpenScript& tab, const Diagnostic& diagnostic) noexcept
 {
-    return line == tab.lastEditLine && ImGui::GetTime() - tab.lastEditTime < kDiagnosticSettleSeconds;
+    if (ImGui::GetTime() - tab.lastEditTime >= kDiagnosticSettleSeconds)
+        return false;
+    return diagnostic.at.line == tab.lastEditLine || (diagnostic.syntax && diagnostic.at.line > tab.lastEditLine);
 }
 
 void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImVec2 textOrigin, u32 first,
@@ -1863,7 +1870,7 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
     std::vector<Spoken> spoken;
 
     for (const Diagnostic& diagnostic : all) {
-        if (diagnostic.at.line < first || diagnostic.at.line > last || settling(tab, diagnostic.at.line))
+        if (diagnostic.at.line < first || diagnostic.at.line > last || settling(tab, diagnostic))
             continue;
         // **The same mark twice is one mark**: the tree lint and the type
         // checker both name an unknown global, at the same name.
