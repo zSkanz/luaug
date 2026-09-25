@@ -6,7 +6,8 @@
 #
 # Invoked as:
 #   cmake -DHOST=<luaug-host> -DSCRIPT=<luau> -DIMGCMP=<imgcmp> -DGOLDEN=<png>
-#         -DOUTPUT=<png> -DFRAMES=<n> [-DTOLERANCE=<n>] -P run_screenshot_gate.cmake
+#         -DOUTPUT=<png> -DFRAMES=<n> [-DTOLERANCE=<n>] [-DWIDTH=<w> -DHEIGHT=<h>]
+#         -P run_screenshot_gate.cmake
 #
 # `TOLERANCE` is optional and defaults to 2, which is the right answer when a
 # golden has to survive a move between GPUs. The lavapipe suite passes 0: it
@@ -24,8 +25,15 @@ endforeach()
 
 file(REMOVE "${OUTPUT}")
 
+# Optional, as in the capture driver: a golden recorded at a size is compared
+# at that size.
+set(size_args)
+if(DEFINED WIDTH AND DEFINED HEIGHT)
+    set(size_args "--width=${WIDTH}" "--height=${HEIGHT}")
+endif()
+
 execute_process(
-    COMMAND "${HOST}" "${SCRIPT}" --headless "--frames=${FRAMES}" --exit "--screenshot=${OUTPUT}"
+    COMMAND "${HOST}" "${SCRIPT}" --headless "--frames=${FRAMES}" --exit "--screenshot=${OUTPUT}" ${size_args}
     RESULT_VARIABLE host_result
     OUTPUT_VARIABLE host_output
     ERROR_VARIABLE host_output)

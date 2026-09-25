@@ -357,13 +357,15 @@ protocol 12.
 
 **Atmosphere, post effects and a sky (ADR 0096) are built**, all ten stages
 of [`docs/briefs/atmosphere-post-kickoff.md`](docs/briefs/atmosphere-post-kickoff.md),
-with twenty-three findings: `Atmosphere`, `Sky` (six pictures, sun, moon,
+with twenty-four findings: `Atmosphere`, `Sky` (six pictures, sun, moon,
 stars, clouds), `BloomEffect`, `ColorCorrectionEffect`, `BlurEffect`,
 `DepthOfFieldEffect` and `SunRaysEffect` as instances under `Lighting` or the
 camera, five new `Lighting` properties, protocol 13, and
 `examples/22-atmosphere`. A world with none draws as before, to the byte of
-the command-stream goldens. **The look of Stages 2 to 9 awaits the owner** in
-`docs/briefs/atmosphere-post/`; their goldens are recorded after.
+the command-stream goldens. **The owner accepted the look on 2026-09-25**, and
+it is held by goldens of its own: `capture_gate_look` (every effect in one
+command stream, blocking on every tier) and ten exact lavapipe images, one per
+look, named in `tests/look/goldens.txt`.
 
 **User surface shaders (ADR 0091) follow the materials work**, since they
 build on the material asset and its panel. Their Stage 0 -- verifying that a

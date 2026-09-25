@@ -701,6 +701,24 @@ if(LUAUG_BUILD_TESTS)
                 -P ${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake)
         set_tests_properties(capture_gate_skinned PROPERTIES TIMEOUT 60)
 
+        # ADR 0096's golden: every effect it added in one world, three frames,
+        # recorded after the owner accepted the look (2026-09-25). Blocking on
+        # every tier, like its neighbours -- the lavapipe images below are the
+        # pixels, and they are not. This is what stops a pass silently dropping
+        # out, a uniform block changing shape, or a pipeline being built every
+        # frame instead of once.
+        add_test(NAME capture_gate_look
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DSCENE=${CMAKE_SOURCE_DIR}/tests/look
+                -DVARIANT=everything
+                -DDRIVER=${CMAKE_SOURCE_DIR}/tests/rendercapture/run_capture_gate.cmake
+                -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/rendercapture/look-everything-3frames.jsonl
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-gate-look.jsonl
+                -DFRAMES=3
+                -P ${CMAKE_SOURCE_DIR}/tests/look/run_look_gate.cmake)
+        set_tests_properties(capture_gate_look PROPERTIES TIMEOUT 120)
+
         # M4.5's gate addition, and the one check in this file that is not a
         # golden: one scene at two `ClockTime` values, and the two frames must
         # differ. See the driver for why a golden could not make that claim --
@@ -1060,7 +1078,32 @@ if(LUAUG_BUILD_TESTS)
                 -DTOLERANCE=0
                 -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake)
 
-        set_tests_properties(lavapipe_golden_meshes lavapipe_golden_specular lavapipe_golden_ui PROPERTIES
+        # ADR 0096's looks, one image each, as the owner accepted them in
+        # `docs/briefs/atmosphere-post/` (2026-09-25): the same scene, camera
+        # and hour, with `tests/look/goldens.txt` naming the variants. 640x360,
+        # because the claim is "this look", and a smaller picture makes it
+        # for a sixth of the bytes.
+        file(STRINGS ${CMAKE_SOURCE_DIR}/tests/look/goldens.txt look_goldens)
+        set(look_golden_tests "")
+        foreach(variant IN LISTS look_goldens)
+            add_test(NAME lavapipe_golden_look_${variant}
+                COMMAND ${CMAKE_COMMAND}
+                    -DHOST=$<TARGET_FILE:luaug_host>
+                    -DIMGCMP=$<TARGET_FILE:imgcmp>
+                    -DSCENE=${CMAKE_SOURCE_DIR}/tests/look
+                    -DVARIANT=${variant}
+                    -DDRIVER=${CMAKE_SOURCE_DIR}/tests/screenshots/run_screenshot_gate.cmake
+                    -DGOLDEN=${CMAKE_SOURCE_DIR}/tests/screenshots/lavapipe/look-${variant}.png
+                    -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/lavapipe-look-${variant}.png
+                    -DFRAMES=30
+                    -DWIDTH=640
+                    -DHEIGHT=360
+                    -DTOLERANCE=0
+                    -P ${CMAKE_SOURCE_DIR}/tests/look/run_look_gate.cmake)
+            list(APPEND look_golden_tests lavapipe_golden_look_${variant})
+        endforeach()
+
+        set_tests_properties(lavapipe_golden_meshes lavapipe_golden_specular lavapipe_golden_ui ${look_golden_tests} PROPERTIES
             LABELS "lavapipe-golden"
             SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
             TIMEOUT 300)

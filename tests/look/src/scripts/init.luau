@@ -312,6 +312,37 @@ local Variants: { [string]: () -> () } = {
         sky.CloudColor = Color3.fromRGB(255, 236, 222)
         sky.Parent = Lighting
     end,
+    ["everything"] = function()
+        -- The command-stream golden's variant: every effect in one world, so
+        -- one capture holds every pass this ADR added and every block it
+        -- uploads. No pictures on the sky -- they arrive from a worker at
+        -- whatever frame it finishes, and a golden needs the same frame twice.
+        local bloom = Instance.new("BloomEffect")
+        bloom.Intensity = 2
+        bloom.Parent = Lighting
+        local grade = Instance.new("ColorCorrectionEffect")
+        grade.TintColor = Color3.fromRGB(255, 226, 196)
+        grade.Contrast = 0.2
+        grade.Parent = Lighting
+        local blur = Instance.new("BlurEffect")
+        blur.Size = 6
+        blur.Parent = camera
+        local focus = Instance.new("DepthOfFieldEffect")
+        focus.FocusDistance = 20
+        focus.InFocusRadius = 4
+        focus.Parent = Lighting
+        local rays = Instance.new("SunRaysEffect")
+        rays.Intensity = 0.8
+        rays.Parent = Lighting
+        local air = Instance.new("Atmosphere")
+        air.Density = 0.45
+        air.Glare = 2
+        air.Parent = Lighting
+        local sky = Instance.new("Sky")
+        sky.CloudCover = 0.6
+        sky.StarCount = 1500
+        sky.Parent = Lighting
+    end,
 }
 
 local apply = Variants[Variant]

@@ -2,8 +2,11 @@
 
 ADR 0096's before-and-after pictures, one folder per stage. **Every picture in
 a stage is the same camera at the same `ClockTime`**; only the effects in the
-world differ. The goldens for these effects are recorded after the owner
-accepts the look, never before.
+world differ. **The owner accepted these on 2026-09-25**, and the goldens were
+recorded from the same scene after that: `tests/rendercapture/look-everything-3frames.jsonl`
+(every effect at once, the blocking command-stream gate) and
+`tests/screenshots/lavapipe/look-*.png` (one exact image per look in
+`tests/look/goldens.txt`, at 640x360, on the nightly suite).
 
 The scene is `tests/look`: a valley at five in the afternoon on the equator,
 looking west into a sun fifteen degrees up. It has a dark frame standing across

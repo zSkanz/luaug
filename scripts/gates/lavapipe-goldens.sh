@@ -59,6 +59,15 @@ if [[ $record -eq 1 ]]; then
         --screenshot=tests/screenshots/lavapipe/specular.png
     "$host" tests/rendercapture/uipanel --headless --frames=2 --exit \
         --screenshot=tests/screenshots/lavapipe/ui.png
+    # ADR 0096's looks: each variant prepared by the same CMake script the
+    # comparison uses, so a recording and a check cannot drift apart.
+    while read -r variant; do
+        [[ -z "$variant" ]] && continue
+        scene="$build/lavapipe-look-record/$variant"
+        cmake -DSCENE=tests/look -DVARIANT="$variant" -DDESTINATION="$scene" -P tests/look/prepare_variant.cmake
+        "$host" "$scene" --headless --frames=30 --width=640 --height=360 --exit \
+            --screenshot="tests/screenshots/lavapipe/look-$variant.png"
+    done < tests/look/goldens.txt
     echo "== recorded =="
     ls -l tests/screenshots/lavapipe/
     exit 0

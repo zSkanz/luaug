@@ -120,6 +120,7 @@ Two scenes, compared **exactly**: tolerance 0, zero pixels allowed to differ.
 |---|---|---|---|
 | `meshes.png` | `examples/02-meshes` | 30 | The whole pass list at once — shadow map, sky, forward PBR, the blended pass, tonemap — and four materials that have to read as the metals and dielectrics they are |
 | `specular.png` | `tests/screenshots/specular` | 120 | The INSTANCED path, and it is here for D043: that path shipped drawing **nothing at all** while every gate it had was satisfied. The draw count fell from 15,250 to 22, the command stream matched its capture, and the frame got eight times faster — because the geometry was being transformed off-screen. A command stream and a counter can both be right about a frame that is empty |
+| `look-<variant>.png` (ten) | `tests/look`, one per line of `tests/look/goldens.txt` | 30, at 640x360 | ADR 0096's effects as the owner accepted them on 2026-09-25 — bloom, grade, blur under a sharp menu, depth of field, sun rays, the air at dusk, a sky of six pictures, the night sky and clouds, and the plain scene they are all compared with. `tests/look/run_look_gate.cmake` prepares the variant and hands it to this directory's driver |
 
 **Exact, and that is the point.** The tolerance-2 gate above exists because two
 GPUs round the last bit of a unorm conversion differently. Comparing a software

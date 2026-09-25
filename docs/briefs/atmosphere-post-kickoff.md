@@ -76,7 +76,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] A 2D check: `examples/20-platformer` with a disabled `BloomEffect` has
       sprites that no longer glow. That is M1's own
       acceptance.
-- [~] Captures for the owner (`atmosphere-post/stage2/`), then goldens -- awaiting the owner.
+- [x] Captures for the owner (`atmosphere-post/stage2/`), then goldens: accepted 2026-09-25, recorded with every other stage's (finding 24).
 
 ## Stage 3 — `BlurEffect`
 
@@ -115,7 +115,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] With an `Atmosphere`, the linear fog is off: `FogStart`, `FogEnd` and
       `FogColor` are kept and ignored, and the Properties panel says so. Without
       one, nothing changes.
-- [x] Budget ≤ 0.2 ms: at the noise floor (-0.03 to -0.01 ms). Captures at noon, dusk and night -- the look awaits the owner.
+- [x] Budget ≤ 0.2 ms: at the noise floor (-0.03 to -0.01 ms). Captures at noon, dusk and night -- accepted 2026-09-25.
 
 ## Stage 7 — `Lighting` properties, in one commit
 
@@ -329,6 +329,19 @@ here*.
    2,200-frame run that each end in a screenshot, whose readback waits for the
    GPU -- and they sit at that method's noise floor, under a tenth of a
    millisecond each. The RHI still has no timestamp query (ADR 0037).
-23. **What still needs the owner:** the look of Stages 2 to 9 in
-   `docs/briefs/atmosphere-post/`, after which their goldens are recorded;
-   nothing else. The class icons already existed (finding 1).
+23. **What still needed the owner** was the look of Stages 2 to 9 in
+   `docs/briefs/atmosphere-post/`, and nothing else; the class icons already
+   existed (finding 1). Accepted on 2026-09-25.
+24. **The goldens are one scene, prepared per variant by CMake** (after the
+   owner's word). `tests/look/prepare_variant.cmake` rewrites the scene's
+   `Variant` line exactly as `look_captures.py` did for the captures, so a
+   golden and the picture the owner approved are the same scene. Two kinds:
+   `capture_gate_look` holds every effect in ONE command stream -- blocking on
+   every tier, CI included, the thing that notices a pass dropping out or a
+   block changing shape -- and ten lavapipe images at 640x360, compared at
+   tolerance zero, hold the pixels, non-blocking like the rest of that suite.
+   The command stream carries no sky pictures, which arrive from a worker at
+   whatever frame it finishes; the images can, because a headless run
+   resamples the sky on the frame thread. Recording re-wrote the three older
+   lavapipe goldens to the same bytes, and two comparison runs passed 13 of
+   13.
