@@ -77,6 +77,7 @@
   "engine.overlay.look.wrong_parent_effect": "Does nothing here. An effect counts only directly under Lighting, where it is the world's, or directly under the current camera, where it belongs to whoever looks through it.",
   "engine.overlay.look.wrong_parent_environment": "Does nothing here. An Atmosphere or a Sky counts only directly under Lighting.",
   "engine.overlay.look.not_first": "Not used: only the first one of these directly under Lighting counts.",
+  "engine.overlay.look.fog_replaced": "FogStart, FogEnd and FogColor are kept but not used: the Atmosphere under Lighting replaces the linear fog. Remove it and they apply again.",
   "engine.overlay.look.outranked": "Not used: an earlier enabled effect of the same kind wins. Lighting's effects come first, in order, then the camera's.",
   "engine.cli.err.script_missing": "Script not found: {path}.",
   "engine.cli.version.engine": "LuauG {version} ({profile})",

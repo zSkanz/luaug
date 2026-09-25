@@ -15,9 +15,9 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Color` | `Color3` | `Color3.fromRGB(196, 210, 230)` | read/write, **inert** | The colour of the air, lit. Distant things fade towards it, and the sky turns towards it at the horizon. The sun's height still decides how bright it is: the same colour is dark at night. |
-| `Decay` | `number` | `0.1` | read/write, **inert** | How quickly the air thins with height, from 0 to 1. 0 keeps it equally thick at every altitude; at the default it halves every 100 metres of height; at 1, every 10. |
-| `Density` | `number` | `0.35` | read/write, **inert** | How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what stands 330 metres away still shows through at the height of `Offset`; at 1, half is gone within 35 metres. |
-| `Glare` | `number` | `0` | read/write, **inert** | The bright lobe the air makes around the sun, from 0 to 10. It brightens the sky near the sun and the distance seen towards it. |
-| `Haze` | `number` | `0` | read/write, **inert** | Extra thickness near the horizon, from 0 to 10: it washes the sky's horizon band into the air's colour and buries far distance deeper than `Density` alone. |
-| `Offset` | `number` | `0` | read/write, **inert** | The height, in metres, at which the air has exactly its `Density`. It is thicker below and thinner above, by `Decay`, so raising it lifts the haze up a valley's sides. |
+| `Color` | `Color3` | `Color3.fromRGB(196, 210, 230)` | read/write | The colour of the air, lit. Distant things fade towards it, and the sky turns towards it at the horizon. The sun's height still decides how bright it is: the same colour is dark at night. |
+| `Decay` | `number` | `0.1` | read/write | How quickly the air thins with height, from 0 to 1. 0 keeps it equally thick at every altitude; at the default it halves every 100 metres of height; at 1, every 10. |
+| `Density` | `number` | `0.35` | read/write | How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what stands 280 metres away still shows through at the height of `Offset`; at 1, half is gone within 35 metres. |
+| `Glare` | `number` | `0` | read/write | The bright lobe the air makes around the sun, from 0 to 10. It brightens the sky near the sun and the distance seen towards it. |
+| `Haze` | `number` | `0` | read/write | Extra thickness near the horizon, from 0 to 10: it washes the sky's horizon band into the air's colour and buries far distance deeper than `Density` alone. |
+| `Offset` | `number` | `0` | read/write | The height, in metres, at which the air has exactly its `Density`. It is thicker below and thinner above, by `Decay`, so raising it lifts the haze up a valley's sides. |

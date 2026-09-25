@@ -207,6 +207,45 @@ local Variants: { [string]: () -> () } = {
         rays.Parent = Lighting
         camera.CFrame = CFrame.lookAt(vector.create(6, 3, 1), vector.create(-40, 9, 60))
     end,
+    ["air"] = function()
+        local air = Instance.new("Atmosphere")
+        air.Parent = Lighting
+    end,
+    ["air-thick"] = function()
+        local air = Instance.new("Atmosphere")
+        air.Density = 0.6
+        air.Glare = 3
+        air.Haze = 2
+        air.Parent = Lighting
+    end,
+    ["air-noon"] = function()
+        Lighting.ClockTime = 12
+        local air = Instance.new("Atmosphere")
+        air.Density = 0.45
+        air.Parent = Lighting
+    end,
+    ["air-dusk"] = function()
+        Lighting.ClockTime = 18.2
+        local air = Instance.new("Atmosphere")
+        air.Density = 0.45
+        air.Glare = 2
+        air.Parent = Lighting
+    end,
+    ["air-night"] = function()
+        Lighting.ClockTime = 22
+        local air = Instance.new("Atmosphere")
+        air.Density = 0.45
+        air.Parent = Lighting
+    end,
+    ["noon"] = function()
+        Lighting.ClockTime = 12
+    end,
+    ["dusk"] = function()
+        Lighting.ClockTime = 18.2
+    end,
+    ["night"] = function()
+        Lighting.ClockTime = 22
+    end,
 }
 
 local apply = Variants[Variant]

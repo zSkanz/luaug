@@ -20,9 +20,9 @@ offers is on the base's page, which is what keeps one added member on
 | `Brightness` | `number` | — | read/write | How strong the sun is, independent of its colour. |
 | `ClockTime` | `number` | — | read/write | The hour of day, 0 to 24, wrapping rather than clamping so that adding a delta every tick never has to check. It is the ONLY input to the sun's direction, which is what makes a replay light the same way the live run did. |
 | `ExposureCompensation` | `number` | — | read/write | Exposure in EV stops, on top of the automatic exposure the renderer measures from the frame itself. Zero means whatever it measured; +1 is twice the light and -1 is half, which is the unit a camera uses. It is a look rather than a limit, so it is not clamped. |
-| `FogColor` | `Color3` | — | read/write | What distance fades towards between FogStart and FogEnd. |
+| `FogColor` | `Color3` | — | read/write | What distance fades towards between FogStart and FogEnd. **Kept and not used while an `Atmosphere` is directly under `Lighting`** -- the air replaces the linear fog -- and it applies again when the `Atmosphere` goes. |
 | `FogEnd` | `number` | — | read/write | Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, which is how fog is turned off without a separate flag. |
-| `FogStart` | `number` | — | read/write | Distance in metres at which fog begins. |
+| `FogStart` | `number` | — | read/write | Distance in metres at which fog begins. Kept and not used while an `Atmosphere` is directly under `Lighting`. |
 | `GeographicLatitude` | `number` | — | read/write | Degrees north of the equator, which tilts the sun's arc across the sky. The second and last input to SunDirection. |
 | `OutdoorAmbient` | `Color3` | — | read/write | The flat light on surfaces that see the open sky. What `Ambient` is for enclosed spaces; the two start equal, so a world that sets neither is lit the same inside and out, and one that wants dark caves darkens `Ambient` alone. A part is outdoors unless the terrain says otherwise. |
 | `SunDirection` | `vector` | — | read-only | The unit vector pointing from the world towards the sun, derived from ClockTime and GeographicLatitude and nothing else -- no wall clock and no accumulated state, so the same ClockTime always gives the same direction. |

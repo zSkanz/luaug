@@ -4,6 +4,7 @@
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace luaug::render {
@@ -287,6 +288,28 @@ void resolveLook(const scene::World& world, InstanceId lightingHost, InstanceId 
         }
     }
     out.blurSize = std::sqrt(blurSquared);
+}
+
+AirMedium airMediumOf(const RenderAtmosphere& atmosphere, core::f64 cameraHeight) noexcept
+{
+    AirMedium air;
+    air.extinction = atmosphere.density * atmosphere.density * 0.02f;
+    air.falloff = 0.69314718f * atmosphere.decay / 10.0f;
+    air.height = static_cast<f32>(cameraHeight - static_cast<core::f64>(atmosphere.offset));
+    air.haze = atmosphere.haze;
+    return air;
+}
+
+f32 airOpticalDepth(const AirMedium& air, f32 rise, f32 reach) noexcept
+{
+    const auto clamped = [](f32 value) { return std::clamp(value, -60.0f, 60.0f); };
+    const f32 atCamera = air.extinction * std::exp(clamped(-air.falloff * air.height));
+    const f32 k = clamped(air.falloff * rise * reach);
+    const f32 along = std::abs(k) > 1e-4f ? (1.0f - std::exp(-k)) / k : 1.0f - 0.5f * k;
+    const f32 horizon = 1.0f - std::abs(rise);
+    const f32 squared = horizon * horizon;
+    const f32 haze = air.haze * air.extinction * squared * squared * squared * squared;
+    return atCamera * reach * along + haze * reach;
 }
 
 LookStanding lookStanding(const scene::World& world, InstanceId id, InstanceId lightingHost, InstanceId camera)

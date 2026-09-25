@@ -105,17 +105,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 6 — `Atmosphere`
 
-- [ ] `Density`, `Offset`, `Color`, `Decay`, `Glare`, `Haze`, each defined in
+- [x] `Density`, `Offset`, `Color`, `Decay`, `Glare`, `Haze`, each defined in
       the manual by what it does to the picture, in this engine's own words:
       - distance and height fog, lit by the sun's colour and direction;
       - a glare lobe around the sun;
       - a horizon band tinting the sky.
-- [ ] Applied in the forward pass, on terrain, voxels, parts and particles
+- [x] Applied in the forward pass, on terrain, voxels, parts and particles
       alike, and in the sky pass, so the horizon and the ground meet.
-- [ ] With an `Atmosphere`, the linear fog is off: `FogStart`, `FogEnd` and
+- [x] With an `Atmosphere`, the linear fog is off: `FogStart`, `FogEnd` and
       `FogColor` are kept and ignored, and the Properties panel says so. Without
       one, nothing changes.
-- [ ] Budget ≤ 0.2 ms. Captures at noon, dusk and night for the owner.
+- [~] Budget ≤ 0.2 ms (measured with the others on the packaged build). Captures at noon, dusk and night for the owner -- awaiting the owner.
 
 ## Stage 7 — `Lighting` properties, in one commit
 
@@ -249,3 +249,23 @@ here*.
    a slatted fence across the sun for the same reason: a thin frame alone gave
    a glow and no shafts, which is the right answer for that scene and no way to
    judge the effect.
+13. **The air is laid over the opaque world and the sky in one pass, not in
+   every forward shader** (Stage 6). The ledger said "applied in the forward
+   pass". Doing that literally means a second build of every surface shader --
+   parts, instanced, skinned, terrain, blocks, particles -- because the old ones
+   must stay byte-identical for a world without air. Instead the forward pass
+   is closed after the opaque surfaces, as it already is for decals, and one
+   pass integrates the air along each pixel's ray from the depth buffer and
+   BLENDS it on (`dst = air * (1 - T) + dst * T`), so it never reads the image
+   it changes. The sky and the far ground are the same integral of the same
+   air, so they meet by construction. What the pass cannot see behind -- glass
+   and particles -- gets a linear fog standing in for the same air at the
+   camera's height.
+14. **Over the open sky the air counts for a share** (Stage 6). The whole
+   integral again, on top of a gradient that already is the air above, turned
+   a clear afternoon's blue grey thirty degrees up; the sky counts 30 % of it,
+   which still buries the horizon, where the integral is largest.
+15. **With air, the horizon IS the air's colour** (Stage 6). `Atmosphere.Color`
+   takes `FogColor`'s place in the sky's derivation, so it is tinted by the hour
+   as the horizon always was -- warm at dusk, dark at night -- and the sky, the
+   reflections and the air over the world agree on it.

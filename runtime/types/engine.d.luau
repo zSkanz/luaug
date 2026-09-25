@@ -1320,7 +1320,7 @@ declare extern type SunRaysEffect extends PostEffect with
 end
 
 declare extern type Atmosphere extends Instance with
-    --- How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what stands 330
+    --- How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what stands 280
     --- metres away still shows through at the height of `Offset`; at 1, half is gone within 35 metres.
     Density: number
     --- The height, in metres, at which the air has exactly its `Density`. It is thicker below and
@@ -2027,9 +2027,12 @@ declare extern type Lighting extends Instance with
     OutdoorAmbient: Color3
     --- How strong the sun is, independent of its colour.
     Brightness: number
-    --- What distance fades towards between FogStart and FogEnd.
+    --- What distance fades towards between FogStart and FogEnd. **Kept and not used while an
+    --- `Atmosphere` is directly under `Lighting`** -- the air replaces the linear fog -- and it applies
+    --- again when the `Atmosphere` goes.
     FogColor: Color3
-    --- Distance in metres at which fog begins.
+    --- Distance in metres at which fog begins. Kept and not used while an `Atmosphere` is directly
+    --- under `Lighting`.
     FogStart: number
     --- Distance in metres at which fog is total. Equal to or below FogStart means no fog at all, which
     --- is how fog is turned off without a separate flag.

@@ -265,13 +265,16 @@ local Classes: { Schema.Class } = {
             {
                 Name = "FogColor",
                 Type = "Color3",
-                Doc = "What distance fades towards between FogStart and FogEnd.",
+                Doc = "What distance fades towards between FogStart and FogEnd. **Kept and not used while an `Atmosphere` "
+                    .. "is directly under `Lighting`** -- the air replaces the linear fog -- and it applies again when "
+                    .. "the `Atmosphere` goes.",
             },
             {
                 Name = "FogStart",
                 Type = "number",
                 ErrorKey = "scene.err.number_at_least_zero",
-                Doc = "Distance in metres at which fog begins.",
+                Doc = "Distance in metres at which fog begins. Kept and not used while an `Atmosphere` is directly "
+                    .. "under `Lighting`.",
             },
             {
                 Name = "FogEnd",

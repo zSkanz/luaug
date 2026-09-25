@@ -71,3 +71,19 @@ frame alone was too thin to show any. `none.png` here is that scene.
 Only open sky shines: a slat, a post or the ground is a hole in the light, which
 is where the dark between the shafts comes from. A machine whose graphics
 settings turn `sun_rays` off -- the Low preset does -- draws without them.
+
+## Stage 6 -- `Atmosphere`
+
+Each hour is a pair: the scene as it draws with no `Atmosphere`, and the same
+hour with one, so the air is the only thing that differs.
+
+| File | What is in the world | What to look at |
+|---|---|---|
+| `none.png` / `air.png` | 17:00; an `Atmosphere` with its defaults | An afternoon haze: the far ridges and the valley's end fade into the air's colour, the blue stays overhead, and the horizon and the far ground meet in one colour |
+| `air-thick.png` | 17:00; `Density` 0.6, `Glare` 3, `Haze` 2 | A misty evening: the far half of the valley is gone, the sky whitens towards the horizon, and a bright lobe of glare surrounds the sun |
+| `noon.png` / `air-noon.png` | 12:00; `Density` 0.45 | Midday haze in the air's own colour, lit white |
+| `dusk.png` / `air-dusk.png` | 18:12, the sun just down; `Density` 0.45, `Glare` 2 | The same air tinted by the hour: warm, and dimmer |
+| `night.png` / `air-night.png` | 22:00; `Density` 0.45 | The air is dark at night -- the same colour, lit by nothing -- so the lamp glows through it rather than the air glowing |
+
+With an `Atmosphere`, `Lighting.FogStart`, `FogEnd` and `FogColor` are kept and
+not used, and the Properties panel says so on `Lighting`.

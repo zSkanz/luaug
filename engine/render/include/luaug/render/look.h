@@ -139,6 +139,33 @@ struct RenderLook
     [[nodiscard]] bool operator==(const RenderLook&) const noexcept = default;
 };
 
+// **The air as numbers** (`Atmosphere`, ADR 0096): what `look_air.hlsl`
+// integrates along every ray, derived from the instance's properties once and
+// here, so the pass, the linear fog the blended surfaces approximate it with,
+// and the tests that pin the documented distances all read one answer.
+struct AirMedium
+{
+    // How much of the light it crosses the air hides per metre, at the height
+    // of `Offset`: `Density` squared, times a fiftieth -- so the default hides
+    // half of what stands about 280 metres away, and a density of 1 half of
+    // what stands 35 metres away.
+    core::f32 extinction = 0.0f;
+    // How fast that falls per metre of height: `Decay` of 1 halves it every ten
+    // metres, 0.1 every hundred, 0 never.
+    core::f32 falloff = 0.0f;
+    // The camera's height above `Offset`, in metres.
+    core::f32 height = 0.0f;
+    // How much thicker the air grows towards the horizon, as a multiple of
+    // `extinction`.
+    core::f32 haze = 0.0f;
+};
+[[nodiscard]] AirMedium airMediumOf(const RenderAtmosphere& atmosphere, core::f64 cameraHeight) noexcept;
+
+// How much air a ray crosses from the camera: `reach` metres along a direction
+// whose vertical component is `rise`. The CPU half of `airOpticalDepth` in
+// `luaug_look.hlsli`; what survives is `exp(-depth)`.
+[[nodiscard]] core::f32 airOpticalDepth(const AirMedium& air, core::f32 rise, core::f32 reach) noexcept;
+
 // Why an instance of one of these classes changes nothing, or `Counts` when it
 // does. The editor turns each into a sentence (R3); the renderer never needs to.
 enum class LookStanding : core::u8

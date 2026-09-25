@@ -63,4 +63,39 @@ cbuffer GpuLookRaysUniforms : register(b0, space3)
 };
 #endif
 
+#if defined(LUAUG_UNIFORMS_AIR)
+// `render::GpuLookAirUniforms`, 128 bytes.
+cbuffer GpuLookAirUniforms : register(b0, space3)
+{
+    column_major float4x4 AirInverseViewProjection;
+    // x how much the air hides per metre at the height of `Offset`, y how fast
+    // that falls per metre of height, z the camera's height above `Offset`,
+    // w how much thicker it grows towards the horizon.
+    float4 AirDensity;
+    // rgb the air's own light, w how far a ray into the sky is taken to go.
+    float4 AirLight;
+    // rgb the glare's light towards the sun, already scaled by `Glare`; w the
+    // share of the air a ray into the open sky counts.
+    float4 AirGlare;
+    // xyz towards the sun, w how tight its glare lobe is.
+    float4 AirSun;
+};
+
+// How much air a ray crosses from the camera, `reach` metres along a direction
+// whose vertical part is `rise`: the integral of an exponential in height along
+// a straight line, which has a closed form. `render::airOpticalDepth` is the
+// same function on the CPU, and a test holds the two to each other's numbers.
+float airOpticalDepth(float rise, float reach)
+{
+    const float atCamera = AirDensity.x * exp(clamp(-AirDensity.y * AirDensity.z, -60.0f, 60.0f));
+    const float k = clamp(AirDensity.y * rise * reach, -60.0f, 60.0f);
+    // (1 - e^-k) / k, which tends to 1 as the ray runs level or the air stops
+    // thinning -- written as its series there, where the quotient is 0 / 0.
+    const float along = abs(k) > 1e-4f ? (1.0f - exp(-k)) / k : 1.0f - 0.5f * k;
+    const float horizon = 1.0f - abs(rise);
+    const float haze = AirDensity.w * AirDensity.x * pow(horizon * horizon, 4.0f);
+    return atCamera * reach * along + haze * reach;
+}
+#endif
+
 #endif // LUAUG_LOOK_HLSLI

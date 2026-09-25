@@ -358,6 +358,22 @@ struct GpuLookRaysUniforms
 };
 static_assert(sizeof(GpuLookRaysUniforms) == 32, "GpuLookRaysUniforms is mirrored by luaug_look.hlsli");
 
+// `luaug_look.hlsli`'s air block (ADR 0096), for `look_air.hlsl`.
+struct GpuLookAirUniforms
+{
+    core::Mat4 inverseViewProjection;
+    // `render::AirMedium`: extinction, falloff, the camera's height above
+    // `Offset`, and haze.
+    f32 density[4]{};
+    // The air's own light, and how far a ray into the sky is taken to go.
+    f32 light[4]{};
+    // The glare's light towards the sun.
+    f32 glare[4]{};
+    // Towards the sun, and the glare lobe's tightness.
+    f32 sun[4]{};
+};
+static_assert(sizeof(GpuLookAirUniforms) == 128, "GpuLookAirUniforms is mirrored by luaug_look.hlsli");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

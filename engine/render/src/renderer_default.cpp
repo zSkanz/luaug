@@ -122,6 +122,18 @@ constexpr f32 kRaysStrength = 3.0f;
 // How far past the screen's edge, in the screen's half-widths, the sun may go
 // before its rays have faded away entirely.
 constexpr f32 kRaysEdgeFade = 0.6f;
+// How far a ray into the open sky is taken to travel through the air, in
+// metres. Far enough that a level ray is buried in any air there is, near
+// enough that an air which never thins (`Decay` 0) still leaves the zenith a
+// little of the sky's own colour at a low `Density`.
+constexpr f32 kAirSkyReach = 40000.0f;
+// The glare lobe's tightness about the sun, and its strength at `Glare` 1.
+constexpr f32 kAirGlareExponent = 12.0f;
+constexpr f32 kAirGlareStrength = 0.35f;
+// The share of the air a ray into the open sky counts (`look_air.hlsl`): the
+// gradient is already the air above, so the whole integral again drew a grey
+// afternoon. The horizon, where the integral is largest, is buried either way.
+constexpr f32 kAirSkyShare = 0.3f;
 
 // The most instances one frame may draw through the instanced path, and the one
 // vertex buffer they all live in. Five megabytes, allocated once: the alternative
@@ -447,8 +459,17 @@ private:
         rhi::PipelineHandle handle{};
         bool tried = false;
     };
+    // How a look pipeline writes: over what is there, added to it, or laid over
+    // it as air -- `dst = src + dst * srcAlpha`, the colour the air adds and
+    // the fraction of what is behind it that survives.
+    enum class LookBlend : core::u8
+    {
+        Replace,
+        Add,
+        Air,
+    };
     [[nodiscard]] bool ensureLookPipeline(rhi::IDevice& device, LookPipeline& slot, const char* shader,
-                                          rhi::TextureFormat format, bool additive = false);
+                                          rhi::TextureFormat format, LookBlend blend = LookBlend::Replace);
 
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
@@ -688,12 +709,14 @@ private:
     LookPipeline raysMask_;
     LookPipeline raysGather_;
     LookPipeline raysAdd_;
+    // The air, laid over the opaque world and the sky.
+    LookPipeline air_;
 
     // Every look pipeline, for `destroy`.
-    [[nodiscard]] std::array<LookPipeline*, 9> lookPipelines() noexcept
+    [[nodiscard]] std::array<LookPipeline*, 10> lookPipelines() noexcept
     {
         return {&gradedTonemap_,  &blur_,     &resample_,   &focusPrepare_, &focusGather_,
-                &focusComposite_, &raysMask_, &raysGather_, &raysAdd_};
+                &focusComposite_, &raysMask_, &raysGather_, &raysAdd_,      &air_};
     }
 
     // **The look's own images, made the first frame one is needed** and
@@ -2193,7 +2216,7 @@ bool DefaultRenderer::ensureDecals(rhi::IDevice& device)
 }
 
 bool DefaultRenderer::ensureLookPipeline(rhi::IDevice& device, LookPipeline& slot, const char* shader,
-                                         rhi::TextureFormat format, bool additive)
+                                         rhi::TextureFormat format, LookBlend blend)
 {
     if (slot.tried)
         return slot.handle.valid();
@@ -2212,10 +2235,17 @@ bool DefaultRenderer::ensureLookPipeline(rhi::IDevice& device, LookPipeline& slo
         return false;
     }
     rhi::ColorTargetDesc target{.format = format};
-    if (additive) {
+    if (blend == LookBlend::Add) {
         target.blend = {.enabled = true,
                         .srcColor = rhi::BlendFactor::One,
                         .dstColor = rhi::BlendFactor::One,
+                        .srcAlpha = rhi::BlendFactor::Zero,
+                        .dstAlpha = rhi::BlendFactor::One};
+    }
+    else if (blend == LookBlend::Air) {
+        target.blend = {.enabled = true,
+                        .srcColor = rhi::BlendFactor::One,
+                        .dstColor = rhi::BlendFactor::SrcAlpha,
                         .srcAlpha = rhi::BlendFactor::Zero,
                         .dstAlpha = rhi::BlendFactor::One};
     }
@@ -2293,7 +2323,7 @@ void DefaultRenderer::sunRaysOnto(rhi::IDevice& device, rhi::ICmdList& cmd, cons
 
     if (!ensureLookPipeline(device, raysMask_, "look_rays_mask", kHdrFormat) ||
         !ensureLookPipeline(device, raysGather_, "look_rays_gather", kHdrFormat) ||
-        !ensureLookPipeline(device, raysAdd_, "look_resample", kHdrFormat, true))
+        !ensureLookPipeline(device, raysAdd_, "look_resample", kHdrFormat, LookBlend::Add))
         return;
     // Half resolution: at a quarter, a post or a branch in front of the sun was
     // a texel or two of the mask, and its shaft drowned in the glow around it.
@@ -2783,7 +2813,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // The sky, resolved once, and the one place its derived colours come from.
     // Both the sky pass and the prefiltered environment read this struct, which
     // is what stops a reflection from disagreeing with what it reflects.
-    const SkyParams sky = skyParamsFor(world.environment.sunDirection, world.environment.fogColor);
+    //
+    // **With an `Atmosphere`, the horizon is the air's colour** (ADR 0096): it
+    // takes `FogColor`'s place in the derivation, so the air is tinted by the
+    // hour exactly as the horizon was -- warm at dusk, dark at night -- and the
+    // sky, the reflections and the air laid over the world all agree on it.
+    const bool air = world.look.atmosphere.present;
+    const SkyParams sky =
+        skyParamsFor(world.environment.sunDirection, air ? world.look.atmosphere.color : world.environment.fogColor);
     updateEnvironment(cmd, sky);
 
     // The clustered light assignment, and its three tables. Built on the CPU
@@ -2794,6 +2831,11 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // `rhi.err.upload_inside_pass` refuses the alternative and is right to: the
     // GPU is rasterizing into the target by then.
     stats_ = RendererStats{};
+    // The air's pipeline the first frame there is air -- before any pass,
+    // because the air is laid INSIDE the forward pass's span, and a pipeline
+    // made mid-pass is not.
+    const bool airDrawn =
+        air && world.camera.valid && ensureLookPipeline(device, air_, "look_air", kHdrFormat, LookBlend::Air);
     buildInstanceBatches(world, meshes);
     if (!instanceStaging_.empty()) {
         cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);
@@ -3340,17 +3382,32 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         frame.outdoorAmbient[0] = world.environment.outdoorAmbient.r;
         frame.outdoorAmbient[1] = world.environment.outdoorAmbient.g;
         frame.outdoorAmbient[2] = world.environment.outdoorAmbient.b;
-        frame.fogColor[0] = world.environment.fogColor.r;
-        frame.fogColor[1] = world.environment.fogColor.g;
-        frame.fogColor[2] = world.environment.fogColor.b;
-        frame.fogRange[0] = world.environment.fogStart;
-        frame.fogRange[1] = world.environment.fogEnd;
+        // **With an `Atmosphere` the linear fog is not the world's any more**
+        // (ADR 0096): `FogStart`, `FogEnd` and `FogColor` are kept and not
+        // used. The opaque world and the sky are covered by the air pass below;
+        // what still reads these three -- the blended surfaces and the
+        // particles, which the air pass cannot see behind -- gets a linear
+        // stand-in for the same air at the camera's height: its colour, from
+        // the camera out to where nineteen parts in twenty are hidden.
+        Color3 fogColor = world.environment.fogColor;
+        f32 fogStart = world.environment.fogStart;
+        f32 fogEnd = world.environment.fogEnd;
+        if (air) {
+            const AirMedium medium = airMediumOf(world.look.atmosphere, world.camera.origin.y);
+            const f32 hidden = airOpticalDepth(medium, 0.0f, 1.0f);
+            fogColor = sky.horizonColor;
+            fogStart = 0.0f;
+            fogEnd = hidden > 0.0f ? 3.0f / hidden : 0.0f;
+        }
+        frame.fogColor[0] = fogColor.r;
+        frame.fogColor[1] = fogColor.g;
+        frame.fogColor[2] = fogColor.b;
+        frame.fogRange[0] = fogStart;
+        frame.fogRange[1] = fogEnd;
         // Precomputed here so a fragment shader does not divide per pixel, and
         // zero when fog is off -- which makes the fog factor zero without the
         // shader needing to know that `end <= start` means anything.
-        frame.fogRange[2] = world.environment.fogEnd > world.environment.fogStart
-                                ? 1.0f / (world.environment.fogEnd - world.environment.fogStart)
-                                : 0.0f;
+        frame.fogRange[2] = fogEnd > fogStart ? 1.0f / (fogEnd - fogStart) : 0.0f;
         for (u32 index = 0; index < kShadowCascadeCount; ++index) {
             frame.cascadeViewProjection[index] = cascades.viewProjection[index];
             // A cascade past the setting's count was never rendered into, so its
@@ -3507,6 +3564,53 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
         }
 
+        // **The air** (`Atmosphere`, ADR 0096), over everything opaque and
+        // over the sky, before anything blended: it reads the depth the forward
+        // pass has attached, so the pass is closed around it and reopened after,
+        // as it is for the decals -- only on a frame that has air.
+        if (airDrawn) {
+            cmd.endRenderPass();
+            const AirMedium medium = airMediumOf(world.look.atmosphere, world.camera.origin.y);
+            GpuLookAirUniforms airBlock;
+            airBlock.inverseViewProjection = core::inverse(world.camera.viewProjection);
+            airBlock.density[0] = medium.extinction;
+            airBlock.density[1] = medium.falloff;
+            airBlock.density[2] = medium.height;
+            airBlock.density[3] = medium.haze;
+            airBlock.light[0] = sky.horizonColor.r;
+            airBlock.light[1] = sky.horizonColor.g;
+            airBlock.light[2] = sky.horizonColor.b;
+            airBlock.light[3] = kAirSkyReach;
+            const f32 glare = world.look.atmosphere.glare * kAirGlareStrength * sky.dayFactor;
+            airBlock.glare[0] = sky.sunColor.r * glare;
+            airBlock.glare[1] = sky.sunColor.g * glare;
+            airBlock.glare[2] = sky.sunColor.b * glare;
+            airBlock.glare[3] = kAirSkyShare;
+            airBlock.sun[0] = sky.sunDirection.x;
+            airBlock.sun[1] = sky.sunDirection.y;
+            airBlock.sun[2] = sky.sunDirection.z;
+            airBlock.sun[3] = kAirGlareExponent;
+            const std::array<rhi::TextureBinding, 1> sceneDepth{rhi::TextureBinding{depth_, pointSampler_}};
+            fullscreenPass(cmd, air_.handle, hdr_, renderWidth_, renderHeight_, "atmosphere", sceneDepth,
+                           asBytes(&airBlock, sizeof(airBlock)), rhi::LoadOp::Load);
+
+            const std::array<rhi::ColorAttachment, 1> resumeTarget{rhi::ColorAttachment{
+                .texture = hdr_,
+                .loadOp = rhi::LoadOp::Load,
+                .storeOp = rhi::StoreOp::Store,
+            }};
+            cmd.beginRenderPass({
+                .colorAttachments = resumeTarget,
+                .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Load, .storeOp = rhi::StoreOp::Store},
+                .debugName = "forward-after-air",
+            });
+            cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+            cmd.setScissor(
+                {.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
+            cmd.setPipeline(pbrBlendPipeline_);
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
+        }
+
         // Blended, after the opaque pass has filled depth, back to front. The
         // frame uniforms are still bound -- same block, same slot, same values
         // -- so only the pipeline changes.
@@ -3547,9 +3651,9 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             lighting.sunLight[0] = sky.lightColor.r * sun;
             lighting.sunLight[1] = sky.lightColor.g * sun;
             lighting.sunLight[2] = sky.lightColor.b * sun;
-            lighting.fogColor[0] = world.environment.fogColor.r;
-            lighting.fogColor[1] = world.environment.fogColor.g;
-            lighting.fogColor[2] = world.environment.fogColor.b;
+            lighting.fogColor[0] = frame.fogColor[0];
+            lighting.fogColor[1] = frame.fogColor[1];
+            lighting.fogColor[2] = frame.fogColor[2];
             lighting.fogRange[0] = frame.fogRange[0];
             lighting.fogRange[1] = frame.fogRange[1];
             lighting.fogRange[2] = frame.fogRange[2];

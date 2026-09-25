@@ -3745,6 +3745,21 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
                 ImGui::TextWrapped("%s", inactive.c_str());
                 ImGui::PopStyleColor();
             }
+            // **`Lighting`'s linear fog, while an `Atmosphere` replaces it**
+            // (ADR 0096): the three properties are kept -- remove the air and
+            // they apply again -- and not used, which a person tuning
+            // `FogEnd` and watching nothing happen needs to be told.
+            if (world.lighting().find(id) != nullptr) {
+                for (core::InstanceId child = world.firstChild(id); child.valid(); child = world.nextSibling(child)) {
+                    if (world.atmospheres().find(child) == nullptr || world.destroyed(child))
+                        continue;
+                    const std::string note = core::engineCatalog().format(LUAUG_TR("engine.overlay.look.fog_replaced"));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.72f, 0.3f, 1.0f));
+                    ImGui::TextWrapped("%s", note.c_str());
+                    ImGui::PopStyleColor();
+                    break;
+                }
+            }
         }
     }
 

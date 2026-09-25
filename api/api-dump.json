@@ -29,38 +29,32 @@
         {
           "Name": "Color",
           "Type": "Color3",
-          "Default": "Color3.fromRGB(196, 210, 230)",
-          "Inert": true
+          "Default": "Color3.fromRGB(196, 210, 230)"
         },
         {
           "Name": "Decay",
           "Type": "number",
-          "Default": "0.1",
-          "Inert": true
+          "Default": "0.1"
         },
         {
           "Name": "Density",
           "Type": "number",
-          "Default": "0.35",
-          "Inert": true
+          "Default": "0.35"
         },
         {
           "Name": "Glare",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         },
         {
           "Name": "Haze",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         },
         {
           "Name": "Offset",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         }
       ],
       "Methods": [],

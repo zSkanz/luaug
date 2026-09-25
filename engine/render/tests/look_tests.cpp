@@ -348,3 +348,31 @@ TEST_CASE("a destroyed effect is not part of the look")
     (void)fixture.world.destroy(blur);
     CHECK(fixture.resolve().blurSize == 0.0f);
 }
+
+TEST_CASE("the air hides what its documentation says, at the distances it names")
+{
+    // `Atmosphere.Density`'s own sentence: at the default, half of what stands
+    // 280 metres away still shows at the height of `Offset`; at 1, half is gone
+    // within 35 metres. Level rays, at the offset's own height.
+    render::RenderAtmosphere air;
+    air.present = true;
+    air.density = 0.35f;
+    const render::AirMedium medium = render::airMediumOf(air, 0.0);
+    CHECK(nearly(std::exp(-render::airOpticalDepth(medium, 0.0f, 280.0f)), 0.5f, 0.02f));
+
+    air.density = 1.0f;
+    const render::AirMedium thick = render::airMediumOf(air, 0.0);
+    CHECK(nearly(std::exp(-render::airOpticalDepth(thick, 0.0f, 35.0f)), 0.5f, 0.02f));
+
+    // Thinner with height: from 100 metres up, with `Decay` at its default,
+    // the same level ray crosses half the air.
+    const render::AirMedium high = render::airMediumOf(render::RenderAtmosphere{.present = true}, 100.0);
+    CHECK(nearly(render::airOpticalDepth(high, 0.0f, 280.0f) / render::airOpticalDepth(medium, 0.0f, 280.0f), 0.5f,
+                 1e-3f));
+
+    // Looking up, the sky's reach is finite even with no end to the air: the
+    // integral of a falling exponential converges.
+    const core::f32 upward = render::airOpticalDepth(medium, 1.0f, 40000.0f);
+    CHECK(std::isfinite(upward));
+    CHECK(upward < render::airOpticalDepth(medium, 0.0f, 40000.0f));
+}
