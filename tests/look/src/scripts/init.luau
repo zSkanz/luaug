@@ -127,6 +127,42 @@ local Variants: { [string]: () -> () } = {
         grade.Brightness = -0.05
         grade.Parent = Lighting
     end,
+    ["blur-menu"] = function()
+        -- A pause menu: the viewer's blur, on the camera, and a label drawn
+        -- over it that stays sharp.
+        local blur = Instance.new("BlurEffect")
+        blur.Size = 24
+        blur.Parent = camera
+        local screen = Instance.new("ScreenGui")
+        local label = Instance.new("TextLabel")
+        label.Text = "Paused"
+        label.TextSize = 64
+        label.TextColor = Color3.fromRGB(255, 255, 255)
+        label.BackgroundColor = Color3.fromRGB(20, 24, 36)
+        label.Size = UDim2.fromOffset(360, 120)
+        label.Position = UDim2.new(0.5, -180, 0.5, -60)
+        label.Parent = screen
+        screen.Parent = game:GetService("UIService")
+    end,
+    ["blur-soft"] = function()
+        local blur = Instance.new("BlurEffect")
+        blur.Size = 4
+        blur.Parent = Lighting
+    end,
+    ["blur-pair"] = function()
+        -- Two of 8, one the world's and one the viewer's: one of about 11.3.
+        local worlds = Instance.new("BlurEffect")
+        worlds.Size = 8
+        worlds.Parent = Lighting
+        local viewers = Instance.new("BlurEffect")
+        viewers.Size = 8
+        viewers.Parent = camera
+    end,
+    ["blur-wide"] = function()
+        local blur = Instance.new("BlurEffect")
+        blur.Size = 80
+        blur.Parent = Lighting
+    end,
 }
 
 local apply = Variants[Variant]

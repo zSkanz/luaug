@@ -388,8 +388,7 @@
         {
           "Name": "Size",
           "Type": "number",
-          "Default": "24",
-          "Inert": true
+          "Default": "24"
         }
       ],
       "Methods": [],

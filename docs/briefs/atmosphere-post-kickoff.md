@@ -80,11 +80,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 3 — `BlurEffect`
 
-- [ ] `Size` in pixels at 1080p, scaled with the render resolution so a blur
+- [x] `Size` in pixels at 1080p, scaled with the render resolution so a blur
       looks the same at any window size. Separable Gaussian, downsampled for
       large sizes. Several combine as `sqrt(a² + b²)`.
-- [ ] Budget ≤ 0.3 ms. A blur of `Size = 0` costs nothing.
-- [ ] The UI is drawn **after** the blur, so a pause menu over a blurred world is
+- [~] Budget ≤ 0.3 ms. A blur of `Size = 0` costs nothing (it builds no pass); the cost is measured with the others on the packaged build.
+- [x] The UI is drawn **after** the blur, so a pause menu over a blurred world is
       sharp.
 
 ## Stage 4 — `DepthOfFieldEffect`
@@ -222,3 +222,12 @@ here*.
    (Stage 2). `tests/look` holds the valley, and `tools/repo/look_captures.py`
    copies it once per variant with its one `Variant` line rewritten, so a
    before and an after differ in the effects and in nothing else.
+9. **A blur of any size costs about the same** (Stage 3). The Gaussian runs at
+   whichever level of the downsample chain puts it between two and four texels
+   wide -- down to a thirty-second of the frame -- and is resampled back, so a
+   blur of 80 pixels is the same dozen taps as one of 6, at far fewer pixels.
+   The downsample is the bloom chain's own thirteen-tap box, reused.
+10. **The blur works on light, before the tone curve** (Stage 3). A lamp or the
+   sun blurred stays a bright disc, as it does through a real lens, rather
+   than spreading into a grey smudge. It is the choice the stage-3 captures ask
+   the owner to judge.

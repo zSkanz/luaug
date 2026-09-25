@@ -320,6 +320,17 @@ struct GpuGradeUniforms
 };
 static_assert(sizeof(GpuGradeUniforms) == 48, "GpuGradeUniforms is mirrored by tonemap_graded.hlsl");
 
+// `look_blur.hlsl`'s block (ADR 0096): one direction of `BlurEffect`'s
+// separable Gaussian.
+struct GpuLookBlurUniforms
+{
+    // xy one source texel along this pass's direction, z the standard deviation
+    // in texels, w how many texels either side the kernel reaches.
+    f32 stepSigma[4]{};
+    f32 reserved[4]{};
+};
+static_assert(sizeof(GpuLookBlurUniforms) == 32, "GpuLookBlurUniforms is mirrored by look_blur.hlsl");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

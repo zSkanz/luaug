@@ -15,4 +15,4 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Size` | `number` | `24` | read/write, **inert** | How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it lands within this distance. It scales with the window, so a blur looks the same at any size. 0 is no blur, and costs nothing. |
+| `Size` | `number` | `24` | read/write | How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it lands within this distance. It scales with the window, so a blur looks the same at any size. 0 is no blur, and costs nothing. |

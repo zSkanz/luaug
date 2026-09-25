@@ -102,6 +102,14 @@ constexpr f32 kBloomIntensity = 0.05f;
 // `BloomEffect.Size` at which the upsample's tent has its own radius of one
 // source texel: the engine's own reach, and the class's default (ADR 0096).
 constexpr f32 kBloomSize = 24.0f;
+// How many halvings the look's blur may go down before it runs its Gaussian:
+// at five, the smallest level is a thirty-second of the frame, where a blur of
+// the whole screen's height is still a handful of texels.
+constexpr u32 kLookBlurLevels = 5;
+// The Gaussian's width, in texels of the level it runs at, that the level is
+// chosen to stay under: wide enough that a bilinear resample back to the frame
+// shows no steps, narrow enough that the kernel is a dozen taps.
+constexpr f32 kLookBlurLevelSigma = 4.0f;
 
 // The most instances one frame may draw through the instanced path, and the one
 // vertex buffer they all live in. Five megabytes, allocated once: the alternative
@@ -655,9 +663,33 @@ private:
     // `tonemap.hlsl` with every colour correction folded in, for a frame that
     // has one.
     LookPipeline gradedTonemap_;
+    // One direction of a separable Gaussian, and a filtered copy from one size
+    // to another.
+    LookPipeline blur_;
+    LookPipeline resample_;
 
     // Every look pipeline, for `destroy`.
-    [[nodiscard]] std::array<LookPipeline*, 1> lookPipelines() noexcept { return {&gradedTonemap_}; }
+    [[nodiscard]] std::array<LookPipeline*, 3> lookPipelines() noexcept
+    {
+        return {&gradedTonemap_, &blur_, &resample_};
+    }
+
+    // **The look's own images, made the first frame one is needed** and
+    // remade when the render size changes -- never on a frame without the
+    // effect that needs them. `lookColor_` is a second full-resolution HDR
+    // image, for a pass that reads the frame and has to write a changed one
+    // somewhere else; the blur's levels are its downsample chain and each
+    // level's ping-pong partner.
+    rhi::TextureHandle lookColor_{};
+    rhi::TextureHandle blurLevels_[kLookBlurLevels]{};
+    rhi::TextureHandle blurPong_[kLookBlurLevels]{};
+    u32 lookWidth_ = 0;
+    u32 lookHeight_ = 0;
+    [[nodiscard]] bool lookTexture(rhi::IDevice& device, rhi::TextureHandle& slot, u32 width, u32 height,
+                                   const char* name);
+    void releaseLookTextures(rhi::IDevice& device);
+    // Blurs `image` in place by `size` pixels of a 1080-line picture.
+    void blurImage(rhi::IDevice& device, rhi::ICmdList& cmd, rhi::TextureHandle image, f32 size);
 };
 
 } // namespace
@@ -1513,6 +1545,9 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
             device.destroy(look->handle);
         *look = {};
     }
+    releaseLookTextures(device);
+    lookWidth_ = 0;
+    lookHeight_ = 0;
 
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
         if (sampler->valid())
@@ -2160,6 +2195,107 @@ bool DefaultRenderer::ensureLookPipeline(rhi::IDevice& device, LookPipeline& slo
     return slot.handle.valid();
 }
 
+bool DefaultRenderer::lookTexture(rhi::IDevice& device, rhi::TextureHandle& slot, u32 width, u32 height,
+                                  const char* name)
+{
+    if (slot.valid())
+        return true;
+    slot = device.createTexture({
+        .format = kHdrFormat,
+        .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+        .width = width,
+        .height = height,
+        .debugName = name,
+    });
+    return slot.valid();
+}
+
+void DefaultRenderer::releaseLookTextures(rhi::IDevice& device)
+{
+    const auto release = [&device](rhi::TextureHandle& texture) {
+        if (texture.valid())
+            device.destroy(texture);
+        texture = {};
+    };
+    release(lookColor_);
+    for (rhi::TextureHandle& level : blurLevels_)
+        release(level);
+    for (rhi::TextureHandle& level : blurPong_)
+        release(level);
+}
+
+void DefaultRenderer::blurImage(rhi::IDevice& device, rhi::ICmdList& cmd, rhi::TextureHandle image, f32 size)
+{
+    // `Size` is where most of a pixel's light lands, which for a Gaussian is two
+    // standard deviations -- in pixels of a picture 1,080 lines tall, so a blur
+    // looks the same at every window size.
+    const f32 sigma = 0.5f * size * static_cast<f32>(renderHeight_) / 1080.0f;
+    // Below a quarter of a pixel the kernel's side taps weigh nothing.
+    if (!(sigma > 0.25f))
+        return;
+    if (!ensureLookPipeline(device, blur_, "look_blur", kHdrFormat) ||
+        !ensureLookPipeline(device, resample_, "look_resample", kHdrFormat))
+        return;
+
+    // Down the chain until the Gaussian is a few texels wide there.
+    u32 levels = 0;
+    f32 levelSigma = sigma;
+    while (levelSigma > kLookBlurLevelSigma && levels < kLookBlurLevels) {
+        levelSigma *= 0.5f;
+        ++levels;
+    }
+
+    cmd.pushDebugGroup("blur");
+    rhi::TextureHandle current = image;
+    u32 width = renderWidth_;
+    u32 height = renderHeight_;
+    for (u32 level = 0; level < levels; ++level) {
+        const u32 levelWidth = bloomLevelSize(renderWidth_, level);
+        const u32 levelHeight = bloomLevelSize(renderHeight_, level);
+        if (!lookTexture(device, blurLevels_[level], levelWidth, levelHeight, "look-blur")) {
+            cmd.popDebugGroup();
+            return;
+        }
+        // The bloom chain's own downsample, with no threshold: a thirteen-tap
+        // box that does not alias the way one bilinear read per texel would.
+        GpuBloomUniforms down;
+        down.texelRadius[0] = 1.0f / static_cast<f32>(width);
+        down.texelRadius[1] = 1.0f / static_cast<f32>(height);
+        down.texelRadius[2] = 1.0f;
+        const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{current, environmentSampler_}};
+        fullscreenPass(cmd, bloomDownPipeline_, blurLevels_[level], levelWidth, levelHeight, "blur-down", source,
+                       asBytes(&down, sizeof(down)));
+        current = blurLevels_[level];
+        width = levelWidth;
+        height = levelHeight;
+    }
+
+    // The partner the two directions ping-pong through: the level's own, or at
+    // full size whichever full-resolution image `image` is not.
+    rhi::TextureHandle& partner = levels > 0 ? blurPong_[levels - 1] : (image == lookColor_ ? hdr_ : lookColor_);
+    if (!lookTexture(device, partner, width, height, "look-blur-pong")) {
+        cmd.popDebugGroup();
+        return;
+    }
+    GpuLookBlurUniforms pass;
+    pass.stepSigma[2] = levelSigma;
+    pass.stepSigma[3] = std::min(std::ceil(3.0f * levelSigma), 16.0f);
+    pass.stepSigma[0] = 1.0f / static_cast<f32>(width);
+    const std::array<rhi::TextureBinding, 1> across{rhi::TextureBinding{current, environmentSampler_}};
+    fullscreenPass(cmd, blur_.handle, partner, width, height, "blur-x", across, asBytes(&pass, sizeof(pass)));
+    pass.stepSigma[0] = 0.0f;
+    pass.stepSigma[1] = 1.0f / static_cast<f32>(height);
+    const std::array<rhi::TextureBinding, 1> vertical{rhi::TextureBinding{partner, environmentSampler_}};
+    fullscreenPass(cmd, blur_.handle, current, width, height, "blur-y", vertical, asBytes(&pass, sizeof(pass)));
+
+    // And back to the frame's size, into the image it came from.
+    if (levels > 0) {
+        const std::array<rhi::TextureBinding, 1> result{rhi::TextureBinding{current, environmentSampler_}};
+        fullscreenPass(cmd, resample_.handle, image, renderWidth_, renderHeight_, "blur-up", result, {});
+    }
+    cmd.popDebugGroup();
+}
+
 bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
 {
     if (particleTried_)
@@ -2470,6 +2606,13 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         return;
     if (ensureTargets(device, renderWidth_, renderHeight_).has_value())
         return;
+    // The look's images are remade lazily at the new size, by whichever effect
+    // next needs one -- a frame without one releases nothing it never made.
+    if (lookWidth_ != renderWidth_ || lookHeight_ != renderHeight_) {
+        releaseLookTextures(device);
+        lookWidth_ = renderWidth_;
+        lookHeight_ = renderHeight_;
+    }
 
     if (!defaultsUploaded_) {
         // White multiplies to itself, (0.5, 0.5, 1) is the tangent-space normal
@@ -3334,6 +3477,21 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     cmd.endRenderPass();
     cmd.popDebugGroup();
 
+    // --- The look's scene passes (ADR 0096) ------------------------------------
+    //
+    // What every pass below reads as "the frame". `hdr_` on every frame without
+    // one of these effects, which is what keeps that frame's command stream the
+    // one it always was.
+    const RenderLook& look = world.look;
+    const rhi::TextureHandle sceneColor = hdr_;
+
+    // **The blur**, last of them: it softens whatever the others made. On the
+    // HDR image and before exposure, so a highlight blurs as light does -- a
+    // bright lamp spreads into a glow rather than into a grey smear -- and the
+    // interface, which the host draws after all of this, stays sharp.
+    if (look.blurSize > 0.0f && world.camera.valid)
+        blurImage(device, cmd, sceneColor, look.blurSize);
+
     // --- Automatic exposure -------------------------------------------------
     //
     // Three passes down to one texel, and the last of them carries state: it
@@ -3359,7 +3517,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         GpuLuminanceUniforms luminance;
         luminance.texelRate[0] = 1.0f / static_cast<f32>(renderWidth_);
         luminance.texelRate[1] = 1.0f / static_cast<f32>(renderHeight_);
-        const std::array<rhi::TextureBinding, 1> hdrBinding{rhi::TextureBinding{hdr_, linearSampler_}};
+        const std::array<rhi::TextureBinding, 1> hdrBinding{rhi::TextureBinding{sceneColor, linearSampler_}};
         fullscreenPass(cmd, luminanceDownPipeline_, luminance64_, 64, 64, "luminance-down", hdrBinding,
                        asBytes(&luminance, sizeof(luminance)));
 
@@ -3394,7 +3552,6 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // replace the engine's own, and one that is disabled turns bloom off. With
     // none, every number below is the constant it always was. The machine's
     // switch still wins over the world's (ADR 0044).
-    const RenderLook& look = world.look;
     const bool bloomOn = settings_.bloom && look.bloomEnabled;
     cmd.pushDebugGroup("bloom");
     if (!bloomOn) {
@@ -3421,7 +3578,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             // round the screen -- the ground's glow at the bottom edge drew a
             // band along the top.
             const std::array<rhi::TextureBinding, 1> source{
-                rhi::TextureBinding{level == 0 ? hdr_ : bloom_[level - 1], environmentSampler_}};
+                rhi::TextureBinding{level == 0 ? sceneColor : bloom_[level - 1], environmentSampler_}};
             sourceWidth = bloomLevelSize(renderWidth_, level);
             sourceHeight = bloomLevelSize(renderHeight_, level);
             fullscreenPass(cmd, bloomDownPipeline_, bloom_[level], sourceWidth, sourceHeight, "bloom-down", source,
@@ -3470,7 +3627,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         }
     }
     const std::array<rhi::TextureBinding, 3> tonemapBindings{
-        rhi::TextureBinding{hdr_, environmentSampler_}, rhi::TextureBinding{bloom_[0], environmentSampler_},
+        rhi::TextureBinding{sceneColor, environmentSampler_}, rhi::TextureBinding{bloom_[0], environmentSampler_},
         rhi::TextureBinding{exposure_[nextExposure], linearSampler_}};
 
     // With anti-aliasing on, this writes the LDR texture the resolve reads and

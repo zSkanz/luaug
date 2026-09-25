@@ -1899,7 +1899,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Size",
                 Type = "number",
-                Inert = true,
                 Default = "24",
                 ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it "

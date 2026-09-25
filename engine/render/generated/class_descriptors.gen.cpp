@@ -812,7 +812,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .type = scene::ValueType::Number,
             .threadSafety = scene::ThreadSafety::Unsafe,
             .readOnly = false,
-            .inert = true,
+            .inert = false,
             .doc = "How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it lands within this distance. It scales with the window, so a blur looks the same at any size. 0 is no blur, and costs nothing.",
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
             .get = native::getBlurEffectSize,

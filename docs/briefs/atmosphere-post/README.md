@@ -32,3 +32,13 @@ python tools/repo/look_captures.py measure bloom-strong grade-warm --host <packa
 **Also checked, not pictured:** a `BloomEffect` inserted with its defaults draws
 exactly the engine's own bloom, and a world with no colour correction draws
 through the unchanged tonemap. The command-stream goldens did not move.
+
+## Stage 3 -- `BlurEffect`
+
+| File | What is in the world | What to look at |
+|---|---|---|
+| `none.png` | nothing | The "before" |
+| `blur-soft.png` | a `BlurEffect` of `Size` 4 under `Lighting` | A gentle softening: edges lose their bite, nothing smears |
+| `blur-pair.png` | two of `Size` 8, one under `Lighting` and one on the camera | They combine by their squares: one blur of about 11.3, not 16 |
+| `blur-menu.png` | a `BlurEffect` of `Size` 24 **on the camera**, with a "Paused" label | The pause-menu case: the world is soft and the label over it is sharp |
+| `blur-wide.png` | a `BlurEffect` of `Size` 80 | The largest kind of blur. **Worth judging**: very bright lights -- the lamp, the sun -- stay bright round discs, because the blur works on the light before the tone curve, as a lens does. The alternative (blurring the finished picture) would turn them into grey smudges |
