@@ -73,7 +73,9 @@ class SdlGpuCmdList final : public ICmdList
 public:
     explicit SdlGpuCmdList(SdlGpuDevice& device) noexcept : device_(device) {}
 
-    void begin(SDL_GPUCommandBuffer* buffer) noexcept { buffer_ = buffer; }
+    void begin(SDL_GPUCommandBuffer* buffer) noexcept;
+    // Releases the staging buffer. Called by the device before it goes.
+    void releaseStaging() noexcept;
     [[nodiscard]] SDL_GPUCommandBuffer* buffer() const noexcept { return buffer_; }
     [[nodiscard]] SDL_GPURenderPass* renderPass() const noexcept { return renderPass_; }
 
@@ -108,10 +110,37 @@ public:
 private:
     [[nodiscard]] SDL_GPUCopyPass* ensureCopyPass() noexcept;
 
+    // Where one upload's bytes were put: a range of the frame's staging buffer,
+    // or -- for an upload that does not fit it -- a transfer buffer of its own,
+    // which `releaseStaged` gives back.
+    struct Staged
+    {
+        SDL_GPUTransferBuffer* transfer = nullptr;
+        u32 offset = 0;
+        bool owned = false;
+    };
+    [[nodiscard]] Staged stage(std::span<const std::byte> data, u32 alignment) noexcept;
+    void releaseStaged(const Staged& staged) noexcept;
+
     SdlGpuDevice& device_;
     SDL_GPUCommandBuffer* buffer_ = nullptr;
     SDL_GPURenderPass* renderPass_ = nullptr;
     SDL_GPUCopyPass* copyPass_ = nullptr;
+
+    // **One transfer buffer for a frame's uploads, not one per upload.** Every
+    // `upload` used to create a transfer buffer and release it: an allocation
+    // and a release of a driver resource per call, and a frame of a lit city
+    // makes a few dozen -- measured at 0.37 ms for three light-table textures
+    // of 90 KB, and more again at submit, where SDL frees them. Now a frame
+    // writes each upload at the next aligned offset of one buffer, and the
+    // first write of a frame CYCLES it, which is SDL's guarantee that bytes a
+    // frame still in flight is reading are never overwritten.
+    SDL_GPUTransferBuffer* staging_ = nullptr;
+    u32 stagingCapacity_ = 0;
+    u32 stagingUsed_ = 0;
+    // What the last frame asked for in all, so the next one starts big enough.
+    u32 stagingWanted_ = 0;
+    bool stagingCycled_ = false;
 };
 
 class SdlGpuDevice final : public IDevice
@@ -127,6 +156,7 @@ public:
             return;
 
         SDL_WaitForGPUIdle(device_);
+        cmdList_.releaseStaging();
 
         for (SDL_GPUGraphicsPipeline* pipeline : pipelines_)
             if (pipeline != nullptr)
@@ -614,6 +644,116 @@ SDL_GPUCopyPass* SdlGpuCmdList::ensureCopyPass() noexcept
     return copyPass_;
 }
 
+namespace {
+
+// An upload larger than this keeps a transfer buffer of its own: a texture
+// arriving at load time is megabytes once, and growing the per-frame buffer to
+// hold it would keep that memory for the rest of the run.
+constexpr u32 kStagingLargestUpload = 4u * 1024u * 1024u;
+// The frame buffer's first size, and the ceiling it grows to.
+constexpr u32 kStagingInitial = 1024u * 1024u;
+constexpr u32 kStagingCeiling = 16u * 1024u * 1024u;
+// D3D12 places a texture copy's source on a 512-byte boundary and rejects
+// anything else; a buffer copy needs far less, and 16 keeps every element type
+// this engine uploads naturally aligned.
+constexpr u32 kTextureStagingAlignment = 512;
+constexpr u32 kBufferStagingAlignment = 16;
+
+[[nodiscard]] constexpr u32 alignUp(u32 value, u32 alignment) noexcept
+{
+    return (value + alignment - 1) / alignment * alignment;
+}
+
+} // namespace
+
+void SdlGpuCmdList::begin(SDL_GPUCommandBuffer* buffer) noexcept
+{
+    buffer_ = buffer;
+    if (buffer == nullptr)
+        return;
+
+    // A new frame: the staging buffer's ranges are free again once it cycles.
+    // It grows here, between frames, and never in the middle of one -- an upload
+    // that does not fit mid-frame takes a buffer of its own instead, and the
+    // next frame starts big enough for all of them.
+    if (stagingWanted_ > stagingCapacity_ && stagingCapacity_ < kStagingCeiling) {
+        u32 capacity = std::max(stagingCapacity_ * 2, kStagingInitial);
+        while (capacity < stagingWanted_ && capacity < kStagingCeiling)
+            capacity *= 2;
+        capacity = std::min(capacity, kStagingCeiling);
+        releaseStaging();
+        const SDL_GPUTransferBufferCreateInfo info{
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = capacity,
+            .props = 0,
+        };
+        staging_ = SDL_CreateGPUTransferBuffer(device_.handle(), &info);
+        stagingCapacity_ = staging_ != nullptr ? capacity : 0;
+    }
+    stagingUsed_ = 0;
+    stagingWanted_ = 0;
+    stagingCycled_ = false;
+}
+
+void SdlGpuCmdList::releaseStaging() noexcept
+{
+    // SDL frees a transfer buffer "as soon as it is safe to do so", so this
+    // never races a copy a frame still in flight is making from it.
+    if (staging_ != nullptr)
+        SDL_ReleaseGPUTransferBuffer(device_.handle(), staging_);
+    staging_ = nullptr;
+    stagingCapacity_ = 0;
+}
+
+SdlGpuCmdList::Staged SdlGpuCmdList::stage(std::span<const std::byte> data, u32 alignment) noexcept
+{
+    SDL_GPUDevice* device = device_.handle();
+    const u32 size = static_cast<u32>(data.size());
+    const u32 offset = alignUp(stagingUsed_, alignment);
+    if (size <= kStagingLargestUpload)
+        stagingWanted_ = std::max(stagingWanted_, offset + size);
+
+    if (staging_ != nullptr && size <= kStagingLargestUpload && offset + size <= stagingCapacity_) {
+        // Cycled on the frame's first write only: every later write of the frame
+        // goes to the same backing, at a range nothing else has used.
+        void* mapped = SDL_MapGPUTransferBuffer(device, staging_, !stagingCycled_);
+        if (mapped != nullptr) {
+            stagingCycled_ = true;
+            std::memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size());
+            SDL_UnmapGPUTransferBuffer(device, staging_);
+            stagingUsed_ = offset + size;
+            return Staged{staging_, offset, false};
+        }
+    }
+
+    // A transfer buffer of its own: too large to keep, or the frame's buffer is
+    // full or not made yet.
+    const SDL_GPUTransferBufferCreateInfo info{
+        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = size,
+        .props = 0,
+    };
+    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &info);
+    if (transfer == nullptr)
+        return {};
+    void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
+    if (mapped == nullptr) {
+        SDL_ReleaseGPUTransferBuffer(device, transfer);
+        return {};
+    }
+    std::memcpy(mapped, data.data(), data.size());
+    SDL_UnmapGPUTransferBuffer(device, transfer);
+    return Staged{transfer, 0, true};
+}
+
+void SdlGpuCmdList::releaseStaged(const Staged& staged) noexcept
+{
+    // Released right after its copy is recorded, which is safe for the reason
+    // `releaseStaging` gives; the shared buffer is kept.
+    if (staged.owned && staged.transfer != nullptr)
+        SDL_ReleaseGPUTransferBuffer(device_.handle(), staged.transfer);
+}
+
 void SdlGpuCmdList::beginRenderPass(const RenderPassDesc& desc)
 {
     endOpenPass();
@@ -772,30 +912,14 @@ void SdlGpuCmdList::upload(BufferHandle buffer, std::span<const std::byte> data,
     if (pass == nullptr)
         return;
 
-    SDL_GPUDevice* device = device_.handle();
-    const SDL_GPUTransferBufferCreateInfo info{
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = static_cast<Uint32>(data.size()),
-        .props = 0,
-    };
-    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &info);
-    if (transfer == nullptr)
+    const Staged staged = stage(data, kBufferStagingAlignment);
+    if (staged.transfer == nullptr)
         return;
-
-    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr) {
-        std::memcpy(mapped, data.data(), data.size());
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-
-        const SDL_GPUTransferBufferLocation source{.transfer_buffer = transfer, .offset = 0};
-        const SDL_GPUBufferRegion destination{
-            .buffer = target, .offset = offsetBytes, .size = static_cast<Uint32>(data.size())};
-        SDL_UploadToGPUBuffer(pass, &source, &destination, false);
-    }
-
-    // SDL frees it "as soon as it is safe to do so", so releasing here does not
-    // race the copy -- a per-frame pool is an optimization for whichever
-    // workload first needs one.
-    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    const SDL_GPUTransferBufferLocation source{.transfer_buffer = staged.transfer, .offset = staged.offset};
+    const SDL_GPUBufferRegion destination{
+        .buffer = target, .offset = offsetBytes, .size = static_cast<Uint32>(data.size())};
+    SDL_UploadToGPUBuffer(pass, &source, &destination, false);
+    releaseStaged(staged);
 }
 
 void SdlGpuCmdList::uploadTexture(TextureHandle texture, std::span<const std::byte> data, u32 mipLevel)
@@ -808,47 +932,35 @@ void SdlGpuCmdList::uploadTexture(TextureHandle texture, std::span<const std::by
     if (pass == nullptr)
         return;
 
-    SDL_GPUDevice* device = device_.handle();
-    const SDL_GPUTransferBufferCreateInfo info{
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = static_cast<Uint32>(data.size()),
-        .props = 0,
-    };
-    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &info);
-    if (transfer == nullptr)
+    const Staged staged = stage(data, kTextureStagingAlignment);
+    if (staged.transfer == nullptr)
         return;
 
-    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr) {
-        std::memcpy(mapped, data.data(), data.size());
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-
-        // Clamped at one: a 64x64 texture's seventh mip is 1x1, and `>> 6`
-        // reaches zero one level later. A zero-sized region uploads nothing and
-        // reports nothing, which is the shape of a texture that is fine until
-        // somebody looks at its smallest level.
-        const u32 mipWidth = std::max(1u, entry->width >> mipLevel);
-        const u32 mipHeight = std::max(1u, entry->height >> mipLevel);
-        const SDL_GPUTextureTransferInfo source{
-            .transfer_buffer = transfer,
-            .offset = 0,
-            .pixels_per_row = mipWidth,
-            .rows_per_layer = mipHeight,
-        };
-        const SDL_GPUTextureRegion region{
-            .texture = entry->texture,
-            .mip_level = mipLevel,
-            .layer = 0,
-            .x = 0,
-            .y = 0,
-            .z = 0,
-            .w = mipWidth,
-            .h = mipHeight,
-            .d = 1,
-        };
-        SDL_UploadToGPUTexture(pass, &source, &region, false);
-    }
-
-    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    // Clamped at one: a 64x64 texture's seventh mip is 1x1, and `>> 6`
+    // reaches zero one level later. A zero-sized region uploads nothing and
+    // reports nothing, which is the shape of a texture that is fine until
+    // somebody looks at its smallest level.
+    const u32 mipWidth = std::max(1u, entry->width >> mipLevel);
+    const u32 mipHeight = std::max(1u, entry->height >> mipLevel);
+    const SDL_GPUTextureTransferInfo source{
+        .transfer_buffer = staged.transfer,
+        .offset = staged.offset,
+        .pixels_per_row = mipWidth,
+        .rows_per_layer = mipHeight,
+    };
+    const SDL_GPUTextureRegion region{
+        .texture = entry->texture,
+        .mip_level = mipLevel,
+        .layer = 0,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .w = mipWidth,
+        .h = mipHeight,
+        .d = 1,
+    };
+    SDL_UploadToGPUTexture(pass, &source, &region, false);
+    releaseStaged(staged);
 }
 
 void SdlGpuCmdList::uploadTextureRegion(TextureHandle texture, u32 x, u32 y, u32 width, u32 height,
@@ -866,42 +978,29 @@ void SdlGpuCmdList::uploadTextureRegion(TextureHandle texture, u32 x, u32 y, u32
     if (pass == nullptr)
         return;
 
-    SDL_GPUDevice* device = device_.handle();
-    const SDL_GPUTransferBufferCreateInfo info{
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = static_cast<Uint32>(data.size()),
-        .props = 0,
-    };
-    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &info);
-    if (transfer == nullptr)
+    const Staged staged = stage(data, kTextureStagingAlignment);
+    if (staged.transfer == nullptr)
         return;
-
-    if (void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false); mapped != nullptr) {
-        std::memcpy(mapped, data.data(), data.size());
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-
-        const SDL_GPUTextureTransferInfo source{
-            .transfer_buffer = transfer,
-            .offset = 0,
-            .pixels_per_row = width,
-            .rows_per_layer = height,
-        };
-        const SDL_GPUTextureRegion region{
-            .texture = entry->texture,
-            .mip_level = 0,
-            .layer = 0,
-            .x = x,
-            .y = y,
-            .z = 0,
-            .w = width,
-            .h = height,
-            .d = 1,
-        };
-        // Not cycling: the rest of the texture is live and has to survive.
-        SDL_UploadToGPUTexture(pass, &source, &region, false);
-    }
-
-    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    const SDL_GPUTextureTransferInfo source{
+        .transfer_buffer = staged.transfer,
+        .offset = staged.offset,
+        .pixels_per_row = width,
+        .rows_per_layer = height,
+    };
+    const SDL_GPUTextureRegion region{
+        .texture = entry->texture,
+        .mip_level = 0,
+        .layer = 0,
+        .x = x,
+        .y = y,
+        .z = 0,
+        .w = width,
+        .h = height,
+        .d = 1,
+    };
+    // Not cycling: the rest of the texture is live and has to survive.
+    SDL_UploadToGPUTexture(pass, &source, &region, false);
+    releaseStaged(staged);
 }
 
 void SdlGpuCmdList::pushDebugGroup(std::string_view name)
