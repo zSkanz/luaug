@@ -210,13 +210,13 @@ public:
     // Registration order, which is deterministic; never a hash order (R10).
     virtual void collectCollisionGroups(WorldHandle world, std::vector<std::string_view>& out) const = 0;
 
-    // --- The rollback-oriented seam (ADR 0016) -------------------------------
+    // --- Rollback (ADR 0016, implemented by ADR 0101) ------------------------
     //
-    // Declared and unimplemented, and that is the decision rather than an
-    // omission: v1 does not do rollback (ADR 0016 calls these foundations, not
-    // rollback), and a half-written snapshot that silently dropped contact
-    // caches would be worse than a refusal. A backend that cannot do it returns
-    // false; nothing in v1 calls these.
+    // The solver's whole state -- bodies, contacts, warm starts, characters --
+    // as bytes, and back. **A restore goes into the same bodies**: a world that
+    // has gained or lost one since the save, or moved its origin, refuses it,
+    // and so does a blob that is not one. A backend that cannot do it at all
+    // returns false from both.
     [[nodiscard]] virtual bool saveState(WorldHandle world, std::vector<u8>& out) const = 0;
     [[nodiscard]] virtual bool restoreState(WorldHandle world, std::span<const u8> blob) = 0;
 

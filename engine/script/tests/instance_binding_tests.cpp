@@ -561,15 +561,17 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // start from the start; and 125 with `NavigationService`'s `DefineAgent`,
     // `SetAreaCost` and `FindPath2D` (ADR 0098); and 129 with `BasePart`'s
     // `SetNetworkOwner` and `GetNetworkOwner`, `Team:GetPlayers` and
-    // `TeamService:GetTeams` (ADR 0099). This number is what makes a
+    // `TeamService:GetTeams` (ADR 0099); and 132 with `RunService`'s
+    // `SaveSimulation`, `RestoreSimulation` and `StepSimulation` (ADR 0101).
+    // This number is what makes a
     // DECLARED-but-unbound method impossible to ship: the IDL would count it and the binding table would not, which is
     // `Inert` for a method.
     //
     // **It earned its keep at F1.** Five methods were declared in the IDL in one
     // commit and this failed on the next build, before anything could reach a
     // script and find a name that answered nothing.
-    CHECK(coverage.declared == 129);
-    CHECK(coverage.bound == 129);
+    CHECK(coverage.declared == 132);
+    CHECK(coverage.bound == 132);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

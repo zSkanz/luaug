@@ -209,10 +209,49 @@ What the machines say to each other is published, byte for byte, in
 against, so it is exactly what this build speaks. A peer must speak the same
 protocol version; the CHANGELOG says when a release changes it.
 
+## Rolling back
+
+For a game where every machine simulates -- a fighting game, a lockstep
+racer -- or an authority that wants to redo a few ticks with an input that
+arrived late, `RunService` saves the 3D simulation and steps it again:
+
+```luau
+local RunService = game:GetService("RunService")
+
+local frame = 0
+local states = {} -- one per tick, for the last few ticks
+RunService.PostSimulation:Connect(function()
+    frame += 1
+    states[frame] = RunService:SaveSimulation()
+    states[frame - 8] = nil
+end)
+
+-- An input for tick `past` arrived late: go back, and come forward again.
+local function correct(past: number, now: number)
+    RunService:RestoreSimulation(states[past])
+    for t = past + 1, now do
+        applyInputs(t)            -- your game's inputs for that tick
+        RunService:StepSimulation()
+        states[t] = RunService:SaveSimulation()
+    end
+end
+```
+
+The re-simulation is exact: the same inputs from the same state give the same
+world, bit for bit, on every machine.
+
+**What is saved is where things are and how they move** -- every simulated
+part's `CFrame` and velocities, every character's movement state, and the
+solver's own. Not which instances exist, not their other properties, not the
+2D layer, and not your scripts' variables: keep your game's state (health,
+scores, input history) in your own tables and restore it beside the buffer.
+`RestoreSimulation` answers `false` and changes nothing if a simulated part was
+created, destroyed or anchored since the save. `StepSimulation` fires no
+`Touched`; those ticks already did.
+
 ## What is not here
 
 - unreliable messages;
-- rollback;
 - lag compensation for hits.
 
 `examples/15-multiplayer` is the whole of it in one file: racers driven by

@@ -57,6 +57,12 @@ does not is engine work and belongs in the git history rather than in this file.
     player leaves. `BasePart:GetNetworkOwner()` answers the owner.
   - The wire is protocol 14: the roster carries each player's team, channel 3
     is `Ownership`, and two messages are new. Peers of protocol 13 are refused.
+- **Rollback** (ADR 0101): `RunService:SaveSimulation()` returns the 3D
+  simulation as a `buffer` -- the solver's whole state, and every simulated
+  part's and character's motion -- `RestoreSimulation(state)` puts it back
+  (false, and nothing changed, when the simulated parts are not the same ones),
+  and `StepSimulation()` steps one fixed tick without scripts or touches. A
+  re-simulation from the same state with the same inputs is bit-exact.
 - **The wire protocol is published** (ADR 0100): `docs/protocol/wire.md`,
   generated from the schema, states every message byte for byte, and the
   compatibility policy -- one version, matched exactly, changed whenever the

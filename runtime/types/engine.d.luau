@@ -2247,6 +2247,21 @@ declare extern type RunService extends Instance with
     --- Whether the world is currently paused. Since `Pause` and `Resume` are both idempotent, this is
     --- how code tells the two states apart rather than by watching a call fail.
     function IsPaused(self): boolean
+    --- **The 3D simulation as it is now, for rolling back to** (ADR 0101): the solver's whole state,
+    --- and where every simulated part and character is and how it is moving. Not which instances exist,
+    --- not their other properties, not the 2D layer, and not your scripts' variables -- a rollback game
+    --- keeps its own state beside this one and restores both. Deterministic: the same world saved on
+    --- two machines is the same bytes.
+    function SaveSimulation(self): buffer
+    --- Puts back what `SaveSimulation` saved, and answers true. **Answers false and changes nothing**
+    --- when the world's simulated parts and characters are not the ones the state was saved with -- one
+    --- was created, destroyed or anchored since -- or when the buffer is not a saved simulation.
+    function RestoreSimulation(self, state: buffer): boolean
+    --- Steps the 3D simulation one fixed tick now, as the tick would, without running a script and
+    --- **without `Touched` or `TouchEnded`**: a tick simulated again already fired its touches. What
+    --- re-simulating after `RestoreSimulation` is: set each tick's inputs -- a character's
+    --- `MoveDirection`, an impulse -- and step, once per tick to catch up.
+    function StepSimulation(self): ()
 end
 
 declare extern type ScriptService extends Instance with

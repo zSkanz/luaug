@@ -2540,7 +2540,30 @@
           "ThreadSafety": "Unsafe"
         },
         {
+          "Name": "RestoreSimulation",
+          "Parameters": [
+            {
+              "Name": "state",
+              "Type": "buffer"
+            }
+          ],
+          "Returns": ["boolean"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
           "Name": "Resume",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SaveSimulation",
+          "Parameters": [],
+          "Returns": ["buffer"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "StepSimulation",
           "Parameters": [],
           "Returns": [],
           "ThreadSafety": "Unsafe"

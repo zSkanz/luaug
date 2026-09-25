@@ -835,13 +835,76 @@ TEST_CASE("the active-body list is ordered, and it is ordered by our handles")
     CHECK(std::none_of(active.begin(), active.end(), [](const ActiveBody& body) { return body.userData == 1; }));
 }
 
-TEST_CASE("the rollback seam refuses rather than pretending")
+// --- Rollback (ADR 0101) ------------------------------------------------------
+
+namespace {
+
+// Every active body's state, in handle order -- what two runs are compared on.
+[[nodiscard]] std::vector<ActiveBody> activeOf(Fixture& fixture)
+{
+    std::vector<ActiveBody> active;
+    fixture.physics->collectActiveBodies(fixture.world, active);
+    return active;
+}
+
+[[nodiscard]] bool identical(const std::vector<ActiveBody>& a, const std::vector<ActiveBody>& b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (std::size_t at = 0; at < a.size(); ++at) {
+        const core::CFrameD& x = a[at].state.transform;
+        const core::CFrameD& y = b[at].state.transform;
+        // Bit for bit: a rollback that is merely close diverges a few hundred
+        // ticks later, which is the failure this exists to rule out.
+        if (!(a[at].body == b[at].body) || !(x == y) || !(a[at].state.linearVelocity == b[at].state.linearVelocity) ||
+            !(a[at].state.angularVelocity == b[at].state.angularVelocity))
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
+TEST_CASE("a world restored to a tick steps on exactly as it did the first time")
 {
     Fixture fixture;
-    std::vector<u8> blob;
-    CHECK_FALSE(fixture.physics->saveState(fixture.world, blob));
-    CHECK(blob.empty());
-    CHECK_FALSE(fixture.physics->restoreState(fixture.world, blob));
+    fixture.spawn(floorDesc());
+    // A leaning tower, so the solver carries contacts and warm starts across
+    // the save -- the state a restore that dropped the contact cache would lose.
+    for (u64 i = 0; i < 8; ++i)
+        fixture.spawn(cubeDesc({static_cast<f64>(i) * 0.3, 1.0 + static_cast<f64>(i) * 1.6, 0.0}, 300 + i));
+    fixture.run(40);
+
+    std::vector<u8> saved;
+    REQUIRE(fixture.physics->saveState(fixture.world, saved));
+    CHECK_FALSE(saved.empty());
+    fixture.run(60);
+    const std::vector<ActiveBody> first = activeOf(fixture);
+    REQUIRE_FALSE(first.empty());
+
+    REQUIRE(fixture.physics->restoreState(fixture.world, saved));
+    fixture.run(60);
+    CHECK(identical(first, activeOf(fixture)));
+
+    // And again from the same state: a restore does not consume it.
+    REQUIRE(fixture.physics->restoreState(fixture.world, saved));
+    fixture.run(60);
+    CHECK(identical(first, activeOf(fixture)));
+}
+
+TEST_CASE("a state is refused by a world that has gained a body since it was saved")
+{
+    Fixture fixture;
+    fixture.spawn(floorDesc());
+    fixture.spawn(cubeDesc({0.0, 3.0, 0.0}, 400));
+    fixture.run(5);
+    std::vector<u8> saved;
+    REQUIRE(fixture.physics->saveState(fixture.world, saved));
+    fixture.spawn(cubeDesc({4.0, 3.0, 0.0}, 401));
+    CHECK_FALSE(fixture.physics->restoreState(fixture.world, saved));
+    // Nor is a blob that is not one.
+    const std::vector<u8> garbage{1, 2, 3};
+    CHECK_FALSE(fixture.physics->restoreState(fixture.world, garbage));
 }
 
 // --- Kinematic motion, and what stands on it (D027) ---------------------------

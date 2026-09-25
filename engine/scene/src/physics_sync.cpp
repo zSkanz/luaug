@@ -9,9 +9,11 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1530,6 +1532,10 @@ void PhysicsSync::writeCharacters()
 
 void PhysicsSync::publishContacts()
 {
+    if (m_quiet) {
+        (void)m_backend.drainContacts(m_world);
+        return;
+    }
     const core::NameAtom touched = m_scene.atoms().intern("Touched");
     const core::NameAtom touchEnded = m_scene.atoms().intern("TouchEnded");
 
@@ -1600,6 +1606,207 @@ void PhysicsSync::mirror()
     if (!m_world.valid() || !m_workspace.valid())
         return;
     applyScene();
+}
+
+// --- Rollback (ADR 0101) -------------------------------------------------------
+
+namespace {
+
+// "LGSS": a saved simulation, and the version of its layout.
+constexpr u32 SimulationMagic = 0x5353474Cu;
+constexpr u32 SimulationVersion = 1;
+
+template <class T>
+void put(std::vector<u8>& out, const T& value)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    const auto* bytes = reinterpret_cast<const u8*>(&value);
+    out.insert(out.end(), bytes, bytes + sizeof(T));
+}
+
+template <class T>
+[[nodiscard]] bool take(std::span<const u8> bytes, usize& at, T& value)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    if (at > bytes.size() || bytes.size() - at < sizeof(T))
+        return false;
+    std::memcpy(&value, bytes.data() + at, sizeof(T));
+    at += sizeof(T);
+    return true;
+}
+
+} // namespace
+
+std::vector<core::InstanceId> PhysicsSync::simulatedIds() const
+{
+    // Every instance with a live body or a character, in id order -- the same
+    // order on every machine, because it is the ids' and not a map's.
+    std::vector<core::InstanceId> ids;
+    for (usize index = 0; index < m_bodies.size(); ++index) {
+        const BodyRecord& record = m_bodies[index];
+        const core::InstanceId id{static_cast<u32>(index), record.generation};
+        if (record.live && m_scene.alive(id))
+            ids.push_back(id);
+    }
+    for (const auto& [key, record] : m_characters) {
+        const core::InstanceId id = unpackInstance(key);
+        if (record.handle.valid() && m_scene.alive(id))
+            ids.push_back(id);
+    }
+    std::sort(ids.begin(), ids.end(), [](core::InstanceId a, core::InstanceId b) {
+        return a.index != b.index ? a.index < b.index : a.generation < b.generation;
+    });
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+}
+
+bool PhysicsSync::saveSimulation(std::vector<u8>& out) const
+{
+    out.clear();
+    if (!m_world.valid())
+        return false;
+    std::vector<u8> solver;
+    if (!m_backend.saveState(m_world, solver))
+        return false;
+    put(out, SimulationMagic);
+    put(out, SimulationVersion);
+    put(out, static_cast<u64>(solver.size()));
+    out.insert(out.end(), solver.begin(), solver.end());
+    const std::vector<core::InstanceId> ids = simulatedIds();
+    put(out, static_cast<u32>(ids.size()));
+    for (const core::InstanceId id : ids) {
+        put(out, id.index);
+        put(out, id.generation);
+        const PartComponent* part = m_scene.parts().find(id);
+        const RigidBodyComponent* body = m_scene.rigidBodies().find(id);
+        const CharacterBodyComponent* character = m_scene.characterBodies().find(id);
+        const u8 has =
+            static_cast<u8>((part != nullptr ? 1 : 0) | (body != nullptr ? 2 : 0) | (character != nullptr ? 4 : 0));
+        put(out, has);
+        if (part != nullptr)
+            put(out, part->cframe);
+        if (body != nullptr) {
+            put(out, body->linearVelocity);
+            put(out, body->angularVelocity);
+            put(out, body->pendingImpulse);
+            put(out, static_cast<u8>(body->active ? 1 : 0));
+        }
+        if (character != nullptr) {
+            put(out, static_cast<u8>(character->grounded ? 1 : 0));
+            put(out, character->state);
+            put(out, character->groundPart);
+            put(out, character->moveDirection);
+            put(out, static_cast<u8>(character->jumpRequested ? 1 : 0));
+            put(out, character->verticalVelocity);
+        }
+    }
+    return true;
+}
+
+bool PhysicsSync::restoreSimulation(std::span<const u8> bytes)
+{
+    if (!m_world.valid())
+        return false;
+    usize at = 0;
+    u32 magic = 0;
+    u32 version = 0;
+    u64 solverBytes = 0;
+    if (!take(bytes, at, magic) || !take(bytes, at, version) || !take(bytes, at, solverBytes) ||
+        magic != SimulationMagic || version != SimulationVersion || solverBytes > bytes.size() - at)
+        return false;
+    const std::span<const u8> solver = bytes.subspan(at, static_cast<usize>(solverBytes));
+    at += static_cast<usize>(solverBytes);
+
+    // **Read everything before writing anything**, so a refusal leaves the
+    // world exactly as it was.
+    struct Entry
+    {
+        core::InstanceId id;
+        u8 has = 0;
+        core::CFrameD cframe;
+        core::Vec3 linear{};
+        core::Vec3 angular{};
+        core::Vec3 impulse{};
+        u8 active = 0;
+        u8 grounded = 0;
+        i32 state = 0;
+        core::InstanceId groundPart;
+        core::Vec3 move{};
+        u8 jump = 0;
+        f32 vertical = 0.0f;
+    };
+    u32 count = 0;
+    if (!take(bytes, at, count))
+        return false;
+    std::vector<Entry> entries;
+    for (u32 index = 0; index < count; ++index) {
+        Entry entry;
+        if (!take(bytes, at, entry.id.index) || !take(bytes, at, entry.id.generation) || !take(bytes, at, entry.has))
+            return false;
+        if ((entry.has & 1) != 0 && !take(bytes, at, entry.cframe))
+            return false;
+        if ((entry.has & 2) != 0 && (!take(bytes, at, entry.linear) || !take(bytes, at, entry.angular) ||
+                                     !take(bytes, at, entry.impulse) || !take(bytes, at, entry.active)))
+            return false;
+        if ((entry.has & 4) != 0 &&
+            (!take(bytes, at, entry.grounded) || !take(bytes, at, entry.state) || !take(bytes, at, entry.groundPart) ||
+             !take(bytes, at, entry.move) || !take(bytes, at, entry.jump) || !take(bytes, at, entry.vertical)))
+            return false;
+        entries.push_back(entry);
+    }
+    if (at != bytes.size())
+        return false;
+
+    // The same bodies, or nothing: the solver's half would refuse too, but
+    // this half is ours to check.
+    const std::vector<core::InstanceId> ids = simulatedIds();
+    if (ids.size() != entries.size())
+        return false;
+    for (usize index = 0; index < ids.size(); ++index) {
+        if (!(ids[index] == entries[index].id))
+            return false;
+        const u8 has = static_cast<u8>((m_scene.parts().find(ids[index]) != nullptr ? 1 : 0) |
+                                       (m_scene.rigidBodies().find(ids[index]) != nullptr ? 2 : 0) |
+                                       (m_scene.characterBodies().find(ids[index]) != nullptr ? 4 : 0));
+        if (has != entries[index].has)
+            return false;
+    }
+    if (!m_backend.restoreState(m_world, solver))
+        return false;
+
+    for (const Entry& entry : entries) {
+        if (PartComponent* part = m_scene.parts().find(entry.id); part != nullptr) {
+            part->cframe = entry.cframe;
+            // What the mirror last wrote is what the solver now holds, so the
+            // next apply does not teleport what the restore just put back.
+            if (entry.id.index < m_bodies.size() && m_bodies[entry.id.index].generation == entry.id.generation)
+                m_bodies[entry.id.index].written = entry.cframe;
+            if (const auto found = m_characters.find(packInstance(entry.id)); found != m_characters.end())
+                found->second.written = entry.cframe;
+        }
+        if (RigidBodyComponent* body = m_scene.rigidBodies().find(entry.id); body != nullptr) {
+            body->linearVelocity = entry.linear;
+            body->angularVelocity = entry.angular;
+            body->pendingImpulse = entry.impulse;
+            body->active = entry.active != 0;
+        }
+        if (CharacterBodyComponent* character = m_scene.characterBodies().find(entry.id); character != nullptr) {
+            character->grounded = entry.grounded != 0;
+            character->state = entry.state;
+            character->groundPart = entry.groundPart;
+            character->moveDirection = entry.move;
+            character->jumpRequested = entry.jump != 0;
+            character->verticalVelocity = entry.vertical;
+        }
+    }
+    return true;
+}
+
+void PhysicsSync::stepQuietly(f64 fixedDt)
+{
+    m_quiet = true;
+    step(fixedDt);
+    m_quiet = false;
 }
 
 void PhysicsSync::step(f64 fixedDt)

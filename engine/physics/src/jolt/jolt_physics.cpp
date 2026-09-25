@@ -49,6 +49,7 @@
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/StateRecorderImpl.h>
 #include <Jolt/RegisterTypes.h>
 #ifdef JPH_DEBUG_RENDERER
 #include <Jolt/Renderer/DebugRendererSimple.h>
@@ -1274,6 +1275,84 @@ public:
 
     // --- Simulation -----------------------------------------------------------
 
+    // --- Rollback (ADR 0101) ---------------------------------------------------
+    //
+    // **The solver's whole state, and ours beside it**: every body's position,
+    // velocity and sleep, the contact cache and the constraints' warm start
+    // (`PhysicsSystem::SaveState` with everything), each character's own state,
+    // which Jolt keeps outside the system, and the contact pairs the next step's
+    // begin/end diff compares against. Without the contact cache a restored
+    // world steps differently from the one saved; without the pairs, it reports
+    // touches that already began.
+    //
+    // **A restore puts state back into the SAME bodies**, and refuses anything
+    // else. The blob opens with which slots are alive at which generation, and
+    // the origin; a world that has gained or lost a body since, or moved its
+    // origin, is a different world, and restoring into it would be Jolt reading
+    // one body's state into another.
+    void saveState(std::vector<u8>& out) const
+    {
+        JPH::StateRecorderImpl recorder;
+        writeLayout(recorder);
+        m_system.SaveState(recorder, JPH::EStateRecorderState::All);
+        for (const CharacterRecord& record : m_characters) {
+            if (record.alive && record.character != nullptr)
+                record.character->SaveState(recorder);
+        }
+        writePairs(recorder, m_previousPairs);
+        const u64 characterPairs = m_previousCharacterPairs.size();
+        recorder.Write(characterPairs);
+        for (const CharacterPair& pair : m_previousCharacterPairs) {
+            recorder.Write(pair.character);
+            recorder.Write(pair.other);
+            recorder.Write(pair.otherIsCharacter);
+        }
+        const std::string data = recorder.GetData();
+        out.assign(data.begin(), data.end());
+    }
+
+    [[nodiscard]] bool restoreState(std::span<const u8> blob)
+    {
+        JPH::StateRecorderImpl recorder;
+        recorder.WriteBytes(blob.data(), blob.size());
+        recorder.Rewind();
+        JPH::StateRecorderImpl expected;
+        writeLayout(expected);
+        const std::string layout = expected.GetData();
+        std::string found(layout.size(), '\0');
+        if (blob.size() < layout.size())
+            return false;
+        recorder.ReadBytes(found.data(), found.size());
+        if (recorder.IsFailed() || found != layout)
+            return false;
+        if (!m_system.RestoreState(recorder))
+            return false;
+        for (CharacterRecord& record : m_characters) {
+            if (record.alive && record.character != nullptr)
+                record.character->RestoreState(recorder);
+        }
+        std::vector<ContactPair> pairs;
+        if (!readPairs(recorder, pairs))
+            return false;
+        u64 characterPairs = 0;
+        recorder.Read(characterPairs);
+        std::vector<CharacterPair> restored;
+        for (u64 at = 0; at < characterPairs && !recorder.IsFailed(); ++at) {
+            CharacterPair pair;
+            recorder.Read(pair.character);
+            recorder.Read(pair.other);
+            recorder.Read(pair.otherIsCharacter);
+            restored.push_back(pair);
+        }
+        if (recorder.IsFailed())
+            return false;
+        m_previousPairs = std::move(pairs);
+        m_previousCharacterPairs = std::move(restored);
+        // A move queued before the restore targets a world that no longer is.
+        m_kinematicMoves.clear();
+        return true;
+    }
+
     void step(f32 fixedDt)
     {
         m_contacts.clear();
@@ -2421,6 +2500,51 @@ private:
     JPH::JobSystemThreadPool m_jobs;
     core::DVec3 m_origin;
     JPH::PhysicsSystem m_system;
+
+    // Which body and character slots are alive, at which generation, and the
+    // origin: what a restore must find unchanged (ADR 0101).
+    void writeLayout(JPH::StateRecorder& recorder) const
+    {
+        recorder.Write(m_origin.x);
+        recorder.Write(m_origin.y);
+        recorder.Write(m_origin.z);
+        const u64 bodies = m_bodies.size();
+        recorder.Write(bodies);
+        for (const BodyRecord& record : m_bodies) {
+            recorder.Write(record.alive);
+            recorder.Write(record.alive ? record.generation : 0u);
+        }
+        const u64 characters = m_characters.size();
+        recorder.Write(characters);
+        for (const CharacterRecord& record : m_characters) {
+            const bool alive = record.alive && record.character != nullptr;
+            recorder.Write(alive);
+            recorder.Write(alive ? record.generation : 0u);
+        }
+    }
+
+    static void writePairs(JPH::StateRecorder& recorder, const std::vector<ContactPair>& pairs)
+    {
+        const u64 count = pairs.size();
+        recorder.Write(count);
+        for (const ContactPair& pair : pairs) {
+            recorder.Write(pair.first);
+            recorder.Write(pair.second);
+        }
+    }
+
+    [[nodiscard]] static bool readPairs(JPH::StateRecorderImpl& recorder, std::vector<ContactPair>& pairs)
+    {
+        u64 count = 0;
+        recorder.Read(count);
+        for (u64 at = 0; at < count && !recorder.IsFailed(); ++at) {
+            ContactPair pair;
+            recorder.Read(pair.first);
+            recorder.Read(pair.second);
+            pairs.push_back(pair);
+        }
+        return !recorder.IsFailed();
+    }
     ContactRecorder m_contacts;
 
     std::vector<BodyRecord> m_bodies;
@@ -2812,8 +2936,20 @@ public:
         }
     }
 
-    [[nodiscard]] bool saveState(WorldHandle, std::vector<u8>&) const override { return false; }
-    [[nodiscard]] bool restoreState(WorldHandle, std::span<const u8>) override { return false; }
+    [[nodiscard]] bool saveState(WorldHandle handle, std::vector<u8>& out) const override
+    {
+        const JoltWorld* world = resolve(handle);
+        if (world == nullptr)
+            return false;
+        world->saveState(out);
+        return true;
+    }
+
+    [[nodiscard]] bool restoreState(WorldHandle handle, std::span<const u8> blob) override
+    {
+        JoltWorld* world = resolve(handle);
+        return world != nullptr && world->restoreState(blob);
+    }
 
     void debugDraw(WorldHandle handle, IDebugDrawSink& sink) override
     {

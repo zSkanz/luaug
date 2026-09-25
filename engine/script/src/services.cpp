@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <span>
@@ -162,6 +163,42 @@ int runServiceIsPaused(lua_State* L)
     // two states apart rather than by watching a call fail.
     lua_pushboolean(L, world(L).engineState().paused);
     return 1;
+}
+
+// **Rollback's three calls** (ADR 0101). The simulation is saved as a buffer
+// so a game keeps as many as it likes and the collector frees the ones it
+// drops; nothing here holds one.
+int runServiceSaveSimulation(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    const scene::PhysicsSync* physics = services(L).physics;
+    std::vector<u8> bytes;
+    if (physics == nullptr || !physics->saveSimulation(bytes))
+        raise(L, LUAUG_TR("script.err.simulation_unavailable"));
+    void* out = lua_newbuffer(L, bytes.size());
+    if (!bytes.empty())
+        std::memcpy(out, bytes.data(), bytes.size());
+    return 1;
+}
+
+int runServiceRestoreSimulation(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    size_t length = 0;
+    const void* data = luaL_checkbuffer(L, 2, &length);
+    scene::PhysicsSync* physics = services(L).physics;
+    const bool restored =
+        physics != nullptr && physics->restoreSimulation(std::span<const u8>{static_cast<const u8*>(data), length});
+    lua_pushboolean(L, restored ? 1 : 0);
+    return 1;
+}
+
+int runServiceStepSimulation(lua_State* L)
+{
+    (void)checkInstance(L, 1);
+    if (scene::PhysicsSync* physics = services(L).physics; physics != nullptr)
+        physics->stepQuietly(world(L).engineState().fixedTimestep);
+    return 0;
 }
 
 // --- TagService --------------------------------------------------------------
@@ -1687,6 +1724,9 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"RunService", "Pause", runServicePause},
     {"RunService", "Resume", runServiceResume},
     {"RunService", "IsPaused", runServiceIsPaused},
+    {"RunService", "SaveSimulation", runServiceSaveSimulation},
+    {"RunService", "RestoreSimulation", runServiceRestoreSimulation},
+    {"RunService", "StepSimulation", runServiceStepSimulation},
 
     {"StreamingService", "AddFocus", streamingAddFocus},
     {"StreamingService", "RemoveFocus", streamingRemoveFocus},

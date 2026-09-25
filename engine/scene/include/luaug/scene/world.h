@@ -701,11 +701,10 @@ public:
     //     restored rather than cleared.
     //   * **The physics mirror.** `PhysicsSync` keeps a body per instance slot
     //     and a character per id, and the backend behind it holds contacts,
-    //     velocities and sleep state that `IPhysics3D::restoreState` does not
-    //     implement (the Jolt backend answers false). A restored world's
-    //     instances therefore correspond to nothing the solver holds: the
-    //     caller destroys the mirror and builds a new one over the restored
-    //     tree.
+    //     velocities and sleep state. The solver CAN be restored now (ADR
+    //     0101), but only into the same bodies, and a world snapshot brings
+    //     back a different set: the caller destroys the mirror and builds a
+    //     new one over the restored tree.
     //   * **Everything else derived and keyed by instance.**
     //     `render::AnimationSystem` (a track per player, a pose per mesh part),
     //     `render::TransformHistory` (last frame's transform, which motion

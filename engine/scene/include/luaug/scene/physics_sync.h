@@ -56,6 +56,23 @@ public:
     [[nodiscard]] std::vector<core::CFrameD> replay(core::InstanceId character, const CharacterReplayStart& start,
                                                     std::span<const CharacterCommand> commands) override;
 
+    // --- Rollback (ADR 0101) ----------------------------------------------
+    //
+    // **The 3D simulation as bytes**: the solver's whole state, and for every
+    // instance it holds a body or a character for, where it is and how it is
+    // moving -- `CFrame`, velocities, a pending impulse, whether it sleeps, and
+    // a character's ground, state, vertical velocity and command. Nothing else:
+    // not which instances exist, not their other properties, not the 2D layer,
+    // and not a line of Luau.
+    [[nodiscard]] bool saveSimulation(std::vector<u8>& out) const;
+    // Puts it all back. **Refused** -- false, nothing changed -- when the bytes
+    // are not a saved simulation, or when the set of bodies and characters is
+    // not the one they were saved with.
+    [[nodiscard]] bool restoreSimulation(std::span<const u8> bytes);
+    // One fixed step of the 3D simulation, as the tick takes it, **without the
+    // touches**: a step taken again is a step whose events already fired.
+    void stepQuietly(f64 fixedDt);
+
     PhysicsSync(const PhysicsSync&) = delete;
     PhysicsSync& operator=(const PhysicsSync&) = delete;
 
@@ -449,6 +466,9 @@ private:
     void applyVoxels();
 
     std::vector<BodyRecord> m_bodies;
+    // Set while `stepQuietly` runs: contacts are drained and not published.
+    bool m_quiet = false;
+    [[nodiscard]] std::vector<core::InstanceId> simulatedIds() const;
     // Characters are few and are not on this path, so a map stays a map.
     std::unordered_map<u64, CharacterRecord> m_characters;
     // How many slots in `m_bodies` are live, so `bodyCount` does not walk.

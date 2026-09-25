@@ -201,6 +201,96 @@ TEST_CASE("a part in a world nobody scripted still falls, because the mirror is 
     CHECK(part->cframe.position.y < 39.0);
 }
 
+TEST_CASE("a script saves the simulation, rolls back to it and steps again to exactly where it was (ADR 0101)")
+{
+    Captured log;
+    Project project;
+    project.write("src/scripts/init.luau", R"(
+        local RunService = game:GetService("RunService")
+        local floor = Instance.new("Part")
+        floor.Anchored = true
+        floor.Size = vector.create(40, 1, 40)
+        floor.Position = vector.create(0, -0.5, 0)
+        floor.Parent = workspace
+        local boxes = {}
+        for i = 1, 6 do
+            local box = Instance.new("Part")
+            box.Size = vector.create(1, 1, 1)
+            box.Position = vector.create(i * 0.3, 1 + i * 1.6, 0)
+            box.Parent = workspace
+            boxes[i] = box
+        end
+        -- And a character walking into them: its controller's state is the
+        -- solver's too, kept outside the system, and must come back with it.
+        local hero = Instance.new("CharacterBody")
+        hero.Position = vector.create(-6, 3, 0)
+        hero.Parent = workspace
+        table.insert(boxes, hero)
+        -- Its input, every tick -- and again for every tick stepped again,
+        -- which is what re-simulating with the inputs means.
+        RunService.PreSimulation:Connect(function()
+            hero:Move(vector.create(1, 0, 0))
+        end)
+        local function mark(name: string)
+            local folder = Instance.new("Folder")
+            folder.Name = name
+            folder.Parent = workspace
+        end
+
+        local ticks = 0
+        local saved: buffer? = nil
+        RunService.PostSimulation:Connect(function()
+            ticks += 1
+            if ticks == 20 then
+                saved = RunService:SaveSimulation()
+            elseif ticks == 60 and saved then
+                local first = {}
+                for i, box in boxes do
+                    first[i] = box.CFrame
+                end
+                if hero.Position.X > -5 then
+                    mark("Walked")
+                end
+                if not RunService:RestoreSimulation(saved) then
+                    mark("NotRestored")
+                end
+                for _ = 1, 40 do
+                    hero:Move(vector.create(1, 0, 0))
+                    RunService:StepSimulation()
+                end
+                local same = true
+                for i, box in boxes do
+                    if box.CFrame ~= first[i] then
+                        same = false
+                    end
+                end
+                mark(if same then "Same" else "Different")
+                -- A body the state does not know of makes it another world.
+                local extra = Instance.new("Part")
+                extra.Parent = workspace
+                RunService:StepSimulation()
+                if not RunService:RestoreSimulation(saved) then
+                    mark("Refused")
+                end
+            end
+        end)
+    )");
+
+    app::WorldHost host;
+    REQUIRE_FALSE(host.boot(bootOptions(project.root)).has_value());
+    for (int tick = 0; tick < 62; ++tick)
+        host.tick();
+
+    const auto marked = [&host](std::string_view name) {
+        return host.world().findFirstChild(host.workspace(), host.world().atoms().lookup(name)).valid();
+    };
+    CHECK_FALSE(marked("NotRestored"));
+    CHECK(marked("Walked"));
+    CHECK(marked("Same"));
+    CHECK_FALSE(marked("Different"));
+    CHECK(marked("Refused"));
+}
+
 TEST_CASE("a character stepped again from where it was, through the commands it was given, goes where it went")
 {
     // **The replay a replica corrects its prediction with** (ADR 0076, as
