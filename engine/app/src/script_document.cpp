@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
+#include <regex>
 #include <string>
 #include <utility>
 
@@ -776,88 +778,236 @@ namespace {
     return std::string_view::npos;
 }
 
+// A line's matches, as byte spans, and the find that makes them.
+struct Span
+{
+    std::size_t begin = 0;
+    std::size_t end = 0;
+};
+
+// **A find compiled once per operation**, plain text or a regular expression:
+// compiling a pattern for every line of a file is the cost that makes regex
+// search feel slow, and none of it is per line.
+class Matcher
+{
+public:
+    Matcher(std::string_view needle, ScriptDocument::SearchOptions options) : m_needle(needle), m_options(options)
+    {
+        if (!options.regex || needle.empty())
+            return;
+        std::string pattern(needle);
+        if (options.wholeWord)
+            pattern = "\\b(?:" + pattern + ")\\b";
+        auto flags = std::regex::ECMAScript;
+        if (!options.matchCase)
+            flags |= std::regex::icase;
+        try {
+            m_regex.emplace(pattern, flags);
+        } catch (const std::regex_error&) {
+            m_invalid = true;
+        }
+    }
+
+    [[nodiscard]] bool usable() const noexcept { return !m_needle.empty() && !m_invalid; }
+
+    void matches(std::string_view line, std::vector<Span>& out) const
+    {
+        out.clear();
+        if (!usable())
+            return;
+        if (!m_regex.has_value()) {
+            std::size_t scan = 0;
+            for (;;) {
+                const std::size_t hit = findInLine(line, m_needle, scan, m_options.matchCase, m_options.wholeWord);
+                if (hit == std::string_view::npos)
+                    return;
+                out.push_back(Span{hit, hit + m_needle.size()});
+                scan = hit + m_needle.size();
+            }
+        }
+        // An empty match marks a place and not a piece of text: it cannot be
+        // highlighted or replaced, so it is stepped over.
+        for (auto it = std::cregex_iterator(line.data(), line.data() + line.size(), *m_regex);
+             it != std::cregex_iterator(); ++it) {
+            if (it->length(0) == 0)
+                continue;
+            const auto begin = static_cast<std::size_t>(it->position(0));
+            out.push_back(Span{begin, begin + static_cast<std::size_t>(it->length(0))});
+        }
+    }
+
+    // What `with` becomes at the match starting at `begin`: itself for a plain
+    // find, and with `$1`..`$9` and `$&` filled in for a pattern.
+    [[nodiscard]] std::string replacement(std::string_view line, std::size_t begin, std::string_view with) const
+    {
+        if (!m_regex.has_value())
+            return std::string(with);
+        for (auto it = std::cregex_iterator(line.data(), line.data() + line.size(), *m_regex);
+             it != std::cregex_iterator(); ++it) {
+            if (static_cast<std::size_t>(it->position(0)) == begin)
+                return it->format(std::string(with));
+        }
+        return std::string(with);
+    }
+
+private:
+    std::string_view m_needle;
+    ScriptDocument::SearchOptions m_options;
+    std::optional<std::regex> m_regex;
+    bool m_invalid = false;
+};
+
 } // namespace
+
+ScriptDocument::BlockBreak ScriptDocument::blockBreakAt(Position caret) const
+{
+    BlockBreak out;
+    caret = clamp(caret);
+    const std::string_view text = m_lines[caret.line].text;
+    const std::vector<Token>& tokens = m_lines[caret.line].tokens;
+    const auto word = [&](const Token& token) { return text.substr(token.column, token.length); };
+
+    // The last thing that means anything before the caret, and the first on
+    // the line.
+    const Token* last = nullptr;
+    const Token* first = nullptr;
+    for (const Token& token : tokens) {
+        if (token.column + token.length > caret.column)
+            break;
+        if (token.kind == TokenKind::Text || token.kind == TokenKind::Comment)
+            continue;
+        if (first == nullptr)
+            first = &token;
+        last = &token;
+    }
+    if (last == nullptr)
+        return out;
+
+    // A function's parameter list closes with `)` on a line with `function`
+    // on it, and how many `(` were still open at that keyword is how many `)`
+    // follow its `end`: `x:Connect(function()` closes with `end)`.
+    std::optional<core::u32> functionOpenParens;
+    core::u32 depth = 0;
+    for (const Token& token : tokens) {
+        if (token.column + token.length > caret.column)
+            break;
+        const std::string_view w = word(token);
+        if (token.kind == TokenKind::Keyword && w == "function")
+            functionOpenParens = depth;
+        else if (token.kind == TokenKind::Operator && w == "(")
+            ++depth;
+        else if (token.kind == TokenKind::Operator && w == ")" && depth > 0)
+            --depth;
+    }
+
+    const std::string_view tail = word(*last);
+    std::string closer;
+    if (last->kind == TokenKind::Keyword && (tail == "then" || tail == "do"))
+        closer = "end";
+    else if (last->kind == TokenKind::Keyword && tail == "repeat")
+        closer = "until ";
+    else if (last->kind == TokenKind::Keyword && tail == "else")
+        out.opens = true;
+    else if (last->kind == TokenKind::Operator && tail == ")" && functionOpenParens.has_value() &&
+             depth == *functionOpenParens)
+        closer = "end" + std::string(*functionOpenParens, ')');
+    if (closer.empty())
+        return out;
+    out.opens = true;
+
+    // `elseif ... then` continues a block and never needs a closer of its own.
+    if (first != nullptr && first->kind == TokenKind::Keyword && word(*first) == "elseif")
+        return out;
+
+    int balance = 0;
+    for (const Line& line : m_lines) {
+        for (const Token& token : line.tokens) {
+            if (token.kind != TokenKind::Keyword)
+                continue;
+            const std::string_view w = std::string_view(line.text).substr(token.column, token.length);
+            if (w == "function" || w == "if" || w == "do" || w == "repeat")
+                ++balance;
+            else if (w == "end" || w == "until")
+                --balance;
+        }
+    }
+    if (balance > 0)
+        out.closer = std::move(closer);
+    return out;
+}
+
+bool ScriptDocument::searchable(std::string_view needle, SearchOptions options)
+{
+    return Matcher(needle, options).usable();
+}
+
+std::vector<Range> ScriptDocument::findAll(std::string_view needle, SearchOptions options) const
+{
+    std::vector<Range> out;
+    const Matcher matcher(needle, options);
+    if (!matcher.usable())
+        return out;
+    std::vector<Span> spans;
+    for (u32 index = 0; index < m_lines.size(); ++index) {
+        matcher.matches(m_lines[index].text, spans);
+        for (const Span& span : spans) {
+            out.push_back(
+                Range{Position{index, static_cast<u32>(span.begin)}, Position{index, static_cast<u32>(span.end)}});
+        }
+    }
+    return out;
+}
 
 Range ScriptDocument::findNext(std::string_view needle, Position from, SearchOptions options) const
 {
-    if (needle.empty())
-        return Range{from, from};
-
     const Position start = clamp(from);
-    // Two passes rather than a modulo walk, because "wrapping once" is exactly
-    // this: everything at or after the caret, then everything before it.
-    for (int pass = 0; pass < 2; ++pass) {
-        const u32 firstLine = pass == 0 ? start.line : 0;
-        const u32 lastLine = pass == 0 ? static_cast<u32>(m_lines.size()) - 1 : start.line;
-        for (u32 index = firstLine; index <= lastLine && index < m_lines.size(); ++index) {
-            const std::size_t begin = pass == 0 && index == start.line ? start.column : 0;
-            const std::size_t hit =
-                findInLine(m_lines[index].text, needle, begin, options.matchCase, options.wholeWord);
-            if (hit == std::string_view::npos)
-                continue;
-            if (pass == 1 && index == start.line && hit >= start.column)
-                continue;
-            return Range{Position{index, static_cast<u32>(hit)},
-                         Position{index, static_cast<u32>(hit + needle.size())}};
-        }
+    const std::vector<Range> all = findAll(needle, options);
+    if (all.empty())
+        return Range{start, start};
+    // The first at or after the caret, wrapping to the top once.
+    for (const Range& match : all) {
+        if (!(match.begin < start))
+            return match;
     }
-    return Range{start, start};
+    return all.front();
 }
 
 Range ScriptDocument::findPrevious(std::string_view needle, Position from, SearchOptions options) const
 {
-    if (needle.empty())
-        return Range{from, from};
-
     const Position start = clamp(from);
-    for (int pass = 0; pass < 2; ++pass) {
-        const auto firstLine = static_cast<std::ptrdiff_t>(pass == 0 ? start.line : m_lines.size() - 1);
-        const auto lastLine = static_cast<std::ptrdiff_t>(pass == 0 ? 0 : start.line);
-        for (std::ptrdiff_t index = firstLine; index >= lastLine; --index) {
-            const auto lineIndex = static_cast<u32>(index);
-            const std::string_view text = m_lines[lineIndex].text;
-            std::size_t best = std::string_view::npos;
-            std::size_t scan = 0;
-            for (;;) {
-                const std::size_t hit = findInLine(text, needle, scan, options.matchCase, options.wholeWord);
-                if (hit == std::string_view::npos)
-                    break;
-                const bool beforeCaret = lineIndex != start.line || hit + needle.size() <= start.column;
-                if ((pass == 0 && beforeCaret) || (pass == 1 && !(lineIndex == start.line && beforeCaret)))
-                    best = hit;
-                scan = hit + 1;
-            }
-            if (best != std::string_view::npos) {
-                return Range{Position{lineIndex, static_cast<u32>(best)},
-                             Position{lineIndex, static_cast<u32>(best + needle.size())}};
-            }
-        }
+    const std::vector<Range> all = findAll(needle, options);
+    if (all.empty())
+        return Range{start, start};
+    // The last that ends at or before the caret, wrapping to the bottom once.
+    for (auto match = all.rbegin(); match != all.rend(); ++match) {
+        if (!(start < match->end))
+            return *match;
     }
-    return Range{start, start};
+    return all.back();
 }
 
 u32 ScriptDocument::countMatches(std::string_view needle, SearchOptions options) const
 {
-    if (needle.empty())
-        return 0;
+    return static_cast<u32>(findAll(needle, options).size());
+}
 
-    u32 total = 0;
-    for (const Line& line : m_lines) {
-        std::size_t scan = 0;
-        for (;;) {
-            const std::size_t hit = findInLine(line.text, needle, scan, options.matchCase, options.wholeWord);
-            if (hit == std::string_view::npos)
-                break;
-            ++total;
-            scan = hit + needle.size();
-        }
-    }
-    return total;
+Range ScriptDocument::replaceMatch(Range match, std::string_view needle, std::string_view with, SearchOptions options)
+{
+    // Only a real match: a stale range -- the text moved since it was found --
+    // replaces nothing rather than something else.
+    const std::vector<Range> all = findAll(needle, options);
+    if (std::find(all.begin(), all.end(), match) == all.end())
+        return Range{match.begin, match.begin};
+    const Matcher matcher(needle, options);
+    const std::string text = matcher.replacement(m_lines[match.begin.line].text, match.begin.column, with);
+    const Position end = replace(match, text);
+    return Range{match.begin, end};
 }
 
 u32 ScriptDocument::replaceAll(std::string_view needle, std::string_view with, SearchOptions options)
 {
-    if (needle.empty())
+    const Matcher matcher(needle, options);
+    if (!matcher.usable())
         return 0;
 
     // **Rebuilt whole, recorded as one step.** A loop of `replace` calls would
@@ -868,18 +1018,17 @@ u32 ScriptDocument::replaceAll(std::string_view needle, std::string_view with, S
     after.reserve(before.size());
 
     u32 replaced = 0;
+    std::vector<Span> spans;
     for (const Line& line : m_lines) {
         if (&line != &m_lines.front())
             after.push_back('\n');
         const std::string_view source = line.text;
+        matcher.matches(source, spans);
         std::size_t scan = 0;
-        for (;;) {
-            const std::size_t hit = findInLine(source, needle, scan, options.matchCase, options.wholeWord);
-            if (hit == std::string_view::npos)
-                break;
-            after.append(source.substr(scan, hit - scan));
-            after.append(with);
-            scan = hit + needle.size();
+        for (const Span& span : spans) {
+            after.append(source.substr(scan, span.begin - scan));
+            after.append(matcher.replacement(source, span.begin, with));
+            scan = span.end;
             ++replaced;
         }
         after.append(source.substr(scan));

@@ -184,6 +184,51 @@ void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view 
     return height < minimum ? minimum : height;
 }
 
+struct UiDragResult
+{
+    core::UDim2 position;
+    core::UDim2 size;
+};
+
+// **Where a dragged interface box puts its properties.** `min`/`max` are the
+// box as the drag found it, in pixels; the four flags say which edges the grip
+// moves (all four for the body); `delta` is the pointer's travel. `Position`
+// places the ANCHOR point, so an edge that stays put stays put only when the
+// anchor moves by its share of the change. Offsets change, scales do not.
+[[nodiscard]] UiDragResult uiDragResult(core::Vec2 min, core::Vec2 max, core::Vec2 delta, bool left, bool right,
+                                        bool top, bool bottom, core::Vec2 anchor, core::UDim2 position,
+                                        core::UDim2 size) noexcept
+{
+    const bool body = left && right && top && bottom;
+    float x0 = min.x;
+    float y0 = min.y;
+    float x1 = max.x;
+    float y1 = max.y;
+    if (body) {
+        x0 += delta.x;
+        x1 += delta.x;
+        y0 += delta.y;
+        y1 += delta.y;
+    }
+    else {
+        if (left)
+            x0 = std::min(x0 + delta.x, x1 - 1.0f);
+        if (right)
+            x1 = std::max(x1 + delta.x, x0 + 1.0f);
+        if (top)
+            y0 = std::min(y0 + delta.y, y1 - 1.0f);
+        if (bottom)
+            y1 = std::max(y1 + delta.y, y0 + 1.0f);
+    }
+    const float grownX = (x1 - x0) - (max.x - min.x);
+    const float grownY = (y1 - y0) - (max.y - min.y);
+    size.x.offset += grownX;
+    size.y.offset += grownY;
+    position.x.offset += (x0 - min.x) + grownX * anchor.x;
+    position.y.offset += (y0 - min.y) + grownY * anchor.y;
+    return UiDragResult{position, size};
+}
+
 // **The REPL's up and down arrows walk what was typed before**, the way every
 // shell does. `at` is -1 on the line being typed, and otherwise an index into
 // `count` entries, oldest first: up goes back to the newest and stops at the
@@ -4839,7 +4884,166 @@ void drawViewportStatus(const Editor& editor, ImVec2 at, ImVec2 region)
     draw->AddText(nullptr, 0.0f, origin, ImGui::ColorConvertFloat4ToU32(ink), status.message.c_str(), nullptr, wrap);
 }
 
-void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands)
+// --- Handles on a selected interface element --------------------------------
+//
+// **A selected Frame, Button or Label gets a box and eight handles** (the owner:
+// "selecting a UI should put points around it"). A corner or an edge resizes,
+// the inside moves, and the whole drag is ONE undo step -- it writes `Size`
+// and `Position` through the inspector like the Properties grid does, under one
+// gesture. The offsets change and the scales do not: a person dragging is
+// saying "this many pixels", which is what an offset is.
+
+// Which part of the box a drag holds: the eight handles, the body, or none.
+enum class UiGrip : core::u8
+{
+    None,
+    Body,
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+};
+
+struct UiDrag
+{
+    UiGrip grip = UiGrip::None;
+    core::InstanceId target;
+    ImVec2 startMouse{};
+    // The box and the properties as the drag found them.
+    ImVec2 min{};
+    ImVec2 max{};
+    core::UDim2 position{};
+    core::UDim2 size{};
+};
+UiDrag g_uiDrag;
+
+// Which grip `mouse` is on, handles before the body.
+[[nodiscard]] UiGrip uiGripAt(ImVec2 mouse, ImVec2 min, ImVec2 max, float reach)
+{
+    const float midX = (min.x + max.x) * 0.5f;
+    const float midY = (min.y + max.y) * 0.5f;
+    const auto near = [&](float x, float y) {
+        return std::fabs(mouse.x - x) <= reach && std::fabs(mouse.y - y) <= reach;
+    };
+    if (near(min.x, min.y))
+        return UiGrip::TopLeft;
+    if (near(max.x, min.y))
+        return UiGrip::TopRight;
+    if (near(min.x, max.y))
+        return UiGrip::BottomLeft;
+    if (near(max.x, max.y))
+        return UiGrip::BottomRight;
+    if (near(midX, min.y))
+        return UiGrip::Top;
+    if (near(midX, max.y))
+        return UiGrip::Bottom;
+    if (near(min.x, midY))
+        return UiGrip::Left;
+    if (near(max.x, midY))
+        return UiGrip::Right;
+    if (mouse.x > min.x && mouse.x < max.x && mouse.y > min.y && mouse.y < max.y)
+        return UiGrip::Body;
+    return UiGrip::None;
+}
+
+[[nodiscard]] ImGuiMouseCursor uiGripCursor(UiGrip grip)
+{
+    switch (grip) {
+    case UiGrip::Left:
+    case UiGrip::Right:
+        return ImGuiMouseCursor_ResizeEW;
+    case UiGrip::Top:
+    case UiGrip::Bottom:
+        return ImGuiMouseCursor_ResizeNS;
+    case UiGrip::TopLeft:
+    case UiGrip::BottomRight:
+        return ImGuiMouseCursor_ResizeNWSE;
+    case UiGrip::TopRight:
+    case UiGrip::BottomLeft:
+        return ImGuiMouseCursor_ResizeNESW;
+    case UiGrip::Body:
+        return ImGuiMouseCursor_ResizeAll;
+    default:
+        return ImGuiMouseCursor_Arrow;
+    }
+}
+
+// Draws the box of the selected interface element over the viewport and
+// takes a drag on it. Returns whether the pointer is on the box, so the
+// world pick underneath does not also take the click.
+bool drawInterfaceHandles(scene::World* world, Inspector* inspector, ImVec2 origin, bool overImage)
+{
+    if (world == nullptr || inspector == nullptr)
+        return false;
+    const core::InstanceId selected = inspector->selection();
+    const scene::UIObjectComponent* ui = world->uiObjects().find(selected);
+    if (ui == nullptr || !ui->visible || ui->absoluteSize.x <= 0.0f || ui->absoluteSize.y <= 0.0f) {
+        g_uiDrag = UiDrag{};
+        return false;
+    }
+
+    const ImVec2 min(origin.x + ui->absolutePosition.x, origin.y + ui->absolutePosition.y);
+    const ImVec2 max(min.x + ui->absoluteSize.x, min.y + ui->absoluteSize.y);
+    const ThemePalette& p = palette();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImU32 edge = ImGui::GetColorU32(themeColor(p.accent));
+    draw->AddRect(min, max, edge, 0.0f, 0, 1.5f);
+
+    constexpr float kHandle = 4.0f;
+    const float midX = (min.x + max.x) * 0.5f;
+    const float midY = (min.y + max.y) * 0.5f;
+    for (const ImVec2 at : {min, ImVec2(max.x, min.y), ImVec2(min.x, max.y), max, ImVec2(midX, min.y),
+                            ImVec2(midX, max.y), ImVec2(min.x, midY), ImVec2(max.x, midY)}) {
+        draw->AddRectFilled(ImVec2(at.x - kHandle, at.y - kHandle), ImVec2(at.x + kHandle, at.y + kHandle),
+                            ImGui::GetColorU32(themeColor(p.surface)));
+        draw->AddRect(ImVec2(at.x - kHandle, at.y - kHandle), ImVec2(at.x + kHandle, at.y + kHandle), edge);
+    }
+
+    const ImVec2 mouse = ImGui::GetMousePos();
+    const UiGrip hovered = overImage ? uiGripAt(mouse, min, max, kHandle + 3.0f) : UiGrip::None;
+    if (g_uiDrag.grip == UiGrip::None && hovered != UiGrip::None) {
+        ImGui::SetMouseCursor(uiGripCursor(hovered));
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            g_uiDrag = UiDrag{hovered, selected, mouse, min, max, ui->position, ui->size};
+            (void)inspector->beginGesture();
+        }
+    }
+
+    if (g_uiDrag.grip != UiGrip::None) {
+        ImGui::SetMouseCursor(uiGripCursor(g_uiDrag.grip));
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) || g_uiDrag.target != selected) {
+            g_uiDrag = UiDrag{};
+            inspector->endGesture();
+            return true;
+        }
+
+        const UiGrip grip = g_uiDrag.grip;
+        const bool body = grip == UiGrip::Body;
+        const UiDragResult moved = uiDragResult(
+            core::Vec2{g_uiDrag.min.x, g_uiDrag.min.y}, core::Vec2{g_uiDrag.max.x, g_uiDrag.max.y},
+            core::Vec2{std::round(mouse.x - g_uiDrag.startMouse.x), std::round(mouse.y - g_uiDrag.startMouse.y)},
+            body || grip == UiGrip::Left || grip == UiGrip::TopLeft || grip == UiGrip::BottomLeft,
+            body || grip == UiGrip::Right || grip == UiGrip::TopRight || grip == UiGrip::BottomRight,
+            body || grip == UiGrip::Top || grip == UiGrip::TopLeft || grip == UiGrip::TopRight,
+            body || grip == UiGrip::Bottom || grip == UiGrip::BottomLeft || grip == UiGrip::BottomRight,
+            ui->anchorPoint, g_uiDrag.position, g_uiDrag.size);
+        const core::UDim2 size = moved.size;
+        const core::UDim2 position = moved.position;
+        if (!(size == ui->size))
+            inspector->enqueue(selected, world->atoms().intern("Size"), scene::Value{size});
+        if (!(position == ui->position))
+            inspector->enqueue(selected, world->atoms().intern("Position"), scene::Value{position});
+        return true;
+    }
+    return hovered != UiGrip::None;
+}
+
+void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands,
+                      scene::World* world = nullptr, Inspector* inspector = nullptr)
 {
     const ImVec2 size = ImGui::GetContentRegionAvail();
     const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -4901,7 +5105,10 @@ void drawViewportBody(Editor& editor, rhi::TextureHandle texture, EditorCommands
         //
         // **Alt picks the part itself**, whatever model it is in: the quick
         // way to one wheel of a car without opening the car first.
-        if (overImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        // A press on the selected interface element's box is the box's, not
+        // a pick of whatever is behind it in the world.
+        const bool onInterface = drawInterfaceHandles(world, inspector, origin, overImage);
+        if (overImage && !onInterface && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             editor.requestPick(inViewport, ImGui::GetIO().KeyCtrl, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left),
                                ImGui::GetIO().KeyAlt);
         }
@@ -5086,8 +5293,8 @@ void drawRibbon(Editor& editor, EditorCommands& commands, EditorPanels& panels, 
     ImGui::EndTabBar();
 }
 
-void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& commands, EditorPanels& panels,
-                  bool& open, const IconAtlas* icons)
+void drawViewport(scene::World* world, Inspector* inspector, Editor& editor, rhi::TextureHandle texture,
+                  EditorCommands& commands, EditorPanels& panels, bool& open, const IconAtlas* icons)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     // **Room for the camera**, painted over the gap by `drawTabIcons`. Before
@@ -5103,7 +5310,7 @@ void drawViewport(Editor& editor, rhi::TextureHandle texture, EditorCommands& co
     (void)panels;
     (void)icons;
     if (visible)
-        drawViewportBody(editor, texture, commands);
+        drawViewportBody(editor, texture, commands, world, inspector);
     ImGui::End();
 }
 
@@ -7692,7 +7899,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
 
     if (editor != nullptr) {
         if (panels.viewport)
-            drawViewport(*editor, viewport, commands, panels, panels.viewport, icons);
+            drawViewport(world, inspector, *editor, viewport, commands, panels, panels.viewport, icons);
         if (panels.content)
             drawContent(*editor, commands, panels, dialogs, icons, world, inspector);
     }

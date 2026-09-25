@@ -1707,13 +1707,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                             // left the script exactly where it was -- reported as
                             // "sometimes it does not save".
                             if (editor.saveStamp(host->world(), host->runtime().dataModel()))
-                                scripts.markSaved(index);
+                                scripts.markSavedWhere(ScriptOrigin::Stamp);
                         }
                         else if (tab->file.empty()) {
                             // It lives in the scene, so saving it is saving the
                             // scene -- the `Source` is already in the world.
                             if (editor.saveOpenScene(host->world()))
-                                scripts.markSaved(index);
+                                scripts.markSavedWhere(ScriptOrigin::Scene);
                         }
                         else if (platform::writeTextFile(options.scriptPath / tab->file, tab->document.text())) {
                             scripts.markSaved(index);
@@ -2169,8 +2169,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 // save moves every linked instance to match the file it just
                 // wrote (ADR 0051), and those live in the world the stage is
                 // standing in front of.
-                if (editorCommands.saveStamp)
-                    (void)editor.saveStamp(host->world(), host->runtime().dataModel());
+                if (editorCommands.saveStamp && editor.saveStamp(host->world(), host->runtime().dataModel()))
+                    scripts.markSavedWhere(ScriptOrigin::Stamp);
                 if (editorCommands.closeStamp) {
                     (void)editor.closeStamp(host->world(), host->runtime().dataModel(), inspector,
                                             editorCommands.closeStampSaving);
@@ -2289,8 +2289,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         editor.stop(host->world(), inspector);
                     editor.newScene(host->world(), inspector);
                 }
-                if (editorCommands.save)
-                    (void)editor.saveOpenScene(host->world());
+                // Every scene script's text went into the file with it.
+                if (editorCommands.save && editor.saveOpenScene(host->world()))
+                    scripts.markSavedWhere(ScriptOrigin::Scene);
 
                 // **One property of one placed stamp, taken back or pushed up**
                 // (S5.6). Drained here with the rest: applying rewrites a file
@@ -2308,8 +2309,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                                     editorCommands.overrideProperty);
                     }
                 }
-                if (!editorCommands.saveAs.empty())
-                    (void)editor.saveSceneAs(host->world(), editorCommands.saveAs);
+                if (!editorCommands.saveAs.empty() && editor.saveSceneAs(host->world(), editorCommands.saveAs))
+                    scripts.markSavedWhere(ScriptOrigin::Scene);
 
                 // Remembered on CHANGE rather than at exit: an editor that only
                 // wrote this on a clean shutdown would forget everything the one

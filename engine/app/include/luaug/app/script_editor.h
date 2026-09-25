@@ -140,8 +140,16 @@ struct OpenScript
     bool replaceOpen = false;
     bool matchCase = false;
     bool wholeWord = false;
+    bool regex = false;
     std::string findText;
     std::string replaceText;
+    // Give the find field the keyboard the next time the box is drawn.
+    bool focusFind = false;
+    // Every match of the find, for the highlights and "3 of 12" -- recomputed
+    // when the text, the query or an option changes, not every frame.
+    std::vector<Range> matches;
+    core::u64 matchesRevision = ~0ull;
+    std::string matchesKey;
     // What the last search matched, so the pane can highlight it and Enter can
     // step from it rather than from the caret.
     Range lastMatch;
@@ -254,6 +262,12 @@ public:
     // text, never before -- a document that says it is saved and is not is the
     // one lie this class must never tell.
     void markSaved(std::size_t index) noexcept;
+    // **Every tab the written file carries**: a scene or a stamp holds the
+    // `Source` of each of its scripts, so writing it saves all of them -- and
+    // marking only the tab that asked left the others with the floppy of an
+    // unsaved script that was already on disk (reported with a screenshot).
+    // A script that is its own file under `src/scripts` is not in either.
+    void markSavedWhere(ScriptOrigin origin) noexcept;
 
     // **Closes tabs whose instance is gone.** A script can be deleted from the
     // Explorer, and a hot reload replaces every instance in the world -- so a

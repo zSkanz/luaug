@@ -126,6 +126,14 @@ void ScriptEditor::markSaved(std::size_t index) noexcept
         tab->savedRevision = tab->document.revision();
 }
 
+void ScriptEditor::markSavedWhere(ScriptOrigin origin) noexcept
+{
+    for (OpenScript& tab : m_tabs) {
+        if (tab.origin == origin && tab.file.empty())
+            tab.savedRevision = tab.document.revision();
+    }
+}
+
 std::size_t ScriptEditor::forgetDestroyed(const scene::World& scene, const scene::World* stamp)
 {
     std::size_t closed = 0;

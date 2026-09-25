@@ -713,3 +713,91 @@ TEST_CASE("return and continue colour as keywords wherever a statement can be")
     ScriptDocument variable("local continue = 1");
     CHECK(kindAt(variable, 0, 6) == TokenKind::Identifier);
 }
+
+TEST_CASE("Enter after a line that opens a block writes its end, once")
+{
+    // **The owner: "the automatic end, as other editors do".** A closer only
+    // when the document has none for the block: a second `end` under one
+    // somebody already typed is worse than none.
+    const auto at = [](std::string_view text) {
+        const std::string source(text);
+        ScriptDocument document(source);
+        const core::u32 line = document.lineCount() - 1;
+        return document.blockBreakAt(Position{line, document.lineLength(line)});
+    };
+
+    CHECK(at("if ready then").closer == "end");
+    CHECK(at("for i = 1, 10 do").closer == "end");
+    CHECK(at("while true do").closer == "end");
+    CHECK(at("local function spin(part: Part)").closer == "end");
+    CHECK(at("local f = function()").closer == "end");
+    CHECK(at("repeat").closer == "until ");
+    // A function passed as an argument closes the call too.
+    CHECK(at("RunService.Heartbeat:Connect(function(dt)").closer == "end)");
+    CHECK(at("task.spawn(pcall(function()").closer == "end))");
+
+    // Already closed: deeper, and nothing written.
+    const auto closed = [](std::string_view text) {
+        const std::string source(text);
+        ScriptDocument document(source);
+        return document.blockBreakAt(Position{0, document.lineLength(0)});
+    };
+    ScriptDocument::BlockBreak done = closed("if ready then\nend");
+    CHECK(done.opens);
+    CHECK(done.closer.empty());
+
+    // `else` and `elseif` go one step deeper and close nothing of their own.
+    CHECK(at("if a then\nelse").opens);
+    CHECK(at("if a then\nelse").closer.empty());
+    CHECK(at("if a then\nelseif b then").closer.empty());
+
+    // A comment or a string that says `then` opens nothing, and nor does a
+    // call that is only a call.
+    CHECK_FALSE(at("print(1) -- then").opens);
+    CHECK_FALSE(at("local s = \"then\"").opens);
+    CHECK_FALSE(at("print(x)").opens);
+}
+
+TEST_CASE("find: every match, a regular expression, replace one or all")
+{
+    // **The owner: Ctrl+F "like the other editors -- find, replace, and the
+    // rest".** The box reads all of this.
+    ScriptDocument document("local speed = 10\nlocal Speed = speed * 2\n-- speedy");
+    ScriptDocument::SearchOptions plain;
+
+    // Case-insensitive by default, and every match in order.
+    const std::vector<Range> all = document.findAll("speed", plain);
+    REQUIRE(all.size() == 4);
+    CHECK(all.front() == Range{Position{0, 6}, Position{0, 11}});
+    CHECK(document.findAll("speed", {.matchCase = true}).size() == 3);
+    CHECK(document.findAll("speed", {.wholeWord = true}).size() == 3);
+
+    // A pattern: its own length per match, `$1` in the replacement.
+    const ScriptDocument::SearchOptions pattern{.matchCase = true, .regex = true};
+    const std::vector<Range> numbers = document.findAll("[0-9]+", pattern);
+    REQUIRE(numbers.size() == 2);
+    CHECK(numbers.front() == Range{Position{0, 14}, Position{0, 16}});
+    CHECK_FALSE(ScriptDocument::searchable("(unclosed", pattern));
+    CHECK(document.findAll("(unclosed", pattern).empty());
+    CHECK(ScriptDocument::searchable("(closed)", pattern));
+
+    // Previous wraps to the last; next from the end wraps to the first.
+    CHECK(document.findPrevious("speed", Position{0, 0}, plain) == all.back());
+    CHECK(document.findNext("speed", Position{2, 10}, plain) == all.front());
+
+    // One replaced, with a group, as one undo step; a stale range replaces
+    // nothing.
+    const Range done = document.replaceMatch(numbers.front(), "([0-9]+)", "($1 + 1)", pattern);
+    CHECK(document.line(0) == "local speed = (10 + 1)");
+    CHECK(done == Range{Position{0, 14}, Position{0, 22}});
+    const Range stale = document.replaceMatch(Range{Position{0, 0}, Position{0, 3}}, "[0-9]+", "x", pattern);
+    CHECK(stale.begin == stale.end);
+    CHECK(document.line(0) == "local speed = (10 + 1)");
+    Position caret;
+    CHECK(document.undo(caret));
+    CHECK(document.line(0) == "local speed = 10");
+
+    // All, as one step.
+    CHECK(document.replaceAll("speed", "velocity", {.matchCase = true, .wholeWord = true}) == 2);
+    CHECK(document.line(1) == "local Speed = velocity * 2");
+}

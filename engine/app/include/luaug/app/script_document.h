@@ -356,19 +356,52 @@ public:
     // Cells in the whole line, which is its drawn width.
     [[nodiscard]] core::u32 cellCount(core::u32 line) const noexcept;
 
+    // --- Blocks ----------------------------------------------------------------
+
+    // What an Enter at `caret` should do about the block the line opens.
+    struct BlockBreak
+    {
+        // The line opens a block -- it ends in `then`, `do`, `repeat`, `else`
+        // or a function's `)` -- so the new line is one step deeper.
+        bool opens = false;
+        // What closes it, when the document has no closer for it yet: `end`,
+        // `end)` for a function passed as an argument, or `until ` for a
+        // `repeat`. Empty when it is already closed, or the line only
+        // continues a block (`elseif`, `else`).
+        std::string closer;
+    };
+    // **The keyword balance of the whole document** decides "not closed yet":
+    // `function`, `if`, `do` and `repeat` open, `end` and `until` close, and
+    // the lexer has already set comments and strings aside. An Enter that
+    // wrote a second `end` under one somebody already typed is worse than
+    // none, so a balanced document gets no closer.
+    [[nodiscard]] BlockBreak blockBreakAt(Position caret) const;
+
     // --- Searching -----------------------------------------------------------
 
     struct SearchOptions
     {
         bool matchCase = false;
         bool wholeWord = false;
+        // `needle` is an ECMAScript regular expression, matched a line at a
+        // time; `with` may name its groups as `$1`..`$9` and the whole as `$&`.
+        bool regex = false;
     };
 
+    // Whether `needle` can search at all: not empty, and a valid pattern when
+    // it is one. The find box tints its field when it cannot.
+    [[nodiscard]] static bool searchable(std::string_view needle, SearchOptions options);
+    // Every match, in document order. An empty match is a place rather than a
+    // piece of text, and is left out.
+    [[nodiscard]] std::vector<Range> findAll(std::string_view needle, SearchOptions options) const;
     // The first match at or after `from`, wrapping to the top once. An empty
     // range when `needle` is empty or nothing matches.
     [[nodiscard]] Range findNext(std::string_view needle, Position from, SearchOptions options) const;
     [[nodiscard]] Range findPrevious(std::string_view needle, Position from, SearchOptions options) const;
     [[nodiscard]] core::u32 countMatches(std::string_view needle, SearchOptions options) const;
+    // One match replaced, as one undo step, returning what it became. A range
+    // that is no longer a match -- the text moved -- replaces nothing.
+    Range replaceMatch(Range match, std::string_view needle, std::string_view with, SearchOptions options);
     // Every match replaced, as ONE undo step. Returns how many.
     core::u32 replaceAll(std::string_view needle, std::string_view with, SearchOptions options);
 

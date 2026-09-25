@@ -788,6 +788,11 @@ std::optional<SignatureHelp> LanguageCore::signature(const std::string& module, 
     const std::vector<Luau::AstNode*> ancestry = Luau::findAstAncestryOfPosition(*source, caret);
     const Luau::AstExprCall* call = nullptr;
     for (auto walk = ancestry.rbegin(); walk != ancestry.rend(); ++walk) {
+        // **A function literal is a boundary**: inside the body of a handler
+        // passed to `Connect`, the caret is in that call's arguments only
+        // technically, and a box about `Connect` over the body is in the way.
+        if ((*walk)->is<Luau::AstExprFunction>())
+            return std::nullopt;
         if (const auto* candidate = (*walk)->as<Luau::AstExprCall>(); candidate != nullptr) {
             // Inside its parentheses, not on the callee's name. `argLocation`
             // begins just after the `(`, so the caret sitting right there --

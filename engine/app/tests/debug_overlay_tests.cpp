@@ -61,6 +61,16 @@ void issueOrAsk(EditorDialogs::Pending what, bool unsavedWork, std::string_view 
 // Where the REPL's up and down arrows go in what was typed before.
 [[nodiscard]] luaug::core::i32 consoleHistoryStep(luaug::core::usize count, luaug::core::i32 at, bool up) noexcept;
 
+// Where a dragged interface box puts its properties.
+struct UiDragResult
+{
+    luaug::core::UDim2 position;
+    luaug::core::UDim2 size;
+};
+[[nodiscard]] UiDragResult uiDragResult(luaug::core::Vec2 min, luaug::core::Vec2 max, luaug::core::Vec2 delta,
+                                        bool left, bool right, bool top, bool bottom, luaug::core::Vec2 anchor,
+                                        luaug::core::UDim2 position, luaug::core::UDim2 size) noexcept;
+
 // What a selection across console lines copies.
 [[nodiscard]] std::string consoleSelectionText(std::span<const std::string_view> lines, luaug::core::usize fromLine,
                                                luaug::core::usize fromOffset, luaug::core::usize toLine,
@@ -788,4 +798,41 @@ TEST_CASE("the console's arrows walk what was typed, and a selection copies what
     CHECK(consoleSelectionText(lines, 0, 0, 2, 99) == "hello world\nsecond\nthird line");
     CHECK(consoleSelectionText(lines, 1, 3, 1, 3).empty());
     CHECK(consoleSelectionText({}, 0, 0, 0, 0).empty());
+}
+
+TEST_CASE("an interface box dragged by a handle resizes, by its body moves, and its anchor holds the far edge")
+{
+    // **The owner: "selecting a UI should put points around it".**
+    using luaug::app::uiDragResult;
+    using luaug::core::UDim;
+    using luaug::core::UDim2;
+    using luaug::core::Vec2;
+    const UDim2 position{UDim{0.0f, 300.0f}, UDim{0.0f, 200.0f}};
+    const UDim2 size{UDim{0.5f, 160.0f}, UDim{0.0f, 100.0f}};
+    const Vec2 min{300.0f, 200.0f};
+    const Vec2 max{460.0f, 300.0f};
+
+    // The bottom-right corner: bigger, not moved; the scale is left alone.
+    const auto corner = uiDragResult(min, max, Vec2{100.0f, 50.0f}, false, true, false, true, Vec2{}, position, size);
+    CHECK(static_cast<double>(corner.size.x.offset) == doctest::Approx(260.0));
+    CHECK(static_cast<double>(corner.size.y.offset) == doctest::Approx(150.0));
+    CHECK(static_cast<double>(corner.size.x.scale) == doctest::Approx(0.5));
+    CHECK(corner.position == position);
+
+    // The body: moved, the same size.
+    const auto body = uiDragResult(min, max, Vec2{-50.0f, -100.0f}, true, true, true, true, Vec2{}, position, size);
+    CHECK(static_cast<double>(body.position.x.offset) == doctest::Approx(250.0));
+    CHECK(static_cast<double>(body.position.y.offset) == doctest::Approx(100.0));
+    CHECK(body.size == size);
+
+    // The left edge of a box anchored at its centre: the right edge stays put,
+    // so the anchor moves by half of what the width changed plus the edge.
+    const auto left =
+        uiDragResult(min, max, Vec2{-40.0f, 0.0f}, true, false, false, false, Vec2{0.5f, 0.5f}, position, size);
+    CHECK(static_cast<double>(left.size.x.offset) == doctest::Approx(200.0));
+    CHECK(static_cast<double>(left.position.x.offset) == doctest::Approx(300.0 - 40.0 + 20.0));
+
+    // Never inside out: a handle dragged past the opposite edge stops a pixel short.
+    const auto crossed = uiDragResult(min, max, Vec2{-500.0f, 0.0f}, false, true, false, false, Vec2{}, position, size);
+    CHECK(static_cast<double>(crossed.size.x.offset) == doctest::Approx(160.0 - 159.0));
 }

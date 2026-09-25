@@ -114,8 +114,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **Type errors are underlined**, beside the parse errors -- an undeclared
       type in an annotation included.
 - [x] **An unsaved script's tab shows a floppy**, not a dot.
-- [ ] **Ctrl+F is a find and replace box** at the pane's corner: replace one
-      or all, match case, whole word, regular expression.
+- [x] **Ctrl+F is a find and replace box** at the pane's corner: replace one
+      or all, match case, whole word, regular expression, every match
+      highlighted, Enter and Shift+Enter to step.
+- [x] **The automatic `end`**: Enter after `then`, `do`, `repeat` or a
+      function's `)` writes the closer below -- `end)` for a function passed
+      to a call -- when the document has none for it.
+- [x] **Saving the scene clears every scene script's floppy**, not only the
+      tab that asked; a stamp's scripts likewise.
 - [ ] **`Signal`, `Collector` and `Promise` are native**, modelled on the
       community libraries the owner named.
 
@@ -137,7 +143,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       and a script -- one read from a file included -- holds children, so a
       `Loader` keeps its modules.
 - [x] **An interface element starts 50 by 50 pixels.**
-- [ ] **A selected interface element has handles** to move and resize it.
+- [x] **A selected interface element has handles**: eight to resize, the
+      body to move, `AnchorPoint` respected, one undo step per drag.
 - [x] **The starter is a scene with its scripts in it**: a script inside the
       part it turns, a module in `ReplicatedStorage`, one in `ScriptService`;
       the external-tooling files it carried and never used are gone.

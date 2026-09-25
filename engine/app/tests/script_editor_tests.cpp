@@ -357,3 +357,23 @@ TEST_CASE("an absurd run of digits is refused rather than wrapping into a plausi
     // the click would scroll somewhere arbitrary in a file that is fine.
     CHECK_FALSE(parseSourceLocation("a.luau:99999999999999: nope").has_value());
 }
+
+TEST_CASE("saving the scene saves every script the scene carries, and not a file's")
+{
+    // **Reported with a screenshot**: one scene script saved, and the others
+    // kept the floppy -- although the scene they live in had just been written
+    // with their text in it.
+    TwoScripts fixture;
+    ScriptEditor editor;
+    (void)editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "local x = 1");
+    (void)editor.open(fixture.second, app::ScriptOrigin::Scene, "b", "src/scripts/b.luau", "b", "local y = 2");
+    // By index once both are open: a second `open` may move the first tab.
+    editor.at(0)->document.insert(Position{0, 0}, "-");
+    editor.at(1)->document.insert(Position{0, 0}, "-");
+    REQUIRE(editor.dirtyCount() == 2);
+
+    editor.markSavedWhere(app::ScriptOrigin::Scene);
+    CHECK_FALSE(editor.at(0)->dirty());
+    // Its own file under src/scripts is not in the scene, so it is not saved.
+    CHECK(editor.at(1)->dirty());
+}

@@ -408,6 +408,10 @@ bool typePaired(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
 
     if (!tab.caret.hasSelection() && (c == ')' || c == ']' || c == '}' || quote) && next == c) {
         placeCaret(tab, doc.nextColumn(tab.caret.head), false);
+        // **Stepping over a closer ends the word being completed**, as typing
+        // one would: the list left open took the next Enter as an accept and
+        // replaced the argument just finished with a suggestion.
+        tab.completing = false;
         return true;
     }
     const char close = closerOf(c);
@@ -1195,8 +1199,37 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
         // The new line starts where the old one's text did. Losing the indent on
         // every Enter is the single most irritating thing a code editor can do.
         const u32 indent = doc.indentOf(tab.caret.head.line);
+        const std::string lineIndent(doc.line(tab.caret.head.line).substr(0, indent));
+        // **One step deeper after a line that opens a block, and its `end`
+        // written below** when the document has none for it yet (the owner:
+        // "the automatic end, as other editors do"). Only with the caret at
+        // the end of the line: an Enter in the middle of one is splitting it.
+        //
+        // What follows the caret may be only the closers the pairing wrote --
+        // `Connect(function(child)|)` -- and then they move below, after the
+        // `end`, which is where the call they close now ends.
+        const Position at = tab.caret.head;
+        const std::string_view rest = doc.line(at.line).substr(at.column);
+        const bool atEnd = rest.find_first_not_of(" \t") == std::string_view::npos;
+        const bool closersOnly = !atEnd && rest.find_first_not_of(") \t") == std::string_view::npos;
+        const ScriptDocument::BlockBreak block =
+            tab.caret.hasSelection() || !(atEnd || closersOnly) ? ScriptDocument::BlockBreak{} : doc.blockBreakAt(at);
+        if (block.opens && !block.closer.empty()) {
+            // One replace, so one undo takes the whole of it back.
+            doc.breakUndoRun();
+            (void)doc.replace(Range{at, Position{at.line, doc.lineLength(at.line)}},
+                              "\n" + lineIndent + "    " + "\n" + lineIndent + block.closer);
+            tab.caret.head = Position{at.line + 1, static_cast<u32>(lineIndent.size() + 4)};
+            tab.caret.anchor = tab.caret.head;
+            tab.caret.desiredColumn = tab.caret.head.column;
+            tab.completing = false;
+            edited(out, index);
+            return;
+        }
         std::string text = "\n";
-        text.append(std::string(doc.line(tab.caret.head.line).substr(0, indent)));
+        text.append(lineIndent);
+        if (block.opens)
+            text.append("    ");
         insertText(tab, out, index, text);
     }
     // **Tab over lines indents them, Shift+Tab outdents** -- over a selection
@@ -1350,6 +1383,7 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
 
     if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
         tab.findOpen = true;
+        tab.focusFind = true;
         // Seeded from the selection, which is what somebody who highlighted a
         // word and pressed Ctrl+F is asking for.
         if (tab.caret.hasSelection() && tab.caret.selection().begin.line == tab.caret.selection().end.line)
@@ -1358,6 +1392,7 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
     if (ImGui::IsKeyPressed(ImGuiKey_H, false)) {
         tab.findOpen = true;
         tab.replaceOpen = true;
+        tab.focusFind = true;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_G, false))
         tab.findOpen = true;
@@ -1531,11 +1566,16 @@ bool stringField(const char* label, const char* hint, std::string& value, float 
     return changed;
 }
 
+[[nodiscard]] ScriptDocument::SearchOptions searchOptionsOf(const OpenScript& tab)
+{
+    return ScriptDocument::SearchOptions{.matchCase = tab.matchCase, .wholeWord = tab.wholeWord, .regex = tab.regex};
+}
+
 void stepMatch(OpenScript& tab, bool forward)
 {
     if (tab.findText.empty())
         return;
-    const ScriptDocument::SearchOptions options{.matchCase = tab.matchCase, .wholeWord = tab.wholeWord};
+    const ScriptDocument::SearchOptions options = searchOptionsOf(tab);
     // Stepping from the END of the last match going forward and from its START
     // going back, so pressing Enter twice does not land on the same hit.
     const Position from = forward ? tab.caret.selection().end : tab.caret.selection().begin;
@@ -1549,60 +1589,210 @@ void stepMatch(OpenScript& tab, bool forward)
     tab.caret.desiredColumn = hit.end.column;
 }
 
-void drawFindBar(OpenScript& tab, ScriptEditorCommands& out, std::size_t index)
+// What the find matches, recomputed when the text, the query or the options
+// change rather than every frame: the highlights, the count and "3 of 12" all
+// read it.
+void refreshMatches(OpenScript& tab)
+{
+    const ScriptDocument::SearchOptions options = searchOptionsOf(tab);
+    const std::string key = tab.findText + (options.matchCase ? "\x01" : "\x02") +
+                            (options.wholeWord ? "\x01" : "\x02") + (options.regex ? "\x01" : "\x02");
+    if (tab.matchesRevision == tab.document.revision() && tab.matchesKey == key)
+        return;
+    tab.matchesRevision = tab.document.revision();
+    tab.matchesKey = key;
+    tab.matches = tab.findOpen ? tab.document.findAll(tab.findText, options) : std::vector<Range>{};
+}
+
+// The match the selection IS, when it is one: what "3 of 12" counts from and
+// what Replace replaces.
+[[nodiscard]] std::optional<std::size_t> currentMatch(const OpenScript& tab)
+{
+    if (!tab.caret.hasSelection())
+        return std::nullopt;
+    const Range selected = tab.caret.selection();
+    for (std::size_t index = 0; index < tab.matches.size(); ++index) {
+        if (tab.matches[index] == selected)
+            return index;
+    }
+    return std::nullopt;
+}
+
+// A toggle drawn as a small labelled button, lit when on.
+bool findToggle(const char* label, const char* tip, bool& value)
+{
+    const ThemePalette& p = currentTheme().palette;
+    if (value)
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(p.accent.r, p.accent.g, p.accent.b, 0.45f));
+    const bool pressed = ImGui::SmallButton(label);
+    if (value)
+        ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", tip);
+    if (pressed)
+        value = !value;
+    return pressed;
+}
+
+// **The find box, at the pane's top right, over the code** -- the owner: "it
+// should be like the other editors: find, replace, and the rest". Two rows: the
+// query with its options, count and steps, and -- opened by the arrow or by
+// Ctrl+H -- the replacement with Replace and Replace All. Enter finds the next,
+// Shift+Enter the previous, Escape closes it and gives the code the keys back.
+void drawFindBox(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, ImVec2 paneMin, float paneWidth)
 {
     if (!tab.findOpen)
         return;
+    refreshMatches(tab);
 
     const ThemePalette& p = currentTheme().palette;
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float rowHeight = ImGui::GetFrameHeight();
+    const float width = std::min(paneWidth - 24.0f, 470.0f);
+    const float height = rowHeight * (tab.replaceOpen ? 2.0f : 1.0f) +
+                         style.ItemSpacing.y * (tab.replaceOpen ? 1.0f : 0.0f) + style.WindowPadding.y * 2.0f;
+    ImGui::SetCursorScreenPos(ImVec2(paneMin.x + paneWidth - width - 18.0f, paneMin.y + 6.0f));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(p.surfaceRaised.r, p.surfaceRaised.g, p.surfaceRaised.b, 1.0f));
-    const float rows = tab.replaceOpen ? 2.0f : 1.0f;
-    if (ImGui::BeginChild("##find", ImVec2(0.0f, ImGui::GetFrameHeightWithSpacing() * rows + 8.0f),
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding)) {
-        const float field = std::max(140.0f, ImGui::GetContentRegionAvail().x * 0.35f);
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(p.accent.r, p.accent.g, p.accent.b, 0.55f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
+    if (ImGui::BeginChild("##find-box", ImVec2(width, height),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoScrollbar)) {
+        const ScriptDocument::SearchOptions options = searchOptionsOf(tab);
+        const bool valid = tab.findText.empty() || ScriptDocument::searchable(tab.findText, options);
 
-        if (stringField("##find-text", "find", tab.findText, field))
-            stepMatch(tab, true);
+        // The chevron that opens the replace row.
+        if (ImGui::ArrowButton("##replace-toggle", tab.replaceOpen ? ImGuiDir_Down : ImGuiDir_Right))
+            tab.replaceOpen = !tab.replaceOpen;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("replace  (Ctrl+H)");
         ImGui::SameLine();
-        if (ImGui::Button("<"))
-            stepMatch(tab, false);
-        ImGui::SameLine();
-        if (ImGui::Button(">"))
-            stepMatch(tab, true);
-        ImGui::SameLine();
-        ImGui::Checkbox("Aa", &tab.matchCase);
-        ImGui::SameLine();
-        ImGui::Checkbox("Word", &tab.wholeWord);
-        ImGui::SameLine();
-        // The count, which is the one number a person actually reads off a find
-        // bar -- "is it there at all" before "where".
-        const core::u32 total =
-            tab.document.countMatches(tab.findText, {.matchCase = tab.matchCase, .wholeWord = tab.wholeWord});
-        ImGui::TextDisabled("%u match%s", total, total == 1 ? "" : "es");
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Close").x -
-                        ImGui::GetStyle().FramePadding.x * 2.0f);
-        if (ImGui::SmallButton("Close")) {
-            tab.findOpen = false;
-            tab.replaceOpen = false;
+
+        // Sized to leave the options, the count and the steps their room.
+        const float trailing =
+            ImGui::CalcTextSize("Aa ab .* 999 of 999").x + rowHeight * 3.0f + style.ItemSpacing.x * 8.0f;
+        const float field = std::max(90.0f, ImGui::GetContentRegionAvail().x - trailing);
+        if (!valid)
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(p.danger.r, p.danger.g, p.danger.b, 0.35f));
+        if (tab.focusFind) {
+            ImGui::SetKeyboardFocusHere();
+            tab.focusFind = false;
         }
+        const bool entered = stringField("##find-text", "find", tab.findText, field);
+        const bool findActive = ImGui::IsItemActive();
+        if (!valid) {
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("not a valid regular expression");
+        }
+        refreshMatches(tab);
+        if (entered)
+            stepMatch(tab, !ImGui::GetIO().KeyShift);
+        ImGui::SameLine();
+        (void)findToggle("Aa", "match case", tab.matchCase);
+        ImGui::SameLine();
+        (void)findToggle("ab", "whole word", tab.wholeWord);
+        ImGui::SameLine();
+        (void)findToggle(".*", "regular expression", tab.regex);
+        ImGui::SameLine();
+
+        // "3 of 12", or how many when the caret is on none of them.
+        const std::optional<std::size_t> current = currentMatch(tab);
+        if (tab.findText.empty())
+            ImGui::TextDisabled("        ");
+        else if (tab.matches.empty())
+            ImGui::TextColored(ImVec4(p.danger.r, p.danger.g, p.danger.b, 1.0f), "No results");
+        else if (current.has_value())
+            ImGui::Text("%zu of %zu", *current + 1, tab.matches.size());
+        else
+            ImGui::TextDisabled("%zu found", tab.matches.size());
+        ImGui::SameLine();
+        ImGui::BeginDisabled(tab.matches.empty());
+        if (ImGui::ArrowButton("##find-previous", ImGuiDir_Up))
+            stepMatch(tab, false);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("previous  (Shift+Enter)");
+        ImGui::SameLine();
+        if (ImGui::ArrowButton("##find-next", ImGuiDir_Down))
+            stepMatch(tab, true);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("next  (Enter)");
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        bool close = ImGui::SmallButton("x");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("close  (Escape)");
 
         if (tab.replaceOpen) {
-            (void)stringField("##replace-text", "replace with", tab.replaceText, field);
+            ImGui::Dummy(ImVec2(ImGui::GetFrameHeight(), rowHeight));
             ImGui::SameLine();
-            ImGui::BeginDisabled(tab.findText.empty());
+            (void)stringField("##replace-text", "replace", tab.replaceText, field);
+            const bool replaceActive = ImGui::IsItemActive();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(tab.matches.empty());
+            // **Replace takes the match the caret is on**, then moves to the
+            // next -- the first press only selects one, when the caret is on
+            // none, so nothing is replaced that was never shown.
+            if (ImGui::Button("Replace")) {
+                if (const std::optional<std::size_t> on = currentMatch(tab); on.has_value()) {
+                    const Range done =
+                        tab.document.replaceMatch(tab.matches[*on], tab.findText, tab.replaceText, options);
+                    tab.caret.anchor = tab.caret.head = done.end;
+                    edited(out, index);
+                    refreshMatches(tab);
+                }
+                stepMatch(tab, true);
+            }
+            ImGui::SameLine();
             if (ImGui::Button("Replace all")) {
-                const core::u32 replaced = tab.document.replaceAll(
-                    tab.findText, tab.replaceText, {.matchCase = tab.matchCase, .wholeWord = tab.wholeWord});
-                if (replaced > 0) {
+                if (tab.document.replaceAll(tab.findText, tab.replaceText, options) > 0) {
                     tab.caret = Caret{};
                     edited(out, index);
+                    refreshMatches(tab);
                 }
             }
             ImGui::EndDisabled();
+            if (replaceActive && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+                close = true;
+        }
+        if (findActive && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            close = true;
+
+        if (close) {
+            tab.findOpen = false;
+            tab.replaceOpen = false;
+            tab.matches.clear();
+            tab.matchesKey.clear();
+            tab.claimCaret = true;
         }
     }
     ImGui::EndChild();
-    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+}
+
+// Every match on the visible lines, under the text; the one the caret is on
+// in the accent, the rest in the warning's colour.
+void drawMatches(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImVec2 textOrigin, u32 first, u32 last)
+{
+    if (!tab.findOpen || tab.matches.empty())
+        return;
+    const ThemePalette& p = currentTheme().palette;
+    const Range selected = tab.caret.selection();
+    for (const Range& match : tab.matches) {
+        if (match.begin.line < first || match.begin.line > last)
+            continue;
+        const float y = textOrigin.y + static_cast<float>(match.begin.line) * m.lineHeight;
+        const float x0 =
+            textOrigin.x + static_cast<float>(tab.document.cellOf(match.begin.line, match.begin.column)) * m.advance;
+        const float x1 =
+            textOrigin.x + static_cast<float>(tab.document.cellOf(match.end.line, match.end.column)) * m.advance;
+        const bool current = match == selected;
+        draw->AddRectFilled(ImVec2(x0, y), ImVec2(x1, y + m.lineHeight),
+                            col(current ? p.accent : p.warning, current ? 0.45f : 0.22f), 2.0f);
+        if (current)
+            draw->AddRect(ImVec2(x0, y), ImVec2(x1, y + m.lineHeight), col(p.accent, 0.9f), 2.0f);
+    }
 }
 
 void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
@@ -1610,8 +1800,6 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
 {
     const ThemePalette& p = currentTheme().palette;
     const PaneMetrics m = metricsFor(tab.document, editor.zoom());
-
-    drawFindBar(tab, out, index);
 
     // **Parsed when the text is at rest**, which is one frame after the last
     // edit: per keystroke would re-parse a file per character, and a timer would
@@ -1641,6 +1829,9 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(p.surface.r, p.surface.g, p.surface.b, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    // The pane's rectangle, for the find box drawn over its top right.
+    const ImVec2 paneTopLeft = ImGui::GetCursorScreenPos();
+    const float paneOuterWidth = ImGui::GetContentRegionAvail().x;
     const bool open = ImGui::BeginChild("##code", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders,
                                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_HorizontalScrollbar);
     ImGui::PopStyleVar();
@@ -1941,6 +2132,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             col(p.warning, 0.22f));
     }
 
+    drawMatches(tab, m, draw, textOrigin, first, last);
     drawSelection(tab, m, draw, textOrigin, first, last);
     for (u32 line = first; line <= last && line < lineCount; ++line) {
         drawGutter(tab, editor, debug, m, draw, ImVec2(origin.x + ImGui::GetScrollX(), origin.y), line,
@@ -2034,6 +2226,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         out.toggleBreakpointLine = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
 
     ImGui::EndChild();
+    drawFindBox(tab, out, index, paneTopLeft, paneOuterWidth);
 }
 
 } // namespace

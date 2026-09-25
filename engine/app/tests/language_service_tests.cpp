@@ -359,3 +359,15 @@ TEST_CASE("a Vector3 reads as Vector3, not as the native vector it is")
     REQUIRE(help.has_value());
     CHECK(help->label == "move(to: Vector3, by: number)");
 }
+
+TEST_CASE("inside a function passed as an argument there is no signature of the outer call")
+{
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    std::string source = "workspace.ChildAdded:Connect(function(child)\n    local x = 1|\nend)\n";
+    const Position caret = caretAt(source, "|");
+    (void)builder.add(service, "Main", "Script", source);
+    core.update(builder.tree);
+    CHECK_FALSE(core.signature("game.ScriptService.Main", caret).has_value());
+}
