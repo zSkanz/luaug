@@ -31,9 +31,19 @@ offers is on the base's page, which is what keeps one added member on
 
 Builds the walkable ground over a box now, so the first path through it costs no building. Answers how many tiles it built; ground already built and unchanged costs nothing.
 
-### `FindPath(from: vector, to: vector): ({ vector }?, boolean)`
+### `DefineAgent(name: string, radius: number, height: number, maxClimb: number? = 0.5, maxSlope: number? = 45)`
+
+Names another agent size, with a walkable ground of its own (ADR 0098): a giant that does not fit through a door the default agent walks through. Queries and a `NavigationAgent` pick it by name. Defining a name again redefines it.
+
+### `FindPath(from: vector, to: vector, agent: string? = ""): ({ vector }?, boolean, { string })`
 
 The waypoints from `from` to `to`, each a corner to walk to in a straight line, and whether they reach the goal. **Nil when `from` is not on walkable ground at all.** A path that stops short -- the goal is off the ground, cut off, or past ground not built yet -- still comes back, with `false`: walk it and ask again from where it ends.
+
+The third answer runs beside the waypoints: the `Label` of the `NavigationLink` that begins at each, or `""` where the way on is walking. `agent` names a type `DefineAgent` made; empty is the service's own (ADR 0098).
+
+### `FindPath2D(from: Vector2, to: Vector2): ({ Vector2 }?, boolean)`
+
+A path on the 2D plane (ADR 0098): over the cells of every `Tilemap2D` -- a filled, colliding tile is a wall -- with every anchored, colliding `Part2D` a wall too. Diagonal steps never cut a wall's corner. The waypoints are where the path turns, and the boolean whether it reaches `to`; nil when `from` is inside a wall.
 
 ### `NearestPoint(point: vector, maxDistance: number? = 4): vector?`
 
@@ -42,3 +52,7 @@ The nearest walkable point within `maxDistance` metres, or nil. What a spawn poi
 ### `Raycast(from: vector, to: vector): vector?`
 
 Walks straight from `from` towards `to` over the walkable ground and answers where it stops -- at `to`, or where a wall or an edge is in the way. Nil when `from` is not on the ground. The cheap question to ask before `FindPath`: most steps are straight.
+
+### `SetAreaCost(label: string, cost: number)`
+
+Prices the ground a `NavigationArea` labels: a path through it counts its length times `cost`. `math.huge` forbids it outright. Unpriced labels cost 1; re-pricing needs no rebuild.

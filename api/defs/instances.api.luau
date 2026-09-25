@@ -3589,6 +3589,103 @@ local Classes: { Schema.Class } = {
             },
         } :: { Schema.Method },
     },
+    {
+        Name = "NavigationArea",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "NavigationArea",
+        Parents = under("BasePart"),
+        Doc = "Marks the walkable ground inside its part's box with a `Label` (ADR 0098), which "
+            .. "`NavigationService:SetAreaCost` prices: water an agent would rather go round, mud that is slow, "
+            .. "a door that is shut. The part need not collide or be anchored -- it is a volume, not a floor. "
+            .. "Ground no area marks costs 1.",
+        Properties = {
+            {
+                Name = "Label",
+                Type = "string",
+                Default = '"Area"',
+                Doc = "The name its cost is set by. Areas that share a label share a cost.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "NavigationLink",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "NavigationLink",
+        Doc = "A way between two points the walkable ground does not join (ADR 0098): a gap to jump, a "
+            .. "ladder, a drop. A path may use it; `FindPath`'s third answer names its `Label` at the waypoint "
+            .. "where it begins, so the script walking the path knows to jump there rather than walk. Both "
+            .. "points are in the world, and each must be near walkable ground.",
+        Properties = {
+            {
+                Name = "From",
+                Type = "vector",
+                Doc = "Where it starts, in the world.",
+            },
+            {
+                Name = "To",
+                Type = "vector",
+                Doc = "Where it ends, in the world.",
+            },
+            {
+                Name = "Bidirectional",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether it can be taken back from `To` to `From`: a ladder can, a drop cannot.",
+            },
+            {
+                Name = "Label",
+                Type = "string",
+                Default = '"Jump"',
+                Doc = "What crossing it is, as the path reports it.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "NavigationAgent",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "NavigationAgent",
+        Parents = under("BasePart"),
+        Doc = "Walks its part to a point over the walkable ground, keeping clear of the other agents as it "
+            .. "goes -- a crowd (ADR 0098). The engine moves the part on the simulation clock: set `Target`, "
+            .. "and `Reached` fires when it arrives. For one character a script walking `FindPath`'s waypoints "
+            .. "is enough; this is for many that must not walk through each other.",
+        Properties = {
+            {
+                Name = "Target",
+                Type = "vector",
+                Doc = "Where it is going. Writing it starts the walk; while `Active` is false it stands still.",
+            },
+            {
+                Name = "Active",
+                Type = "boolean",
+                Default = "false",
+                Doc = "Whether it is walking. Writing `Target` sets it; arriving clears it.",
+            },
+            {
+                Name = "MaxSpeed",
+                Type = "number",
+                Default = "8",
+                ErrorKey = "scene.err.number_above_zero",
+                Doc = "Its fastest, in metres per second.",
+            },
+            {
+                Name = "AgentType",
+                Type = "string",
+                Default = '""',
+                Doc = "Which agent it is, as `NavigationService:DefineAgent` named it; empty for the service's own.",
+            },
+        } :: { Schema.Property },
+        Events = {
+            {
+                Name = "Reached",
+                Parameters = {},
+                Doc = "Fired once when it arrives at `Target`.",
+            },
+        } :: { Schema.Event },
+    },
 }
 
 local Definition: Schema.Definition = {

@@ -1842,6 +1842,163 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     tilemap2DDesc.detachComponents = native::detachTilemap2DComponents;
     classes.registerClass(tilemap2DDesc);
 
+    // --- NavigationArea ---
+    static std::array<PropertyDesc, 1> navigationAreaProperties;
+    navigationAreaProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Label"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The name its cost is set by. Areas that share a label share a cost.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getNavigationAreaLabel,
+            .set = native::setNavigationAreaLabel,
+        },
+    }};
+    ClassDescriptor navigationAreaDesc;
+    navigationAreaDesc.name = atoms.intern("NavigationArea");
+    navigationAreaDesc.super = instanceClass;
+    navigationAreaDesc.flags = ClassFlags::None;
+    navigationAreaDesc.defaultName = atoms.intern("NavigationArea");
+    navigationAreaDesc.doc = "Marks the walkable ground inside its part's box with a `Label` (ADR 0098), which `NavigationService:SetAreaCost` prices: water an agent would rather go round, mud that is slow, a door that is shut. The part need not collide or be anchored -- it is a volume, not a floor. Ground no area marks costs 1.";
+    static constexpr std::array<std::string_view, 3> navigationAreaParents{{"BasePart", "ReplicatedStorage", "ServerStorage"}};
+    navigationAreaDesc.parents = navigationAreaParents;
+    navigationAreaDesc.properties = navigationAreaProperties;
+    navigationAreaDesc.attachComponents = native::attachNavigationAreaComponents;
+    navigationAreaDesc.detachComponents = native::detachNavigationAreaComponents;
+    classes.registerClass(navigationAreaDesc);
+
+    // --- NavigationLink ---
+    static std::array<PropertyDesc, 4> navigationLinkProperties;
+    navigationLinkProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("From"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where it starts, in the world.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getNavigationLinkFrom,
+            .set = native::setNavigationLinkFrom,
+        },
+        PropertyDesc{
+            .name = atoms.intern("To"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where it ends, in the world.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getNavigationLinkTo,
+            .set = native::setNavigationLinkTo,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Bidirectional"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it can be taken back from `To` to `From`: a ladder can, a drop cannot.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getNavigationLinkBidirectional,
+            .set = native::setNavigationLinkBidirectional,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Label"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "What crossing it is, as the path reports it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getNavigationLinkLabel,
+            .set = native::setNavigationLinkLabel,
+        },
+    }};
+    ClassDescriptor navigationLinkDesc;
+    navigationLinkDesc.name = atoms.intern("NavigationLink");
+    navigationLinkDesc.super = instanceClass;
+    navigationLinkDesc.flags = ClassFlags::None;
+    navigationLinkDesc.defaultName = atoms.intern("NavigationLink");
+    navigationLinkDesc.doc = "A way between two points the walkable ground does not join (ADR 0098): a gap to jump, a ladder, a drop. A path may use it; `FindPath`'s third answer names its `Label` at the waypoint where it begins, so the script walking the path knows to jump there rather than walk. Both points are in the world, and each must be near walkable ground.";
+    navigationLinkDesc.properties = navigationLinkProperties;
+    navigationLinkDesc.attachComponents = native::attachNavigationLinkComponents;
+    navigationLinkDesc.detachComponents = native::detachNavigationLinkComponents;
+    classes.registerClass(navigationLinkDesc);
+
+    // --- NavigationAgent ---
+    static std::array<PropertyDesc, 4> navigationAgentProperties;
+    navigationAgentProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Target"),
+            .type = ValueType::Vector3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Where it is going. Writing it starts the walk; while `Active` is false it stands still.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getNavigationAgentTarget,
+            .set = native::setNavigationAgentTarget,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Active"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether it is walking. Writing `Target` sets it; arriving clears it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getNavigationAgentActive,
+            .set = native::setNavigationAgentActive,
+        },
+        PropertyDesc{
+            .name = atoms.intern("MaxSpeed"),
+            .type = ValueType::Number,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Its fastest, in metres per second.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_above_zero"),
+            .get = native::getNavigationAgentMaxSpeed,
+            .set = native::setNavigationAgentMaxSpeed,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AgentType"),
+            .type = ValueType::String,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Which agent it is, as `NavigationService:DefineAgent` named it; empty for the service's own.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getNavigationAgentAgentType,
+            .set = native::setNavigationAgentAgentType,
+        },
+    }};
+    static std::array<EventDesc, 1> navigationAgentEvents;
+    navigationAgentEvents = {{
+        EventDesc{
+            .name = atoms.intern("Reached"),
+            .slot = 7,
+            .doc = "Fired once when it arrives at `Target`.",
+        },
+    }};
+    ClassDescriptor navigationAgentDesc;
+    navigationAgentDesc.name = atoms.intern("NavigationAgent");
+    navigationAgentDesc.super = instanceClass;
+    navigationAgentDesc.flags = ClassFlags::None;
+    navigationAgentDesc.defaultName = atoms.intern("NavigationAgent");
+    navigationAgentDesc.doc = "Walks its part to a point over the walkable ground, keeping clear of the other agents as it goes -- a crowd (ADR 0098). The engine moves the part on the simulation clock: set `Target`, and `Reached` fires when it arrives. For one character a script walking `FindPath`'s waypoints is enough; this is for many that must not walk through each other.";
+    static constexpr std::array<std::string_view, 3> navigationAgentParents{{"BasePart", "ReplicatedStorage", "ServerStorage"}};
+    navigationAgentDesc.parents = navigationAgentParents;
+    navigationAgentDesc.properties = navigationAgentProperties;
+    navigationAgentDesc.events = navigationAgentEvents;
+    navigationAgentDesc.attachComponents = native::attachNavigationAgentComponents;
+    navigationAgentDesc.detachComponents = native::detachNavigationAgentComponents;
+    classes.registerClass(navigationAgentDesc);
+
     // --- DataModel ---
     static std::array<PropertyDesc, 2> dataModelProperties;
     dataModelProperties = {{
@@ -2859,13 +3016,31 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = native::setNavigationServiceAgentMaxSlope,
         },
     }};
-    static std::array<MethodDesc, 4> navigationServiceMethods;
+    static std::array<MethodDesc, 7> navigationServiceMethods;
     navigationServiceMethods = {{
         MethodDesc{
             .name = atoms.intern("FindPath"),
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
-            .doc = "The waypoints from `from` to `to`, each a corner to walk to in a straight line, and whether they reach the goal. **Nil when `from` is not on walkable ground at all.** A path that stops short -- the goal is off the ground, cut off, or past ground not built yet -- still comes back, with `false`: walk it and ask again from where it ends.",
+            .doc = "The waypoints from `from` to `to`, each a corner to walk to in a straight line, and whether they reach the goal. **Nil when `from` is not on walkable ground at all.** A path that stops short -- the goal is off the ground, cut off, or past ground not built yet -- still comes back, with `false`: walk it and ask again from where it ends.\012\012The third answer runs beside the waypoints: the `Label` of the `NavigationLink` that begins at each, or `\"\"` where the way on is walking. `agent` names a type `DefineAgent` made; empty is the service's own (ADR 0098).",
+        },
+        MethodDesc{
+            .name = atoms.intern("DefineAgent"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Names another agent size, with a walkable ground of its own (ADR 0098): a giant that does not fit through a door the default agent walks through. Queries and a `NavigationAgent` pick it by name. Defining a name again redefines it.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetAreaCost"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Prices the ground a `NavigationArea` labels: a path through it counts its length times `cost`. `math.huge` forbids it outright. Unpriced labels cost 1; re-pricing needs no rebuild.",
+        },
+        MethodDesc{
+            .name = atoms.intern("FindPath2D"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "A path on the 2D plane (ADR 0098): over the cells of every `Tilemap2D` -- a filled, colliding tile is a wall -- with every anchored, colliding `Part2D` a wall too. Diagonal steps never cut a wall's corner. The waypoints are where the path turns, and the boolean whether it reaches `to`; nil when `from` is inside a wall.",
         },
         MethodDesc{
             .name = atoms.intern("NearestPoint"),

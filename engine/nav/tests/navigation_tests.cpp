@@ -11,7 +11,9 @@
 
 #include <cmath>
 #include <doctest/doctest.h>
+#include <limits>
 #include <memory>
+#include <vector>
 
 #include "class_descriptors.gen.h"
 
@@ -237,4 +239,145 @@ TEST_CASE("terrain is ground: a path across a flat field")
     REQUIRE(path.has_value());
     CHECK(path->complete);
     CHECK(std::abs(path->points.back().y) < 1.0);
+}
+
+// --- ADR 0098 -------------------------------------------------------------------
+
+TEST_CASE("a door the default agent walks through is shut to a giant")
+{
+    Level level;
+    level.floor();
+    // A wall along x = 0 with a door 1.6 m wide.
+    level.block({0.0, 1.5, -10.4}, {1.0f, 3.0f, 19.2f});
+    level.block({0.0, 1.5, 10.4}, {1.0f, 3.0f, 19.2f});
+    level.navigation->defineAgent("Giant", nav::NavAgent{1.5f, 4.0f, 0.5f, 45.0f});
+
+    const std::optional<nav::NavPath> small = level.navigation->findPath({-10.0, 0.0, 0.0}, {10.0, 0.0, 0.0});
+    REQUIRE(small.has_value());
+    CHECK(small->complete);
+    const std::optional<nav::NavPath> giant = level.navigation->findPath({-10.0, 0.0, 0.0}, {10.0, 0.0, 0.0}, "Giant");
+    REQUIRE(giant.has_value());
+    CHECK_FALSE(giant->complete);
+    // An agent nobody defined has no ground at all.
+    CHECK_FALSE(level.navigation->findPath({-10.0, 0.0, 0.0}, {10.0, 0.0, 0.0}, "Nobody").has_value());
+}
+
+TEST_CASE("priced ground is walked round, and ground priced at infinity is never walked")
+{
+    Level level;
+    level.floor();
+    // A strip of water across the middle, leaving a dry way round at z < -15.
+    const core::InstanceId pool = level.block({0.0, 0.5, 2.5}, {4.0f, 1.4f, 35.0f});
+    level.world.rigidBodies().find(pool)->canCollide = false;
+    const core::InstanceId area = level.world.create(level.classes.findId(level.atoms.intern("NavigationArea")));
+    REQUIRE_FALSE(level.world.setParent(area, pool).has_value());
+    level.world.navigationAreas().find(area)->label = "Water";
+    level.nextTick();
+
+    const auto detours = [&] {
+        const std::optional<nav::NavPath> path = level.navigation->findPath({-10.0, 0.0, 0.0}, {10.0, 0.0, 0.0});
+        REQUIRE(path.has_value());
+        CHECK(path->complete);
+        bool round = false;
+        for (const core::DVec3& point : path->points)
+            round = round || point.z < -14.0;
+        return round;
+    };
+    // Unpriced water is ground like any other: straight across.
+    CHECK_FALSE(detours());
+    level.navigation->setAreaCost("Water", 50.0f);
+    CHECK(detours());
+    level.navigation->setAreaCost("Water", std::numeric_limits<float>::infinity());
+    CHECK(detours());
+    // Priced back to nothing, the straight way is back -- no rebuild asked for.
+    level.navigation->setAreaCost("Water", 1.0f);
+    CHECK_FALSE(detours());
+}
+
+TEST_CASE("a link joins two platforms, and the path says where to jump")
+{
+    Level level;
+    level.block({-10.0, -0.5, 0.0}, {10.0f, 1.0f, 10.0f});
+    level.block({10.0, -0.5, 0.0}, {10.0f, 1.0f, 10.0f});
+    // Without a link the gap is the end of the ground.
+    const std::optional<nav::NavPath> stuck = level.navigation->findPath({-12.0, 0.0, 0.0}, {12.0, 0.0, 0.0});
+    REQUIRE(stuck.has_value());
+    CHECK_FALSE(stuck->complete);
+
+    const core::InstanceId link = level.world.create(level.classes.findId(level.atoms.intern("NavigationLink")));
+    REQUIRE_FALSE(level.world.setParent(link, level.workspace).has_value());
+    scene::NavigationLinkComponent& joined = *level.world.navigationLinks().find(link);
+    joined.from = {-6.0, 0.0, 0.0};
+    joined.to = {6.0, 0.0, 0.0};
+    joined.label = "Jump";
+    level.nextTick();
+
+    const std::optional<nav::NavPath> path = level.navigation->findPath({-12.0, 0.0, 0.0}, {12.0, 0.0, 0.0});
+    REQUIRE(path.has_value());
+    CHECK(path->complete);
+    REQUIRE(path->labels.size() == path->points.size());
+    bool jumps = false;
+    for (core::usize at = 0; at < path->labels.size(); ++at) {
+        if (path->labels[at] == "Jump") {
+            jumps = true;
+            CHECK(horizontal(path->points[at], {-6.0, 0.0, 0.0}) < 0.6);
+        }
+    }
+    CHECK(jumps);
+}
+
+TEST_CASE("a crowd walks to its targets without walking through itself")
+{
+    Level level;
+    level.floor();
+    std::vector<nav::CrowdAgentState> crowd{
+        {core::InstanceId{1, 1}, "", {-10.0, 0.0, -0.4}, {10.0, 0.0, 0.4}, true, 4.0f},
+        {core::InstanceId{2, 1}, "", {10.0, 0.0, 0.4}, {-10.0, 0.0, -0.4}, true, 4.0f},
+    };
+    std::vector<nav::CrowdAgentStep> steps;
+    double closest = 100.0;
+    int reached = 0;
+    for (int tick = 0; tick < 600 && reached < 2; ++tick) {
+        level.navigation->stepCrowd(crowd, 1.0f / 60.0f, steps);
+        REQUIRE(steps.size() == 2);
+        for (core::usize at = 0; at < 2; ++at) {
+            crowd[at].position = steps[at].position;
+            if (steps[at].reached) {
+                crowd[at].active = false;
+                ++reached;
+            }
+        }
+        closest = std::min(closest, horizontal(crowd[0].position, crowd[1].position));
+    }
+    // Head on, and they passed rather than met.
+    CHECK(reached == 2);
+    CHECK(closest > 0.6);
+    CHECK(horizontal(crowd[0].position, {10.0, 0.0, 0.4}) < 1.0);
+    CHECK(horizontal(crowd[1].position, {-10.0, 0.0, -0.4}) < 1.0);
+}
+
+TEST_CASE("on the plane a path goes round a wall of tiles, through its gap")
+{
+    Level level;
+    const core::InstanceId map = level.world.create(level.classes.findId(level.atoms.intern("Tilemap2D")));
+    REQUIRE_FALSE(level.world.setParent(map, level.workspace).has_value());
+    scene::Tilemap2DComponent& tiles = *level.world.tilemaps2d().find(map);
+    tiles.cellSize = 1.0f;
+    // A wall at x = 5 from y = -10 to 10, with a gap at y = 8.
+    for (core::i32 y = -10; y <= 10; ++y) {
+        if (y != 8)
+            (void)tiles.setCell(5, y, 1);
+    }
+
+    const std::optional<nav::NavPath2D> path = level.navigation->findPath2D({0.5f, 0.5f}, {10.5f, 0.5f});
+    REQUIRE(path.has_value());
+    CHECK(path->complete);
+    bool throughGap = false;
+    for (const core::Vec2& point : path->points)
+        throughGap = throughGap || point.y > 7.0f;
+    CHECK(throughGap);
+    CHECK(std::abs(path->points.back().x - 10.5f) < 0.01f);
+
+    // Standing inside the wall is no path at all.
+    CHECK_FALSE(level.navigation->findPath2D({5.5f, 0.5f}, {10.5f, 0.5f}).has_value());
 }

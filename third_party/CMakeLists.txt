@@ -737,9 +737,10 @@ endif()
 add_library(enet::enet ALIAS luaug_enet)
 
 # ---------------------------------------------------------------------------
-# Recast/Detour (ADR 0022, integrated by ADR 0089): the navmesh builder and its
-# query library, and nothing else of the vendored tree -- DetourCrowd and
-# DetourTileCache stay unbuilt until something calls them. Its sources directly,
+# Recast/Detour (ADR 0022, integrated by ADR 0089): the navmesh builder, its
+# query library and -- since ADR 0098's crowds call it -- DetourCrowd, all from
+# the one pinned tree. DetourTileCache stays unbuilt until something calls it.
+# Its sources directly,
 # as Box2D's are, because upstream's CMake configures the demo and the tests.
 #
 # Deterministic by construction: it is single-threaded, and `engine/nav` feeds
@@ -748,11 +749,13 @@ add_library(enet::enet ALIAS luaug_enet)
 if(LUAUG_NAV_RECAST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Source/Recast.cpp")
     file(GLOB LUAUG_RECAST_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Source/*.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Source/*.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Source/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/DetourCrowd/Source/*.cpp")
     add_library(recastnavigation STATIC ${LUAUG_RECAST_SOURCES})
     target_include_directories(recastnavigation SYSTEM PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Include")
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/DetourCrowd/Include")
     if(MSVC)
         target_compile_options(recastnavigation PRIVATE /W0)
     else()

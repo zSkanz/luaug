@@ -781,6 +781,34 @@ struct NavigationComponent
     f32 agentMaxSlope = 45.0f;
 };
 
+// A `NavigationArea` (ADR 0098): the label the ground inside its part's box
+// is priced by. The box is the part's; this is only the name.
+struct NavigationAreaComponent
+{
+    std::string label = "Area";
+};
+
+// A `NavigationLink` (ADR 0098): two world points the walkable ground does not
+// join, and what crossing between them is called.
+struct NavigationLinkComponent
+{
+    core::DVec3 from{};
+    core::DVec3 to{};
+    bool bidirectional = true;
+    std::string label = "Jump";
+};
+
+// A `NavigationAgent` (ADR 0098): where its part is walking, and how. The
+// crowd that moves it is the host's and is rebuilt from these, so nothing
+// else about it is state.
+struct NavigationAgentComponent
+{
+    core::DVec3 target{};
+    bool active = false;
+    f32 maxSpeed = 8.0f;
+    std::string agentType;
+};
+
 // A registered block type (V1, `VoxelService`). Its id is its position in the
 // registry plus one, which is registration order -- a pure function of the
 // script that registered it.

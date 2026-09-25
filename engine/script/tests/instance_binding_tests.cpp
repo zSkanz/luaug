@@ -557,16 +557,17 @@ TEST_CASE("the boot-time method cross-check reports both directions")
     // `NavigationService`'s `FindPath`, `NearestPoint`, `Raycast` and
     // `BuildRegion`; and 121 when a part came to wear a material (ADR 0090):
     // `BasePart`'s `SetMaterialParameter`, `GetMaterialParameter` and
-    // `ClearMaterialParameter`; and 122 with `Sound:Resume`, when `Play` came to
-    // start from the start. This number is what makes a
+    // `ClearMaterialParameter`; 122 with `Sound:Resume`, when `Play` came to
+    // start from the start; and 125 with `NavigationService`'s `DefineAgent`,
+    // `SetAreaCost` and `FindPath2D` (ADR 0098). This number is what makes a
     // DECLARED-but-unbound method impossible to ship: the IDL would count it and the binding table would not, which is
     // `Inert` for a method.
     //
     // **It earned its keep at F1.** Five methods were declared in the IDL in one
     // commit and this failed on the next build, before anything could reach a
     // script and find a name that answered nothing.
-    CHECK(coverage.declared == 122);
-    CHECK(coverage.bound == 122);
+    CHECK(coverage.declared == 125);
+    CHECK(coverage.bound == 125);
     CHECK(coverage.declaredWithoutBinding == 0);
 }
 

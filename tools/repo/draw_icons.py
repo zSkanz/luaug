@@ -227,6 +227,16 @@ def draw_icon(group, name):
         for x,y in ((3,3),(13,8),(3,13)): i.rect(x,y,8,8,1)
     elif name == "NavigationService":
         i.line((5,19),(5,10),(18,10),(18,3)).circle(5,19,3).circle(5,10,2,True).circle(18,10,2,True).line((14,6),(18,2),(22,6))
+    elif name == "NavigationArea":
+        i.line((12,3),(22,9),(12,16),(2,9),closed=True)
+        i.line((2,15),(12,22),(22,15)).line((7,6),(17,12)).line((7,12),(17,6))
+    elif name == "NavigationLink":
+        i.circle(4,18,2.5).circle(20,18,2.5)
+        i.arc(12,13,8,180,360).line((16,9),(20,13),(23,9))
+    elif name == "NavigationAgent":
+        i.circle(9,4,2).line((3,12),(7,8),(12,9),(15,13))
+        i.line((9,9),(8,15),(4,21)).line((8,15),(13,20))
+        i.line((16,5),(22,5)).line((19,2),(22,5),(19,8))
     elif name == "NetworkService":
         i.circle(12,12,3)
         for x,y in ((4,4),(20,4),(4,20),(20,20)): i.line((12,12),(x,y)).circle(x,y,2,True)
@@ -391,6 +401,21 @@ def preview(theme, images):
                 sheet.paste(Image.new("RGB",(size,size),color),(x+offset,y+32-size),alpha)
             d.text((x,y+43), name, font=font, fill=fg)
     sheet.save(ART / "lighting-review.png")
+    navigation = ("NavigationService", "NavigationArea", "NavigationLink", "NavigationAgent")
+    sheet = Image.new("RGB", (960, 220))
+    d = ImageDraw.Draw(sheet)
+    for row, (mode, bg) in enumerate((("dark", "#191E28"), ("light", "#F4F6FA"))):
+        d.rectangle((0, row * 110, 960, (row + 1) * 110), fill=bg)
+        fg = "#DCE3F1" if mode == "dark" else "#273247"
+        for n, name in enumerate(navigation):
+            x, y = 20 + n * 240, row * 110 + 18
+            im = images[f"class/{name}.png"]
+            color = theme["palette"]["motion"][mode]
+            for offset, size in ((0,32), (45,24), (82,16), (110,13)):
+                alpha = im.getchannel("A").resize((size,size), Image.Resampling.BOX)
+                sheet.paste(Image.new("RGB",(size,size),color),(x+offset,y+32-size),alpha)
+            d.text((x,y+48), name, font=font, fill=fg)
+    sheet.save(ART / "navigation-review.png")
     cards=[]
     for path in images:
         cards.append(f'<figure><div><img src="{path.replace(".png", ".svg")}" width="48"><img src="{path.replace(".png", ".svg")}" width="24"><img src="{path.replace(".png", ".svg")}" width="16"></div><figcaption>{html.escape(path[:-4])}</figcaption></figure>')

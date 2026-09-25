@@ -313,6 +313,9 @@ struct NameIndex
     X(Part2DComponent, parts2d)                                                                                        \
     X(Tilemap2DComponent, tilemaps2d)                                                                                  \
     X(NavigationComponent, navigation)                                                                                 \
+    X(NavigationAreaComponent, navigationAreas)                                                                        \
+    X(NavigationLinkComponent, navigationLinks)                                                                        \
+    X(NavigationAgentComponent, navigationAgents)                                                                      \
     X(SpotLightComponent, spotLights)                                                                                  \
     X(LightingComponent, lighting)                                                                                     \
     X(PostEffectComponent, postEffects)                                                                                \
@@ -849,6 +852,21 @@ public:
     [[nodiscard]] const ComponentPool<Part2DComponent>& parts2d() const noexcept { return m_parts2d; }
     [[nodiscard]] ComponentPool<NavigationComponent>& navigation() noexcept { return m_navigation; }
     [[nodiscard]] const ComponentPool<NavigationComponent>& navigation() const noexcept { return m_navigation; }
+    [[nodiscard]] ComponentPool<NavigationAreaComponent>& navigationAreas() noexcept { return m_navigationAreas; }
+    [[nodiscard]] const ComponentPool<NavigationAreaComponent>& navigationAreas() const noexcept
+    {
+        return m_navigationAreas;
+    }
+    [[nodiscard]] ComponentPool<NavigationLinkComponent>& navigationLinks() noexcept { return m_navigationLinks; }
+    [[nodiscard]] const ComponentPool<NavigationLinkComponent>& navigationLinks() const noexcept
+    {
+        return m_navigationLinks;
+    }
+    [[nodiscard]] ComponentPool<NavigationAgentComponent>& navigationAgents() noexcept { return m_navigationAgents; }
+    [[nodiscard]] const ComponentPool<NavigationAgentComponent>& navigationAgents() const noexcept
+    {
+        return m_navigationAgents;
+    }
     [[nodiscard]] ComponentPool<Tilemap2DComponent>& tilemaps2d() noexcept { return m_tilemaps2d; }
     [[nodiscard]] const ComponentPool<Tilemap2DComponent>& tilemaps2d() const noexcept { return m_tilemaps2d; }
     [[nodiscard]] ComponentPool<ParticleEmitterComponent>& particleEmitters() noexcept { return m_particleEmitters; }

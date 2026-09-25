@@ -334,6 +334,36 @@ bool setTilemap2DCollisionGroup(World& world, core::InstanceId id, const Value& 
 void attachTilemap2DComponents(World& world, core::InstanceId id);
 void detachTilemap2DComponents(World& world, core::InstanceId id);
 
+// NavigationArea
+Value getNavigationAreaLabel(const World& world, core::InstanceId id);
+bool setNavigationAreaLabel(World& world, core::InstanceId id, const Value& value);
+void attachNavigationAreaComponents(World& world, core::InstanceId id);
+void detachNavigationAreaComponents(World& world, core::InstanceId id);
+
+// NavigationLink
+Value getNavigationLinkFrom(const World& world, core::InstanceId id);
+bool setNavigationLinkFrom(World& world, core::InstanceId id, const Value& value);
+Value getNavigationLinkTo(const World& world, core::InstanceId id);
+bool setNavigationLinkTo(World& world, core::InstanceId id, const Value& value);
+Value getNavigationLinkBidirectional(const World& world, core::InstanceId id);
+bool setNavigationLinkBidirectional(World& world, core::InstanceId id, const Value& value);
+Value getNavigationLinkLabel(const World& world, core::InstanceId id);
+bool setNavigationLinkLabel(World& world, core::InstanceId id, const Value& value);
+void attachNavigationLinkComponents(World& world, core::InstanceId id);
+void detachNavigationLinkComponents(World& world, core::InstanceId id);
+
+// NavigationAgent
+Value getNavigationAgentTarget(const World& world, core::InstanceId id);
+bool setNavigationAgentTarget(World& world, core::InstanceId id, const Value& value);
+Value getNavigationAgentActive(const World& world, core::InstanceId id);
+bool setNavigationAgentActive(World& world, core::InstanceId id, const Value& value);
+Value getNavigationAgentMaxSpeed(const World& world, core::InstanceId id);
+bool setNavigationAgentMaxSpeed(World& world, core::InstanceId id, const Value& value);
+Value getNavigationAgentAgentType(const World& world, core::InstanceId id);
+bool setNavigationAgentAgentType(World& world, core::InstanceId id, const Value& value);
+void attachNavigationAgentComponents(World& world, core::InstanceId id);
+void detachNavigationAgentComponents(World& world, core::InstanceId id);
+
 // DataModel
 Value getDataModelEngineVersion(const World& world, core::InstanceId id);
 Value getDataModelLuauVersion(const World& world, core::InstanceId id);

@@ -873,18 +873,81 @@ int navigationFindPath(lua_State* L)
     const core::InstanceId service = checkInstance(L, 1);
     const core::Vec3 from = checkVector3(L, 2);
     const core::Vec3 to = checkVector3(L, 3);
+    // Which agent type, as `DefineAgent` named it; empty is the service's own.
+    const std::string_view agent = luaL_optstring(L, 4, "");
     nav::INavigation* navigation = navigationFor(L, service);
     const std::optional<nav::NavPath> path =
-        navigation != nullptr ? navigation->findPath(core::toDVec3(from), core::toDVec3(to)) : std::nullopt;
+        navigation != nullptr ? navigation->findPath(core::toDVec3(from), core::toDVec3(to), agent) : std::nullopt;
     if (!path.has_value()) {
         lua_pushnil(L);
         lua_pushboolean(L, 0);
-        return 2;
+        lua_createtable(L, 0, 0);
+        return 3;
     }
     // A fresh array every call, so a caller may keep it and change it.
     lua_createtable(L, static_cast<int>(path->points.size()), 0);
     for (usize at = 0; at < path->points.size(); ++at) {
         pushVector3(L, core::toVec3(path->points[at]));
+        lua_rawseti(L, -2, static_cast<int>(at) + 1);
+    }
+    lua_pushboolean(L, path->complete ? 1 : 0);
+    // **Beside the waypoints, what crossing from each is** (ADR 0098): a
+    // link's label, or "" for walking -- one entry per waypoint, never a hole.
+    lua_createtable(L, static_cast<int>(path->points.size()), 0);
+    for (usize at = 0; at < path->points.size(); ++at) {
+        const std::string& label = at < path->labels.size() ? path->labels[at] : std::string();
+        lua_pushlstring(L, label.data(), label.size());
+        lua_rawseti(L, -2, static_cast<int>(at) + 1);
+    }
+    return 3;
+}
+
+int navigationDefineAgent(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const std::string_view name = luaL_checkstring(L, 2);
+    nav::NavAgent agent;
+    agent.radius = static_cast<f32>(luaL_checknumber(L, 3));
+    agent.height = static_cast<f32>(luaL_checknumber(L, 4));
+    agent.maxClimb = static_cast<f32>(luaL_optnumber(L, 5, 0.5));
+    agent.maxSlope = static_cast<f32>(luaL_optnumber(L, 6, 45.0));
+    // The same rules the service's own agent properties keep.
+    if (!(agent.radius > 0.0f) || !(agent.height > 0.0f) || !(agent.maxClimb >= 0.0f) ||
+        !(agent.maxSlope >= 0.0f && agent.maxSlope <= 89.0f))
+        raise(L, LUAUG_TR("script.err.nav_agent_size"));
+    if (nav::INavigation* navigation = navigationFor(L, service); navigation != nullptr)
+        navigation->defineAgent(name, agent);
+    return 0;
+}
+
+int navigationSetAreaCost(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const std::string_view label = luaL_checkstring(L, 2);
+    const auto cost = static_cast<f32>(luaL_checknumber(L, 3));
+    // Infinity forbids; anything else below zero is nothing a path can mean.
+    if (!(cost >= 0.0f))
+        raise(L, LUAUG_TR("script.err.nav_area_cost"));
+    if (nav::INavigation* navigation = navigationFor(L, service); navigation != nullptr)
+        navigation->setAreaCost(label, cost);
+    return 0;
+}
+
+int navigationFindPath2D(lua_State* L)
+{
+    const core::InstanceId service = checkInstance(L, 1);
+    const core::Vec2 from = checkVector2(L, 2);
+    const core::Vec2 to = checkVector2(L, 3);
+    nav::INavigation* navigation = navigationFor(L, service);
+    const std::optional<nav::NavPath2D> path = navigation != nullptr ? navigation->findPath2D(from, to) : std::nullopt;
+    if (!path.has_value()) {
+        lua_pushnil(L);
+        lua_pushboolean(L, 0);
+        return 2;
+    }
+    lua_createtable(L, static_cast<int>(path->points.size()), 0);
+    for (usize at = 0; at < path->points.size(); ++at) {
+        pushVector2(L, path->points[at]);
         lua_rawseti(L, -2, static_cast<int>(at) + 1);
     }
     lua_pushboolean(L, path->complete ? 1 : 0);
@@ -1626,6 +1689,9 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
     {"Workspace", "Raycast", workspaceRaycast},
     {"Workspace", "Raycast2D", workspaceRaycast2D},
     {"NavigationService", "FindPath", navigationFindPath},
+    {"NavigationService", "DefineAgent", navigationDefineAgent},
+    {"NavigationService", "SetAreaCost", navigationSetAreaCost},
+    {"NavigationService", "FindPath2D", navigationFindPath2D},
     {"NavigationService", "NearestPoint", navigationNearestPoint},
     {"NavigationService", "Raycast", navigationRaycast},
     {"NavigationService", "BuildRegion", navigationBuildRegion},

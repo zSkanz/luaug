@@ -903,6 +903,48 @@ void WorldHost::tick()
     m_runtime->firePhase(core::Phase::PreSimulation, state.fixedTimestep);
     m_runtime->drain(core::Phase::PreSimulation);
 
+    // **The crowd walks** (ADR 0098): after the scripts have given this tick's
+    // orders and before physics sees where everything stands. Every
+    // `NavigationAgent` in instance order, its part moved through the world's
+    // own verb so the move is a write like a script's, and `Reached` fired on
+    // the tick it arrives -- deferred like every other signal (ADR 0015).
+    if (m_navigation != nullptr) {
+        std::vector<nav::CrowdAgentState> crowd;
+        m_world->navigationAgents().forEach([&](core::InstanceId id, const scene::NavigationAgentComponent& agent) {
+            const core::InstanceId body = m_world->parentOf(id);
+            const scene::PartComponent* part = body.valid() ? m_world->parts().find(body) : nullptr;
+            if (part == nullptr || !m_world->isAncestorOf(m_workspace, body))
+                return;
+            crowd.push_back(nav::CrowdAgentState{id, agent.agentType, part->cframe.position, agent.target, agent.active,
+                                                 agent.maxSpeed});
+        });
+        if (!crowd.empty()) {
+            std::vector<nav::CrowdAgentStep> steps;
+            m_navigation->stepCrowd(crowd, static_cast<f32>(state.fixedTimestep), steps);
+            const core::NameAtom cframeName = m_world->atoms().intern("CFrame");
+            const core::NameAtom reachedName = m_world->atoms().intern("Reached");
+            for (const nav::CrowdAgentStep& step : steps) {
+                const core::InstanceId body = m_world->parentOf(step.id);
+                const scene::PartComponent* part = body.valid() ? m_world->parts().find(body) : nullptr;
+                if (part == nullptr)
+                    continue;
+                if (part->cframe.position.x != step.position.x || part->cframe.position.y != step.position.y ||
+                    part->cframe.position.z != step.position.z) {
+                    core::CFrameD moved = part->cframe;
+                    moved.position = step.position;
+                    (void)m_world->setProperty(body, cframeName, scene::Value{moved});
+                }
+                if (step.reached) {
+                    if (scene::NavigationAgentComponent* agent = m_world->navigationAgents().find(step.id);
+                        agent != nullptr)
+                        agent->active = false;
+                    m_world->changes().push(
+                        scene::Change{scene::ChangeKind::InstanceEventNoArgs, step.id, {}, reachedName});
+                }
+            }
+        }
+    }
+
     if (m_physics.has_value())
         m_physics->step(state.fixedTimestep);
     if (m_physics2d.has_value())

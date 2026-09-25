@@ -1286,6 +1286,19 @@ local Excluded: { Schema.Excluded } = {
             .. "a script that builds it the same way on both ends -- and a live edit would be a message of "
             .. "its own, which no game has asked for yet.",
     },
+    {
+        Name = "NavigationArea",
+        Reason = "What it says is a question only the authority's navigation asks (ADR 0098): a path is "
+            .. "searched where the game's scripts run, and a replica that wants one asks with a remote. "
+            .. "The part it labels is replicated; the label is not something a replica draws.",
+    },
+    { Name = "NavigationLink", Reason = "A way across for the authority's paths. The same as `NavigationArea`." },
+    {
+        Name = "NavigationAgent",
+        Reason = "It walks its part on the authority's tick, and the part's `CFrame` is what arrives -- "
+            .. "interpolated like any other part's. Sending the agent too would send a second account of "
+            .. "one motion.",
+    },
     { Name = "Frame", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextLabel", Reason = "Screen-space UI. The same as `ScreenGui`." },
     { Name = "TextButton", Reason = "Screen-space UI. The same as `ScreenGui`." },

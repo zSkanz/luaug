@@ -8,6 +8,7 @@ if(LUAUG_NAV_RECAST)
     luaug_add_module(nav
         LAYER 4
         SOURCES
+            src/nav2d.cpp
             src/recast_navigation.cpp
         DEPS
             core

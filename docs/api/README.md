@@ -75,6 +75,9 @@ guided tour.
 | [`MeshPart`](meshpart.md) | [`BasePart`](basepart.md) | A part whose geometry is an imported mesh rather than a primitive solid. |
 | [`Model`](model.md) | [`PVInstance`](pvinstance.md) | A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with. |
 | [`ModuleScript`](modulescript.md) | [`BaseScript`](basescript.md) | Luau that is REQUIRED rather than run. |
+| [`NavigationAgent`](navigationagent.md) | [`Instance`](instance.md) | Walks its part to a point over the walkable ground, keeping clear of the other agents as it goes -- a crowd (ADR 0098). |
+| [`NavigationArea`](navigationarea.md) | [`Instance`](instance.md) | Marks the walkable ground inside its part's box with a `Label` (ADR 0098), which `NavigationService:SetAreaCost` prices: water an agent would rather go round, mud that is slow, a door that is shut. |
+| [`NavigationLink`](navigationlink.md) | [`Instance`](instance.md) | A way between two points the walkable ground does not join (ADR 0098): a gap to jump, a ladder, a drop. |
 | [`PVInstance`](pvinstance.md) | [`Instance`](instance.md) | The base of everything with a position and orientation in the world: a pivot to move it by, and an offset saying where that pivot sits. |
 | [`Part`](part.md) | [`BasePart`](basepart.md) | The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh. |
 | [`Part2D`](part2d.md) | [`Instance`](instance.md) | A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D world. |

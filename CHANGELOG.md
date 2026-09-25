@@ -46,6 +46,25 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **Navigation for more than one body, over priced ground, across gaps, in
+  crowds, and on the plane** (ADR 0098).
+  - `NavigationService:DefineAgent(name, radius, height, maxClimb?, maxSlope?)`
+    names another agent size with a mesh of its own, and `FindPath`
+    takes its name as a last argument.
+  - `NavigationArea`, under a part, labels the ground inside it (`Label`);
+    `NavigationService:SetAreaCost(label, cost)` prices it for every agent,
+    and `math.huge` forbids it. An unpriced label costs 1.
+  - `NavigationLink` (`From`, `To`, `Bidirectional`, `Label`) joins two points
+    the mesh does not -- a jump, a ladder. `FindPath` gains a third answer: the
+    label of the link that begins at each waypoint, or `""` where the way on is
+    walking.
+  - `NavigationAgent`, under a part, walks it to its `Target` around every
+    other agent, on the fixed tick, at `MaxSpeed`, over the mesh its
+    `AgentType` names; `Reached` fires when it arrives.
+  - `NavigationService:FindPath2D(from, to)` searches the plane: every
+    colliding `Tilemap2D` cell and every anchored, colliding `Part2D` is a
+    wall.
+
 - **The look of a world is instances** (ADR 0096). Under `Lighting` they are
   the world's -- saved with the scene and replicated -- and under
   `Workspace.CurrentCamera` they are the viewer's own; anywhere else they do

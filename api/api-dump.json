@@ -1634,6 +1634,80 @@
       "Events": []
     },
     {
+      "Name": "NavigationAgent",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Active",
+          "Type": "boolean",
+          "Default": "false"
+        },
+        {
+          "Name": "AgentType",
+          "Type": "string",
+          "Default": "\"\""
+        },
+        {
+          "Name": "MaxSpeed",
+          "Type": "number",
+          "Default": "8"
+        },
+        {
+          "Name": "Target",
+          "Type": "vector"
+        }
+      ],
+      "Methods": [],
+      "Events": [
+        {
+          "Name": "Reached",
+          "Parameters": []
+        }
+      ]
+    },
+    {
+      "Name": "NavigationArea",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Label",
+          "Type": "string",
+          "Default": "\"Area\""
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "NavigationLink",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Bidirectional",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "From",
+          "Type": "vector"
+        },
+        {
+          "Name": "Label",
+          "Type": "string",
+          "Default": "\"Jump\""
+        },
+        {
+          "Name": "To",
+          "Type": "vector"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "NavigationService",
       "Extends": "Instance",
       "Tags": ["NotCreatable", "Service"],
@@ -1676,6 +1750,35 @@
           "ThreadSafety": "Unsafe"
         },
         {
+          "Name": "DefineAgent",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            },
+            {
+              "Name": "radius",
+              "Type": "number"
+            },
+            {
+              "Name": "height",
+              "Type": "number"
+            },
+            {
+              "Name": "maxClimb",
+              "Type": "number?",
+              "Default": "0.5"
+            },
+            {
+              "Name": "maxSlope",
+              "Type": "number?",
+              "Default": "45"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
           "Name": "FindPath",
           "Parameters": [
             {
@@ -1685,9 +1788,29 @@
             {
               "Name": "to",
               "Type": "vector"
+            },
+            {
+              "Name": "agent",
+              "Type": "string?",
+              "Default": "\"\""
             }
           ],
-          "Returns": ["{ vector }?", "boolean"],
+          "Returns": ["{ vector }?", "boolean", "{ string }"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "FindPath2D",
+          "Parameters": [
+            {
+              "Name": "from",
+              "Type": "Vector2"
+            },
+            {
+              "Name": "to",
+              "Type": "Vector2"
+            }
+          ],
+          "Returns": ["{ Vector2 }?", "boolean"],
           "ThreadSafety": "Unsafe"
         },
         {
@@ -1719,6 +1842,21 @@
             }
           ],
           "Returns": ["vector?"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SetAreaCost",
+          "Parameters": [
+            {
+              "Name": "label",
+              "Type": "string"
+            },
+            {
+              "Name": "cost",
+              "Type": "number"
+            }
+          ],
+          "Returns": [],
           "ThreadSafety": "Unsafe"
         }
       ],

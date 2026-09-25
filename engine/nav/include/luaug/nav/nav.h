@@ -21,6 +21,9 @@
 
 #include <memory>
 #include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace luaug::scene {
@@ -58,7 +61,48 @@ struct NavPath
     // or past ground no query has built. A partial path is useful: walking most
     // of the way and asking again is what a game wants.
     bool complete = false;
+
+    // Beside `points`: the label of the `NavigationLink` that begins at each,
+    // or empty where the way on is walking (ADR 0098).
+    std::vector<std::string> labels;
 };
+
+// One `NavigationAgent` as the crowd reads it (ADR 0098).
+struct CrowdAgentState
+{
+    core::InstanceId id;
+    std::string agentType;
+    core::DVec3 position{};
+    core::DVec3 target{};
+    bool active = false;
+    f32 maxSpeed = 8.0f;
+};
+
+// What a crowd step did to one agent: where its part goes, how fast it was
+// moving, and whether it arrived this step.
+struct CrowdAgentStep
+{
+    core::InstanceId id;
+    core::DVec3 position{};
+    core::DVec3 velocity{};
+    bool reached = false;
+};
+
+// A path on the 2D plane (ADR 0098): where it turns, and whether it reaches
+// the goal.
+struct NavPath2D
+{
+    std::vector<core::Vec2> points;
+    bool complete = false;
+};
+
+// **The plane's search**: A* over the cells of every `Tilemap2D` under
+// `workspace` -- a filled, colliding tile is a wall -- with anchored,
+// colliding `Part2D`s stamped over them as walls, 8-connected without cutting
+// a wall's corner. `std::nullopt` when `from` is inside a wall or off every
+// grid.
+[[nodiscard]] std::optional<NavPath2D> findPath2D(const scene::World& world, core::InstanceId workspace,
+                                                  core::Vec2 from, core::Vec2 to);
 
 class INavigation
 {
@@ -76,23 +120,44 @@ public:
     // mirror's) is seen by the next tick's.
     virtual void setTick(u64 tick) noexcept = 0;
 
+    // **Another agent size, by name** (ADR 0098), with a mesh of its own. A
+    // name defined again is redefined and its tiles dropped. Every query
+    // below takes an agent name; empty is `setAgent`'s.
+    virtual void defineAgent(std::string_view name, const NavAgent& agent) = 0;
+    // The price of the ground a `NavigationArea` labels, for every agent: a
+    // multiplier on distance, and infinity forbids it. Unpriced labels cost 1.
+    virtual void setAreaCost(std::string_view label, f32 cost) = 0;
+
     // A path between two absolute points. `std::nullopt` means there is none
     // from here: the start is not on the mesh. A path that does not reach the
     // goal comes back with `complete` false.
-    [[nodiscard]] virtual std::optional<NavPath> findPath(core::DVec3 from, core::DVec3 to) = 0;
+    [[nodiscard]] virtual std::optional<NavPath> findPath(core::DVec3 from, core::DVec3 to,
+                                                          std::string_view agent = {}) = 0;
 
     // The nearest point on the mesh within `maxDistance`: what a spawn, a
     // teleport and a click-to-move need before they can ask for a path.
-    [[nodiscard]] virtual std::optional<core::DVec3> nearestPoint(core::DVec3 point, f32 maxDistance) = 0;
+    [[nodiscard]] virtual std::optional<core::DVec3> nearestPoint(core::DVec3 point, f32 maxDistance,
+                                                                  std::string_view agent = {}) = 0;
 
     // A straight walk from `from` towards `to`, stopping where the mesh does --
     // the cheap question an agent asks before a search. `std::nullopt` when
     // `from` is not on the mesh.
-    [[nodiscard]] virtual std::optional<core::DVec3> raycast(core::DVec3 from, core::DVec3 to) = 0;
+    [[nodiscard]] virtual std::optional<core::DVec3> raycast(core::DVec3 from, core::DVec3 to,
+                                                             std::string_view agent = {}) = 0;
 
     // Builds (or rebuilds, where dirty) every tile over a box, ahead of the
     // first path through it. Answers how many tiles it built.
-    virtual usize buildRegion(core::DVec3 minimum, core::DVec3 maximum) = 0;
+    virtual usize buildRegion(core::DVec3 minimum, core::DVec3 maximum, std::string_view agent = {}) = 0;
+
+    // **One step of the crowd** (ADR 0098): every `NavigationAgent`, in the
+    // order given, walked `dt` seconds towards its target around the others.
+    // Agents not given are dropped from the crowd. Deterministic for the same
+    // input: one thread, a fixed order.
+    virtual void stepCrowd(std::span<const CrowdAgentState> agents, f32 dt, std::vector<CrowdAgentStep>& out) = 0;
+
+    // A path on the 2D plane, over the world this navigation was made for
+    // (see `findPath2D`).
+    [[nodiscard]] virtual std::optional<NavPath2D> findPath2D(core::Vec2 from, core::Vec2 to) = 0;
 
     // Forgets every tile; the next query rebuilds what it needs.
     virtual void invalidate() = 0;

@@ -1923,6 +1923,35 @@ declare extern type Tilemap2D extends Instance with
     function Clear(self): ()
 end
 
+declare extern type NavigationArea extends Instance with
+    --- The name its cost is set by. Areas that share a label share a cost.
+    Label: string
+end
+
+declare extern type NavigationLink extends Instance with
+    --- Where it starts, in the world.
+    From: vector
+    --- Where it ends, in the world.
+    To: vector
+    --- Whether it can be taken back from `To` to `From`: a ladder can, a drop cannot.
+    Bidirectional: boolean
+    --- What crossing it is, as the path reports it.
+    Label: string
+end
+
+declare extern type NavigationAgent extends Instance with
+    --- Where it is going. Writing it starts the walk; while `Active` is false it stands still.
+    Target: vector
+    --- Whether it is walking. Writing `Target` sets it; arriving clears it.
+    Active: boolean
+    --- Its fastest, in metres per second.
+    MaxSpeed: number
+    --- Which agent it is, as `NavigationService:DefineAgent` named it; empty for the service's own.
+    AgentType: string
+    --- Fired once when it arrives at `Target`.
+    read Reached: Signal<()>
+end
+
 declare extern type DataModel extends Instance with
     --- The version of the engine runtime executing this VM, as `luaug.toml` pins it. Read-only: the
     --- runtime is chosen before the VM exists, so nothing a script does can change it.
@@ -2561,8 +2590,22 @@ declare extern type NavigationService extends Instance with
     --- The waypoints from `from` to `to`, each a corner to walk to in a straight line, and whether they
     --- reach the goal. **Nil when `from` is not on walkable ground at all.** A path that stops short --
     --- the goal is off the ground, cut off, or past ground not built yet -- still comes back, with
-    --- `false`: walk it and ask again from where it ends.
-    function FindPath(self, from: vector, to: vector): ({ vector }?, boolean)
+    --- `false`: walk it and ask again from where it ends. The third answer runs beside the waypoints:
+    --- the `Label` of the `NavigationLink` that begins at each, or `""` where the way on is walking.
+    --- `agent` names a type `DefineAgent` made; empty is the service's own (ADR 0098).
+    function FindPath(self, from: vector, to: vector, agent: string?): ({ vector }?, boolean, { string })
+    --- Names another agent size, with a walkable ground of its own (ADR 0098): a giant that does not
+    --- fit through a door the default agent walks through. Queries and a `NavigationAgent` pick it by
+    --- name. Defining a name again redefines it.
+    function DefineAgent(self, name: string, radius: number, height: number, maxClimb: number?, maxSlope: number?): ()
+    --- Prices the ground a `NavigationArea` labels: a path through it counts its length times `cost`.
+    --- `math.huge` forbids it outright. Unpriced labels cost 1; re-pricing needs no rebuild.
+    function SetAreaCost(self, label: string, cost: number): ()
+    --- A path on the 2D plane (ADR 0098): over the cells of every `Tilemap2D` -- a filled, colliding
+    --- tile is a wall -- with every anchored, colliding `Part2D` a wall too. Diagonal steps never cut a
+    --- wall's corner. The waypoints are where the path turns, and the boolean whether it reaches `to`;
+    --- nil when `from` is inside a wall.
+    function FindPath2D(self, from: Vector2, to: Vector2): ({ Vector2 }?, boolean)
     --- The nearest walkable point within `maxDistance` metres, or nil. What a spawn point, a teleport
     --- and a click on the world need before they can ask for a path.
     function NearestPoint(self, point: vector, maxDistance: number?): vector?
@@ -3165,6 +3208,9 @@ declare Instance: {
         & (("AnimationPlayer") -> AnimationPlayer)
         & (("Part2D") -> Part2D)
         & (("Tilemap2D") -> Tilemap2D)
+        & (("NavigationArea") -> NavigationArea)
+        & (("NavigationLink") -> NavigationLink)
+        & (("NavigationAgent") -> NavigationAgent)
         & (("RemoteEvent") -> RemoteEvent)
         & (("RemoteFunction") -> RemoteFunction),
     stamp: (name: string, linked: boolean?) -> Instance,

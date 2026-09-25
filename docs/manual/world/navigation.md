@@ -90,3 +90,81 @@ The mesh is built in square tiles, only where queries reach, so the first path
 through new ground pays for building it. `BuildRegion(minimum, maximum)` pays
 up front, for an arena as it loads or a level behind a loading screen. Ground
 already built and unchanged costs nothing to ask for again.
+
+## More than one body
+
+The four properties above are the service's own agent. A game with a giant
+and a rat defines the others by name, and each gets a mesh of its own:
+
+```luau
+Navigation:DefineAgent("Giant", 1.5, 4)          -- radius, height
+Navigation:DefineAgent("Rat", 0.2, 0.3, 0.2, 60) -- ..., maxClimb, maxSlope
+local path, reached = Navigation:FindPath(from, to, "Giant")
+```
+
+A name nobody defined has no ground: `FindPath` answers `nil`. Defining a name
+again redefines it and drops the mesh it had.
+
+## Ground that costs more
+
+A `NavigationArea` under a part labels the ground inside the part's box. The
+part need not collide -- a pool of water is a part with `CanCollide` off and a
+`NavigationArea` labelled `"Water"` inside it. The service prices each label
+for every agent, as a multiplier on distance:
+
+```luau
+Navigation:SetAreaCost("Water", 10)       -- walked round when round is shorter than ten times across
+Navigation:SetAreaCost("Door", math.huge) -- never walked
+Navigation:SetAreaCost("Door", 1)         -- open again; nothing is rebuilt
+```
+
+A label nobody priced costs 1, the same as any other ground. Prices are read
+at query time, so opening a door is a price, not a rebuild. Moving or resizing
+the part is a rebuild of the tiles it touches.
+
+## Gaps the mesh does not cross
+
+A `NavigationLink` joins two points: a jump between roofs, a ladder, a
+teleporter. `From` and `To` are absolute; `Bidirectional` (on by default) lets
+the link be taken both ways. A path that uses it says so in its third answer,
+one label per waypoint -- the link's `Label` at the waypoint where it begins,
+`""` where the way on is walking:
+
+```luau
+local path, reached, labels = Navigation:FindPath(from, to)
+for index, point in path do
+    if labels[index] == "Jump" then
+        -- the next waypoint is across the gap: jump to it
+    end
+end
+```
+
+## Crowds
+
+A `NavigationAgent` under a part walks the part itself. Set its `Target` and it
+goes, at `MaxSpeed` metres per second, over the mesh its `AgentType` names
+(empty is the service's own), steering round every other agent on the way. It
+moves on the fixed tick, the same on every run, and fires `Reached` when it
+arrives -- `Active` goes false and the part stops.
+
+```luau
+local agent = Instance.new("NavigationAgent")
+agent.MaxSpeed = 6
+agent.Parent = guard
+agent.Target = vector.create(20, 0, 5)
+agent.Reached:Connect(function()
+    agent.Target = vector.create(-20, 0, 5)
+end)
+```
+
+A crowd agent moves the part's `CFrame`; it does not push a `CharacterBody`.
+For a body with physics, walk a `FindPath` yourself as above.
+
+## On the plane
+
+A 2D game asks `FindPath2D(from, to)` with two `Vector2`s. There is no mesh:
+the search runs over cells -- the first `Tilemap2D`'s size and alignment, or a
+metre when there is no tilemap -- and every colliding tile and every anchored,
+colliding `Part2D` is a wall. It answers the points where the path turns and
+whether it reaches the goal, and `nil` when `from` is inside a wall. Paths go
+round a wall's corner, never across it.

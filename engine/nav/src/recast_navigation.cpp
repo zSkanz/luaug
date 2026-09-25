@@ -10,6 +10,7 @@
 #include "luaug/scene/components.h"
 #include "luaug/scene/world.h"
 
+#include <DetourCrowd.h>
 #include <DetourNavMesh.h>
 #include <DetourNavMeshBuilder.h>
 #include <DetourNavMeshQuery.h>
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <string>
 #include <utility>
 
 namespace luaug::nav {
@@ -46,6 +48,12 @@ constexpr int MaxPolysPerTile = 1024;
 constexpr int MaxPathPolys = 2048;
 constexpr int MaxStraightPoints = 256;
 constexpr unsigned short WalkableFlag = 1;
+// Area ids for `NavigationArea` labels (ADR 0098): one to 62, Recast's own
+// walkable area being 63. The first fifteen also get a flag bit each, which is
+// how a label priced at infinity is excluded outright rather than merely dear.
+constexpr unsigned char MostAreaLabels = 62;
+constexpr unsigned char ExcludableAreas = 15;
+constexpr int MaxCrowdAgents = 256;
 
 // FNV-1a, folded over the bytes of what a tile's mesh depends on.
 struct Fingerprint
@@ -93,6 +101,78 @@ struct TileRecord
 {
     u64 fingerprint = 0;
     dtTileRef ref = 0;
+};
+
+// **What every agent type shares** (ADR 0098): the area labels, in the order
+// they were first seen -- an id is its place plus one, so it never changes
+// while the process runs -- their prices, and each link's label by the index
+// of the instance that holds it.
+struct Shared
+{
+    std::vector<std::string> labels;
+    std::map<std::string, f32, std::less<>> costs;
+    std::map<core::u32, std::string> linkLabels;
+
+    [[nodiscard]] unsigned char areaOf(std::string_view label)
+    {
+        for (usize at = 0; at < labels.size(); ++at) {
+            if (labels[at] == label)
+                return static_cast<unsigned char>(at + 1);
+        }
+        // Past the last id, labels share it: counted rather than refused, a
+        // world with sixty-three kinds of mud is one nobody will build.
+        if (labels.size() >= MostAreaLabels)
+            return MostAreaLabels;
+        labels.emplace_back(label);
+        return static_cast<unsigned char>(labels.size());
+    }
+
+    // The query filter every search uses: walkable ground, each label at its
+    // price, and a label priced at infinity left out.
+    [[nodiscard]] dtQueryFilter filter() const
+    {
+        dtQueryFilter out;
+        out.setIncludeFlags(WalkableFlag);
+        unsigned short exclude = 0;
+        for (usize at = 0; at < labels.size(); ++at) {
+            const auto id = static_cast<int>(at + 1);
+            const auto found = costs.find(labels[at]);
+            const f32 cost = found != costs.end() ? found->second : 1.0f;
+            if (!std::isfinite(cost)) {
+                if (id <= ExcludableAreas)
+                    exclude = static_cast<unsigned short>(exclude | (1u << id));
+                else
+                    out.setAreaCost(id, 1.0e6f);
+                continue;
+            }
+            out.setAreaCost(id, std::max(cost, 0.001f));
+        }
+        out.setExcludeFlags(exclude);
+        return out;
+    }
+};
+
+// A `NavigationArea`'s box, gathered with the statics.
+struct AreaBox
+{
+    f64 minX = 0.0;
+    f64 minY = 0.0;
+    f64 minZ = 0.0;
+    f64 maxX = 0.0;
+    f64 maxY = 0.0;
+    f64 maxZ = 0.0;
+    std::string label;
+    u64 hash = 0;
+};
+
+// A `NavigationLink`, gathered with the statics.
+struct LinkRecord
+{
+    core::InstanceId id;
+    DVec3 from{};
+    DVec3 to{};
+    bool bidirectional = true;
+    u64 hash = 0;
 };
 
 // Triangles for Recast: flat positions and index triples.
@@ -143,23 +223,27 @@ struct Soup
     return corners;
 }
 
-class RecastNavigation final : public INavigation
+// **One agent type's walkable ground**: a mesh, its query, its tiles and its
+// crowd. `RecastNavigation` below holds one of these per type (ADR 0098).
+class AgentMesh
 {
 public:
-    explicit RecastNavigation(const scene::World& world) : m_world(world) {}
+    AgentMesh(const scene::World& world, Shared& shared) : m_world(world), m_shared(shared) {}
 
-    ~RecastNavigation() override
+    ~AgentMesh()
     {
+        if (m_crowd != nullptr)
+            dtFreeCrowd(m_crowd);
         if (m_query != nullptr)
             dtFreeNavMeshQuery(m_query);
         if (m_mesh != nullptr)
             dtFreeNavMesh(m_mesh);
     }
 
-    RecastNavigation(const RecastNavigation&) = delete;
-    RecastNavigation& operator=(const RecastNavigation&) = delete;
+    AgentMesh(const AgentMesh&) = delete;
+    AgentMesh& operator=(const AgentMesh&) = delete;
 
-    void setWorkspace(core::InstanceId workspace) noexcept override
+    void setWorkspace(core::InstanceId workspace) noexcept
     {
         if (workspace != m_workspace) {
             m_workspace = workspace;
@@ -167,7 +251,7 @@ public:
         }
     }
 
-    void setAgent(const NavAgent& agent) override
+    void setAgent(const NavAgent& agent)
     {
         if (agent == m_agent)
             return;
@@ -175,9 +259,9 @@ public:
         invalidate();
     }
 
-    void setTick(u64 tick) noexcept override { m_tick = tick; }
+    void setTick(u64 tick) noexcept { m_tick = tick; }
 
-    [[nodiscard]] std::optional<NavPath> findPath(DVec3 from, DVec3 to) override
+    [[nodiscard]] std::optional<NavPath> findPath(DVec3 from, DVec3 to)
     {
         prepare();
         ensureTiles(std::min(from.x, to.x), std::min(from.z, to.z), std::max(from.x, to.x), std::max(from.z, to.z),
@@ -221,17 +305,32 @@ public:
             m_query->closestPointOnPoly(polys[static_cast<usize>(count - 1)], goal, target, nullptr);
 
         std::array<float, MaxStraightPoints * 3> straight{};
+        std::array<unsigned char, MaxStraightPoints> flags{};
+        std::array<dtPolyRef, MaxStraightPoints> refs{};
         int points = 0;
-        m_query->findStraightPath(start, target, polys.data(), count, straight.data(), nullptr, nullptr, &points,
-                                  MaxStraightPoints, 0);
+        m_query->findStraightPath(start, target, polys.data(), count, straight.data(), flags.data(), refs.data(),
+                                  &points, MaxStraightPoints, 0);
         path.points.reserve(static_cast<usize>(points));
-        for (int at = 0; at < points; ++at)
+        path.labels.reserve(static_cast<usize>(points));
+        for (int at = 0; at < points; ++at) {
             path.points.push_back(pointOf(&straight[static_cast<usize>(at) * 3]));
+            // **Where a link begins, its label** (ADR 0098): the script
+            // walking the path jumps there instead of walking.
+            std::string label;
+            if ((flags[static_cast<usize>(at)] & DT_STRAIGHTPATH_OFFMESH_CONNECTION) != 0) {
+                if (const dtOffMeshConnection* link = m_mesh->getOffMeshConnectionByRef(refs[static_cast<usize>(at)]);
+                    link != nullptr) {
+                    if (const auto found = m_shared.linkLabels.find(link->userId); found != m_shared.linkLabels.end())
+                        label = found->second;
+                }
+            }
+            path.labels.push_back(std::move(label));
+        }
         path.complete = reached && goalOnMesh;
         return path;
     }
 
-    [[nodiscard]] std::optional<DVec3> nearestPoint(DVec3 point, f32 maxDistance) override
+    [[nodiscard]] std::optional<DVec3> nearestPoint(DVec3 point, f32 maxDistance)
     {
         prepare();
         const f64 reach = static_cast<f64>(std::max(maxDistance, 0.0f));
@@ -252,7 +351,7 @@ public:
         return at;
     }
 
-    [[nodiscard]] std::optional<DVec3> raycast(DVec3 from, DVec3 to) override
+    [[nodiscard]] std::optional<DVec3> raycast(DVec3 from, DVec3 to)
     {
         prepare();
         ensureTiles(std::min(from.x, to.x), std::min(from.z, to.z), std::max(from.x, to.x), std::max(from.z, to.z),
@@ -284,15 +383,20 @@ public:
         return pointOf(stop);
     }
 
-    usize buildRegion(DVec3 minimum, DVec3 maximum) override
+    usize buildRegion(DVec3 minimum, DVec3 maximum)
     {
         prepare();
         return ensureTiles(std::min(minimum.x, maximum.x), std::min(minimum.z, maximum.z),
                            std::max(minimum.x, maximum.x), std::max(minimum.z, maximum.z), 0.0, RegionTileBudget);
     }
 
-    void invalidate() override
+    void invalidate()
     {
+        // The crowd holds references into the mesh, so it goes first.
+        if (m_crowd != nullptr)
+            dtFreeCrowd(m_crowd);
+        m_crowd = nullptr;
+        m_slots.clear();
         if (m_query != nullptr)
             dtFreeNavMeshQuery(m_query);
         if (m_mesh != nullptr)
@@ -302,7 +406,7 @@ public:
         m_tiles.clear();
     }
 
-    [[nodiscard]] usize tileCount() const noexcept override
+    [[nodiscard]] usize tileCount() const noexcept
     {
         usize count = 0;
         for (const auto& [key, record] : m_tiles)
@@ -317,13 +421,7 @@ private:
 
     [[nodiscard]] bool ready() const noexcept { return m_mesh != nullptr && m_query != nullptr; }
 
-    [[nodiscard]] static dtQueryFilter walkable() noexcept
-    {
-        dtQueryFilter filter;
-        filter.setIncludeFlags(WalkableFlag);
-        filter.setExcludeFlags(0);
-        return filter;
-    }
+    [[nodiscard]] dtQueryFilter walkable() const { return m_shared.filter(); }
 
     // How far above and below a point to look for the mesh under it: an agent
     // standing is its height above the ground, and one jumping more.
@@ -427,6 +525,55 @@ private:
             m_statics.push_back(entry);
         });
 
+        // **The labelled boxes** (ADR 0098), gathered in instance order so a
+        // label's area id is a function of the world.
+        m_areas.clear();
+        m_world.navigationAreas().forEach([&](core::InstanceId id, const scene::NavigationAreaComponent& area) {
+            const core::InstanceId holder = m_world.parentOf(id);
+            const scene::PartComponent* part = holder.valid() ? m_world.parts().find(holder) : nullptr;
+            if (part == nullptr || !inWorld(m_world, m_workspace, holder))
+                return;
+            AreaBox box;
+            box.minX = box.minY = box.minZ = std::numeric_limits<f64>::max();
+            box.maxX = box.maxY = box.maxZ = std::numeric_limits<f64>::lowest();
+            for (const DVec3& corner : cornersOf(part->cframe, part->size)) {
+                box.minX = std::min(box.minX, corner.x);
+                box.minY = std::min(box.minY, corner.y);
+                box.minZ = std::min(box.minZ, corner.z);
+                box.maxX = std::max(box.maxX, corner.x);
+                box.maxY = std::max(box.maxY, corner.y);
+                box.maxZ = std::max(box.maxZ, corner.z);
+            }
+            box.label = area.label;
+            (void)m_shared.areaOf(area.label);
+            Fingerprint hash;
+            hash.add(box.minX);
+            hash.add(box.minY);
+            hash.add(box.minZ);
+            hash.add(box.maxX);
+            hash.add(box.maxY);
+            hash.add(box.maxZ);
+            for (const char c : area.label)
+                hash.add(c);
+            box.hash = hash.value;
+            m_areas.push_back(std::move(box));
+        });
+        // **The links** (ADR 0098), each baked into the tile its start is in.
+        m_links.clear();
+        m_world.navigationLinks().forEach([&](core::InstanceId id, const scene::NavigationLinkComponent& link) {
+            if (!inWorld(m_world, m_workspace, id))
+                return;
+            LinkRecord record{id, link.from, link.to, link.bidirectional, 0};
+            m_shared.linkLabels[id.index] = link.label;
+            Fingerprint hash;
+            hash.add(id.index);
+            hash.add(link.from);
+            hash.add(link.to);
+            hash.add(link.bidirectional);
+            record.hash = hash.value;
+            m_links.push_back(record);
+        });
+
         m_world.terrains().forEach([&](core::InstanceId id, const scene::TerrainComponent& terrain) {
             if (!inWorld(m_world, m_workspace, id) || terrain.field.empty())
                 return;
@@ -458,6 +605,14 @@ private:
         maxZ = static_cast<f64>(key.z + 1) * size + border;
     }
 
+    // Whether a link's start is inside a tile -- the tile it is baked into.
+    [[nodiscard]] bool linkInTile(const LinkRecord& link, TileKey key) const noexcept
+    {
+        const f64 size = tileMetres();
+        return static_cast<i32>(std::floor(link.from.x / size)) == key.x &&
+               static_cast<i32>(std::floor(link.from.z / size)) == key.z;
+    }
+
     [[nodiscard]] int walkableRadiusCells() const noexcept
     {
         return static_cast<int>(std::ceil(m_agent.radius / cellSize()));
@@ -478,6 +633,15 @@ private:
             if (entry.maxX < minX || entry.minX > maxX || entry.maxZ < minZ || entry.minZ > maxZ)
                 continue;
             hash.add(entry.hash);
+        }
+        for (const AreaBox& area : m_areas) {
+            if (area.maxX < minX || area.minX > maxX || area.maxZ < minZ || area.minZ > maxZ)
+                continue;
+            hash.add(area.hash);
+        }
+        for (const LinkRecord& link : m_links) {
+            if (linkInTile(link, key))
+                hash.add(link.hash);
         }
         return hash.value;
     }
@@ -696,6 +860,17 @@ private:
             return;
         if (!rcErodeWalkableArea(&context, config.walkableRadius, *owned.compact))
             return;
+        // **Each labelled box marks the ground inside it** (ADR 0098), after
+        // the erosion as Recast's own sample does, so the label reaches the
+        // edge an agent can actually stand on. The box is the part's, as the
+        // world sees it square: a turned part marks what it spans.
+        for (const AreaBox& area : m_areas) {
+            const float lowest[3] = {static_cast<float>(area.minX), static_cast<float>(area.minY),
+                                     static_cast<float>(area.minZ)};
+            const float highest[3] = {static_cast<float>(area.maxX), static_cast<float>(area.maxY),
+                                      static_cast<float>(area.maxZ)};
+            rcMarkBoxArea(&context, lowest, highest, m_shared.areaOf(area.label), *owned.compact);
+        }
         if (!rcBuildDistanceField(&context, *owned.compact))
             return;
         if (!rcBuildRegions(&context, *owned.compact, config.borderSize, config.minRegionArea, config.mergeRegionArea))
@@ -717,8 +892,39 @@ private:
         if (owned.polys->npolys == 0)
             return;
 
-        for (int at = 0; at < owned.polys->npolys; ++at)
-            owned.polys->flags[at] = owned.polys->areas[at] == RC_WALKABLE_AREA ? WalkableFlag : 0;
+        // Walkable wherever an area was kept, and one flag bit more for the
+        // first labels, so the filter can leave a forbidden one out.
+        for (int at = 0; at < owned.polys->npolys; ++at) {
+            const unsigned char area = owned.polys->areas[at];
+            unsigned short flags = area == RC_NULL_AREA ? 0 : WalkableFlag;
+            if (area >= 1 && area <= ExcludableAreas)
+                flags = static_cast<unsigned short>(flags | (1u << area));
+            owned.polys->flags[at] = flags;
+        }
+
+        // **The links that start here** (ADR 0098), as Detour's off-mesh
+        // connections: this tile holds them, and Detour joins their far ends
+        // to whichever tile holds that ground when it is added.
+        std::vector<float> linkVerts;
+        std::vector<float> linkRadii;
+        std::vector<unsigned char> linkDirections;
+        std::vector<unsigned char> linkAreas;
+        std::vector<unsigned short> linkFlags;
+        std::vector<unsigned int> linkIds;
+        for (const LinkRecord& link : m_links) {
+            if (!linkInTile(link, key))
+                continue;
+            for (const DVec3& end : {link.from, link.to}) {
+                linkVerts.push_back(static_cast<float>(end.x));
+                linkVerts.push_back(static_cast<float>(end.y));
+                linkVerts.push_back(static_cast<float>(end.z));
+            }
+            linkRadii.push_back(m_agent.radius);
+            linkDirections.push_back(link.bidirectional ? DT_OFFMESH_CON_BIDIR : 0);
+            linkAreas.push_back(RC_WALKABLE_AREA);
+            linkFlags.push_back(WalkableFlag);
+            linkIds.push_back(link.id.index);
+        }
 
         dtNavMeshCreateParams params{};
         params.verts = owned.polys->verts;
@@ -744,6 +950,15 @@ private:
         params.cs = config.cs;
         params.ch = config.ch;
         params.buildBvTree = true;
+        if (!linkIds.empty()) {
+            params.offMeshConVerts = linkVerts.data();
+            params.offMeshConRad = linkRadii.data();
+            params.offMeshConDir = linkDirections.data();
+            params.offMeshConAreas = linkAreas.data();
+            params.offMeshConFlags = linkFlags.data();
+            params.offMeshConUserID = linkIds.data();
+            params.offMeshConCount = static_cast<int>(linkIds.size());
+        }
 
         unsigned char* data = nullptr;
         int dataSize = 0;
@@ -757,7 +972,132 @@ private:
         record.ref = ref;
     }
 
+public:
+    // **One step of this type's crowd** (ADR 0098). `agents` are this type's,
+    // in the order the host gathered them; an agent missing from them is
+    // removed from the crowd.
+    void stepCrowd(std::span<const CrowdAgentState> agents, f32 dt, std::vector<CrowdAgentStep>& out)
+    {
+        prepare();
+        for (const CrowdAgentState& agent : agents) {
+            ensureTiles(std::min(agent.position.x, agent.target.x), std::min(agent.position.z, agent.target.z),
+                        std::max(agent.position.x, agent.target.x), std::max(agent.position.z, agent.target.z),
+                        tileMetres(), QueryTileBudget);
+        }
+        const auto unchanged = [&out](const CrowdAgentState& agent) {
+            out.push_back(CrowdAgentStep{agent.id, agent.position, DVec3{}, false});
+        };
+        if (!ready()) {
+            for (const CrowdAgentState& agent : agents)
+                unchanged(agent);
+            return;
+        }
+        if (m_crowd == nullptr) {
+            m_crowd = dtAllocCrowd();
+            if (m_crowd == nullptr || !m_crowd->init(MaxCrowdAgents, std::max(m_agent.radius, 0.1f), m_mesh)) {
+                if (m_crowd != nullptr)
+                    dtFreeCrowd(m_crowd);
+                m_crowd = nullptr;
+                for (const CrowdAgentState& agent : agents)
+                    unchanged(agent);
+                return;
+            }
+        }
+        // The prices may have changed since the last step.
+        *m_crowd->getEditableFilter(0) = walkable();
+
+        // Gone from the world, gone from the crowd.
+        std::erase_if(m_slots, [&](const Slot& slot) {
+            const bool present = std::any_of(agents.begin(), agents.end(),
+                                             [&slot](const CrowdAgentState& agent) { return agent.id == slot.id; });
+            if (!present)
+                m_crowd->removeAgent(slot.index);
+            return !present;
+        });
+
+        std::vector<int> indices;
+        indices.reserve(agents.size());
+        for (const CrowdAgentState& agent : agents) {
+            auto slot =
+                std::find_if(m_slots.begin(), m_slots.end(), [&agent](const Slot& s) { return s.id == agent.id; });
+            dtCrowdAgentParams params{};
+            params.radius = m_agent.radius;
+            params.height = m_agent.height;
+            params.maxSpeed = agent.maxSpeed;
+            params.maxAcceleration = agent.maxSpeed * 4.0f;
+            params.collisionQueryRange = m_agent.radius * 12.0f;
+            params.pathOptimizationRange = m_agent.radius * 30.0f;
+            params.updateFlags = DT_CROWD_ANTICIPATE_TURNS | DT_CROWD_OPTIMIZE_VIS | DT_CROWD_OPTIMIZE_TOPO |
+                                 DT_CROWD_OBSTACLE_AVOIDANCE | DT_CROWD_SEPARATION;
+            params.obstacleAvoidanceType = 3;
+            params.separationWeight = 2.0f;
+            params.queryFilterType = 0;
+            if (slot == m_slots.end()) {
+                const float at[3] = {static_cast<float>(agent.position.x), static_cast<float>(agent.position.y),
+                                     static_cast<float>(agent.position.z)};
+                const int index = m_crowd->addAgent(at, &params);
+                if (index < 0) {
+                    indices.push_back(-1);
+                    continue;
+                }
+                m_slots.push_back(Slot{agent.id, index, DVec3{}, false});
+                slot = std::prev(m_slots.end());
+            }
+            else {
+                m_crowd->updateAgentParameters(slot->index, &params);
+            }
+            // A new target, or walking again: ask the crowd for the way.
+            const bool retarget =
+                agent.active && (!slot->active || slot->target.x != agent.target.x ||
+                                 slot->target.y != agent.target.y || slot->target.z != agent.target.z);
+            if (retarget) {
+                const dtQueryFilter filter = walkable();
+                dtPolyRef ref = 0;
+                float goal[3];
+                if (nearest(agent.target, searchExtents(), filter, ref, goal))
+                    m_crowd->requestMoveTarget(slot->index, ref, goal);
+            }
+            else if (!agent.active && slot->active) {
+                m_crowd->resetMoveTarget(slot->index);
+            }
+            slot->target = agent.target;
+            slot->active = agent.active;
+            indices.push_back(slot->index);
+        }
+
+        m_crowd->update(dt, nullptr);
+
+        for (usize at = 0; at < agents.size(); ++at) {
+            const CrowdAgentState& agent = agents[at];
+            const dtCrowdAgent* state = indices[at] >= 0 ? m_crowd->getAgent(indices[at]) : nullptr;
+            if (state == nullptr || !state->active) {
+                unchanged(agent);
+                continue;
+            }
+            CrowdAgentStep step;
+            step.id = agent.id;
+            step.position = pointOf(state->npos);
+            step.velocity = pointOf(state->vel);
+            // Arrived: within its own radius of the goal, on the ground.
+            const f64 dx = step.position.x - agent.target.x;
+            const f64 dz = step.position.z - agent.target.z;
+            const f64 reach = static_cast<f64>(m_agent.radius) + 0.1;
+            step.reached = agent.active && dx * dx + dz * dz <= reach * reach;
+            out.push_back(step);
+        }
+    }
+
+private:
+    struct Slot
+    {
+        core::InstanceId id;
+        int index = -1;
+        DVec3 target{};
+        bool active = false;
+    };
+
     const scene::World& m_world;
+    Shared& m_shared;
     core::InstanceId m_workspace;
     NavAgent m_agent;
     u64 m_tick = 0;
@@ -766,10 +1106,145 @@ private:
     u64 m_gatheredMutations = 0;
     u64 m_gatheredTerrains = 0;
     std::vector<Static> m_statics;
+    std::vector<AreaBox> m_areas;
+    std::vector<LinkRecord> m_links;
     std::map<TileKey, TileRecord> m_tiles;
     dtNavMesh* m_mesh = nullptr;
     dtNavMeshQuery* m_query = nullptr;
+    dtCrowd* m_crowd = nullptr;
+    std::vector<Slot> m_slots;
     std::array<float, 3> m_extents{};
+};
+
+// **Every agent type's ground, and what they share** (ADR 0098): the service's
+// own agent, the ones `defineAgent` named, the area prices, and the link labels.
+class RecastNavigation final : public INavigation
+{
+public:
+    explicit RecastNavigation(const scene::World& world) : m_world(world), m_default(world, m_shared) {}
+
+    void setWorkspace(core::InstanceId workspace) noexcept override
+    {
+        m_workspace = workspace;
+        m_default.setWorkspace(workspace);
+        for (auto& [name, mesh] : m_named)
+            mesh->setWorkspace(workspace);
+    }
+
+    void setAgent(const NavAgent& agent) override { m_default.setAgent(agent); }
+
+    void setTick(u64 tick) noexcept override
+    {
+        m_tick = tick;
+        m_default.setTick(tick);
+        for (auto& [name, mesh] : m_named)
+            mesh->setTick(tick);
+    }
+
+    void defineAgent(std::string_view name, const NavAgent& agent) override
+    {
+        if (name.empty()) {
+            m_default.setAgent(agent);
+            return;
+        }
+        auto found = m_named.find(name);
+        if (found == m_named.end()) {
+            found = m_named.emplace(std::string(name), std::make_unique<AgentMesh>(m_world, m_shared)).first;
+            found->second->setWorkspace(m_workspace);
+            found->second->setTick(m_tick);
+        }
+        found->second->setAgent(agent);
+    }
+
+    void setAreaCost(std::string_view label, f32 cost) override
+    {
+        m_shared.costs[std::string(label)] = cost;
+        (void)m_shared.areaOf(label);
+    }
+
+    [[nodiscard]] std::optional<NavPath> findPath(DVec3 from, DVec3 to, std::string_view agent) override
+    {
+        AgentMesh* mesh = meshFor(agent);
+        return mesh != nullptr ? mesh->findPath(from, to) : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<DVec3> nearestPoint(DVec3 point, f32 maxDistance, std::string_view agent) override
+    {
+        AgentMesh* mesh = meshFor(agent);
+        return mesh != nullptr ? mesh->nearestPoint(point, maxDistance) : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<DVec3> raycast(DVec3 from, DVec3 to, std::string_view agent) override
+    {
+        AgentMesh* mesh = meshFor(agent);
+        return mesh != nullptr ? mesh->raycast(from, to) : std::nullopt;
+    }
+
+    usize buildRegion(DVec3 minimum, DVec3 maximum, std::string_view agent) override
+    {
+        AgentMesh* mesh = meshFor(agent);
+        return mesh != nullptr ? mesh->buildRegion(minimum, maximum) : 0;
+    }
+
+    void stepCrowd(std::span<const CrowdAgentState> agents, f32 dt, std::vector<CrowdAgentStep>& out) override
+    {
+        out.clear();
+        // Each type's agents in the order given, the service's own first and
+        // then the named ones by name: an order the world decides.
+        std::vector<CrowdAgentState> group;
+        const auto step = [&](std::string_view type, AgentMesh& mesh) {
+            group.clear();
+            for (const CrowdAgentState& agent : agents) {
+                if (agent.agentType == type)
+                    group.push_back(agent);
+            }
+            mesh.stepCrowd(group, dt, out);
+        };
+        step({}, m_default);
+        for (auto& [name, mesh] : m_named)
+            step(name, *mesh);
+        // An agent of a type nobody defined stands where it is.
+        for (const CrowdAgentState& agent : agents) {
+            if (!agent.agentType.empty() && m_named.find(agent.agentType) == m_named.end())
+                out.push_back(CrowdAgentStep{agent.id, agent.position, DVec3{}, false});
+        }
+    }
+
+    [[nodiscard]] std::optional<NavPath2D> findPath2D(core::Vec2 from, core::Vec2 to) override
+    {
+        return nav::findPath2D(m_world, m_workspace, from, to);
+    }
+
+    void invalidate() override
+    {
+        m_default.invalidate();
+        for (auto& [name, mesh] : m_named)
+            mesh->invalidate();
+    }
+
+    [[nodiscard]] usize tileCount() const noexcept override
+    {
+        usize count = m_default.tileCount();
+        for (const auto& [name, mesh] : m_named)
+            count += mesh->tileCount();
+        return count;
+    }
+
+private:
+    [[nodiscard]] AgentMesh* meshFor(std::string_view name)
+    {
+        if (name.empty())
+            return &m_default;
+        const auto found = m_named.find(name);
+        return found != m_named.end() ? found->second.get() : nullptr;
+    }
+
+    const scene::World& m_world;
+    Shared m_shared;
+    AgentMesh m_default;
+    std::map<std::string, std::unique_ptr<AgentMesh>, std::less<>> m_named;
+    core::InstanceId m_workspace;
+    u64 m_tick = 0;
 };
 
 } // namespace

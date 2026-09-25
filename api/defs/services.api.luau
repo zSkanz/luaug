@@ -1671,13 +1671,57 @@ local Classes: { Schema.Class } = {
                 Parameters = {
                     { Name = "from", Type = "vector" },
                     { Name = "to", Type = "vector" },
+                    { Name = "agent", Type = "string?", Default = '""' },
                 },
-                Returns = { "{ vector }?", "boolean" },
+                Returns = { "{ vector }?", "boolean", "{ string }" },
                 ThreadSafety = "Unsafe",
                 Doc = "The waypoints from `from` to `to`, each a corner to walk to in a straight line, and "
                     .. "whether they reach the goal. **Nil when `from` is not on walkable ground at all.** A "
                     .. "path that stops short -- the goal is off the ground, cut off, or past ground not built "
-                    .. "yet -- still comes back, with `false`: walk it and ask again from where it ends.",
+                    .. "yet -- still comes back, with `false`: walk it and ask again from where it ends.\n\n"
+                    .. "The third answer runs beside the waypoints: the `Label` of the `NavigationLink` that "
+                    .. 'begins at each, or `""` where the way on is walking. `agent` names a type '
+                    .. "`DefineAgent` made; empty is the service's own (ADR 0098).",
+            },
+            {
+                Name = "DefineAgent",
+                Parameters = {
+                    { Name = "name", Type = "string" },
+                    { Name = "radius", Type = "number" },
+                    { Name = "height", Type = "number" },
+                    { Name = "maxClimb", Type = "number?", Default = "0.5" },
+                    { Name = "maxSlope", Type = "number?", Default = "45" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Names another agent size, with a walkable ground of its own (ADR 0098): a giant that "
+                    .. "does not fit through a door the default agent walks through. Queries and a "
+                    .. "`NavigationAgent` pick it by name. Defining a name again redefines it.",
+            },
+            {
+                Name = "SetAreaCost",
+                Parameters = {
+                    { Name = "label", Type = "string" },
+                    { Name = "cost", Type = "number" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Prices the ground a `NavigationArea` labels: a path through it counts its length times "
+                    .. "`cost`. `math.huge` forbids it outright. Unpriced labels cost 1; re-pricing needs no "
+                    .. "rebuild.",
+            },
+            {
+                Name = "FindPath2D",
+                Parameters = {
+                    { Name = "from", Type = "Vector2" },
+                    { Name = "to", Type = "Vector2" },
+                },
+                Returns = { "{ Vector2 }?", "boolean" },
+                ThreadSafety = "Unsafe",
+                Doc = "A path on the 2D plane (ADR 0098): over the cells of every `Tilemap2D` -- a filled, "
+                    .. "colliding tile is a wall -- with every anchored, colliding `Part2D` a wall too. "
+                    .. "Diagonal steps never cut a wall's corner. The waypoints are where the path turns, and "
+                    .. "the boolean whether it reaches `to`; nil when `from` is inside a wall.",
             },
             {
                 Name = "NearestPoint",
