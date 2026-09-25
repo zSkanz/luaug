@@ -558,9 +558,13 @@ void refreshCompletions(OpenScript& tab, const scene::World* world, core::Instan
     // only the tab knows.
     const CompletionWorld tree{world, root, tab.instance};
     collectCompletions(tab.document, request, world->classes(), world->atoms(), tree, tab.completions);
-    // A row that is exactly what is already typed offers nothing, and keeping
-    // it up turns the next Enter into an accept instead of a new line.
-    std::erase_if(tab.completions, [&request](const Completion& row) { return row.label == request.prefix; });
+    // **A word already whole closes the list**, longer names and all: `Part`
+    // typed is `Part`, and `Part2D` waits for the `2`. The exact row itself
+    // would offer nothing, and keeping any row up turns the next Enter into an
+    // accept instead of a new line.
+    tab.completionWhole = completesExactly(tab.completions, request.prefix);
+    if (tab.completionWhole)
+        tab.completions.clear();
     tab.completionReplace = request.replace;
     tab.completing = !tab.completions.empty();
     if (tab.completionIndex >= tab.completions.size())
@@ -601,8 +605,13 @@ void takeLanguageAnswers(ScriptEditor& editor)
         OpenScript* tab = tabOf(answer->module);
         if (tab != nullptr && answer->revision == tab->document.revision() && answer->revision == tab->askedRevision &&
             answer->at == tab->caret.head && !tab->justAccepted) {
-            mergeCompletions(tab->completions, answer->completions.items, answer->completions.inType,
-                             tab->completionPrefix);
+            // A word the tree already knew was whole stays closed: the
+            // checker's longer names are exactly what closing it withheld.
+            if (tab->completionWhole)
+                tab->completions.clear();
+            else
+                mergeCompletions(tab->completions, answer->completions.items, answer->completions.inType,
+                                 tab->completionPrefix);
             tab->completing = !tab->completions.empty();
             if (tab->completionIndex >= tab->completions.size())
                 tab->completionIndex = 0;

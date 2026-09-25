@@ -484,9 +484,19 @@ void sortCompletions(std::vector<Completion>& out, std::string_view prefix)
 
 } // namespace
 
+bool completesExactly(std::span<const Completion> rows, std::string_view prefix) noexcept
+{
+    return !prefix.empty() &&
+           std::any_of(rows.begin(), rows.end(), [prefix](const Completion& row) { return row.label == prefix; });
+}
+
 void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completion>& analyzed, bool inType,
                       std::string_view prefix)
 {
+    if (completesExactly(analyzed, prefix)) {
+        shown.clear();
+        return;
+    }
     std::vector<Completion> merged;
     for (const Completion& row : analyzed) {
         if (startsWith(row.label, prefix) && row.label != prefix)

@@ -187,6 +187,10 @@ struct OpenScript
     // next Enter accepted it a second time instead of breaking the line --
     // reported as "Enter does not work on a suggestion".
     bool justAccepted = false;
+    // The word before the caret is already a whole name the list offered, so
+    // the list is closed -- and stays closed when the type checker's answer
+    // for the same word arrives a frame later.
+    bool completionWhole = false;
 
     // **What the language service was last asked for this tab** (ADR 0093),
     // so an answer that arrives a frame or two later is matched to the text

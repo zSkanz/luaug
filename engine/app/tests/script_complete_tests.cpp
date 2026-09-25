@@ -953,7 +953,7 @@ TEST_CASE("the checker's rows lead, the tree's children stay, and a type positio
     REQUIRE(row("Name") != shown.end());
     CHECK(row("Name")->doc == "the checker's");
 
-    // Filtered by what is typed, and a row that IS what is typed is dropped.
+    // Filtered by what is typed.
     shown = found;
     luaug::app::mergeCompletions(shown, checked, false, "Pa");
     REQUIRE(shown.size() == 1);
@@ -966,6 +966,38 @@ TEST_CASE("the checker's rows lead, the tree's children stay, and a type positio
     // ...except where a type is written: there it is the whole answer.
     shown = found;
     luaug::app::mergeCompletions(shown, {}, true, "");
+    CHECK(shown.empty());
+}
+
+TEST_CASE("a word already whole closes the list, and one letter more opens it again")
+{
+    // **The owner**: with `Part` and `Part2D` both offered, `Part` typed is
+    // done -- `Part2D` is worth offering once `Part2` is.
+    Reflection fixture;
+
+    const std::vector<Completion> whole = at(fixture, "Part");
+    REQUIRE(has(whole, "Part"));
+    REQUIRE(has(whole, "Part2D"));
+    CHECK(app::completesExactly(whole, "Part"));
+
+    const std::vector<Completion> longer = at(fixture, "Part2");
+    CHECK(has(longer, "Part2D"));
+    CHECK_FALSE(app::completesExactly(longer, "Part2"));
+
+    // Case counts here, where it does not for filtering: `part` is not yet
+    // `Part`, and the list is how it gets there.
+    const std::vector<Completion> lower = at(fixture, "part");
+    CHECK(has(lower, "Part"));
+    CHECK_FALSE(app::completesExactly(lower, "part"));
+
+    // Nothing typed is never whole.
+    CHECK_FALSE(app::completesExactly(whole, ""));
+
+    // The checker's answer, which arrives a frame later, closes it the same way.
+    std::vector<Completion> shown{Completion{"Part2D", "", "", CompletionKind::Class}};
+    const std::vector<Completion> checked{Completion{"Part", "", "", CompletionKind::Class},
+                                          Completion{"Part2D", "", "", CompletionKind::Class}};
+    app::mergeCompletions(shown, checked, false, "Part");
     CHECK(shown.empty());
 }
 

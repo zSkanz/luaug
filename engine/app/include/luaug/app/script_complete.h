@@ -195,6 +195,13 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
                         const scene::ClassRegistry& classes, const core::AtomTable& atoms, const CompletionWorld& tree,
                         std::vector<Completion>& out);
 
+// **A word already whole closes the list** (the owner: with `Part` and
+// `Part2D` both offered, typing `Part` is done, and `Part2D` is only worth
+// offering once `Part2` is typed). True when a row IS `prefix`, exactly --
+// case included, because `part` is not yet `Part` and the list is how it gets
+// there. The caller then shows nothing rather than every longer name.
+[[nodiscard]] bool completesExactly(std::span<const Completion> rows, std::string_view prefix) noexcept;
+
 // **What the ENGINE puts in front of a script**, as opposed to what Luau does:
 // the world globals, the datatype namespaces, and the functions the runtime
 // installs. Luau's own are `script::stdGlobals()`.
@@ -237,7 +244,8 @@ struct SignatureHelp
 // instance, which only the tree knows -- are kept beside them. Where a TYPE is
 // written (`inType`) the checker's rows are the whole answer, empty or not: a
 // value's members are wrong there. Filtered by `prefix` as `collectCompletions`
-// filters, and a row that is exactly the prefix is dropped.
+// filters -- and when a checker's row IS the prefix, the word is whole and
+// `shown` is emptied (`completesExactly`).
 void mergeCompletions(std::vector<Completion>& shown, const std::vector<Completion>& analyzed, bool inType,
                       std::string_view prefix);
 
