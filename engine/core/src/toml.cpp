@@ -244,6 +244,16 @@ TomlDocument::ParseResult TomlDocument::parse(std::string_view text, std::string
                            .line = line};
     };
 
+    // **A UTF-8 byte-order mark is skipped rather than refused** (D185), for
+    // the reason `JsonDocument::parse` gives: Notepad and Windows PowerShell's
+    // `Set-Content -Encoding utf8` write one, and a refused `luaug.toml` is a
+    // project that silently runs on the engine's defaults -- the wrong scene,
+    // not an error. Only at the very start, where it is an encoding mark and
+    // not somebody's text.
+    constexpr std::string_view kUtf8Bom = "\xEF\xBB\xBF";
+    if (text.starts_with(kUtf8Bom))
+        text.remove_prefix(kUtf8Bom.size());
+
     std::string section;
     usize lineNumber = 0;
     usize cursor = 0;

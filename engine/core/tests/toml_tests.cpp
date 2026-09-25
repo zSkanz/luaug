@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 #include <ostream>
+#include <string>
 #include <string_view>
 
 using luaug::core::TomlDocument;
@@ -141,4 +142,24 @@ TEST_CASE("an empty document parses and answers nothing")
 
     CHECK(document.parse("# only a comment\n", "test.toml").ok);
     CHECK_FALSE(document.has("anything"));
+}
+
+TEST_CASE("a byte-order mark at the start is skipped, as the JSON reader skips one (D185)")
+{
+    // Windows PowerShell's `Set-Content -Encoding utf8` and Notepad write one;
+    // refusing the file made the project run on engine defaults in silence.
+    const std::string withBom = std::string("\xEF\xBB\xBF") + "[project]\nname = \"Snake\"\n";
+    TomlDocument document;
+    const TomlDocument::ParseResult result = document.parse(withBom, "luaug.toml");
+    REQUIRE(result.ok);
+    CHECK(document.string("project.name") == "Snake");
+
+    // Only at the very start: anywhere else it is somebody's text.
+    const std::string inside = std::string("[project]\nname = \"") + "\xEF\xBB\xBF" + "a\"\n";
+    REQUIRE(document.parse(inside, "luaug.toml").ok);
+    CHECK(document.string("project.name") == std::string_view("\xEF\xBB\xBF"
+                                                              "a"));
+
+    // A file that is only the mark is an empty file.
+    CHECK(document.parse("\xEF\xBB\xBF", "empty.toml").ok);
 }
