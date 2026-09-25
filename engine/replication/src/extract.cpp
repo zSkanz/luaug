@@ -292,6 +292,239 @@ using generated::Source;
             setF32(out, lighting->exposureCompensation);
             return true;
         }
+        if (field.name == "EnvironmentDiffuseScale") {
+            setF32(out, lighting->environmentDiffuseScale);
+            return true;
+        }
+        if (field.name == "EnvironmentSpecularScale") {
+            setF32(out, lighting->environmentSpecularScale);
+            return true;
+        }
+        if (field.name == "ShadowSoftness") {
+            setF32(out, lighting->shadowSoftness);
+            return true;
+        }
+        if (field.name == "GlobalShadows") {
+            setBool(out, lighting->globalShadows);
+            return true;
+        }
+        if (field.name == "AutoExposure") {
+            setBool(out, lighting->autoExposure);
+            return true;
+        }
+        return false;
+    }
+
+    // ADR 0096's look: the effects, the air and the sky.
+    if (field.pool == "postEffects") {
+        const scene::PostEffectComponent* component = world.postEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Enabled") {
+            setBool(out, component->enabled);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "bloomEffects") {
+        const scene::BloomEffectComponent* component = world.bloomEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Intensity") {
+            setF32(out, component->intensity);
+            return true;
+        }
+        if (field.name == "Size") {
+            setF32(out, component->size);
+            return true;
+        }
+        if (field.name == "Threshold") {
+            setF32(out, component->threshold);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "colorCorrectionEffects") {
+        const scene::ColorCorrectionEffectComponent* component = world.colorCorrectionEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Brightness") {
+            setF32(out, component->brightness);
+            return true;
+        }
+        if (field.name == "Contrast") {
+            setF32(out, component->contrast);
+            return true;
+        }
+        if (field.name == "Saturation") {
+            setF32(out, component->saturation);
+            return true;
+        }
+        if (field.name == "TintColor") {
+            setVec3(out, core::Vec3{component->tintColor.r, component->tintColor.g, component->tintColor.b});
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "blurEffects") {
+        const scene::BlurEffectComponent* component = world.blurEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Size") {
+            setF32(out, component->size);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "depthOfFieldEffects") {
+        const scene::DepthOfFieldEffectComponent* component = world.depthOfFieldEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "FocusDistance") {
+            setF32(out, component->focusDistance);
+            return true;
+        }
+        if (field.name == "InFocusRadius") {
+            setF32(out, component->inFocusRadius);
+            return true;
+        }
+        if (field.name == "NearIntensity") {
+            setF32(out, component->nearIntensity);
+            return true;
+        }
+        if (field.name == "FarIntensity") {
+            setF32(out, component->farIntensity);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "sunRaysEffects") {
+        const scene::SunRaysEffectComponent* component = world.sunRaysEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Intensity") {
+            setF32(out, component->intensity);
+            return true;
+        }
+        if (field.name == "Spread") {
+            setF32(out, component->spread);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "atmospheres") {
+        const scene::AtmosphereComponent* component = world.atmospheres().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Density") {
+            setF32(out, component->density);
+            return true;
+        }
+        if (field.name == "Offset") {
+            setF32(out, component->offset);
+            return true;
+        }
+        if (field.name == "Color") {
+            setVec3(out, core::Vec3{component->color.r, component->color.g, component->color.b});
+            return true;
+        }
+        if (field.name == "Decay") {
+            setF32(out, component->decay);
+            return true;
+        }
+        if (field.name == "Glare") {
+            setF32(out, component->glare);
+            return true;
+        }
+        if (field.name == "Haze") {
+            setF32(out, component->haze);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "skies") {
+        const scene::SkyComponent* component = world.skies().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "SkyboxBack") {
+            setU32(out, component->skyboxBack.id);
+            return true;
+        }
+        if (field.name == "SkyboxDown") {
+            setU32(out, component->skyboxDown.id);
+            return true;
+        }
+        if (field.name == "SkyboxFront") {
+            setU32(out, component->skyboxFront.id);
+            return true;
+        }
+        if (field.name == "SkyboxLeft") {
+            setU32(out, component->skyboxLeft.id);
+            return true;
+        }
+        if (field.name == "SkyboxRight") {
+            setU32(out, component->skyboxRight.id);
+            return true;
+        }
+        if (field.name == "SkyboxUp") {
+            setU32(out, component->skyboxUp.id);
+            return true;
+        }
+        if (field.name == "SkyboxOrientation") {
+            setVec3(out, component->skyboxOrientation);
+            return true;
+        }
+        if (field.name == "SunTexture") {
+            setU32(out, component->sunTexture.id);
+            return true;
+        }
+        if (field.name == "MoonTexture") {
+            setU32(out, component->moonTexture.id);
+            return true;
+        }
+        if (field.name == "SunAngularSize") {
+            setF32(out, component->sunAngularSize);
+            return true;
+        }
+        if (field.name == "MoonAngularSize") {
+            setF32(out, component->moonAngularSize);
+            return true;
+        }
+        if (field.name == "StarCount") {
+            setF32(out, component->starCount);
+            return true;
+        }
+        if (field.name == "CelestialBodiesShown") {
+            setBool(out, component->celestialBodiesShown);
+            return true;
+        }
+        if (field.name == "CloudCover") {
+            setF32(out, component->cloudCover);
+            return true;
+        }
+        if (field.name == "CloudDensity") {
+            setF32(out, component->cloudDensity);
+            return true;
+        }
+        if (field.name == "CloudColor") {
+            setVec3(out, core::Vec3{component->cloudColor.r, component->cloudColor.g, component->cloudColor.b});
+            return true;
+        }
         return false;
     }
 
@@ -465,6 +698,220 @@ using generated::Source;
 
 [[nodiscard]] bool writeComponent(scene::World& world, InstanceId id, const FieldDesc& field, const FieldValue& value)
 {
+    // ADR 0096's look: the effects, the air and the sky.
+    const auto toColour = [](core::Vec3 v) { return core::Color3{v.x, v.y, v.z}; };
+    if (field.pool == "postEffects") {
+        scene::PostEffectComponent* component = world.postEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Enabled") {
+            component->enabled = asBool(value);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "bloomEffects") {
+        scene::BloomEffectComponent* component = world.bloomEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Intensity") {
+            component->intensity = asF32(value);
+            return true;
+        }
+        if (field.name == "Size") {
+            component->size = asF32(value);
+            return true;
+        }
+        if (field.name == "Threshold") {
+            component->threshold = asF32(value);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "colorCorrectionEffects") {
+        scene::ColorCorrectionEffectComponent* component = world.colorCorrectionEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Brightness") {
+            component->brightness = asF32(value);
+            return true;
+        }
+        if (field.name == "Contrast") {
+            component->contrast = asF32(value);
+            return true;
+        }
+        if (field.name == "Saturation") {
+            component->saturation = asF32(value);
+            return true;
+        }
+        if (field.name == "TintColor") {
+            component->tintColor = toColour(asVec3(value));
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "blurEffects") {
+        scene::BlurEffectComponent* component = world.blurEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Size") {
+            component->size = asF32(value);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "depthOfFieldEffects") {
+        scene::DepthOfFieldEffectComponent* component = world.depthOfFieldEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "FocusDistance") {
+            component->focusDistance = asF32(value);
+            return true;
+        }
+        if (field.name == "InFocusRadius") {
+            component->inFocusRadius = asF32(value);
+            return true;
+        }
+        if (field.name == "NearIntensity") {
+            component->nearIntensity = asF32(value);
+            return true;
+        }
+        if (field.name == "FarIntensity") {
+            component->farIntensity = asF32(value);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "sunRaysEffects") {
+        scene::SunRaysEffectComponent* component = world.sunRaysEffects().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Intensity") {
+            component->intensity = asF32(value);
+            return true;
+        }
+        if (field.name == "Spread") {
+            component->spread = asF32(value);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "atmospheres") {
+        scene::AtmosphereComponent* component = world.atmospheres().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "Density") {
+            component->density = asF32(value);
+            return true;
+        }
+        if (field.name == "Offset") {
+            component->offset = asF32(value);
+            return true;
+        }
+        if (field.name == "Color") {
+            component->color = toColour(asVec3(value));
+            return true;
+        }
+        if (field.name == "Decay") {
+            component->decay = asF32(value);
+            return true;
+        }
+        if (field.name == "Glare") {
+            component->glare = asF32(value);
+            return true;
+        }
+        if (field.name == "Haze") {
+            component->haze = asF32(value);
+            return true;
+        }
+        return false;
+    }
+
+    if (field.pool == "skies") {
+        scene::SkyComponent* component = world.skies().find(id);
+        if (component == nullptr) {
+            return false;
+        }
+        if (field.name == "SkyboxBack") {
+            component->skyboxBack = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SkyboxDown") {
+            component->skyboxDown = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SkyboxFront") {
+            component->skyboxFront = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SkyboxLeft") {
+            component->skyboxLeft = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SkyboxRight") {
+            component->skyboxRight = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SkyboxUp") {
+            component->skyboxUp = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SkyboxOrientation") {
+            component->skyboxOrientation = asVec3(value);
+            return true;
+        }
+        if (field.name == "SunTexture") {
+            component->sunTexture = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "MoonTexture") {
+            component->moonTexture = core::NameAtom{asU32(value)};
+            return true;
+        }
+        if (field.name == "SunAngularSize") {
+            component->sunAngularSize = asF32(value);
+            return true;
+        }
+        if (field.name == "MoonAngularSize") {
+            component->moonAngularSize = asF32(value);
+            return true;
+        }
+        if (field.name == "StarCount") {
+            component->starCount = asF32(value);
+            return true;
+        }
+        if (field.name == "CelestialBodiesShown") {
+            component->celestialBodiesShown = asBool(value);
+            return true;
+        }
+        if (field.name == "CloudCover") {
+            component->cloudCover = asF32(value);
+            return true;
+        }
+        if (field.name == "CloudDensity") {
+            component->cloudDensity = asF32(value);
+            return true;
+        }
+        if (field.name == "CloudColor") {
+            component->cloudColor = toColour(asVec3(value));
+            return true;
+        }
+        return false;
+    }
+
     if (field.pool == "parts") {
         scene::PartComponent* part = world.parts().find(id);
         if (part == nullptr) {
@@ -597,6 +1044,16 @@ using generated::Source;
             lighting->fogEnd = asF32(value);
         else if (field.name == "ExposureCompensation")
             lighting->exposureCompensation = asF32(value);
+        else if (field.name == "EnvironmentDiffuseScale")
+            lighting->environmentDiffuseScale = asF32(value);
+        else if (field.name == "EnvironmentSpecularScale")
+            lighting->environmentSpecularScale = asF32(value);
+        else if (field.name == "ShadowSoftness")
+            lighting->shadowSoftness = asF32(value);
+        else if (field.name == "GlobalShadows")
+            lighting->globalShadows = asBool(value);
+        else if (field.name == "AutoExposure")
+            lighting->autoExposure = asBool(value);
         else
             return false;
         return true;
@@ -955,7 +1412,9 @@ usize clearForReplica(scene::World& world, InstanceId workspace)
         if (descriptor == nullptr)
             continue;
         const std::string_view name = world.atoms().text(descriptor->name);
-        if (name == "ReplicatedStorage") {
+        // `Lighting`'s children travel too (ADR 0096): the authority's
+        // effects, air and sky replace whatever the replica's scene put there.
+        if (name == "ReplicatedStorage" || name == "Lighting") {
             cleared += clearReplicated(world, service);
         }
         else if (name == "ServerStorage") {

@@ -50,15 +50,19 @@ set directly:
 That is why `Lighting.Brightness` is the sun's *strength* alone. The sun has a
 colour of its own now, and it is not this property.
 
-## The sky is analytic
+## The sky
 
-There is no skybox, no HDRI and no `Sky` instance. The sky is a horizon-to-zenith
-gradient plus a sun disc, computed from the properties above and drawn before any
-geometry, in linear HDR so that the disc can be brighter than white without
-clipping.
+**With nothing under `Lighting`, the sky is analytic**: a horizon-to-zenith
+gradient plus a sun disc, computed from the properties above and drawn before
+any geometry, in linear HDR so that the disc can be brighter than white without
+clipping. A `Sky` under `Lighting` replaces it with six pictures, and adds the
+moon, stars and clouds; an `Atmosphere` adds the air. Both are on
+[their own page](manual:rendering/atmosphere-and-sky). There is no HDR panorama
+sky.
 
-**The sky is also the reflection environment.** A metal surface reflects the sky
-at the hour the script set — prefiltered per roughness, with diffuse irradiance
+**The sky is also the reflection environment** -- the gradient, or a `Sky`'s
+pictures and clouds. A metal surface reflects the sky at the hour the script
+set — prefiltered per roughness, with diffuse irradiance
 projected from the same sky. One consequence is worth stating plainly: there is
 one environment for the whole world, so a polished floor **indoors** reflects the
 sky outside. It is right outdoors and wrong in a cave.
@@ -75,7 +79,16 @@ sky outside. It is right outdoors and wrong in a cave.
 | `Lighting.FogStart` | `number` | 200 | Metres at which fog begins. |
 | `Lighting.FogEnd` | `number` | 0 | Metres at which it is total. |
 | `Lighting.ExposureCompensation` | `number` | 0 | EV stops on top of the measured exposure. |
+| `Lighting.EnvironmentDiffuseScale` | `number` | 1 | How much the sky lights matte surfaces, 0 to 1. |
+| `Lighting.EnvironmentSpecularScale` | `number` | 1 | How much it is reflected in shiny ones, 0 to 1. |
+| `Lighting.ShadowSoftness` | `number` | 0.2 | How soft a sun shadow's edge is, 0 to 1: a quarter of a metre of penumbra at 1. |
+| `Lighting.GlobalShadows` | `boolean` | true | Whether the sun -- or the moon -- casts shadows at all. Lamps still do. |
+| `Lighting.AutoExposure` | `boolean` | true | Whether the exposure follows the frame. The machine's setting can turn it off too. |
 | `Lighting.SunDirection` | `vector`, read-only | — | Derived. |
+
+**`FogStart`, `FogEnd` and `FogColor` are kept and not used while an
+`Atmosphere` is under `Lighting`**: the air replaces the linear fog, and they
+apply again when it goes.
 
 **Fog is off by default**, because `FogEnd` starts at 0 and an end at or below
 the start means no fog at all. Turning it on is two writes:
@@ -103,5 +116,6 @@ goes dark; a stop of positive compensation is the fix. Changing albedos is
 ## Where to look next
 
 - [Shadows](manual:rendering/shadows) — what `ClockTime` does to them
-- [The post chain](manual:rendering/post) — where the exposure is measured
+- [Atmosphere, sky and clouds](manual:rendering/atmosphere-and-sky)
+- [Post effects](manual:rendering/post) — where the exposure is measured
 - [`Lighting`](api:Lighting)

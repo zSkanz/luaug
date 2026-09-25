@@ -6783,6 +6783,11 @@ void drawProjectSettings(Editor& editor)
     static std::array<char, 96> identity{};
     static std::array<int, 2> size{};
     static int quality = 2;
+    // ADR 0096's two machine switches: whether this project's worlds draw their
+    // depth of field and sun rays by default. Blur and colour correction have
+    // none -- a game uses them to say something.
+    static bool depthOfField = true;
+    static bool sunRays = true;
     static std::string problem;
 
     // Seeded on the frame it opens, and only then: re-reading every frame would
@@ -6800,6 +6805,8 @@ void drawProjectSettings(Editor& editor)
         size[0] = config.windowWidth > 0 ? config.windowWidth : 1280;
         size[1] = config.windowHeight > 0 ? config.windowHeight : 720;
         quality = static_cast<int>(config.graphics.quality);
+        depthOfField = config.graphics.depthOfField;
+        sunRays = config.graphics.sunRays;
     }
 
     ImGui::TextWrapped("%s", root.filename().string().c_str());
@@ -6830,6 +6837,12 @@ void drawProjectSettings(Editor& editor)
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::Combo("##quality", &quality, "low\0medium\0high\0ultra\0");
     ImGui::TextWrapped("Default quality for this project. Players can change it later.");
+    ImGui::Checkbox("Depth of field", &depthOfField);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("whether a DepthOfFieldEffect in the world is drawn on this machine -- off, it draws sharp");
+    ImGui::Checkbox("Sun rays", &sunRays);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("whether a SunRaysEffect in the world is drawn on this machine");
 
     if (!problem.empty()) {
         ImGui::Spacing();
@@ -6849,12 +6862,14 @@ void drawProjectSettings(Editor& editor)
         // **One key at a time, and it stops at the first refusal.** A dialog
         // that pressed on after a failed write would leave the file half
         // changed, which is the one state worse than not saving.
-        const std::array<std::pair<const char*, std::string>, 5> writes{{
+        const std::array<std::pair<const char*, std::string>, 7> writes{{
             {"project.name", core::tomlString(std::string_view(name.data()))},
             {"project.id", core::tomlString(std::string_view(identity.data()))},
             {"window.title", core::tomlString(std::string_view(title.data()))},
             {"window.size", core::tomlNumberArray(extent)},
             {"graphics.quality", core::tomlString(Presets[static_cast<std::size_t>(chosen)])},
+            {"graphics.depth_of_field", core::tomlBoolean(depthOfField)},
+            {"graphics.sun_rays", core::tomlBoolean(sunRays)},
         }};
 
         bool ok = true;

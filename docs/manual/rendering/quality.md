@@ -43,6 +43,12 @@ nothing gets it.
 | `ambient_occlusion` | false | false | **true** | true |
 | `anti_aliasing` | true | true | **true** | true |
 | `auto_exposure` | true | true | **true** | true |
+| `depth_of_field` | false | false | **true** | true |
+| `sun_rays` | false | true | **true** | true |
+
+`depth_of_field` and `sun_rays` say whether a world's `DepthOfFieldEffect` and
+`SunRaysEffect` are drawn on this machine; a world that has neither pays nothing
+for either way (ADR 0096).
 
 Two of those are worth a sentence each.
 

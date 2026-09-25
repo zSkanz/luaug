@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 12;
+inline constexpr u32 ProtocolVersion = 13;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -127,6 +127,11 @@ inline constexpr FieldDesc LightingFields[] = {
     {"FogStart", 6, Encoding::F32, Source::Component, "lighting"},
     {"FogEnd", 7, Encoding::F32, Source::Component, "lighting"},
     {"ExposureCompensation", 8, Encoding::F32, Source::Component, "lighting"},
+    {"EnvironmentDiffuseScale", 9, Encoding::F32, Source::Component, "lighting"},
+    {"EnvironmentSpecularScale", 10, Encoding::F32, Source::Component, "lighting"},
+    {"ShadowSoftness", 11, Encoding::F32, Source::Component, "lighting"},
+    {"GlobalShadows", 12, Encoding::Bool, Source::Component, "lighting"},
+    {"AutoExposure", 13, Encoding::Bool, Source::Component, "lighting"},
 };
 
 inline constexpr FieldDesc DecalFields[] = {
@@ -178,12 +183,74 @@ inline constexpr FieldDesc Part2DFields[] = {
     {"Filter", 18, Encoding::I32, Source::Component, "parts2d"},
 };
 
+inline constexpr FieldDesc BloomEffectFields[] = {
+    {"Enabled", 1, Encoding::Bool, Source::Component, "postEffects"},
+    {"Intensity", 2, Encoding::F32, Source::Component, "bloomEffects"},
+    {"Size", 3, Encoding::F32, Source::Component, "bloomEffects"},
+    {"Threshold", 4, Encoding::F32, Source::Component, "bloomEffects"},
+};
+
+inline constexpr FieldDesc ColorCorrectionEffectFields[] = {
+    {"Enabled", 1, Encoding::Bool, Source::Component, "postEffects"},
+    {"Brightness", 2, Encoding::F32, Source::Component, "colorCorrectionEffects"},
+    {"Contrast", 3, Encoding::F32, Source::Component, "colorCorrectionEffects"},
+    {"Saturation", 4, Encoding::F32, Source::Component, "colorCorrectionEffects"},
+    {"TintColor", 5, Encoding::Color3, Source::Component, "colorCorrectionEffects"},
+};
+
+inline constexpr FieldDesc BlurEffectFields[] = {
+    {"Enabled", 1, Encoding::Bool, Source::Component, "postEffects"},
+    {"Size", 2, Encoding::F32, Source::Component, "blurEffects"},
+};
+
+inline constexpr FieldDesc DepthOfFieldEffectFields[] = {
+    {"Enabled", 1, Encoding::Bool, Source::Component, "postEffects"},
+    {"FocusDistance", 2, Encoding::F32, Source::Component, "depthOfFieldEffects"},
+    {"InFocusRadius", 3, Encoding::F32, Source::Component, "depthOfFieldEffects"},
+    {"NearIntensity", 4, Encoding::F32, Source::Component, "depthOfFieldEffects"},
+    {"FarIntensity", 5, Encoding::F32, Source::Component, "depthOfFieldEffects"},
+};
+
+inline constexpr FieldDesc SunRaysEffectFields[] = {
+    {"Enabled", 1, Encoding::Bool, Source::Component, "postEffects"},
+    {"Intensity", 2, Encoding::F32, Source::Component, "sunRaysEffects"},
+    {"Spread", 3, Encoding::F32, Source::Component, "sunRaysEffects"},
+};
+
+inline constexpr FieldDesc AtmosphereFields[] = {
+    {"Density", 1, Encoding::F32, Source::Component, "atmospheres"},
+    {"Offset", 2, Encoding::F32, Source::Component, "atmospheres"},
+    {"Color", 3, Encoding::Color3, Source::Component, "atmospheres"},
+    {"Decay", 4, Encoding::F32, Source::Component, "atmospheres"},
+    {"Glare", 5, Encoding::F32, Source::Component, "atmospheres"},
+    {"Haze", 6, Encoding::F32, Source::Component, "atmospheres"},
+};
+
+inline constexpr FieldDesc SkyFields[] = {
+    {"SkyboxBack", 1, Encoding::NameAtom, Source::Component, "skies"},
+    {"SkyboxDown", 2, Encoding::NameAtom, Source::Component, "skies"},
+    {"SkyboxFront", 3, Encoding::NameAtom, Source::Component, "skies"},
+    {"SkyboxLeft", 4, Encoding::NameAtom, Source::Component, "skies"},
+    {"SkyboxRight", 5, Encoding::NameAtom, Source::Component, "skies"},
+    {"SkyboxUp", 6, Encoding::NameAtom, Source::Component, "skies"},
+    {"SkyboxOrientation", 7, Encoding::Vector3, Source::Component, "skies"},
+    {"SunTexture", 8, Encoding::NameAtom, Source::Component, "skies"},
+    {"MoonTexture", 9, Encoding::NameAtom, Source::Component, "skies"},
+    {"SunAngularSize", 10, Encoding::F32, Source::Component, "skies"},
+    {"MoonAngularSize", 11, Encoding::F32, Source::Component, "skies"},
+    {"StarCount", 12, Encoding::F32, Source::Component, "skies"},
+    {"CelestialBodiesShown", 13, Encoding::Bool, Source::Component, "skies"},
+    {"CloudCover", 14, Encoding::F32, Source::Component, "skies"},
+    {"CloudDensity", 15, Encoding::F32, Source::Component, "skies"},
+    {"CloudColor", 16, Encoding::Color3, Source::Component, "skies"},
+};
+
 // Every replicated class, in schema order.
 inline constexpr ClassDesc Classes[] = {
     {"BasePart", BasePartFields, -1, false, false},
     {"CharacterBody", CharacterBodyFields, 0, false, false},
     {"Model", ModelFields, -1, false, false},
-    {"Lighting", LightingFields, -1, true, false},
+    {"Lighting", LightingFields, -1, true, true},
     {"Decal", DecalFields, -1, false, false},
     {"ParticleEmitter", ParticleEmitterFields, -1, false, false},
     {"Folder", {}, -1, false, false},
@@ -191,6 +258,13 @@ inline constexpr ClassDesc Classes[] = {
     {"ReplicatedStorage", {}, -1, true, true},
     {"RemoteFunction", {}, -1, false, false},
     {"Part2D", Part2DFields, -1, false, false},
+    {"BloomEffect", BloomEffectFields, -1, false, false},
+    {"ColorCorrectionEffect", ColorCorrectionEffectFields, -1, false, false},
+    {"BlurEffect", BlurEffectFields, -1, false, false},
+    {"DepthOfFieldEffect", DepthOfFieldEffectFields, -1, false, false},
+    {"SunRaysEffect", SunRaysEffectFields, -1, false, false},
+    {"Atmosphere", AtmosphereFields, -1, false, false},
+    {"Sky", SkyFields, -1, false, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.

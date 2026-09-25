@@ -390,6 +390,32 @@ struct RealSide
                                    core::InstanceId id) { world.lighting().add(id, scene::LightingComponent{}); },
             .detachComponents = [](scene::World& world, core::InstanceId id) { world.lighting().remove(id); },
         });
+        // And the look's (ADR 0096): the abstract effect, the blur that stands
+        // for all five on the wire, and the camera a viewer's effect sits on.
+        const scene::ClassId effect = classes.registerClass({
+            .name = atoms.intern("PostEffect"),
+            .super = classes.findId(atoms.intern("Instance")),
+            .defaultName = atoms.intern("PostEffect"),
+            .attachComponents = [](scene::World& world,
+                                   core::InstanceId id) { world.postEffects().add(id, scene::PostEffectComponent{}); },
+            .detachComponents = [](scene::World& world, core::InstanceId id) { world.postEffects().remove(id); },
+        });
+        (void)classes.registerClass({
+            .name = atoms.intern("BlurEffect"),
+            .super = effect,
+            .defaultName = atoms.intern("BlurEffect"),
+            .attachComponents = [](scene::World& world,
+                                   core::InstanceId id) { world.blurEffects().add(id, scene::BlurEffectComponent{}); },
+            .detachComponents = [](scene::World& world, core::InstanceId id) { world.blurEffects().remove(id); },
+        });
+        (void)classes.registerClass({
+            .name = atoms.intern("Camera"),
+            .super = classes.findId(atoms.intern("Instance")),
+            .defaultName = atoms.intern("Camera"),
+            .attachComponents = [](scene::World& world,
+                                   core::InstanceId id) { world.cameras().add(id, scene::CameraComponent{}); },
+            .detachComponents = [](scene::World& world, core::InstanceId id) { world.cameras().remove(id); },
+        });
         const auto make = [this](std::string_view name) {
             const core::InstanceId id = world.create(classes.findId(atoms.intern(name)));
             REQUIRE(id.valid());
@@ -1406,5 +1432,48 @@ TEST_CASE("a sprite on the authority is a sprite on the replica, frame and facin
     CHECK((copy->position == core::Vec2{4.0f, -2.25f}));
     CHECK((copy->imageRectOffset == core::Vec2{0.0f, 0.0f}));
     CHECK_FALSE(copy->flipX);
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("the world's blur travels under Lighting, and a camera's stays on its own screen (ADR 0096)")
+{
+    PlayedMatch match;
+    scene::World& world = match.server.world;
+    const auto make = [&](std::string_view className, std::string_view name, core::InstanceId parent) {
+        const core::InstanceId id = world.create(match.server.classes.findId(match.server.atoms.intern(className)));
+        REQUIRE(id.valid());
+        world.setName(id, match.server.atoms.intern(name));
+        REQUIRE_FALSE(world.setParent(id, parent).has_value());
+        return id;
+    };
+
+    // The authority lays a blur over its world, and its own camera wears one
+    // of its own -- a pause menu nobody else is looking at.
+    const core::InstanceId worlds = make("BlurEffect", "WorldBlur", match.server.lighting);
+    world.blurEffects().find(worlds)->size = 12.0f;
+    const core::InstanceId camera = make("Camera", "Camera", match.server.workspace);
+    (void)make("BlurEffect", "PauseBlur", camera);
+    match.run(4);
+
+    // The world's arrives under the replica's own Lighting, with its size.
+    core::InstanceId seen;
+    for (core::InstanceId child = match.client.world.firstChild(match.client.lighting); child.valid();
+         child = match.client.world.nextSibling(child)) {
+        if (match.client.world.name(child) == match.client.atoms.intern("WorldBlur"))
+            seen = child;
+    }
+    REQUIRE(seen.valid());
+    REQUIRE(match.client.world.blurEffects().find(seen) != nullptr);
+    CHECK(static_cast<double>(match.client.world.blurEffects().find(seen)->size) == doctest::Approx(12.0));
+
+    // Switched off on the authority, off on the replica.
+    world.postEffects().find(worlds)->enabled = false;
+    match.run(3);
+    CHECK_FALSE(match.client.world.postEffects().find(seen)->enabled);
+
+    // And the camera's never crossed: the replica holds one blur, the world's.
+    core::usize blurs = 0;
+    match.client.world.blurEffects().forEach([&](core::InstanceId, const scene::BlurEffectComponent&) { ++blurs; });
+    CHECK(blurs == 1);
     CHECK(match.replica->checksumFailures() == 0);
 }

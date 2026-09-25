@@ -803,7 +803,7 @@ if(LUAUG_BUILD_TESTS)
     # script, the scene and the assets, and a CI runner with no Vulkan driver
     # must not turn "this machine has no graphics" into a red build.
     foreach(example 01-instances 02-meshes 03-physics-playground 06-scene 11-ocean 12-ragdoll 20-platformer
-                    21-navigation)
+                    21-navigation 22-atmosphere)
         add_test(NAME example_boot_${example}
             COMMAND luaug_host "${CMAKE_SOURCE_DIR}/examples/${example}"
                     --headless --frames=20 --exit --rhi=null)

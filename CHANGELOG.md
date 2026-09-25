@@ -46,6 +46,38 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **The look of a world is instances** (ADR 0096). Under `Lighting` they are
+  the world's -- saved with the scene and replicated -- and under
+  `Workspace.CurrentCamera` they are the viewer's own; anywhere else they do
+  nothing and the editor says so. A world with none of them draws exactly as
+  before.
+  - `BloomEffect` (`Intensity`, `Size`, `Threshold`) governs the engine's
+    bloom, and one that is disabled turns it off; `ColorCorrectionEffect`
+    (`Brightness`, `Contrast`, `Saturation`, `TintColor`); `BlurEffect`
+    (`Size`); `DepthOfFieldEffect` (`FocusDistance`, `InFocusRadius`,
+    `NearIntensity`, `FarIntensity`); `SunRaysEffect` (`Intensity`,
+    `Spread`). All five extend the abstract `PostEffect` (`Enabled`).
+  - `Atmosphere` (`Density`, `Offset`, `Color`, `Decay`, `Glare`, `Haze`):
+    distance and height fog lit by the time of day, meeting the sky at the
+    horizon. With one, `Lighting.FogStart`, `FogEnd` and `FogColor` are kept
+    and not used.
+  - `Sky`: six pictures (`SkyboxBack` ... `SkyboxUp`, `SkyboxOrientation`)
+    that are also what the world reflects; the sun (`SunTexture`,
+    `SunAngularSize`), the moon (`MoonTexture`, `MoonAngularSize`), stars
+    (`StarCount`), `CelestialBodiesShown`; and clouds (`CloudCover`,
+    `CloudDensity`, `CloudColor`) drifting on `SimTime`. The sun's direction
+    stays `ClockTime`'s.
+  - `Lighting.EnvironmentDiffuseScale`, `EnvironmentSpecularScale`,
+    `ShadowSoftness`, `GlobalShadows` and `AutoExposure`. Their defaults are
+    the picture before them, to the bit; every determinism trace moved once
+    for them.
+  - `[graphics] depth_of_field` and `sun_rays` in `luaug.toml` (off in the Low
+    preset, and depth of field in Medium), and in Project Settings.
+  - The wire carries `Lighting`'s children and its five new properties:
+    **protocol 13**, which a protocol 12 peer refuses.
+  - `examples/22-atmosphere`, and the manual's new page, "Atmosphere, sky and
+    clouds".
+
 - **`TextLabel.TextTransparency`**: the words' own see-through, apart from the
   box's `BackgroundTransparency` (0 solid, 1 not drawn; drawn clamped).
 - **The editor, from the owner's feedback pass**

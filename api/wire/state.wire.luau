@@ -231,6 +231,355 @@ local ModelFields: { Schema.Field } = {
     },
 }
 
+local BloomEffectFields: { Schema.Field } = {
+    {
+        Name = "Enabled",
+        Id = 1,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "postEffects",
+        Doc = "An effect switched off from a script is off on every screen that sees the world.",
+    },
+    {
+        Name = "Intensity",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "bloomEffects",
+        Doc = "How strong the glow is.",
+    },
+    {
+        Name = "Size",
+        Id = 3,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "bloomEffects",
+        Doc = "How far it reaches.",
+    },
+    {
+        Name = "Threshold",
+        Id = 4,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "bloomEffects",
+        Doc = "How bright a pixel must be to glow.",
+    },
+}
+
+local ColorCorrectionEffectFields: { Schema.Field } = {
+    {
+        Name = "Enabled",
+        Id = 1,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "postEffects",
+        Doc = "An effect switched off from a script is off on every screen that sees the world.",
+    },
+    {
+        Name = "Brightness",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "colorCorrectionEffects",
+        Doc = "A grade is how the world looks, so every replica wears it.",
+    },
+    {
+        Name = "Contrast",
+        Id = 3,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "colorCorrectionEffects",
+        Doc = "The same.",
+    },
+    {
+        Name = "Saturation",
+        Id = 4,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "colorCorrectionEffects",
+        Doc = "The same -- a flash to grey when a player is hit is a grade a script sets.",
+    },
+    {
+        Name = "TintColor",
+        Id = 5,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "colorCorrectionEffects",
+        Doc = "The same.",
+    },
+}
+
+local BlurEffectFields: { Schema.Field } = {
+    {
+        Name = "Enabled",
+        Id = 1,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "postEffects",
+        Doc = "An effect switched off from a script is off on every screen that sees the world.",
+    },
+    {
+        Name = "Size",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "blurEffects",
+        Doc = "How far the world picture is softened.",
+    },
+}
+
+local DepthOfFieldEffectFields: { Schema.Field } = {
+    {
+        Name = "Enabled",
+        Id = 1,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "postEffects",
+        Doc = "An effect switched off from a script is off on every screen that sees the world.",
+    },
+    {
+        Name = "FocusDistance",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "depthOfFieldEffects",
+        Doc = "Where the world's lens is focused.",
+    },
+    {
+        Name = "InFocusRadius",
+        Id = 3,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "depthOfFieldEffects",
+        Doc = "How deep the sharp band is.",
+    },
+    {
+        Name = "NearIntensity",
+        Id = 4,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "depthOfFieldEffects",
+        Doc = "How soft the near side is.",
+    },
+    {
+        Name = "FarIntensity",
+        Id = 5,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "depthOfFieldEffects",
+        Doc = "How soft the far side is.",
+    },
+}
+
+local SunRaysEffectFields: { Schema.Field } = {
+    {
+        Name = "Enabled",
+        Id = 1,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "postEffects",
+        Doc = "An effect switched off from a script is off on every screen that sees the world.",
+    },
+    {
+        Name = "Intensity",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "sunRaysEffects",
+        Doc = "How bright the shafts are.",
+    },
+    {
+        Name = "Spread",
+        Id = 3,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "sunRaysEffects",
+        Doc = "How far they reach.",
+    },
+}
+
+local AtmosphereFields: { Schema.Field } = {
+    {
+        Name = "Density",
+        Id = 1,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "atmospheres",
+        Doc = "The air is the world's weather: a fog rolling in on the authority rolls in everywhere.",
+    },
+    {
+        Name = "Offset",
+        Id = 2,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "atmospheres",
+        Doc = "Where it is thickest.",
+    },
+    {
+        Name = "Color",
+        Id = 3,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "atmospheres",
+        Doc = "Its colour.",
+    },
+    {
+        Name = "Decay",
+        Id = 4,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "atmospheres",
+        Doc = "How it thins with height.",
+    },
+    {
+        Name = "Glare",
+        Id = 5,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "atmospheres",
+        Doc = "Its glow towards the sun.",
+    },
+    {
+        Name = "Haze",
+        Id = 6,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "atmospheres",
+        Doc = "Its thickness at the horizon.",
+    },
+}
+
+local SkyFields: { Schema.Field } = {
+    {
+        Name = "SkyboxBack",
+        Id = 1,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The pictures, by content URN through the snapshot's string table; the images ship with the game.",
+    },
+    {
+        Name = "SkyboxDown",
+        Id = 2,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The same.",
+    },
+    {
+        Name = "SkyboxFront",
+        Id = 3,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The same.",
+    },
+    {
+        Name = "SkyboxLeft",
+        Id = 4,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The same.",
+    },
+    {
+        Name = "SkyboxRight",
+        Id = 5,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The same.",
+    },
+    {
+        Name = "SkyboxUp",
+        Id = 6,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The same.",
+    },
+    {
+        Name = "SkyboxOrientation",
+        Id = 7,
+        Encoding = "Vector3",
+        Source = "Component",
+        Component = "skies",
+        Doc = "How the pictures are turned.",
+    },
+    {
+        Name = "SunTexture",
+        Id = 8,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The sun's picture.",
+    },
+    {
+        Name = "MoonTexture",
+        Id = 9,
+        Encoding = "NameAtom",
+        Source = "Component",
+        Component = "skies",
+        Doc = "The moon's picture.",
+    },
+    {
+        Name = "SunAngularSize",
+        Id = 10,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "skies",
+        Doc = "How large the sun looks.",
+    },
+    {
+        Name = "MoonAngularSize",
+        Id = 11,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "skies",
+        Doc = "How large the moon looks.",
+    },
+    {
+        Name = "StarCount",
+        Id = 12,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "skies",
+        Doc = "How many stars.",
+    },
+    {
+        Name = "CelestialBodiesShown",
+        Id = 13,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "skies",
+        Doc = "Whether the sun, moon and stars are drawn.",
+    },
+    {
+        Name = "CloudCover",
+        Id = 14,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "skies",
+        Doc = "How much of the sky is cloud -- weather, and the world's.",
+    },
+    {
+        Name = "CloudDensity",
+        Id = 15,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "skies",
+        Doc = "How thick the clouds are.",
+    },
+    {
+        Name = "CloudColor",
+        Id = 16,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "skies",
+        Doc = "Their colour.",
+    },
+}
+
 local NoFields: { Schema.Field } = {}
 
 local LightingFields: { Schema.Field } = {
@@ -297,6 +646,46 @@ local LightingFields: { Schema.Field } = {
         Source = "Component",
         Component = "lighting",
         Doc = "A flash, a blinding moment, a cave entrance a game brightens.",
+    },
+    {
+        Name = "EnvironmentDiffuseScale",
+        Id = 9,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "How much the sky lights the world (ADR 0096).",
+    },
+    {
+        Name = "EnvironmentSpecularScale",
+        Id = 10,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "How much it is reflected.",
+    },
+    {
+        Name = "ShadowSoftness",
+        Id = 11,
+        Encoding = "F32",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "How soft the sun's shadows are.",
+    },
+    {
+        Name = "GlobalShadows",
+        Id = 12,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "Whether the sun casts at all.",
+    },
+    {
+        Name = "AutoExposure",
+        Id = 13,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "lighting",
+        Doc = "Whether the world's exposure follows the frame.",
     },
 }
 
@@ -662,6 +1051,9 @@ local Classes: { Schema.Class } = {
     {
         Name = "Lighting",
         Service = true,
+        -- ADR 0096: the world's look is instances under it, and they travel with
+        -- it. A camera's do not -- `Camera` is excluded, and its subtree with it.
+        Contents = true,
         Doc = "**The first service whose properties travel**: the time of day, the fog and the light. "
             .. "It is never spawned -- every world has one from boot, on both ends -- so it travels under "
             .. "a fixed id and a replica writes its own.",
@@ -716,6 +1108,41 @@ local Classes: { Schema.Class } = {
             .. "and which frame of its sheet it shows. A replica drives it kinematically, as it drives a "
             .. "`BasePart`.",
         Fields = Part2DFields,
+    },
+    {
+        Name = "BloomEffect",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = BloomEffectFields,
+    },
+    {
+        Name = "ColorCorrectionEffect",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = ColorCorrectionEffectFields,
+    },
+    {
+        Name = "BlurEffect",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = BlurEffectFields,
+    },
+    {
+        Name = "DepthOfFieldEffect",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = DepthOfFieldEffectFields,
+    },
+    {
+        Name = "SunRaysEffect",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = SunRaysEffectFields,
+    },
+    {
+        Name = "Atmosphere",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = AtmosphereFields,
+    },
+    {
+        Name = "Sky",
+        Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
+        Fields = SkyFields,
     },
 }
 
@@ -814,27 +1241,11 @@ local Excluded: { Schema.Excluded } = {
         Reason = "The same as `PointLight`.",
     },
 
-    -- ADR 0096's classes. **Not yet, rather than never**: the ADR decides that
-    -- the world's own -- the ones under `Lighting` -- travel, and a camera's do
-    -- not, and Stage 10 of its ledger carries them with a protocol bump.
+    -- ADR 0096: the abstract base of the five effects, which travel by name.
     {
         Name = "PostEffect",
-        Reason = "Abstract. Its five classes are listed by name below.",
+        Reason = "Abstract. Its five classes are replicated by name.",
     },
-    {
-        Name = "BloomEffect",
-        Reason = "Not yet carried: ADR 0096 replicates the world's effects under `Lighting` from its ledger's "
-            .. "Stage 10, and never a camera's, which belong to one viewer.",
-    },
-    { Name = "ColorCorrectionEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
-    { Name = "BlurEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
-    { Name = "DepthOfFieldEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
-    { Name = "SunRaysEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
-    {
-        Name = "Atmosphere",
-        Reason = "Not yet carried: ADR 0096 replicates it under `Lighting` from its ledger's Stage 10.",
-    },
-    { Name = "Sky", Reason = "Not yet carried. The same as `Atmosphere`." },
     {
         Name = "Material",
         Reason = "A material is an asset reference, and assets arrive with the build rather than over " .. "the wire.",

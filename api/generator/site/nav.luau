@@ -84,14 +84,15 @@ local Sections: { Section } = {
     {
         Slug = "rendering",
         Title = "Rendering and lighting",
-        Summary = "The camera, the sun, the sky, the lights, particles and decals, and the post chain.",
+        Summary = "The camera, the sun, the sky and the air, the lights, particles and decals, and the post effects.",
         Pages = {
             { Slug = "camera", Title = "The camera" },
             { Slug = "lighting", Title = "Lighting and the sky" },
+            { Slug = "atmosphere-and-sky", Title = "Atmosphere, sky and clouds" },
             { Slug = "shadows", Title = "Shadows" },
             { Slug = "lights", Title = "Point and spot lights" },
             { Slug = "particles-and-decals", Title = "Particles and decals" },
-            { Slug = "post", Title = "The post chain" },
+            { Slug = "post", Title = "Post effects" },
             { Slug = "quality", Title = "Graphics quality settings" },
         },
     },

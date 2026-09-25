@@ -46,6 +46,7 @@ once, at migration.
 | `PhysicalProperties` and material-derived physics | **`Friction`, `Restitution`, `Density`** | Direct and typed, with no bundle object. |
 | `CameraType` state machine | **A fully scriptable `Camera`**, plus rigs in `@luaug/camera` | No hidden controllers, and the near and far planes exposed. |
 | `workspace.StreamingEnabled` | **`StreamingService`** | Streaming is a system, not scene-root state. |
+| `SkyboxBk`, `SkyboxDn`, `SkyboxFt`, `SkyboxLf`, `SkyboxRt` | **`SkyboxBack`, `SkyboxDown`, `SkyboxFront`, `SkyboxLeft`, `SkyboxRight`** (and `SkyboxUp`) | Whole words. A property is read far more often than it is typed. |
 | `BasePart.Color`, `BasePart.Transparency`, and `Material` as an enum of surface kinds | **`BasePart.Material`, a [material asset](manual:world/materials) the part wears**, and `part:SetMaterialParameter("Color", c)` | A surface is governed by its material, as in the engines this design follows (ADR 0090). The default material a plain part wears lets it change `Color` and `Transparency`, so a tint is one method call; `luaug migrate materials` converts a project's files. **This is the one row that removes a member scripts write constantly.** |
 
 ## Interface

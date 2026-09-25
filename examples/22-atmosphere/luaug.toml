@@ -1,0 +1,13 @@
+# The look of a world, as instances (ADR 0096): a valley under a Sky of six
+# pictures with clouds, in an Atmosphere, with every post effect on a key.
+
+[project]
+name = "LuauG Atmosphere"
+id = "dev.luaug.atmosphere"
+version = "1.0.0"
+engine = "0.1"
+
+[window]
+title = "LuauG — Atmosphere"
+width = 1280
+height = 720

@@ -156,15 +156,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 10 — Wire, quality, showcase, documentation
 
-- [ ] The wire schema carries the new classes under `Lighting`. Protocol bump.
+- [x] The wire schema carries the new classes under `Lighting`. Protocol bump.
       A two-world test: the authority enables a `BlurEffect` under `Lighting`
       and the replica draws it. A camera's effect does not cross.
-- [ ] `luaug.toml`'s `depth_of_field` and `sun_rays`, in the quality presets
+- [x] `luaug.toml`'s `depth_of_field` and `sun_rays`, in the quality presets
       (ADR 0044), and in the editor's graphics settings.
-- [ ] `examples/22-atmosphere`: a small valley with a day that runs on
+- [x] `examples/22-atmosphere`: a small valley with a day that runs on
       `ClockTime`, a `Sky`, an `Atmosphere`, and every effect toggled from keys,
       with an on-screen list of what is on.
-- [ ] Manual: `rendering/post.md` and `rendering/lighting.md` rewritten for the
+- [x] Manual: `rendering/post.md` and `rendering/lighting.md` rewritten for the
       instances; a new `rendering/atmosphere-and-sky.md`; a divergence row for
       the face names; and the sentence "there is no skybox" removed.
 - [ ] `CHANGELOG.md`, `PROGRESS.md`, this ledger ticked, and **Findings**
@@ -305,3 +305,18 @@ here*.
    `environment.cpp`, operation for operation -- so the reflections show the
    clouds the sky does; the prefiltered chain rebuilds after about five seconds
    of drift.
+20. **The wire carries the look by component, as it carries everything else**
+   (Stage 10). A generic reader through each property's accessor was the
+   shorter code, and it would have been the only one in the module: the
+   replication tests register `Lighting` by hand, beside the renderer rather
+   than above it, and a field read through an accessor those tests do not have
+   would have failed there. So the forty-six fields are read and written by
+   component like the rest, generated into `extract.cpp` from one table.
+   `Lighting` gains `Contents = true` (ADR 0080), so its children travel and a
+   replica's own give way to the authority's; a camera is excluded, and its
+   subtree with it, so a viewer's effects never cross -- a session test holds
+   both. Protocol 13.
+21. **The sky's bake is over its budget on the dev build** -- 79 ms against 50
+   for 2048-texel pictures of 1024-texel faces, in eight bands. It is off the
+   frame thread either way, so no frame waits for it; the packaged build's
+   number is in `docs/perf-baselines.md`, beside the others.
