@@ -490,6 +490,12 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, sce
         map(material.properties.metallicRoughnessMap, false);
         map(material.properties.emissiveMap, true);
     });
+    // A sky's sun and moon (ADR 0096): colours. Its six faces are not here --
+    // they are resampled on the CPU by `SkyLoader`, which reads them itself.
+    world.skies().forEach([&](core::InstanceId, const scene::SkyComponent& sky) {
+        load(sky.sunTexture, true);
+        load(sky.moonTexture, true);
+    });
     // Decal images (F2): colours, like base colours.
     world.decals().forEach([&](core::InstanceId, const scene::DecalComponent& decal) { load(decal.texture, true); });
     // The 2D layer's pictures: a sprite's image and a tilemap's tileset.

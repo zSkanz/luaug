@@ -2051,7 +2051,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "SkyboxBack",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "The image towards +Z, before `SkyboxOrientation` turns the set. None of the six means "
                     .. "the engine's own sky, drawn from the time of day.",
@@ -2059,42 +2058,36 @@ local Classes: { Schema.Class } = {
             {
                 Name = "SkyboxDown",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "The image straight down.",
             },
             {
                 Name = "SkyboxFront",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "The image towards -Z, which a camera with no rotation looks at.",
             },
             {
                 Name = "SkyboxLeft",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "The image towards -X.",
             },
             {
                 Name = "SkyboxRight",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "The image towards +X.",
             },
             {
                 Name = "SkyboxUp",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "The image straight up.",
             },
             {
                 Name = "SkyboxOrientation",
                 Type = "vector",
-                Inert = true,
                 Default = "vector.create(0, 0, 0)",
                 Doc = "Turns the six images together, in degrees about X, Y and Z -- a mountain range painted "
                     .. "into the images is moved to where the world wants it.",
@@ -2102,7 +2095,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "SunTexture",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "An image drawn as the sun's disc, lit by the sun's colour. None draws a round, soft-edged "
                     .. "disc.",
@@ -2110,14 +2102,12 @@ local Classes: { Schema.Class } = {
             {
                 Name = "MoonTexture",
                 Type = "Content",
-                Inert = true,
                 ContentKind = "Texture",
                 Doc = "An image drawn as the moon's disc at night. None draws a plain pale disc.",
             },
             {
                 Name = "SunAngularSize",
                 Type = "number",
-                Inert = true,
                 Default = "2.3",
                 ErrorKey = "scene.err.number_angular_size",
                 Doc = "How wide the sun looks, in degrees across, above 0 and at most 60. The real sun is about "
@@ -2126,7 +2116,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "MoonAngularSize",
                 Type = "number",
-                Inert = true,
                 Default = "2",
                 ErrorKey = "scene.err.number_angular_size",
                 Doc = "How wide the moon looks, in degrees across, above 0 and at most 60.",
@@ -2134,7 +2123,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "StarCount",
                 Type = "number",
-                Inert = true,
                 Default = "3000",
                 ErrorKey = "scene.err.number_star_count",
                 Doc = "How many stars cover the whole sky at night, from 0 to 10,000. They come out as the "
@@ -2143,7 +2131,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "CelestialBodiesShown",
                 Type = "boolean",
-                Inert = true,
                 Default = "true",
                 Doc = "Whether the sun, the moon and the stars are drawn. Off leaves only the images and the "
                     .. "clouds -- the light still comes from where the clock puts the sun.",

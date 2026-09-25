@@ -374,6 +374,24 @@ struct GpuLookAirUniforms
 };
 static_assert(sizeof(GpuLookAirUniforms) == 128, "GpuLookAirUniforms is mirrored by luaug_look.hlsli");
 
+// `sky_look.hlsl`'s second block (ADR 0096), beside `GpuSkyUniforms`.
+struct GpuLookSkyUniforms
+{
+    // Pictures drawn, sun/moon/stars drawn, sun a picture, moon a picture.
+    f32 flags[4]{};
+    // Towards the moon, and its angular radius in radians.
+    f32 moon[4]{};
+    // The moon's light, and how much of it shows.
+    f32 moonColor[4]{};
+    // Star cells per cube face, the chance a cell holds one, how much shows.
+    f32 stars[4]{};
+    // Cloud cover, density, and the wind's offset (Stage 9).
+    f32 clouds[4]{};
+    // The clouds' lit colour.
+    f32 cloudColor[4]{1.0f, 1.0f, 1.0f, 0.0f};
+};
+static_assert(sizeof(GpuLookSkyUniforms) == 96, "GpuLookSkyUniforms is mirrored by luaug_look.hlsli");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

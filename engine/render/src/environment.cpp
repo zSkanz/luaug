@@ -1,6 +1,7 @@
 #include "luaug/render/environment.h"
 
 #include "luaug/jobs/jobs.h"
+#include "luaug/render/skybox.h"
 
 #include <algorithm>
 #include <cmath>
@@ -347,6 +348,13 @@ SkyParams skyParamsFor(Vec3 sunDirection, Color3 fogColor) noexcept
     return params;
 }
 
+void setSunAngularRadius(SkyParams& params, f32 radius) noexcept
+{
+    params.sunAngularRadius = radius;
+    params.discCosOuter = std::cos(radius);
+    params.discCosInner = std::cos(radius * 0.9f);
+}
+
 Vec3 evaluateSky(const SkyParams& params, Vec3 direction) noexcept
 {
     const Vec3 d = core::normalize(direction);
@@ -365,7 +373,12 @@ Vec3 evaluateSky(const SkyParams& params, Vec3 direction) noexcept
     const Color3 gradient = core::lerp(params.horizonColor, params.zenithColor, std::sqrt(height));
 
     const f32 below = saturate(-d.y);
-    const Color3 sky = core::lerp(gradient, scale(params.horizonColor, 0.35f), std::sqrt(below));
+    Color3 sky = core::lerp(gradient, scale(params.horizonColor, 0.35f), std::sqrt(below));
+    // A `Sky` of pictures replaces the gradient, and keeps the sun on top.
+    if (params.skybox != nullptr) {
+        const Vec3 pictured = params.skybox->sample(d);
+        sky = Color3{pictured.x, pictured.y, pictured.z};
+    }
 
     const f32 cosAngle = core::dot(d, params.sunDirection);
     const f32 disc = smoothstep(params.discCosOuter, params.discCosInner, cosAngle);
@@ -383,7 +396,7 @@ Vec3 evaluateSky(const SkyParams& params, Vec3 direction) noexcept
     // what puts a highlight in a mirror. A disc at radiance 1 reflects as a pale
     // smudge, which is the M4 look this milestone exists to replace.
     const f32 discIntensity = kSunDiscIntensity * params.dayFactor;
-    const Color3 sun = scale(params.sunColor, disc * discIntensity + glow);
+    const Color3 sun = scale(params.sunColor, params.celestial ? disc * discIntensity + glow : 0.0f);
 
     return Vec3{sky.r + sun.r, sky.g + sun.g, sky.b + sun.b};
 }

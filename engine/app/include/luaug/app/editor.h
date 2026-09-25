@@ -649,6 +649,11 @@ struct EditorCommands
     std::string newMaterialVariantOf;
     std::string newMaterialVariantName;
 
+    // **A sky's pictures, by folder** (ADR 0096): a folder of six images -- or
+    // one image -- dropped on a `Sky`, its faces filled by the names' suffixes.
+    std::string assignSkyboxPath;
+    core::InstanceId assignSkyboxTarget;
+
     // Step back, or forward again.
     bool undo = false;
     bool redo = false;
@@ -676,7 +681,7 @@ struct EditorCommands
                duplicateSelection || groupSelection || groupAsFolder || ungroupSelection || reparentTo.valid() ||
                reorderChild.valid() || renameInstance.valid() || paste || pasteInto || cutSelection ||
                !placeStamp.empty() || breakStamp.valid() || stampSubject.valid() || undo || redo || newScene ||
-               !assignMaterialPath.empty();
+               !assignMaterialPath.empty() || !assignSkyboxPath.empty();
     }
 
     [[nodiscard]] bool any() const noexcept
@@ -691,9 +696,18 @@ struct EditorCommands
                !duplicateContent.empty() || newStampClass != scene::InvalidClass || !renameContent.empty() ||
                !assignStampPath.empty() || importAssets || importParent.valid() || openScript.valid() ||
                !assignMaterialPath.empty() || !openMaterial.empty() || !newMaterial.empty() ||
-               !newMaterialVariantOf.empty();
+               !newMaterialVariantOf.empty() || !assignSkyboxPath.empty();
     }
 };
+
+// **Which face of a sky a picture is for, by its name** (ADR 0096): the
+// property it fills -- `SkyboxBack` and the rest -- or empty when the name
+// says nothing. Read from the last word of the name, case aside, in the
+// spellings sky pictures are commonly saved under: `back`, `bk`; `down`, `dn`,
+// `bottom`; `front`, `ft`; `left`, `lf`; `right`, `rt`; `up`, `top`; and the
+// axis names `pz`, `ny`, `nz`, `nx`, `px`, `py` in the engine's own axes --
+// +Z is the back, -Z the front.
+[[nodiscard]] std::string_view skyFaceOfName(std::string_view fileName) noexcept;
 
 // The undo stack, and it is snapshots rather than commands.
 //
@@ -1169,6 +1183,12 @@ public:
     // failure, and a drop onto parts that all already wear it records nothing
     // -- a step that undoes nothing eats a press of ctrl-Z (D134).
     bool assignMaterialTo(scene::World& world, std::string_view path, std::span<const core::InstanceId> targets);
+
+    // **Fills a `Sky`'s faces from a folder of pictures, or one face from one
+    // picture** (ADR 0096), as one undo step. Which face a file is for is read
+    // off its name (`skyFaceOfName`); a folder whose names say nothing fills
+    // nothing and says so.
+    bool assignSkybox(scene::World& world, std::string_view path, core::InstanceId sky);
 
     // The material open in the material panel.
     struct MaterialSession

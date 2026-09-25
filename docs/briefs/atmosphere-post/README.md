@@ -101,3 +101,19 @@ image goldens did not move). These show what each does when it is changed.
 | `shadows-soft.png` | `ShadowSoftness = 1` | The shadows' edges widen into a penumbra |
 | `sky-light-off.png` | `EnvironmentDiffuseScale` and `EnvironmentSpecularScale` both 0 | The blue fill the sky gives the shadows is gone: they read darker and neutral, lit only by `Ambient` |
 | `exposure-fixed.png` | `AutoExposure = false` | The exposure holds at the calibration value instead of following the frame |
+
+## Stage 8 -- `Sky`
+
+The pictures are `tests/look/content/sky/*.png`, drawn by
+`tools/repo/draw_skybox.py`: a late-afternoon gradient, a ring of distant
+mountains, streaks of high cloud and dark ground below, **with no sun painted
+in** -- the engine draws the sun where the clock puts it.
+
+| File | What is in the world | What to look at |
+|---|---|---|
+| `none.png` | nothing | The engine's own gradient sky |
+| `sky-images.png` | a `Sky` with the six pictures | The pictured sky and its clouds behind the scene; the sun and its shadows exactly where they were -- the clock's, not the pictures'. The reflections and the sky's light on the shadows now come from the pictures |
+| `sky-turned.png` | the same, `SkyboxOrientation` 0, 90, 0 | The pictures turned a quarter round the vertical: different clouds overhead, the same sun |
+| `sky-big-sun.png` | a `Sky` with no pictures and `SunAngularSize` 8 | The engine's gradient kept, and a sun four times the size |
+| `night-before.png` | 05:00, no `Sky` | The engine's own night: dark, no moon disc, no stars |
+| `sky-night.png` | 05:00 with a `Sky` and its defaults | The stars and the moon a `Sky` adds -- the moon low in the west behind the fence, opposite the sun, lighting the scene -- in the same places every night |

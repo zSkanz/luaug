@@ -128,24 +128,24 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 8 — `Sky`
 
-- [ ] Six faces (`SkyboxBack`, `SkyboxDown`, `SkyboxFront`, `SkyboxLeft`,
+- [x] Six faces (`SkyboxBack`, `SkyboxDown`, `SkyboxFront`, `SkyboxLeft`,
       `SkyboxRight`, `SkyboxUp`) and `SkyboxOrientation`. Resample them on the
       CPU, **off the frame thread**, into one octahedral image the sky pass
       samples by direction.
-- [ ] The same image feeds the existing environment prefilter (ADR 0043's
+- [x] The same image feeds the existing environment prefilter (ADR 0043's
       octahedral path), so reflections and diffuse ambient come from the skybox.
       The previous sky keeps drawing until the bake is done. Scale the result by
       `EnvironmentDiffuseScale` and `EnvironmentSpecularScale`.
-- [ ] The celestial layer on top: `SunTexture`, `MoonTexture`, `SunAngularSize`,
+- [x] The celestial layer on top: `SunTexture`, `MoonTexture`, `SunAngularSize`,
       `MoonAngularSize`, `StarCount` and `CelestialBodiesShown`, with or without
       images. **The sun's direction stays a function of `ClockTime` and
       `GeographicLatitude` alone** (ADR 0096).
-- [ ] The editor: image pickers for the faces, and a drop target for a folder of
+- [x] The editor: image pickers for the faces, and a drop target for a folder of
       six images named by the common suffixes. A shipped sample skybox under
       `examples/` with a licence that R6 allows, recorded in
       `THIRD_PARTY_NOTICES.md`, or drawn procedurally by a script in
       `tools/repo`.
-- [ ] Bake ≤ 50 ms, off the frame thread. A frame never waits for it.
+- [~] Bake ≤ 50 ms, off the frame thread (measured with the others). A frame never waits for it.
       Captures for the owner.
 
 ## Stage 9 — Clouds
@@ -277,3 +277,23 @@ here*.
    quarter of a metre at 1, so its default of 0.2 is the engine's 0.05 m to the
    bit; `GlobalShadows` off draws no cascade and clears the contact term; and
    `AutoExposure` off takes the same branch the machine's switch does.
+17. **A skybox is one octahedral picture, 2048 on a side, made by jobs**
+   (Stage 8). The frozen RHI has no cube texture, so the six faces are
+   resampled on the CPU into the unfolding the environment already uses,
+   about sixteen texels a degree at the horizon, and the sky pass samples it
+   by direction. Six jobs read and decode the faces -- a loose file, or a
+   packed one transcoded to plain texels -- eight resample bands follow once
+   all six are in, and a last job averages it into the 128-texel linear copy
+   the prefilter integrates. The frame only asks whether the last one has
+   finished; until then the previous sky draws. A headless run waits instead,
+   so a capture is the sky that was asked for. The sample sky is drawn by a
+   script, so R6 has nothing to ask.
+18. **A `Sky` draws through its own sky pipeline**, beside the plain one and
+   taking its block unchanged at slot 0 (Stage 8): the pictures or the
+   gradient, the sun as a picture or the soft disc at `SunAngularSize`, and at
+   night the moon opposite the sun and a hashed grid of stars -- the same stars
+   every night. The moon and the stars are not in the reflections: a point
+   of light in a 128-texel environment is nothing, and the moon's light is
+   already the light model's. A folder of six pictures dropped on a `Sky` in
+   the Explorer fills the faces by the names' last word (`back`, `bk`, `px`
+   and the rest, `skyFaceOfName`).

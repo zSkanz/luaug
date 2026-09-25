@@ -102,6 +102,8 @@ constexpr f32 kBloomIntensity = 0.05f;
 // `BloomEffect.Size` at which the upsample's tent has its own radius of one
 // source texel: the engine's own reach, and the class's default (ADR 0096).
 constexpr f32 kBloomSize = 24.0f;
+// For a `Sky`'s angular sizes, which are authored in degrees.
+constexpr f32 kDegreesToRadians = 0.017453292519943295f;
 // How many halvings the look's blur may go down before it runs its Gaussian:
 // at five, the smallest level is a thirty-second of the frame, where a blur of
 // the whole screen's height is still a handful of texels.
@@ -130,6 +132,11 @@ constexpr f32 kAirSkyReach = 40000.0f;
 // The glare lobe's tightness about the sun, and its strength at `Glare` 1.
 constexpr f32 kAirGlareExponent = 12.0f;
 constexpr f32 kAirGlareStrength = 0.35f;
+// A governed sky's night: how bright the moon's face is, how bright the
+// brightest star, and the chance a cell of the star grid holds one.
+constexpr f32 kMoonGlow = 1.6f;
+constexpr f32 kStarGlow = 1.2f;
+constexpr f32 kStarChance = 0.5f;
 // The share of the air a ray into the open sky counts (`look_air.hlsl`): the
 // gradient is already the air above, so the whole integral again drew a grey
 // afternoon. The horizon, where the integral is largest, is buried either way.
@@ -343,7 +350,8 @@ struct EnvironmentCache
         if (core::dot(params.sunDirection, irradianceSky.sunDirection) < kIrradianceRebuildCosine)
             return true;
         return !(params.horizonColor == irradianceSky.horizonColor && params.zenithColor == irradianceSky.zenithColor &&
-                 params.sunColor == irradianceSky.sunColor);
+                 params.sunColor == irradianceSky.sunColor && params.skybox == irradianceSky.skybox &&
+                 params.celestial == irradianceSky.celestial);
     }
 
     [[nodiscard]] bool stale(const SkyParams& params) const noexcept
@@ -353,7 +361,9 @@ struct EnvironmentCache
         if (core::dot(params.sunDirection, target.sunDirection) < kEnvironmentRebuildCosine)
             return true;
         return !(params.horizonColor == target.horizonColor && params.zenithColor == target.zenithColor &&
-                 params.sunColor == target.sunColor && params.specularScale == target.specularScale);
+                 params.sunColor == target.sunColor && params.specularScale == target.specularScale &&
+                 params.skybox == target.skybox && params.celestial == target.celestial &&
+                 params.sunAngularRadius == target.sunAngularRadius);
     }
 };
 
@@ -711,12 +721,17 @@ private:
     LookPipeline raysAdd_;
     // The air, laid over the opaque world and the sky.
     LookPipeline air_;
+    // The sky a `Sky` governs. Made by `ensureSkyLook` rather than as a
+    // fullscreen pass: it is drawn INSIDE the forward pass, so it declares
+    // that pass's depth format as the plain sky's pipeline does.
+    LookPipeline skyLook_;
+    [[nodiscard]] bool ensureSkyLook(rhi::IDevice& device);
 
     // Every look pipeline, for `destroy`.
-    [[nodiscard]] std::array<LookPipeline*, 10> lookPipelines() noexcept
+    [[nodiscard]] std::array<LookPipeline*, 11> lookPipelines() noexcept
     {
-        return {&gradedTonemap_,  &blur_,     &resample_,   &focusPrepare_, &focusGather_,
-                &focusComposite_, &raysMask_, &raysGather_, &raysAdd_,      &air_};
+        return {&gradedTonemap_, &blur_,       &resample_, &focusPrepare_, &focusGather_, &focusComposite_,
+                &raysMask_,      &raysGather_, &raysAdd_,  &air_,          &skyLook_};
     }
 
     // **The look's own images, made the first frame one is needed** and
@@ -2486,6 +2501,38 @@ void DefaultRenderer::blurImage(rhi::IDevice& device, rhi::ICmdList& cmd, rhi::T
     cmd.popDebugGroup();
 }
 
+bool DefaultRenderer::ensureSkyLook(rhi::IDevice& device)
+{
+    if (skyLook_.tried)
+        return skyLook_.handle.valid();
+    skyLook_.tried = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+    core::EngineError error;
+    const rhi::ShaderHandle vertex = shaderLibrary_->create(device, "sky_look", rhi::ShaderStage::Vertex, &error);
+    const rhi::ShaderHandle fragment = shaderLibrary_->create(device, "sky_look", rhi::ShaderStage::Fragment, &error);
+    for (const rhi::ShaderHandle handle : {vertex, fragment}) {
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+    }
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+    const std::array<rhi::ColorTargetDesc, 1> target{rhi::ColorTargetDesc{.format = kHdrFormat}};
+    skyLook_.handle = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .primitive = rhi::PrimitiveType::TriangleList,
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        .depthStencil = {.depthTest = false, .depthWrite = false},
+        .colorTargets = target,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "sky_look",
+    });
+    return skyLook_.handle.valid();
+}
+
 bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
 {
     if (particleTried_)
@@ -2829,6 +2876,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     SkyParams sky =
         skyParamsFor(world.environment.sunDirection, air ? world.look.atmosphere.color : world.environment.fogColor);
     sky.specularScale = world.environment.environmentSpecularScale;
+    // **A `Sky` governs the sun's look and, with pictures, the sky itself**
+    // (ADR 0096) -- never where the sun is.
+    const RenderSky& skyLook = world.look.sky;
+    if (skyLook.present) {
+        setSunAngularRadius(sky, skyLook.sunAngularSize * 0.5f * kDegreesToRadians);
+        sky.celestial = skyLook.celestialBodiesShown;
+        if (skyLook.image.valid())
+            sky.skybox = skyLook.radiance;
+    }
     updateEnvironment(cmd, sky);
 
     // The clustered light assignment, and its three tables. Built on the CPU
@@ -2844,6 +2900,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // made mid-pass is not.
     const bool airDrawn =
         air && world.camera.valid && ensureLookPipeline(device, air_, "look_air", kHdrFormat, LookBlend::Air);
+    // And the governed sky's, for the same reason.
+    const bool skyGoverned = skyLook.present && world.camera.valid && ensureSkyLook(device);
     buildInstanceBatches(world, meshes);
     if (!instanceStaging_.empty()) {
         cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);
@@ -3372,9 +3430,47 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         // The disc's brightness relative to the sky around it, scaled by the day
         // factor so a sun below the horizon leaves no disc behind.
         skyUniforms.sunColor[3] = kSunDiscIntensity * sky.dayFactor;
-        cmd.setPipeline(skyPipeline_);
-        cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&skyUniforms, sizeof(skyUniforms)));
-        cmd.draw(3, 1, 0, 0);
+        if (skyGoverned) {
+            // **The sky a `Sky` governs** (ADR 0096): its pictures or the
+            // gradient, and its sun, moon and stars, through its own pipeline.
+            GpuLookSkyUniforms lookSky;
+            lookSky.flags[0] = skyLook.image.valid() ? 1.0f : 0.0f;
+            lookSky.flags[1] = skyLook.celestialBodiesShown ? 1.0f : 0.0f;
+            lookSky.flags[2] = skyLook.sunImage.valid() ? 1.0f : 0.0f;
+            lookSky.flags[3] = skyLook.moonImage.valid() ? 1.0f : 0.0f;
+            // The moon stands opposite the sun, as the light model has it.
+            lookSky.moon[0] = -sky.sunDirection.x;
+            lookSky.moon[1] = -sky.sunDirection.y;
+            lookSky.moon[2] = -sky.sunDirection.z;
+            lookSky.moon[3] = skyLook.moonAngularSize * 0.5f * kDegreesToRadians;
+            // Night is what shows the moon and the stars: none of either while
+            // the day factor is up, all of them once it has gone.
+            const f32 night = 1.0f - sky.dayFactor;
+            lookSky.moonColor[0] = 0.78f * kMoonGlow;
+            lookSky.moonColor[1] = 0.82f * kMoonGlow;
+            lookSky.moonColor[2] = 0.9f * kMoonGlow;
+            lookSky.moonColor[3] = night;
+            // About StarCount stars over the whole sphere: six faces of cells,
+            // half of them holding one.
+            const f32 cells = std::sqrt(static_cast<f32>(skyLook.starCount) / (6.0f * kStarChance));
+            lookSky.stars[0] = skyLook.starCount > 0 ? std::max(cells, 1.0f) : 0.0f;
+            lookSky.stars[1] = kStarChance;
+            lookSky.stars[2] = night * night * kStarGlow;
+            cmd.setPipeline(skyLook_.handle);
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&skyUniforms, sizeof(skyUniforms)));
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&lookSky, sizeof(lookSky)));
+            const std::array<rhi::TextureBinding, 3> skyTextures{
+                rhi::TextureBinding{skyLook.image.valid() ? skyLook.image : whitePixel_, environmentSampler_},
+                rhi::TextureBinding{skyLook.sunImage.valid() ? skyLook.sunImage : whitePixel_, environmentSampler_},
+                rhi::TextureBinding{skyLook.moonImage.valid() ? skyLook.moonImage : whitePixel_, environmentSampler_}};
+            cmd.bindTextures(rhi::ShaderStage::Fragment, 0, skyTextures);
+            cmd.draw(3, 1, 0, 0);
+        }
+        else {
+            cmd.setPipeline(skyPipeline_);
+            cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&skyUniforms, sizeof(skyUniforms)));
+            cmd.draw(3, 1, 0, 0);
+        }
 
         GpuFrameUniforms frame;
         frame.sunDirectionBrightness[0] = sky.lightDirection.x;

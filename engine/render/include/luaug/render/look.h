@@ -19,12 +19,17 @@
 #include "luaug/core/math.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
+#include "luaug/rhi/types.h"
+
+#include <memory>
 
 namespace luaug::scene {
 class World;
 }
 
 namespace luaug::render {
+
+struct SkyRadiance;
 
 // `Atmosphere`, as drawn. Meaningful only when `present`.
 struct RenderAtmosphere
@@ -72,6 +77,15 @@ struct RenderSky
     core::f32 cloudCover = 0.0f;
     core::f32 cloudDensity = 0.5f;
     core::Color3 cloudColor{1.0f, 1.0f, 1.0f};
+
+    // **What is drawn, handed over after the extract**: the six pictures
+    // resampled (`SkyLoader::append`), and the sun's and moon's pictures from
+    // the texture library. Invalid for none, or for a picture still loading --
+    // which draws the plain disc, or the previous sky, meanwhile.
+    rhi::TextureHandle image;
+    std::shared_ptr<const SkyRadiance> radiance;
+    rhi::TextureHandle sunImage;
+    rhi::TextureHandle moonImage;
 
     // Whether any face names an image. None is the engine's own sky.
     [[nodiscard]] bool hasImages() const noexcept

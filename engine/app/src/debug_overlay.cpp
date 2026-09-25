@@ -982,6 +982,17 @@ struct ContentDrag
     return contentKindOf(std::filesystem::path(drag.path).filename().string()) == ContentKind::Stamp;
 }
 
+// A folder, and a picture: what a `Sky` row takes (ADR 0096).
+[[nodiscard]] bool isFolderDrag(const ContentDrag& drag) noexcept
+{
+    return std::string_view(drag.rootClass) == "folder";
+}
+
+[[nodiscard]] bool isTextureDrag(const ContentDrag& drag) noexcept
+{
+    return contentKindOf(std::filesystem::path(drag.path).filename().string()) == ContentKind::Texture;
+}
+
 // The instance tree, virtualised.
 //
 // **Every row used to be drawn every frame**, which on the flagship is 4,300
@@ -1710,6 +1721,16 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
                     if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr) {
                         commands->assignMaterialPath = static_cast<const ContentDrag*>(took->Data)->path;
                         commands->assignMaterialTarget = row.id;
+                    }
+                }
+                // **Sky pictures dropped on a `Sky`** (ADR 0096): a folder of
+                // six, or one, each face read off its name.
+                else if (fromBrowser && world.skies().find(row.id) != nullptr &&
+                         (isFolderDrag(*static_cast<const ContentDrag*>(peek->Data)) ||
+                          isTextureDrag(*static_cast<const ContentDrag*>(peek->Data)))) {
+                    if (const ImGuiPayload* took = ImGui::AcceptDragDropPayload(kContentDragPayload); took != nullptr) {
+                        commands->assignSkyboxPath = static_cast<const ContentDrag*>(took->Data)->path;
+                        commands->assignSkyboxTarget = row.id;
                     }
                 }
                 else if (fromBrowser && isStampDrag(*static_cast<const ContentDrag*>(peek->Data)) &&
@@ -6374,13 +6395,16 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                     // A material is dragged too -- onto a part's `Material`
                     // field, an Explorer row or the part in the viewport, and
                     // the part wears it.
+                    // And a folder, which a `Sky` takes as its six pictures.
                     if ((entry.kind == ContentKind::Stamp || entry.kind == ContentKind::Material ||
-                         entry.kind == ContentKind::Texture) &&
+                         entry.kind == ContentKind::Texture || entry.kind == ContentKind::Folder) &&
                         ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) {
                         ContentDrag payload;
                         (void)std::snprintf(payload.path, sizeof(payload.path), "%s", entry.path.c_str());
+                        // A folder has no root class; it is marked as a folder
+                        // so a drop target can tell it from a file with none.
                         (void)std::snprintf(payload.rootClass, sizeof(payload.rootClass), "%s",
-                                            entry.rootClass.c_str());
+                                            entry.kind == ContentKind::Folder ? "folder" : entry.rootClass.c_str());
                         ImGui::SetDragDropPayload(kContentDragPayload, &payload, sizeof(payload));
                         ImGui::TextUnformatted(ContentTree::displayNameOf(entry).c_str());
                         ImGui::EndDragDropSource();

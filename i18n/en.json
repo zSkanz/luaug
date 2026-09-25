@@ -235,6 +235,8 @@
   "ui.warn.glyph_cache_cleared": "The glyph cache filled ({entries} entries) and was cleared ({clears} time(s) so far); something is asking for many text sizes, such as a TextScaled label being resized.",
   "render.err.mesh_not_compiled": "The mesh {path} has no compiled form, so nothing was drawn for it. Open the project once to compile it, or run `luaug build-assets`.",
   "render.err.material_file_missing": "Could not read the material at {path}.",
+  "render.info.sky_baked": "The sky's pictures were resampled in {ms} ms, off the frame.",
+  "render.err.sky_face_missing": "A Sky's picture {path} could not be read; that face of the sky is drawn black.",
   "render.err.material_texture_missing": "Could not read the texture at {path}; the material draws without it.",
   "render.err.pipeline_create_failed": "Could not create a graphics pipeline for the renderer.",
   "render.err.target_create_failed": "Could not create an offscreen render target.",

@@ -5783,3 +5783,19 @@ TEST_CASE("a script made in the editor starts with code, and a module with the t
     REQUIRE(empty.has_value());
     CHECK(std::get<std::string>(*empty).empty());
 }
+
+TEST_CASE("a sky picture's face is read off its name (ADR 0096)")
+{
+    // The last word of the name, whatever its case and separator.
+    CHECK(app::skyFaceOfName("sky/sunset_bk.png") == "SkyboxBack");
+    CHECK(app::skyFaceOfName("Sunset-Front.PNG") == "SkyboxFront");
+    CHECK(app::skyFaceOfName("dn.jpg") == "SkyboxDown");
+    CHECK(app::skyFaceOfName("valley left.png") == "SkyboxLeft");
+    CHECK(app::skyFaceOfName("top.png") == "SkyboxUp");
+    // The axis spellings, in the engine's axes: +X right, -Z front.
+    CHECK(app::skyFaceOfName("cube_px.png") == "SkyboxRight");
+    CHECK(app::skyFaceOfName("cube_nz.png") == "SkyboxFront");
+    // A name that says nothing fills nothing.
+    CHECK(app::skyFaceOfName("mountains.png").empty());
+    CHECK(app::skyFaceOfName("").empty());
+}

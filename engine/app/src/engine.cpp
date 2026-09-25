@@ -59,6 +59,7 @@
 #include "luaug/render/render_world.h"
 #include "luaug/render/renderer.h"
 #include "luaug/render/shader_library.h"
+#include "luaug/render/sky_loader.h"
 #include "luaug/render/terrain_loader.h"
 #include "luaug/render/transform_history.h"
 #include "luaug/render/ui_renderer.h"
@@ -986,6 +987,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     render::VoxelLoader voxelLoader;
     // Particles (F2): simulated on the frame, because they are a picture.
     render::ParticleSystem particles;
+    // **A `Sky`'s six pictures** (ADR 0096), read and resampled off the frame
+    // thread; the previous sky draws until a new one is ready. A headless run
+    // waits for it instead, for the reason the texture loader does: a capture
+    // records the frame it was told to, not the frame the sky arrived by.
+    render::SkyLoader skyLoader;
+    skyLoader.setContentRoot(contentRoot);
+    skyLoader.setContentMounts(&contentMounts);
+    skyLoader.setSynchronous(options.headless);
     // **The editor reads its textures off the frame; everything else does not**
     // (D118). A decode is 14 to 36 ms for an ordinary 1024-square PNG, and the
     // synchronous path loads every missing map it finds in one frame -- so
@@ -2249,6 +2258,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                                       inspector.selectionSet());
                     }
                 }
+                if (!editorCommands.assignSkyboxPath.empty())
+                    (void)editor.assignSkybox(authored(), editorCommands.assignSkyboxPath,
+                                              editorCommands.assignSkyboxTarget);
                 if (!editorCommands.newMaterial.empty()) {
                     if (const std::string made = editor.createMaterial(editorCommands.newMaterial); !made.empty())
                         (void)editor.openMaterial(made);
@@ -3588,6 +3600,12 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             particles.update(authored(), stageOf() != nullptr ? stageOf()->workspace() : host->workspace(),
                              frame.renderDt);
             particles.append(snapshot);
+            // The sky's pictures, for the sky the extract resolved: a bake
+            // started, or a finished one uploaded -- before any render pass.
+            if (renderer != nullptr && renderer->valid()) {
+                skyLoader.sync(*device, *cmd, authored(), snapshot.look.sky);
+                skyLoader.append(snapshot);
+            }
             // The UI is laid out against the TARGET's size rather than the
             // window's: an offscreen render at 640x360 has to produce the
             // layout that resolution would, which is the whole of what the
@@ -4149,6 +4167,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
         }
     }
 
+    skyLoader.destroy(*device);
     uiText.destroy(*device);
     uiRenderer.destroy(*device);
     debugRenderer.destroy(*device);

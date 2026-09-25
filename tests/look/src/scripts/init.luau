@@ -259,6 +259,41 @@ local Variants: { [string]: () -> () } = {
     ["exposure-fixed"] = function()
         Lighting.AutoExposure = false
     end,
+    ["sky-images"] = function()
+        local sky = Instance.new("Sky")
+        sky.SkyboxBack = "asset://sky/back.png" :: Content
+        sky.SkyboxDown = "asset://sky/down.png" :: Content
+        sky.SkyboxFront = "asset://sky/front.png" :: Content
+        sky.SkyboxLeft = "asset://sky/left.png" :: Content
+        sky.SkyboxRight = "asset://sky/right.png" :: Content
+        sky.SkyboxUp = "asset://sky/up.png" :: Content
+        sky.Parent = Lighting
+    end,
+    ["sky-turned"] = function()
+        local sky = Instance.new("Sky")
+        sky.SkyboxBack = "asset://sky/back.png" :: Content
+        sky.SkyboxDown = "asset://sky/down.png" :: Content
+        sky.SkyboxFront = "asset://sky/front.png" :: Content
+        sky.SkyboxLeft = "asset://sky/left.png" :: Content
+        sky.SkyboxRight = "asset://sky/right.png" :: Content
+        sky.SkyboxUp = "asset://sky/up.png" :: Content
+        sky.SkyboxOrientation = vector.create(0, 90, 0)
+        sky.Parent = Lighting
+    end,
+    ["sky-big-sun"] = function()
+        local sky = Instance.new("Sky")
+        sky.SunAngularSize = 8
+        sky.Parent = Lighting
+    end,
+    ["sky-night"] = function()
+        -- The engine's own gradient, with the moon and the stars a Sky adds.
+        Lighting.ClockTime = 5
+        local sky = Instance.new("Sky")
+        sky.Parent = Lighting
+    end,
+    ["night-before"] = function()
+        Lighting.ClockTime = 5
+    end,
 }
 
 local apply = Variants[Variant]

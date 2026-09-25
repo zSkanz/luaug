@@ -605,6 +605,10 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // to the camera the game looks through, and a tool looking at the scene is
     // looking at that.
     resolveLook(world, lightingHost, cameraUsable ? cameraId : core::InstanceId{}, out.look);
+    if (out.look.sky.present && materials != nullptr) {
+        out.look.sky.sunImage = materials->find(out.look.sky.sunTexture);
+        out.look.sky.moonImage = materials->find(out.look.sky.moonTexture);
+    }
 
     // --- Debug parts --------------------------------------------------------
     //

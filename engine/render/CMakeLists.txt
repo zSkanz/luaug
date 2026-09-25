@@ -23,6 +23,8 @@ luaug_add_module(render
         src/mesh_cache.cpp
         src/lighting.cpp
         src/look.cpp
+        src/skybox.cpp
+        src/sky_loader.cpp
         src/native_accessors.cpp
         src/renderer_default.cpp
         src/settings.cpp
@@ -73,6 +75,7 @@ luaug_add_module_tests(render
         tests/mesh_cache_tests.cpp
         tests/lighting_tests.cpp
         tests/look_tests.cpp
+        tests/skybox_tests.cpp
         tests/settings_tests.cpp
         tests/shadow_tests.cpp
         tests/animation_tests.cpp

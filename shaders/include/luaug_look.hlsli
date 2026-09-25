@@ -98,4 +98,44 @@ float airOpticalDepth(float rise, float reach)
 }
 #endif
 
+#if defined(LUAUG_UNIFORMS_LOOK_SKY)
+// `render::GpuLookSkyUniforms`, 96 bytes, at the fragment stage's SECOND slot:
+// the first is the plain sky's `GpuSkyUniforms`, which `sky_look.hlsl` reads as
+// it is.
+cbuffer GpuLookSkyUniforms : register(b1, space3)
+{
+    // x the six pictures are drawn, y the sun, moon and stars are, z the sun is
+    // a picture, w the moon is.
+    float4 LookSkyFlags;
+    // xyz towards the moon, w its angular radius in radians.
+    float4 LookMoon;
+    // rgb the moon's light, w how much of it shows -- nothing by day.
+    float4 LookMoonColor;
+    // x the star grid's cells per cube face, y the chance a cell holds one, z
+    // how much of the stars shows -- nothing by day, w unused.
+    float4 LookStars;
+    // x how much of the sky clouds cover, y how thick they are, zw where the
+    // wind has carried them, in cloud-layer units.
+    float4 LookClouds;
+    // rgb the clouds' colour where the sun lights them, w unused.
+    float4 LookCloudColor;
+};
+
+// The octahedral mapping, the same as `luaug_brdf.hlsli`'s and
+// `render::octahedralUv`'s: the pictures were resampled by the CPU half of it.
+float2 lookOctahedralUv(float3 direction)
+{
+    const float3 d = normalize(direction);
+    const float norm = abs(d.x) + abs(d.y) + abs(d.z);
+    const float3 n = d / max(norm, 1e-6f);
+    float2 f = float2(n.x, n.z);
+    if (n.y < 0.0f)
+    {
+        f = float2((1.0f - abs(n.z)) * (n.x >= 0.0f ? 1.0f : -1.0f),
+                   (1.0f - abs(n.x)) * (n.z >= 0.0f ? 1.0f : -1.0f));
+    }
+    return f * 0.5f + 0.5f;
+}
+#endif
+
 #endif // LUAUG_LOOK_HLSLI

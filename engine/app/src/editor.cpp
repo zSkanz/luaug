@@ -1478,6 +1478,78 @@ std::string Editor::createMaterialVariant(std::string_view parent, std::string_v
     return relative;
 }
 
+std::string_view skyFaceOfName(std::string_view fileName) noexcept
+{
+    // The stem: no folders, no extension.
+    if (const auto slash = fileName.find_last_of("/\\"); slash != std::string_view::npos)
+        fileName.remove_prefix(slash + 1);
+    if (const auto dot = fileName.find('.'); dot != std::string_view::npos)
+        fileName = fileName.substr(0, dot);
+    // Its last word, lower-cased: `Sunset_BK` and `sunset-back` say the same.
+    const std::size_t end = fileName.size();
+    std::size_t begin = end;
+    while (begin > 0 && std::isalnum(static_cast<unsigned char>(fileName[begin - 1])) != 0)
+        --begin;
+    if (begin == end)
+        return {};
+    std::string word(fileName.substr(begin, end - begin));
+    for (char& c : word)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    struct Spelling
+    {
+        std::string_view word;
+        std::string_view property;
+    };
+    static constexpr std::array<Spelling, 22> kSpellings{{
+        {"back", "SkyboxBack"},     {"bk", "SkyboxBack"},     {"pz", "SkyboxBack"},   {"down", "SkyboxDown"},
+        {"dn", "SkyboxDown"},       {"bottom", "SkyboxDown"}, {"ny", "SkyboxDown"},   {"front", "SkyboxFront"},
+        {"ft", "SkyboxFront"},      {"nz", "SkyboxFront"},    {"left", "SkyboxLeft"}, {"lf", "SkyboxLeft"},
+        {"nx", "SkyboxLeft"},       {"right", "SkyboxRight"}, {"rt", "SkyboxRight"},  {"px", "SkyboxRight"},
+        {"up", "SkyboxUp"},         {"top", "SkyboxUp"},      {"py", "SkyboxUp"},     {"bot", "SkyboxDown"},
+        {"forward", "SkyboxFront"}, {"behind", "SkyboxBack"},
+    }};
+    for (const Spelling& spelling : kSpellings) {
+        if (word == spelling.word)
+            return spelling.property;
+    }
+    return {};
+}
+
+bool Editor::assignSkybox(scene::World& world, std::string_view path, core::InstanceId sky)
+{
+    if (!world.alive(sky) || world.destroyed(sky) || world.skies().find(sky) == nullptr) {
+        m_status = EditorStatus{"drop sky pictures on a Sky", true};
+        return false;
+    }
+
+    // One picture, or every picture directly in the folder.
+    std::vector<std::pair<std::string_view, std::string>> faces;
+    const std::string folder(path);
+    for (const ContentEntry& entry : m_content.entries()) {
+        if (entry.kind != ContentKind::Texture)
+            continue;
+        const bool itself = entry.path == folder;
+        const bool inside = entry.path.size() > folder.size() + 1 && entry.path.starts_with(folder) &&
+                            entry.path[folder.size()] == '/' &&
+                            entry.path.find('/', folder.size() + 1) == std::string::npos;
+        if (!itself && !inside)
+            continue;
+        if (const std::string_view property = skyFaceOfName(entry.path); !property.empty())
+            faces.emplace_back(property, std::string(asset::AssetScheme) + entry.path);
+    }
+    if (faces.empty()) {
+        m_status = EditorStatus{"no picture there is named for a face (back, down, front, left, right, up)", true};
+        return false;
+    }
+
+    m_history.record(world, "Assign Sky Pictures");
+    for (const auto& [property, urn] : faces)
+        (void)world.setProperty(sky, world.atoms().intern(property), scene::Value{urn});
+    m_status = EditorStatus{std::to_string(faces.size()) + (faces.size() == 1 ? " face" : " faces") + " set", false};
+    return true;
+}
+
 bool Editor::assignMaterialTo(scene::World& world, std::string_view path, std::span<const core::InstanceId> targets)
 {
     const std::string relative = normalizeMaterialPath(path);

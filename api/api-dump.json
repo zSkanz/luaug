@@ -2521,8 +2521,7 @@
         {
           "Name": "CelestialBodiesShown",
           "Type": "boolean",
-          "Default": "true",
-          "Inert": true
+          "Default": "true"
         },
         {
           "Name": "CloudColor",
@@ -2545,66 +2544,54 @@
         {
           "Name": "MoonAngularSize",
           "Type": "number",
-          "Default": "2",
-          "Inert": true
+          "Default": "2"
         },
         {
           "Name": "MoonTexture",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "SkyboxBack",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "SkyboxDown",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "SkyboxFront",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "SkyboxLeft",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "SkyboxOrientation",
           "Type": "vector",
-          "Default": "vector.create(0, 0, 0)",
-          "Inert": true
+          "Default": "vector.create(0, 0, 0)"
         },
         {
           "Name": "SkyboxRight",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "SkyboxUp",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         },
         {
           "Name": "StarCount",
           "Type": "number",
-          "Default": "3000",
-          "Inert": true
+          "Default": "3000"
         },
         {
           "Name": "SunAngularSize",
           "Type": "number",
-          "Default": "2.3",
-          "Inert": true
+          "Default": "2.3"
         },
         {
           "Name": "SunTexture",
-          "Type": "Content",
-          "Inert": true
+          "Type": "Content"
         }
       ],
       "Methods": [],

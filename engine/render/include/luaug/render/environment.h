@@ -27,6 +27,7 @@
 #include "luaug/core/math.h"
 #include "luaug/core/types.h"
 
+#include <memory>
 #include <span>
 
 namespace luaug::render {
@@ -37,6 +38,8 @@ using core::u16;
 using core::u32;
 using core::usize;
 using core::Vec3;
+
+struct SkyRadiance;
 
 // The prefiltered environment's base level, in texels per side. 128 is chosen
 // against the content rather than against a habit: the sky is a smooth gradient
@@ -104,6 +107,13 @@ struct SkyParams
     // that no shader changes for it -- the sky pass ignores it, and the chain
     // rebakes when it changes, as it does for a new horizon colour.
     f32 specularScale = 1.0f;
+    // **A `Sky` of pictures** (ADR 0096): their linear light, which replaces
+    // the gradient in everything this struct describes -- so the reflections
+    // and the diffuse light come from the pictures. Null is the gradient.
+    std::shared_ptr<const SkyRadiance> skybox;
+    // `Sky.CelestialBodiesShown`: the sun's disc and glow are in the sky, and
+    // therefore in its reflection. The light the sun casts is not this.
+    bool celestial = true;
 };
 
 // The derivation, and the one place it happens.
@@ -115,6 +125,10 @@ struct SkyParams
 // approaches the horizon, and below it the warmth cools through twilight into
 // a night blue. None of that touches a script-authored value.
 [[nodiscard]] SkyParams skyParamsFor(Vec3 sunDirection, Color3 fogColor) noexcept;
+
+// Gives the sun's disc a new angular radius, in radians, and the two cosines
+// derived from it.
+void setSunAngularRadius(SkyParams& params, f32 radius) noexcept;
 
 // Linear HDR radiance arriving from `direction`, which need not be normalised.
 // The CPU half of `shaders/src/sky.hlsl`; see this file's header.
