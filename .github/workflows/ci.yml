@@ -678,6 +678,109 @@ jobs:
   # observed wall time, small enough that saving and restoring a cache is a real
   # fraction of it -- and this job has no test step for a cache to shorten.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # **The compiler the editor ships, built from source** (ADR 0091).
+  #
+  # Once per pinned DXC commit and desktop platform: the result is cached under
+  # a key that IS the commit, so every later run restores it in seconds and no
+  # ordinary build compiles LLVM. `tools/repo/toolchain.luau` is the same
+  # command a developer runs, and it refuses a checkout whose commit or
+  # submodules do not match the manifest. What is cached is what ships -- the
+  # compiler, its library, its licence texts and the stamp -- never the 4 GB
+  # build tree.
+  # ---------------------------------------------------------------------------
+  dxc-source:
+    needs: changes
+    if: ${{ !cancelled() && !startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.code != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, platform: windows-x64 }
+          - { os: ubuntu-latest, platform: linux-x64 }
+          - { os: macos-latest, platform: macos-arm64 }
+          - { os: macos-13, platform: macos-x64 }
+    runs-on: ${{ matrix.os }}
+    # A cold build on a four-core runner is the whole of LLVM's HLSL front end;
+    # measured locally at 5 to 6 minutes on 14 threads, so a quarter of that
+    # rate plus headroom. A warm run is a cache restore.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set the out-of-tree build root (R14) and the cache key
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "LUAUG_BUILD_ROOT=${RUNNER_TEMP}/luaug-build" >> "$GITHUB_ENV"
+          commit="$(python3 -c "import json;print(next(r['commit'] for r in json.load(open('third_party/manifest.json'))['toolchains'] if r['name']=='dxc'))")"
+          version="$(python3 -c "import json;print(next(r['version'] for r in json.load(open('third_party/manifest.json'))['toolchains'] if r['name']=='dxc'))")"
+          echo "DXC_COMMIT=${commit}" >> "$GITHUB_ENV"
+          echo "DXC_HOME=${RUNNER_TEMP}/luaug-build/toolchains/dxc-source/${version}/${{ matrix.platform }}" >> "$GITHUB_ENV"
+
+      - name: Restore the built compiler
+        id: cache
+        uses: actions/cache@v4
+        with:
+          key: dxc-source-${{ matrix.platform }}-${{ env.DXC_COMMIT }}
+          path: |
+            ${{ env.DXC_HOME }}/bin
+            ${{ env.DXC_HOME }}/licenses
+            ${{ env.DXC_HOME }}/STAMP
+
+      - name: Install rokit and the pinned toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "${RUNNER_OS}-$(uname -m)" in
+            Windows-*) asset="windows-x86_64" ;;
+            Linux-*)   asset="linux-x86_64" ;;
+            macOS-arm64) asset="macos-aarch64" ;;
+            macOS-*)   asset="macos-x86_64" ;;
+          esac
+          curl -fsSL -o "${RUNNER_TEMP}/rokit.zip" \
+            "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-${asset}.zip"
+          unzip -q "${RUNNER_TEMP}/rokit.zip" -d "${RUNNER_TEMP}/rokit"
+          "${RUNNER_TEMP}/rokit/rokit" self-install
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+          "$HOME/.rokit/bin/rokit" authenticate github --token "$GH_TOKEN"
+          "$HOME/.rokit/bin/rokit" install --no-trust-check
+
+      - name: Ensure Ninja
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ninja >/dev/null 2>&1; then
+            if [[ "${RUNNER_OS}" == "macOS" ]]; then brew install ninja; else sudo apt-get install -y ninja-build; fi
+          fi
+
+      - name: Build DXC from source (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          lute tools/repo/toolchain.luau build dxc --jobs=4 --platform=${{ matrix.platform }} || exit /b 1
+
+      - name: Build DXC from source
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        shell: bash
+        run: lute tools/repo/toolchain.luau build dxc --jobs=4 --platform=${{ matrix.platform }}
+
+      - name: Upload the built compiler
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxc-${{ matrix.platform }}
+          path: |
+            ${{ env.DXC_HOME }}/bin
+            ${{ env.DXC_HOME }}/licenses
+            ${{ env.DXC_HOME }}/STAMP
+          retention-days: 30
+
   build-macos:
     # Gated exactly as `build-test` is, and for the reasons stated there: only a
     # literal `false` from `changes` stops it, so a `changes` job that fails or

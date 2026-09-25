@@ -48,16 +48,17 @@ run at any time.
 
 ## Stage 0 — Verify `U-64` before anything depends on it
 
-- [ ] Build DXC from source at the manifest's pinned version (v1.9.2602),
+- [x] Build DXC from source at the manifest's pinned version (v1.9.2602),
       outside the repository tree, on Windows x64.
-- [ ] Compile a trivial shader to DXIL with it, and put **no** `dxil.dll`
+- [x] Compile a trivial shader to DXIL with it, and put **no** `dxil.dll`
       anywhere the process can find one.
-- [ ] Create a graphics pipeline from that DXIL through SDL3 GPU's D3D12
+- [x] Create a graphics pipeline from that DXIL through SDL3 GPU's D3D12
       backend on a retail Windows machine with **Developer Mode off**, and draw
-      one frame.
-- [ ] Record the measured source-build time and output size for each desktop
+      one frame. *Through D3D12 directly, with a hash-zeroed control that is
+      refused -- see Findings.*
+- [x] Record the measured source-build time and output size for each desktop
       platform you can build here (Windows, and Linux in the Tier-2 container).
-- [ ] Update `U-64` in `docs/research/UNCONFIRMED.md` to `confirmed` or
+- [x] Update `U-64` in `docs/research/UNCONFIRMED.md` to `confirmed` or
       `refuted`, with how it was verified.
 - **If `U-64` is refuted, stop and report to the owner.** ADR 0091 lists the two
   fallbacks: fetch Microsoft's `dxil.dll` onto the user's machine as ADR 0032
@@ -66,19 +67,22 @@ run at any time.
 
 ## Stage 1 — The toolchain that ships
 
-- [ ] A pinned, hashed **source** row for DXC in `third_party/manifest.json`,
+- [x] A pinned, hashed **source** row for DXC in `third_party/manifest.json`,
       beside the existing prebuilt row. Each row says which is built by the
       engine's developers and which is redistributed. `THIRD_PARTY_NOTICES.md`
       is regenerated, and carries DXC's NCSA notice and the notices its licence
       lists for its third-party parts.
-- [ ] A CI job that builds DXC from source **once per pinned version and per
+- [x] A CI job that builds DXC from source **once per pinned version and per
       desktop platform** (Windows x64, Linux x64, macOS arm64 and x64) and caches
       the result. No ordinary build ever compiles LLVM, and the cache key is the
       source hash.
-- [ ] `scripts/package.ps1` and `tools/repo/package.luau` put `dxcompiler` and
+- [~] `scripts/package.ps1` and `tools/repo/package.luau` put `dxcompiler` and
       SDL_shadercross beside the editor binary. A package without them fails the
       package step rather than shipping an editor that cannot compile.
-- [ ] The engine's own shaders keep ADR 0032's fetched prebuilt compiler. Only
+      *`dxcompiler`, `dxc` and the licence texts: done. SDL_shadercross is
+      linked into the editor and `assetc` when Stage 4 gives them something to
+      compile, so there is no separate file to ship.*
+- [x] The engine's own shaders keep ADR 0032's fetched prebuilt compiler. Only
       the source-built one is ever redistributed.
 
 ## Stage 2 — The contract
@@ -196,4 +200,21 @@ shaders, and mobile -- ADR 0091, *Not decided here*.
 
 ## Findings
 
-*(Appended as the stages land.)*
+- **Stage 0, 2026-09-25 -- U-64 holds, and the proof is a refusal as well as
+  an acceptance.** DXC built from the `v1.9.2602` source (commit `21d28f72`)
+  signs its own DXIL: a probe created a pipeline from it on retail D3D12 with
+  Developer Mode off and no `dxil.dll` anywhere, drew a frame and read back the
+  colour the shader writes; the same bytecode with its container digest zeroed
+  was refused (`E_INVALIDARG`). The probe called D3D12 directly rather than
+  through SDL3 GPU -- SDL hands the same bytes to the same
+  `CreateGraphicsPipelineState`, and the direct call is what makes the control
+  possible. The source-built output is **not** byte-identical to the prebuilt
+  compiler's (the container differs from byte 5, and a vertex shader was four
+  bytes longer), so "compare the bytes" is not a substitute for the device.
+- **The source build is minutes, not hours.** Configure and build: 5 min 23 s
+  on Windows x64 at `-j14`, 295 s on Linux x64 in the Tier-2 image; the whole
+  build tree is 4 GB, what ships is `dxcompiler` (21 MB on Windows, 37.5 MB on
+  Linux) and a 1 MB `dxc`. That is why CI caches only what ships.
+- **SDL_shadercross links `dxcompiler` at load time** (`DxcCreateInstance` is
+  an import, not a `LoadLibrary`), so whatever links it needs the library
+  beside it. The player never links it; the editor and `assetc` will.

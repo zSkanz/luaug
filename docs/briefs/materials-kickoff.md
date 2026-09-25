@@ -62,7 +62,7 @@ one included -- then a push, then CI read. Nothing lands on a red `main`.
       closed it.
 - [x] The engine default material, built in (not a file): white, `Metalness` 0,
       `Roughness` 0.7, declaring `Color` and `Transparency`.
-- [~] A `MaterialLibrary` the host owns, keyed by URN, that loads through
+- [x] A `MaterialLibrary` the host owns, keyed by URN, that loads through
       `ContentMounts` (compiled first, loose second) and reloads a changed file
       (ADR 0062). `scene` is L3 and has no filesystem: it holds a handle, and the
       host answers what the handle means. `tools/repo/checklayers.luau` has to

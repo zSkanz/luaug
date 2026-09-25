@@ -20,7 +20,7 @@ vendored yet; the roadmap allows lazy vendoring so long as the row exists.
 | sdl_shadercross | main-2026-06-26 | `e55cf5e31ced` | zlib | https://github.com/libsdl-org/SDL_shadercross | `third_party/sdl_shadercross/` |
 | spirv_cross | sdl-shadercross-pin | `1a6169566c73` | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-Cross | `third_party/spirv_cross/` |
 | jolt | 5.6.0 | `e77f175595e6` | MIT | https://github.com/jrouwe/JoltPhysics | `third_party/jolt/` |
-| box2d | 3.1.1 | _not vendored yet_ | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
+| box2d | 3.1.1 | `8c661469c950` | MIT | https://github.com/erincatto/box2d | `third_party/box2d/` |
 | miniaudio | 0.11.25 | `9634bedb5b5a` | MIT-0 OR Unlicense | https://github.com/mackron/miniaudio | `third_party/miniaudio/` |
 | fastgltf | 0.9.0 | `0d1b67a28c49` | MIT | https://github.com/spnda/fastgltf | `third_party/fastgltf/` |
 | simdjson | 3.12.3 | `7382dc2be88e` | Apache-2.0 OR MIT | https://github.com/simdjson/simdjson | `third_party/simdjson/` |
@@ -48,6 +48,16 @@ by SHA256 (ADR 0032). They do not ship inside the engine or a packaged game.
 |---|---|---|---|---|---|
 | dxc | v1.9.2602 | NCSA AND MIT | windows-x64 | `a1e89031421cf3c1…` | https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip |
 | dxc | v1.9.2602 | NCSA AND MIT | linux-x64 | `a1d3e3b5e1c5685b…` | https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/linux_dxc_2026_02_20.x86_64.tar.gz |
+
+## Toolchains built from source and redistributed
+
+Built by `tools/repo/toolchain.luau` at a pinned commit, outside the repository,
+and **shipped beside the editor** (ADR 0091) -- never inside a packaged game.
+The editor folder carries each one's licence texts under `licenses/<name>/`.
+
+| Toolchain | Version | Commit | License | Licence texts | Upstream |
+|---|---|---|---|---|---|
+| dxc | v1.9.2602 | `21d28f727ad3` | NCSA AND MIT AND Apache-2.0 | `LICENSE.TXT`, `ThirdPartyNotices.txt` | https://github.com/microsoft/DirectXShaderCompiler |
 
 Policy: permissive licenses only (MIT / BSD / zlib / Apache-2.0 / public domain).
 No GPL, no LGPL, and no commercial dependency in the default build path. Adding

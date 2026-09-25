@@ -625,6 +625,50 @@ local function commandNotices()
         end
     end
 
+    local decodedRoot = json.asObject(json.deserialize(fs.readFileToString(ManifestPath)))
+    local toolchains = if decodedRoot then json.asArray((decodedRoot :: json.Object).toolchains) else nil
+    if toolchains and #(toolchains :: json.Array) > 0 then
+        table.insert(lines, "")
+        table.insert(lines, "## Toolchains built from source and redistributed")
+        table.insert(lines, "")
+        table.insert(lines, "Built by `tools/repo/toolchain.luau` at a pinned commit, outside the repository,")
+        table.insert(lines, "and **shipped beside the editor** (ADR 0091) -- never inside a packaged game.")
+        table.insert(lines, "The editor folder carries each one's licence texts under `licenses/<name>/`.")
+        table.insert(lines, "")
+        table.insert(lines, "| Toolchain | Version | Commit | License | Licence texts | Upstream |")
+        table.insert(lines, "|---|---|---|---|---|---|")
+        for index, entry in toolchains :: json.Array do
+            local row = json.asObject(entry)
+            if not row then
+                fail(`{ManifestPath}: toolchain #{index} is not an object`)
+            end
+            local context = `{ManifestPath} toolchain #{index}`
+            local files: { string } = {}
+            local declaredFiles = json.asArray((row :: json.Object).licenseFiles)
+            if declaredFiles then
+                for _, file in declaredFiles :: json.Array do
+                    table.insert(files, `\`{file}\``)
+                end
+            end
+            table.insert(
+                lines,
+                `| {expectString(row :: json.Object, "name", context)} | {expectString(
+                    row :: json.Object,
+                    "version",
+                    context
+                )} | \`{string.sub(expectString(row :: json.Object, "commit", context), 1, 12)}\` | {expectString(
+                    row :: json.Object,
+                    "license",
+                    context
+                )} | {table.concat(files, ", ")} | {expectString(
+                    row :: json.Object,
+                    "upstream",
+                    context
+                )} |`
+            )
+        end
+    end
+
     table.insert(lines, "")
     table.insert(lines, "Policy: permissive licenses only (MIT / BSD / zlib / Apache-2.0 / public domain).")
     table.insert(lines, "No GPL, no LGPL, and no commercial dependency in the default build path. Adding")

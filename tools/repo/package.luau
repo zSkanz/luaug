@@ -38,6 +38,7 @@
 ]]
 
 local fs = require("@std/fs")
+local json = require("@std/json")
 local path = require("@std/path")
 local platform = require("@std/system/platform")
 local process = require("@std/process")
@@ -54,6 +55,17 @@ end
 
 local function executableName(base: string): string
     return if platform.win32 then `{base}.exe` else base
+end
+
+--- The platform tag `tools/repo/toolchain.luau` builds under -- a different
+--- spelling from the folder's, and the same one that tool uses.
+local function toolchainPlatform(): string
+    local hint = string.lower(process.env.PROCESSOR_ARCHITECTURE or process.env.HOSTTYPE or "")
+    local arch = if string.find(hint, "arm") then "arm64" else "x64"
+    if platform.win32 then
+        return `windows-{arch}`
+    end
+    return if platform.macos then `macos-{arch}` else `linux-{arch}`
 end
 
 --- The platform tag in the folder's name. Not derived from a target, because
@@ -302,6 +314,34 @@ local function run(): number
     -- The player, under its own directory with its own content, so that
     -- `luaug build` can find a binary that carries no overlay (D057).
     copyHost(joined(buildRoot, playerPreset, "engine", "app"), joined(target, "player"), "the player host")
+
+    -- **The compilers the editor ships** (ADR 0091): every redistributed
+    -- toolchain row, built from source by `tools/repo/toolchain.luau`, beside
+    -- the editor and never under `player/` -- a game never compiles a shader.
+    -- Its licence texts go with it. Missing is a failed package, not an editor
+    -- that cannot compile a user's surface shader.
+    local manifest = json.asObject(json.deserialize(fs.readFileToString("third_party/manifest.json")))
+    local toolchains = if manifest then json.asArray((manifest :: json.Object).toolchains) else nil
+    if toolchains then
+        for _, entry in toolchains :: json.Array do
+            local row = json.asObject(entry)
+            if not row or (row :: json.Object).redistributed ~= true then
+                continue
+            end
+            local toolchain = tostring((row :: json.Object).name)
+            local rowVersion = tostring((row :: json.Object).version)
+            local home = joined(buildRoot, "toolchains", `{toolchain}-source`, rowVersion, toolchainPlatform())
+            if not fs.exists(joined(home, "STAMP")) then
+                fail(
+                    `{toolchain} {rowVersion} is not built for this platform; run: `
+                        .. `lute tools/repo/toolchain.luau build {toolchain}`
+                )
+                continue
+            end
+            copyTree(joined(home, "bin"), target)
+            copyRequiredTree(joined(home, "licenses"), joined(target, "licenses", toolchain), `{toolchain}'s licences`)
+        end
+    end
 
     -- The two tools the CLI shells out to. `assetc` keeps a content directory of
     -- its own when the build produced one.
