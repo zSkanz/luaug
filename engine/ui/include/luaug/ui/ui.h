@@ -362,6 +362,11 @@ struct InteractionResult
 [[nodiscard]] InteractionResult updateInteraction(scene::World& world, core::InstanceId uiService,
                                                   const InteractionInput& input);
 
+// **Forgets what was hovered, pressed and focused.** Those are ids into ONE
+// world, and play and stop replace it: a focus kept across the swap is a
+// text field of a world that is gone still holding the keyboard.
+void resetInteraction() noexcept;
+
 // The topmost visible element under a point, or an invalid id. Exposed for the
 // tests, which is the only reason it is not private: a hit test is easier to
 // believe as a case than as a consequence.

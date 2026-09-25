@@ -171,6 +171,11 @@ void moveCaret(std::string_view text, u32& caret, const InteractionInput& input)
 
 } // namespace
 
+void resetInteraction() noexcept
+{
+    g_state = InteractionState{};
+}
+
 core::InstanceId hitTest(const scene::World& world, core::InstanceId uiService, core::Vec2 point)
 {
     if (!uiService.valid())

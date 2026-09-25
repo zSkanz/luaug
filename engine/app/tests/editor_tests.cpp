@@ -5917,3 +5917,28 @@ TEST_CASE("with the UI selected, a click in the viewport reaches the UI under it
     const auto beside = editor.resolvePick(rig.world, rig.workspace, inspector);
     CHECK_FALSE(beside.has_value());
 }
+
+TEST_CASE("in the editor the game's pointer is in the viewport's pixels")
+{
+    // **The owner**: a friend's buttons did not answer in play. The game is
+    // drawn into the viewport panel and its UI laid out against that panel, so
+    // a pointer in window pixels missed by the panel's offset.
+    std::vector<platform::Event> window(3);
+    window[0].type = platform::EventType::MouseMoved;
+    window[0].pointerX = 420.0f;
+    window[0].pointerY = 148.0f;
+    window[1].type = platform::EventType::MouseButtonDown;
+    window[1].pointerX = 420.0f;
+    window[1].pointerY = 148.0f;
+    window[2].type = platform::EventType::KeyDown;
+    window[2].pointerX = 7.0f;
+
+    std::vector<platform::Event> game;
+    app::toViewportEvents(window, ViewportRect{320.0f, 48.0f, 800.0f, 600.0f}, game);
+    REQUIRE(game.size() == 3);
+    CHECK(static_cast<double>(game[0].pointerX) == doctest::Approx(100.0));
+    CHECK(static_cast<double>(game[0].pointerY) == doctest::Approx(100.0));
+    CHECK(static_cast<double>(game[1].pointerX) == doctest::Approx(100.0));
+    // Not a pointer event: left as it was.
+    CHECK(static_cast<double>(game[2].pointerX) == doctest::Approx(7.0));
+}

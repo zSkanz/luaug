@@ -179,6 +179,53 @@ TEST_CASE("Activated needs both ends of the press on one element")
     (void)button;
 }
 
+TEST_CASE("a button is its whole box: an image button with or without an image, a text button with no text")
+{
+    // **The owner**: a friend's buttons did not answer. The box is what takes
+    // the click -- not the picture, not the text, not whether the background
+    // is drawn -- so each of these is pressed anywhere inside it.
+    Fixture fixture;
+    const auto place = [&](InstanceId id, float x, float y) {
+        scene::UIObjectComponent* object = fixture.world->uiObjects().find(id);
+        object->position = core::UDim2{core::UDim{0.0f, x}, core::UDim{0.0f, y}};
+        object->size = core::UDim2{core::UDim{0.0f, 100.0f}, core::UDim{0.0f, 60.0f}};
+    };
+    const auto press = [&](Vec2 at) {
+        fixture.interact(at, true, false);
+        (void)fixture.events();
+        fixture.interact(at, false, true);
+        const std::vector<std::string> after = fixture.events();
+        return std::ranges::find(after, "Activated") != after.end();
+    };
+
+    // No image: the background's box.
+    const InstanceId plain = fixture.child("ImageButton", fixture.screen);
+    place(plain, 0.0f, 0.0f);
+    // An image and no background drawn at all: still the box.
+    const InstanceId pictured = fixture.child("ImageButton", fixture.screen);
+    place(pictured, 200.0f, 0.0f);
+    (void)fixture.world->setProperty(pictured, fixture.atoms.intern("Image"),
+                                     scene::Value{std::string("asset://icon.png")});
+    (void)fixture.world->setProperty(pictured, fixture.atoms.intern("BackgroundTransparency"), scene::Value{1.0});
+    // The friend's: an empty text button inside a rounded frame, beside a label.
+    const InstanceId holder = fixture.child("Frame", fixture.screen);
+    place(holder, 0.0f, 200.0f);
+    fixture.world->uiObjects().find(holder)->size = core::UDim2{core::UDim{0.0f, 400.0f}, core::UDim{0.0f, 300.0f}};
+    (void)fixture.child("UICorner", holder);
+    const InstanceId label = fixture.child("TextLabel", holder);
+    place(label, 0.0f, 0.0f);
+    const InstanceId restart = fixture.box(holder, 50.0f, 150.0f, 200.0f, 80.0f);
+    (void)fixture.world->setProperty(restart, fixture.atoms.intern("Text"), scene::Value{std::string()});
+    fixture.run();
+
+    CHECK(press(Vec2{50.0f, 30.0f}));
+    CHECK(press(Vec2{250.0f, 30.0f}));
+    CHECK(press(Vec2{100.0f, 390.0f}));
+    // And a click on the label beside it is the label's, not the button's.
+    CHECK(ui::hitTest(*fixture.world, fixture.service, Vec2{50.0f, 230.0f}) == label);
+    CHECK(ui::hitTest(*fixture.world, fixture.service, Vec2{100.0f, 390.0f}) == restart);
+}
+
 TEST_CASE("the UI reports whether it took the pointer")
 {
     Fixture fixture;

@@ -136,6 +136,19 @@ namespace {
 
 } // namespace
 
+void toViewportEvents(std::span<const platform::Event> events, const ViewportRect& viewport,
+                      std::vector<platform::Event>& out)
+{
+    out.assign(events.begin(), events.end());
+    for (platform::Event& event : out) {
+        if (event.type == platform::EventType::MouseMoved || event.type == platform::EventType::MouseButtonDown ||
+            event.type == platform::EventType::MouseButtonUp || event.type == platform::EventType::MouseWheel) {
+            event.pointerX -= viewport.x;
+            event.pointerY -= viewport.y;
+        }
+    }
+}
+
 std::optional<PickHit> pickNearest(const scene::World& world, core::InstanceId root, const PickRay& ray) noexcept
 {
     std::optional<PickHit> best;

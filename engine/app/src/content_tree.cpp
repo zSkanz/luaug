@@ -148,6 +148,7 @@ bool ContentTree::open(const std::filesystem::path& root, std::string_view relat
 
 bool ContentTree::refresh()
 {
+    ++m_refreshes;
     m_entries.clear();
     if (m_root.empty())
         return false;

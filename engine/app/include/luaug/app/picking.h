@@ -3,6 +3,7 @@
 #include <luaug/core/id.h>
 #include <luaug/core/math.h>
 #include <luaug/core/types.h>
+#include <luaug/platform/event.h>
 
 #include <optional>
 #include <span>
@@ -39,6 +40,15 @@ struct ViewportRect
     f32 width = 1.0f;
     f32 height = 1.0f;
 };
+
+// **The game's pointer, in the viewport's pixels** (the owner: a friend's
+// buttons did not answer in play). In the editor the game is drawn into the
+// viewport panel, and its UI is laid out against that panel's size -- so a
+// pointer in WINDOW pixels lands wherever the panel's offset puts it, off the
+// button it was aimed at. Every pointer event is moved by the panel's origin;
+// everything else passes as it was.
+void toViewportEvents(std::span<const platform::Event> events, const ViewportRect& viewport,
+                      std::vector<platform::Event>& out);
 
 struct PickRay
 {

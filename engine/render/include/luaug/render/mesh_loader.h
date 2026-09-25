@@ -213,6 +213,13 @@ public:
     // the cache's to free; the textures are this one's.
     void destroy(rhi::IDevice& device);
 
+    // **Try the missing ones again** (the owner: textures imported after a
+    // script asked for them showed only after the engine was reopened). A
+    // texture not found is remembered so it is not read and warned about every
+    // frame -- and was remembered for good. The content changing, or play
+    // starting, is when one of them may be there now.
+    void retryMissing() noexcept { failed_.clear(); }
+
     // Waits for any decode still running, because one is writing into memory
     // this object owns. See the definition: abandoning it is a use-after-free at
     // shutdown, which is the hardest kind to attribute.

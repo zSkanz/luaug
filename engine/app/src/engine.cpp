@@ -835,6 +835,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     render::TextureLibrary textureLibrary;
     render::MeshCache meshCache;
     render::MeshLoader meshLoader;
+    core::u64 contentRefreshesSeen = 0;
 
     // Where `asset://` resolves from. Two mounts and the order is the rule:
     // the project's content DIRECTORY first, then its pack if one has been
@@ -915,6 +916,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     const bool isProject = !options.scriptPath.empty() && std::filesystem::is_directory(options.scriptPath, pathError);
     const std::filesystem::path contentRoot = isProject ? options.scriptPath / "content" : platform::paths().contentDir;
     meshLoader.setContentRoot(contentRoot);
+    // What `asset://` completes to in the script editor.
+    if (isProject)
+        setCompletionAssetRoot(contentRoot);
 
     contentMounts.clear();
     if (!isProject)
@@ -1580,6 +1584,8 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                         // them, so the first resumption lands in this frame's
                         // drain and `game.Loaded` is raised after all of them.
                         if (wasEditing && !editing(editor.runState())) {
+                            meshLoader.retryMissing();
+                            ui::resetInteraction();
                             // Before the scripts start, so their first line is
                             // the first line of the console.
                             if (overlay.has_value())
@@ -1601,6 +1607,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     }
                     else {
                         editor.stop(host->world(), inspector);
+                        ui::resetInteraction();
 
                         // **What was typed during play survives the stop**
                         // (the owner: a variable changed while playing stayed
@@ -2003,6 +2010,13 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (!heightmapPicked.empty()) {
                     editor.setHeightmapSource(heightmapPicked.front());
                     heightmapPicked.clear();
+                }
+
+                // **Files that were missing may be there now**: the content
+                // was read again -- an import, a refresh, a folder made.
+                if (editor.content().refreshes() != contentRefreshesSeen) {
+                    contentRefreshesSeen = editor.content().refreshes();
+                    meshLoader.retryMissing();
                 }
 
                 if (!importedPaths.empty()) {
@@ -3337,7 +3351,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // the camera is two things answering one key.
             const bool gameTakesInput = !options.editor || (editor.inPlayMode() && !editor.cameraDetached());
             if (gameTakesInput) {
-                host->pumpInput(events);
+                // In the editor, the game's pointer is the viewport's (see
+                // `toViewportEvents`): scripts, the UI and the canvases in the
+                // world all read it after this.
+                if (options.editor) {
+                    static std::vector<platform::Event> viewportEvents;
+                    toViewportEvents(events, editor.viewport(), viewportEvents);
+                    host->pumpInput(viewportEvents);
+                }
+                else {
+                    host->pumpInput(events);
+                }
             }
             else if (gameHadInput) {
                 host->input().releaseAll(host->world());

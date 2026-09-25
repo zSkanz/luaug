@@ -115,6 +115,9 @@ public:
     // second is the sort of thing that is invisible until somebody points a
     // project at a network drive.
     bool refresh();
+    // How many times the folder has been read, so what depends on the files --
+    // a texture that was missing -- can notice that it may be there now.
+    [[nodiscard]] core::u64 refreshes() const noexcept { return m_refreshes; }
 
     // Into a subfolder of the current one, or up to its parent. Both are no-ops
     // when there is nowhere to go, so a caller does not have to check first.
@@ -277,6 +280,7 @@ private:
     std::filesystem::path m_root;
     std::string m_relative;
     std::vector<ContentEntry> m_entries;
+    core::u64 m_refreshes = 0;
 };
 
 } // namespace luaug::app
