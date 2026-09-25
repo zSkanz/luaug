@@ -202,6 +202,21 @@ ${format_block}
         endforeach()
     endforeach()
 
+    # --- The engine's headers, beside the blobs (ADR 0091) -------------------
+    # What the editor's surface compiler includes when it compiles a user's
+    # shader at run time: `luaug/surface.hlsli` and everything it builds on.
+    foreach(header IN LISTS headers)
+        file(RELATIVE_PATH header_relative "${include_dir}" "${header}")
+        set(header_copy "${out_dir}/include/${header_relative}")
+        add_custom_command(
+            OUTPUT "${header_copy}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${header}" "${header_copy}"
+            DEPENDS "${header}"
+            COMMENT "Shader header ${header_relative} -> content"
+            VERBATIM)
+        list(APPEND outputs "${header_copy}")
+    endforeach()
+
     # --- Surface shaders the engine ships (ADR 0091) -------------------------
     set(surfaces "")
     foreach(pattern IN LISTS arg_SURFACES)

@@ -1,0 +1,13 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/look.surface.hlsl",
+  "readsSceneColor": false,
+  "instanceParameters": ["Color"],
+  "properties": {
+    "Color": [0.8, 0.35, 0.2],
+    "Roughness": 0.45,
+    "Metalness": 0.2
+  }
+}

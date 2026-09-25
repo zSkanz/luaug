@@ -139,6 +139,19 @@ if(LUAUG_DEBUG_UI)
     # compiles it.
     target_sources(luaug_app PRIVATE src/language_service.cpp)
     target_link_libraries(luaug_app PRIVATE Luau.Analysis)
+
+    # **The surface shader compiler** (ADR 0091), and only here: it RUNS
+    # `shadercross` rather than linking it, so the editor carries no compiler
+    # library and a shipped game neither compiles nor can. The build tree's own
+    # shadercross is where a dev build finds it; a package puts one beside the
+    # editor, which is looked for first.
+    target_sources(luaug_app PRIVATE src/surface_compiler.cpp)
+    if(LUAUG_SHADER_TOOLCHAIN)
+        target_compile_definitions(luaug_app PRIVATE
+            LUAUG_DEV_SHADERCROSS="${CMAKE_BINARY_DIR}/host-tools/shadercross${CMAKE_EXECUTABLE_SUFFIX}")
+    else()
+        target_compile_definitions(luaug_app PRIVATE LUAUG_DEV_SHADERCROSS="")
+    endif()
 endif()
 
 # PUBLIC rather than PRIVATE: debug_overlay.h describes a class that is inert in
@@ -289,6 +302,19 @@ luaug_add_module_tests(app
 if(LUAUG_BUILD_TESTS AND LUAUG_DEBUG_UI)
     target_sources(luaug_app_tests PRIVATE tests/language_service_tests.cpp)
     target_link_libraries(luaug_app_tests PRIVATE Luau.Analysis)
+
+    # The surface compiler against the real `shadercross` and the real headers
+    # (ADR 0091). Skipped, and saying so, on a host with no shader toolchain.
+    target_sources(luaug_app_tests PRIVATE tests/surface_compiler_tests.cpp)
+    if(LUAUG_SHADER_TOOLCHAIN)
+        target_compile_definitions(luaug_app_tests PRIVATE
+            LUAUG_TEST_SHADERCROSS="${CMAKE_BINARY_DIR}/host-tools/shadercross${CMAKE_EXECUTABLE_SUFFIX}")
+    else()
+        target_compile_definitions(luaug_app_tests PRIVATE LUAUG_TEST_SHADERCROSS="")
+    endif()
+    target_compile_definitions(luaug_app_tests PRIVATE
+        LUAUG_TEST_SHADER_INCLUDE="${CMAKE_SOURCE_DIR}/shaders/include")
+    add_dependencies(luaug_app_tests shadercross)
 endif()
 
 if(LUAUG_BUILD_TESTS AND LUAUG_ENABLE_REPLICATION)
@@ -784,6 +810,22 @@ if(LUAUG_BUILD_TESTS)
             SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
             TIMEOUT 180)
     endforeach()
+
+    # ADR 0091 end to end: a project's own surface shader, compiled by the
+    # editor at run time, drawn identically to the built-in surface it copies --
+    # and differently once changed, which is what shows it was used at all.
+    if(LUAUG_DEBUG_UI AND LUAUG_SHADER_TOOLCHAIN)
+        add_test(NAME user_surface_proof
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DIMGCMP=$<TARGET_FILE:imgcmp>
+                -DSCENES=${CMAKE_SOURCE_DIR}/tests/screenshots/usersurface
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/user-surface-proof
+                -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_user_surface_proof.cmake)
+        set_tests_properties(user_surface_proof PROPERTIES
+            SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+            TIMEOUT 240)
+    endif()
 
     # M8's graphics settings family, as a differential. See the driver for why
     # the claim is "these two must differ" rather than a golden: a preset that

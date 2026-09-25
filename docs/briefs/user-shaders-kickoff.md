@@ -76,12 +76,11 @@ run at any time.
       desktop platform** (Windows x64, Linux x64, macOS arm64 and x64) and caches
       the result. No ordinary build ever compiles LLVM, and the cache key is the
       source hash.
-- [~] `scripts/package.ps1` and `tools/repo/package.luau` put `dxcompiler` and
+- [x] `scripts/package.ps1` and `tools/repo/package.luau` put `dxcompiler` and
       SDL_shadercross beside the editor binary. A package without them fails the
       package step rather than shipping an editor that cannot compile.
-      *`dxcompiler`, `dxc` and the licence texts: done. SDL_shadercross is
-      linked into the editor and `assetc` when Stage 4 gives them something to
-      compile, so there is no separate file to ship.*
+      *The editor RUNS `shadercross` rather than linking it (see Findings), so
+      both are files beside the editor, and the player gets neither.*
 - [x] The engine's own shaders keep ADR 0032's fetched prebuilt compiler. Only
       the source-built one is ever redistributed.
 
@@ -125,14 +124,14 @@ run at any time.
       variant, through SDL_shadercross. The output is cached by content hash
       (the shader, its includes and the contract version) and stored in the pack
       under a new asset kind.
-- [ ] `#include` of `.hlsli` files in the project's `content/` works, and the
+- [x] `#include` of `.hlsli` files in the project's `content/` works, and the
       cache key covers them.
-- [ ] **Asynchronous compilation in the editor.** A surface draws with the
+- [~] **Asynchronous compilation in the editor.** A surface draws with the
       default material while its shader compiles, and no frame waits. Measure
       and record a cold compile of the ocean shader and a warm cache hit.
-- [ ] **A shader that fails draws with the error material**, and the editor
+- [x] **A shader that fails draws with the error material**, and the editor
       lists each error with its file and line.
-- [ ] Saving a shader or an include recompiles it and reloads every surface
+- [x] Saving a shader or an include recompiles it and reloads every surface
       using it (ADR 0062).
 - [ ] The editor survives a GPU device loss caused by a user shader: it reports
       the loss and recovers, and does not crash.
@@ -231,6 +230,18 @@ shaders, and mobile -- ADR 0091, *Not decided here*.
   `WorldPosition` is the draw's position plus the camera's, carried in the
   block's header; without it a wave laid out in world space would slide with
   the camera.
+- **Stage 4 -- the editor runs the compiler; it does not link it.** Linking
+  SDL_shadercross would make `dxcompiler` a load-time import of the editor --
+  an editor that does not start where the library is missing -- and a DXC
+  crash on somebody's shader would take the editor down with it. Running the
+  `shadercross` program the engine's own build uses, on a worker, costs a
+  process per variant and stage and buys both back; SDL3's process API was
+  already vendored. Errors come back on its output as `file:line: error:` and
+  reach the console with their file and line.
+- **An identical picture proves nothing on its own.** The first end-to-end run
+  of a user surface drew identically to the built-in one because the scene had
+  no camera and neither ran the real renderer. The gate now also renders a
+  copy whose surface paints everything green and fails unless that differs.
 - **SDL_shadercross links `dxcompiler` at load time** (`DxcCreateInstance` is
   an import, not a `LoadLibrary`), so whatever links it needs the library
   beside it. The player never links it; the editor and `assetc` will.

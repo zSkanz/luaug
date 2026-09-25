@@ -343,6 +343,12 @@ local function run(): number
         end
     end
 
+    -- **And the program that drives it** (ADR 0091): the editor compiles a
+    -- user's surface shader by running `shadercross`, the same program the
+    -- engine's own build runs. Statically linked, so it is one file.
+    local shadercross = executableName("shadercross")
+    copyFile(joined(buildRoot, editorPreset, "host-tools", shadercross), joined(target, shadercross), "shadercross")
+
     -- The two tools the CLI shells out to. `assetc` keeps a content directory of
     -- its own when the build produced one.
     for _, tool in { "assetc", "iconpatch" } do

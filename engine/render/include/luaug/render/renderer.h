@@ -26,6 +26,8 @@
 
 namespace luaug::render {
 
+class ISurfaceSource;
+
 struct RenderTarget
 {
     rhi::TextureHandle color{};
@@ -89,6 +91,11 @@ public:
     // machine can afford, and mixing the two would put a stranger's GPU budget
     // into the scene that gets hashed.
     virtual void setSettings(const GraphicsSettings& settings) = 0;
+
+    // Where surface shaders named by URN come from (ADR 0091): the editor's
+    // compiler, or a packaged game's pack. Null -- the default -- draws every
+    // such surface with the built-in one. Not owned.
+    virtual void setSurfaceSource(ISurfaceSource* source) { (void)source; }
     [[nodiscard]] virtual const GraphicsSettings& settings() const noexcept = 0;
 
     // What the last frame actually submitted.

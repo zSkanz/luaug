@@ -1,6 +1,9 @@
 #include "luaug/app/engine.h"
 
 #include "luaug/app/script_editor.h"
+#if LUAUG_DEBUG_UI
+#include "luaug/app/surface_compiler.h"
+#endif
 #include "luaug/script/debugger.h"
 
 #include <lua.h>
@@ -859,6 +862,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // Terrain and block worlds, streamed on a grid of their own (ADR 0075).
     FieldStreamer fields;
     std::unique_ptr<render::IRenderer> renderer;
+#if LUAUG_DEBUG_UI
+    // A user's surface shaders, compiled on a worker (ADR 0091). Editor and dev
+    // builds only: a shipped game carries bytecode and no compiler.
+    std::unique_ptr<SurfaceCompiler> surfaceCompiler;
+#endif
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
     render::UiRenderer uiRenderer;
@@ -1086,6 +1094,26 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             core::logText(LogLevel::Warn, error->message);
             renderer.reset();
         }
+#if LUAUG_DEBUG_UI
+        if (renderer != nullptr) {
+            // Beside the editor in a package, in host-tools in a build tree.
+#if defined(_WIN32)
+            constexpr std::string_view compilerName = "shadercross.exe";
+#else
+            constexpr std::string_view compilerName = "shadercross";
+#endif
+            std::filesystem::path compiler = platform::paths().executableDir / compilerName;
+            std::error_code missing;
+            if (!std::filesystem::exists(compiler, missing))
+                compiler = std::filesystem::path(LUAUG_DEV_SHADERCROSS);
+            const std::filesystem::path user = platform::paths().userDir;
+            const std::filesystem::path cache =
+                (user.empty() ? std::filesystem::temp_directory_path(missing) : user) / "surface-cache";
+            surfaceCompiler = std::make_unique<SurfaceCompiler>(
+                contentMounts, compiler, platform::paths().contentDir / "shaders" / "include", cache);
+            renderer->setSurfaceSource(surfaceCompiler.get());
+        }
+#endif
     };
 
     FrameScheduler scheduler;
@@ -3955,6 +3983,14 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             // camera nobody assigned -- the M1 debug path still draws, which is
             // what keeps every earlier example and the capture golden working.
             const bool useRenderer = renderer != nullptr && renderer->valid() && snapshot.camera.valid;
+#if LUAUG_DEBUG_UI
+            // **A screenshot is of the world as it will look** (ADR 0091): the
+            // frame it is taken from waits for surface shaders still compiling,
+            // which no interactive frame ever does.
+            if (useRenderer && surfaceCompiler != nullptr && !options.screenshotPath.empty() && options.frames != 0 &&
+                frame.index + 1 >= options.frames)
+                surfaceCompiler->drain();
+#endif
             if (useRenderer) {
                 renderer->render(
                     *device, *cmd,

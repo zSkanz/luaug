@@ -13,6 +13,7 @@ luaug_add_module(platform
         src/async_io.cpp
         src/file.cpp
         src/window.cpp
+        src/process.cpp
         src/events.cpp
         src/console.cpp
         src/crash.cpp

@@ -9,6 +9,7 @@
 #include "luaug/render/settings.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/render/shadow.h"
+#include "luaug/render/surface_source.h"
 
 #include <algorithm>
 #include <array>
@@ -413,6 +414,7 @@ public:
     [[nodiscard]] RendererStats stats() const noexcept override { return stats_; }
 
     void setSettings(const GraphicsSettings& settings) override;
+    void setSurfaceSource(ISurfaceSource* source) override { surfaceSource_ = source; }
     [[nodiscard]] const GraphicsSettings& settings() const noexcept override { return settings_; }
 
 private:
@@ -469,6 +471,8 @@ private:
     {
         std::string name;
         bool ready = false;
+        // A URN surface's program revision, so a recompile rebuilds.
+        core::u64 revision = 0;
         asset::SurfaceReflection reflection;
         std::array<rhi::ShaderHandle, 10> shaders{};
         rhi::PipelineHandle forward{};
@@ -480,12 +484,18 @@ private:
         rhi::PipelineHandle prepassInstanced{};
     };
     std::vector<SurfaceSet> surfaces_;
+    ISurfaceSource* surfaceSource_ = nullptr;
+    // Per material of the frame: whether its surface failed, and draws as the
+    // error surface -- loud magenta, the colour no material means.
+    std::vector<bool> materialError_;
     // Per material of the frame: its surface (index + 1, 0 for the built-in),
     // its packed block, and its surface textures in declaration order.
     std::vector<u32> materialSurface_;
     std::vector<std::vector<core::u8>> materialBlock_;
     std::vector<std::array<rhi::TextureBinding, asset::MaxSurfaceTextures>> materialSurfaceTextures_;
-    [[nodiscard]] u32 surfaceFor(rhi::IDevice& device, std::string_view name);
+    [[nodiscard]] u32 surfaceFor(rhi::IDevice& device, std::string_view name, bool& failed);
+    [[nodiscard]] bool buildSurfacePipelines(rhi::IDevice& device, SurfaceSet& set);
+    static void releaseSurface(rhi::IDevice& device, SurfaceSet& set);
     void prepareSurfaces(rhi::IDevice& device, const RenderWorld& world);
     void bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment) const;
 
@@ -1572,17 +1582,8 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(shaders_[index]);
     shaderCount_ = 0;
 
-    for (SurfaceSet& surface : surfaces_) {
-        for (rhi::PipelineHandle pipeline : {surface.forward, surface.blended, surface.instanced, surface.shadow,
-                                             surface.shadowInstanced, surface.prepass, surface.prepassInstanced}) {
-            if (pipeline.valid())
-                device.destroy(pipeline);
-        }
-        for (rhi::ShaderHandle shader : surface.shaders) {
-            if (shader.valid())
-                device.destroy(shader);
-        }
-    }
+    for (SurfaceSet& surface : surfaces_)
+        releaseSurface(device, surface);
     surfaces_.clear();
 
     for (rhi::PipelineHandle* pipeline : {&shadowPipeline_,
@@ -1701,8 +1702,79 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     valid_ = false;
 }
 
-u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name)
+void DefaultRenderer::releaseSurface(rhi::IDevice& device, SurfaceSet& set)
 {
+    for (rhi::PipelineHandle* pipeline : {&set.forward, &set.blended, &set.instanced, &set.shadow, &set.shadowInstanced,
+                                          &set.prepass, &set.prepassInstanced}) {
+        if (pipeline->valid())
+            device.destroy(*pipeline);
+        *pipeline = rhi::PipelineHandle{};
+    }
+    for (rhi::ShaderHandle& shader : set.shaders) {
+        if (shader.valid())
+            device.destroy(shader);
+        shader = rhi::ShaderHandle{};
+    }
+    set.ready = false;
+}
+
+u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name, bool& failed)
+{
+    failed = false;
+    // **A user's surface, by URN**: asked for every frame, never waited on.
+    if (name.find("://") != std::string_view::npos) {
+        const SurfaceProgram* program = nullptr;
+        const SurfaceStatus status = surfaceSource_ != nullptr
+                                         ? surfaceSource_->find(name, shaderLibrary_->format(), program)
+                                         : SurfaceStatus::Pending;
+        if (status == SurfaceStatus::Failed || (status == SurfaceStatus::Ready && program == nullptr)) {
+            failed = status == SurfaceStatus::Failed;
+            return 0;
+        }
+        if (status == SurfaceStatus::Pending)
+            return 0;
+        core::usize found = surfaces_.size();
+        for (core::usize index = 0; index < surfaces_.size(); ++index) {
+            if (surfaces_[index].name == name)
+                found = index;
+        }
+        if (found < surfaces_.size() && surfaces_[found].revision == program->revision)
+            return surfaces_[found].ready ? static_cast<u32>(found) + 1u : 0u;
+        if (found == surfaces_.size()) {
+            surfaces_.emplace_back().name = std::string(name);
+        }
+        SurfaceSet& set = surfaces_[found];
+        // A frame in flight may still hold the old pipelines; a recompile is
+        // a save in the editor, rare enough to wait for the GPU.
+        if (set.ready)
+            device.waitIdle();
+        releaseSurface(device, set);
+        set.revision = program->revision;
+        set.reflection = program->reflection;
+        for (core::usize index = 0; index < 5; ++index) {
+            for (const bool fragment : {false, true}) {
+                const asset::SurfaceResourceCounts counts = asset::surfaceResourceCounts(
+                    set.reflection, static_cast<asset::SurfaceVariant>(index),
+                    fragment ? asset::SurfaceStage::Fragment : asset::SurfaceStage::Vertex);
+                const std::vector<std::byte>& code = program->code[index * 2 + (fragment ? 1 : 0)];
+                set.shaders[index * 2 + (fragment ? 1 : 0)] = device.createShader({
+                    .stage = fragment ? rhi::ShaderStage::Fragment : rhi::ShaderStage::Vertex,
+                    .format = shaderLibrary_->format(),
+                    .code = code,
+                    .entryPoint = fragment ? "FragmentMain" : "VertexMain",
+                    .samplerCount = counts.samplers,
+                    .uniformBufferCount = counts.uniformBuffers,
+                    .debugName = set.name,
+                });
+            }
+        }
+        if (!buildSurfacePipelines(device, set)) {
+            failed = true;
+            return 0;
+        }
+        return static_cast<u32>(found) + 1u;
+    }
+
     for (core::usize index = 0; index < surfaces_.size(); ++index) {
         if (surfaces_[index].name == name)
             return surfaces_[index].ready ? static_cast<u32>(index) + 1u : 0u;
@@ -1742,11 +1814,18 @@ u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name)
                 shaderLibrary_->createCounted(device, shaderName, rhiStage, counts.samplers, counts.uniformBuffers);
         }
     }
-    if (!std::all_of(set.shaders.begin(), set.shaders.end(), [](rhi::ShaderHandle shader) { return shader.valid(); })) {
+    if (!buildSurfacePipelines(device, set)) {
         const std::array<core::I18nArg, 1> args{core::I18nArg{"name", name}};
         core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_unavailable"), args);
         return 0;
     }
+    return static_cast<u32>(surfaces_.size());
+}
+
+bool DefaultRenderer::buildSurfacePipelines(rhi::IDevice& device, SurfaceSet& set)
+{
+    if (!std::all_of(set.shaders.begin(), set.shaders.end(), [](rhi::ShaderHandle shader) { return shader.valid(); }))
+        return false;
 
     // The built-in surface's states, with the full vertex layout in every pass:
     // a displaced vertex casts a displaced shadow, and it may displace by its
@@ -1838,17 +1917,13 @@ u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name)
 
     set.ready = set.forward.valid() && set.instanced.valid() && set.blended.valid() && set.shadow.valid() &&
                 set.shadowInstanced.valid() && set.prepass.valid() && set.prepassInstanced.valid();
-    if (!set.ready) {
-        const std::array<core::I18nArg, 1> args{core::I18nArg{"name", name}};
-        core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_unavailable"), args);
-        return 0;
-    }
-    return static_cast<u32>(surfaces_.size());
+    return set.ready;
 }
 
 void DefaultRenderer::prepareSurfaces(rhi::IDevice& device, const RenderWorld& world)
 {
     materialSurface_.assign(world.materials.size(), 0u);
+    materialError_.assign(world.materials.size(), false);
     materialBlock_.resize(world.materials.size());
     materialSurfaceTextures_.resize(world.materials.size());
 
@@ -1863,7 +1938,9 @@ void DefaultRenderer::prepareSurfaces(rhi::IDevice& device, const RenderWorld& w
             material.surface.empty() ? std::string_view{settings_.forcedSurface} : std::string_view{material.surface};
         if (name.empty())
             continue;
-        const u32 surface = surfaceFor(device, name);
+        bool failed = false;
+        const u32 surface = surfaceFor(device, name, failed);
+        materialError_[index] = failed;
         if (surface == 0)
             continue;
         materialSurface_[index] = surface;
@@ -2395,7 +2472,21 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             }
             else if (draw.material != boundMaterial && draw.material < world.materials.size()) {
                 const RenderMaterial& material = world.materials[draw.material];
-                cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&material.uniforms, sizeof(material.uniforms)));
+                if (draw.material < materialError_.size() && materialError_[draw.material]) {
+                    // A surface shader that does not compile: the built-in
+                    // surface in a colour nobody picks, so it is found.
+                    GpuMaterialUniforms error = material.uniforms;
+                    const f32 magenta[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+                    std::memcpy(error.baseColor, magenta, sizeof(magenta));
+                    const f32 glow[4] = {0.6f, 0.0f, 0.6f, 0.0f};
+                    std::memcpy(error.emissive, glow, sizeof(glow));
+                    std::memset(error.textureFlags, 0, sizeof(error.textureFlags));
+                    cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&error, sizeof(error)));
+                }
+                else {
+                    cmd.bindUniforms(rhi::ShaderStage::Fragment, 1,
+                                     asBytes(&material.uniforms, sizeof(material.uniforms)));
+                }
 
                 // Every slot is bound every time, with the shadow map last.
                 // A slot left over from the previous material is the classic
