@@ -113,6 +113,19 @@ function(luaug_add_shaders target)
     foreach(source IN LISTS sources)
         get_filename_component(name "${source}" NAME_WLE)
 
+        # **A shader built on another one** -- `tonemap_graded.hlsl` includes
+        # `tonemap.hlsl` whole (ADR 0096) -- depends on it as it does on the
+        # shared headers: without this, editing the plain tonemap left the
+        # graded one compiled from yesterday's text. Read at configure time,
+        # so a NEW include line needs a reconfigure; an edit to the included
+        # file does not.
+        set(siblings "")
+        file(STRINGS "${source}" sibling_lines REGEX "^#include \"\\.\\./src/[^\"]+\"")
+        foreach(line IN LISTS sibling_lines)
+            string(REGEX REPLACE "^#include \"\\.\\./src/([^\"]+)\".*" "\\1" sibling "${line}")
+            list(APPEND siblings "${CMAKE_SOURCE_DIR}/shaders/src/${sibling}")
+        endforeach()
+
         # Output paths are flat per format, so two shaders sharing a stem in
         # different directories would silently overwrite each other's blobs.
         if(name IN_LIST seen_names)
@@ -139,7 +152,7 @@ function(luaug_add_shaders target)
                         -e ${entrypoint}
                         ${include_args}
                         -o "${output}"
-                    DEPENDS shadercross "${source}" ${headers}
+                    DEPENDS shadercross "${source}" ${headers} ${siblings}
                     COMMENT "Shader ${name}.${stage} -> ${format}"
                     VERBATIM)
                 list(APPEND outputs "${output}")
@@ -163,7 +176,7 @@ function(luaug_add_shaders target)
                     -e ${entrypoint}
                     ${include_args}
                     -o "${reflect_output}"
-                DEPENDS shadercross "${source}" ${headers}
+                DEPENDS shadercross "${source}" ${headers} ${siblings}
                 COMMENT "Shader ${name}.${stage} -> reflection"
                 VERBATIM)
             list(APPEND outputs "${reflect_output}")
