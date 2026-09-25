@@ -127,6 +127,9 @@ stream replays; an ambient `math.random` does not — see
 | `Connection` | What `Signal.Connect` returned. |
 | `InputObject` | One raw input event. Returned, never constructed. |
 | `AnimationTrack` | One clip playing on one `AnimationPlayer`. A handle, and the one mutable datatype. |
+| `Material` | A surface, loaded from a `.material.json` asset with `Material.load`. A loaded one is read-only; `Clone` makes the copy a script changes. See [Materials](manual:world/materials). |
+| `Collector` | Holds connections, instances, threads and promises, and ends them all at once. See [Signals](manual:concepts/signals). |
+| `Promise` | Work that finishes later: chained with `AndThen`, waited on with `Await`. See [Signals](manual:concepts/signals). |
 
 Five of those have **no constructor at all** — the engine hands them to you, and
 that is the whole of how you get one.

@@ -53,7 +53,7 @@ then on, typos included:
 type Arena = Workspace & { Coin: Part & { Gem: Part } }
 
 local arena = workspace :: Arena
-arena.Coin.Gem.Transparency = 0.5   -- typed
+arena.Coin.Gem.Anchored = true     -- typed
 print(arena.Coni)                   -- still an error: no key 'Coni'
 ```
 

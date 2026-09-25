@@ -1,19 +1,21 @@
 # Shadows
 
-**The sun is the only shadow caster in this release.** Point lights and spot
-lights illuminate; they do not occlude.
-
-That is not a limit hidden in a footnote — `PointLight.Shadows` and
-`SpotLight.Shadows` both carry the **stored, not yet acted on** badge in the
-reference. Writing `light.Shadows = true` succeeds, reading it back gives `true`,
-and the frame is identical. The property is there because its meaning is not in
-doubt, only its implementation date; the badge is there because a property that
-accepts a write and changes nothing is otherwise impossible to notice.
+**The sun casts shadows, and so can a lamp.** The sun (or the moon at night)
+casts through cascaded shadow maps. A `PointLight` or `SpotLight` with
+`Shadows = true` casts through a shared atlas of sixteen tiles: a spot takes one
+tile and a point light six. [Point and spot lights](manual:rendering/lights)
+says what happens when more lights ask than there are tiles.
 
 ## What a script controls
 
-Nothing, directly. There is no shadow property on `Lighting`, on `Camera`, or
-anywhere else in the scripting API.
+Two `Lighting` properties shape the sun's shadow:
+
+- **`Lighting.GlobalShadows`**: whether the sun or moon casts at all. Off is the
+  look of an overcast day, or a stylised world with no shadows; lamps that cast
+  still do.
+- **`Lighting.ShadowSoftness`**: how soft the edge is, from 0 (as hard as the
+  shadow map allows) to 1 (a quarter of a metre of penumbra either side). The
+  default, 0.2, is the edge the engine always drew.
 
 What a script controls is **where the sun is**, and that is `Lighting.ClockTime`
 and `Lighting.GeographicLatitude`:

@@ -109,7 +109,7 @@ template.Anchored = true
 -- deliberately not parented: it is a template, not scenery
 
 for index = 1, 100 do
-    local copy = template:Clone()
+    local copy = template:Clone() :: Part
     copy.Position = vector.create(index * 2, 0.5, 0)
     copy.Parent = workspace
 end

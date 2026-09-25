@@ -101,12 +101,16 @@ known tick rather than the moment it lands.
 
 ## What is not here
 
-- **No server.** `net.serve` is a reserved name; the engine never listens on a
-  port in any build.
+- **No server in a script.** `net.serve` is a reserved name. A script never opens
+  a port; the only listening socket is the one a match opens with `--host` or
+  `--serve` on the command line (ADR 0070).
 - **No raw sockets, and no WebSocket client for a script.**
-- **No replication, no remote events, no authority model.** A second player is
-  not something this release has an opinion about.
 - **No filesystem**, so no local save file. Persistence is the backend.
+
+Players talking to each other is not this page's job: that is
+[Multiplayer](manual:guides/multiplayer), with replication, an authority, and
+`RemoteEvent` and `RemoteFunction` for your own messages. This page is about the
+server you run yourself: scores, accounts, saves.
 
 The `[permissions]` table in `luaug.toml` parses and is reserved against the day
 `serve` and a filesystem arrive; nothing reads it today.

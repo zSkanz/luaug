@@ -96,7 +96,10 @@ pays nothing.
 ```luau
 --!strict
 local StreamingService = game:GetService("StreamingService")
-StreamingService:AddFocus(workspace.CurrentCamera)
+local camera = workspace.CurrentCamera
+if camera ~= nil then
+    StreamingService:AddFocus(camera)
+end
 ```
 
 That is the whole of it. Place four hundred parts across a kilometre, save, run.

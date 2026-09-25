@@ -99,8 +99,9 @@ gets nothing:
 local ok, hotReload = pcall(function(): Instance
     return game:GetService("HotReloadService")
 end)
-if ok and hotReload ~= nil then
-    -- development
+if ok then
+    -- development: `hotReload` is the service
+    print(hotReload.Name)
 end
 ```
 

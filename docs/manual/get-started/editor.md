@@ -106,9 +106,14 @@ hides panels and overlays.
 
 Every instance in the Explorer takes a child from its **+** -- whether the child
 does anything there is another matter -- and the scene saves what is inside
-every service, not only `Workspace`. Two exceptions: streamed chunks are the
-streaming system's, and `ScriptService` is the project's `src/scripts`
-directory: a Script made or dropped there is written as a file and mounted.
+every service, not only `Workspace`. **A script goes wherever you put it**, and
+is saved in the scene with its `Source` (ADR 0092): inside the part it drives,
+in a model, or in `ScriptService`, which is an ordinary service.
+
+Two things are not the scene's to save. Streamed chunks belong to the streaming
+system. And a script mounted from a file under `src/scripts` belongs to its
+file: the editor shows it but does not move it, and anything you put inside it
+is saved as yours.
 
 ## The script editor
 

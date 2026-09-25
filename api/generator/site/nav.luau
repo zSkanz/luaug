@@ -106,6 +106,7 @@ local Sections: { Section } = {
             { Slug = "queries", Title = "Raycasts and queries" },
             { Slug = "joints", Title = "Welds and constraints" },
             { Slug = "character", Title = "CharacterBody" },
+            { Slug = "ragdoll", Title = "Ragdolls" },
         },
     },
     {

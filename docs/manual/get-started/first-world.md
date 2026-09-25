@@ -28,14 +28,14 @@ workspace.CurrentCamera = camera
 local ground = Instance.new("Part")
 ground.Size = vector.create(40, 1, 40)
 ground.Position = vector.create(0, -0.5, 0)
-ground.Color = Color3.fromRGB(90, 108, 82)
+ground:SetMaterialParameter("Color", Color3.fromRGB(90, 108, 82))
 ground.Anchored = true
 ground.Parent = workspace
 
 local crate = Instance.new("Part")
 crate.Size = vector.create(2, 2, 2)
 crate.Position = vector.create(0, 8, 0)
-crate.Color = Color3.fromRGB(200, 140, 60)
+crate:SetMaterialParameter("Color", Color3.fromRGB(200, 140, 60))
 crate.Parent = workspace
 
 RunService.Heartbeat:Connect(function(dt: number)
@@ -50,6 +50,9 @@ Six things happened there, and each is a page of its own later:
 - **`game:GetService`** reached two singletons.
 - **`Instance.new`** made parts, and **`Parent`** put them in the world.
 - **`Anchored`** made one of them scenery and left the other to gravity.
+- **`SetMaterialParameter`** tinted them. A part's look is its
+  [material](manual:world/materials)'s; a plain part wears the engine's
+  default, which lets a part set its own `Color` and `Transparency`.
 - **`CFrame.lookAt`** aimed a camera, and **`Workspace.CurrentCamera`** made it
   the view.
 - **`RunService.Heartbeat`** ran code once per simulation tick with a fixed
@@ -63,7 +66,7 @@ Add this to the end:
 ```luau
 crate.Touched:Connect(function(other: BasePart)
     if other == ground then
-        crate.Color = Color3.fromRGB(80, 180, 120)
+        crate:SetMaterialParameter("Color", Color3.fromRGB(80, 180, 120))
     end
 end)
 ```

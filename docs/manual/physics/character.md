@@ -3,7 +3,7 @@
 A capsule that walks. The player, or anything that should climb a ramp and step
 over a kerb instead of tumbling.
 
-`CharacterBody` extends `BasePart`, so it has a `CFrame`, a `Size`, a `Color`, a
+`CharacterBody` extends `BasePart`, so it has a `CFrame`, a `Size`, a `Material`, a
 `CollisionGroup` and everything else a part has. What it adds is that it is a
 **controller rather than a rigid body**: it sweeps its own shape and moves at
 the velocity you give it, which is why it does not tip over.

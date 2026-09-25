@@ -19,7 +19,7 @@ Building the world in code:
 -- Every example before scenes existed opened like this.
 local ground = Instance.new("Part")
 ground.Size = vector.create(40, 1, 40)
-ground.Color = Color3.fromRGB(90, 108, 82)
+ground:SetMaterialParameter("Color", Color3.fromRGB(90, 108, 82))
 ground.Anchored = true
 ground.Parent = workspace
 -- ...and two hundred more lines of the same

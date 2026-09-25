@@ -23,10 +23,10 @@ HTTP client and your own server: see [Talking to a backend](manual:guides/backen
 | Missing | State |
 |---|---|
 | Complex-script shaping | **Not scheduled.** A label lays its codepoints out left to right, so Arabic, Devanagari and Thai do not join. Rich text is here: `TextLabel.RichText`. |
-| Skyboxes and custom environments | **Not present.** The sky is analytic, from `Lighting`, and it is also the reflection environment — right outdoors and wrong in a cave. |
+| An HDR panorama sky | **Not present.** A `Sky` takes six images, and reflections come from it; an HDR panorama is not a format it reads. See [Atmosphere and the sky](manual:rendering/atmosphere-and-sky). |
 | Screen-space reflections | **Not scheduled.** What ships is image-based lighting from that sky. |
 | Temporal anti-aliasing, upscalers, frame generation | **Not present**, and blocked on a velocity buffer that does not exist. |
-| Motion blur, depth of field, colour grading | **Not present.** |
+| Motion blur, film grain, lens flare, a vignette | **Not present.** Depth of field, colour correction, bloom, blur and sun rays are here, as effects under `Lighting` (see [The post chain](manual:rendering/post)). |
 
 ## Physics
 

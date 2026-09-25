@@ -117,11 +117,21 @@ arrangement of convenience.
 That is also why the same server can relay to other clients: a gate test, the
 overlay console, a tool.
 
-## What does not hot-swap yet
+## Assets reload themselves
 
-**Assets.** The protocol reserves an asset-changed message and the engine answers
-it with "not implemented" rather than ignoring it — a caller that gets silence
-cannot tell "not yet" from "lost". Changing a texture means restarting.
+**A saved asset reloads on its own, without restarting the world** (ADR 0062).
+A `.luau` under `src/` is a script and rebuilds the world; a `.png` or a model
+under `content/` is an asset, and only that asset is read again:
+
+- the texture or mesh is dropped from its library, and the next frame loads the
+  file as it stands on disk;
+- the world, the running scripts and everything else stay exactly as they were;
+- a material file reloads the same way, and every part wearing it draws the
+  change.
+
+**This applies to loose files.** Content served from a pack is a compiled
+artifact: changing it means recompiling it, and a reload of a packed asset reads
+the bytes it was built into.
 
 ## Where to look next
 

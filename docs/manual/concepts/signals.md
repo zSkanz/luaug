@@ -154,3 +154,92 @@ place you destroy it.
 
 `Instance.Destroying` is the hook for that, and `Signal.Once` is the right tool
 whenever the answer is "the first one only".
+
+`Signal:DisconnectAll()` disconnects every connection of a signal at once. The
+signal stays usable, and nothing fires.
+
+## Collector: cleaning up in one place
+
+A system that makes connections, instances and threads usually has to undo all
+of them together. A `Collector` holds them and ends each one the way it is
+ended (ADR 0094):
+
+| What you add | What cleaning does |
+|---|---|
+| a function | calls it |
+| a thread | cancels it |
+| a `Connection` | disconnects it |
+| an `Instance`, a `Signal`, or a table with `Destroy` | destroys it |
+| a `Promise` | cancels it |
+
+```luau
+--!strict
+local enemy = Instance.new("Part")
+enemy.Parent = workspace
+
+local collector = Collector.new()
+collector:Add(enemy.Touched:Connect(function(other: Instance)
+    print("hit", other.Name)
+end))
+collector:Add(function()
+    print("cleaned up")
+end)
+
+-- Everything above ends when the enemy is destroyed.
+collector:LinkToInstance(enemy)
+```
+
+- `Add(object, method?, key?)` takes an object and returns it. `method` names
+  another cleanup method, or `true` calls the object itself. `key` names the
+  entry for `Get` and `Remove`, and adding under a key that is already held
+  cleans what was there first.
+- **`Cleanup` runs newest first**, the order destructors run in, and the same on
+  every run: a connection made after the instance it listens to is disconnected
+  before that instance is destroyed. The collector stays usable. `Destroy`
+  cleans and retires it.
+- `LinkToInstance(instance)` cleans the collector when that instance is
+  destroyed.
+
+## Promise: work that finishes later
+
+A `Promise` stands for a value that is not ready yet: a delay, a request, the
+next fire of a signal. Its constructors are namespace functions and its methods
+are PascalCase, as the casing rule asks.
+
+```luau
+--!strict
+local door = Instance.new("Part")
+door.Parent = workspace
+
+Promise.delay(2)
+    :AndThen(function()
+        door.Anchored = false
+        return "opened"
+    end)
+    :Catch(function(problem)
+        warn("the door did not open:", problem)
+    end)
+
+-- Parks this thread until the first touch, then goes on.
+local ok, other = Promise.fromEvent(door.Touched):Await()
+if ok then
+    print("touched by", (other :: Instance).Name)
+end
+```
+
+- **The executor runs at once, on its own thread**, so it may yield. Resolving
+  with another promise adopts it, and a handler that errors rejects the promise
+  it returns.
+- **Waiting**: `Await` gives `true` and the values, or `false` and the
+  rejection. `AwaitStatus` gives an `Enum.PromiseState` in place of the boolean.
+  `ExpectAsync` gives the values or raises.
+- **Combining**: `Promise.all`, `allSettled`, `race`, `any` and `some`.
+  Retrying: `retry` and `retryWithDelay`.
+- **Cancelling**: `Cancel` stops the executor and runs its cancel hook, cancels
+  every consumer, and cancels the parent once none of its consumers is left.
+- **Time is the simulation's**: `Promise.delay` and `Timeout` run on the tick
+  clock, like `task.delay`, never on the wall clock (R10).
+- A rejection nothing handled is reported with a warning after the drain.
+
+Both are part of the engine, installed as globals. There is nothing to
+`require`.

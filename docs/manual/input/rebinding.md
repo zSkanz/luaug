@@ -6,7 +6,7 @@ action responds to is assigning a property.
 
 ```luau
 --!strict
-local binding = jump:GetPreferredBinding(Enum.InputDeviceType.Keyboard)
+local binding = jump:GetPreferredBinding(Enum.InputDeviceType.KeyboardMouse)
 if binding ~= nil then
     binding.KeyCode = Enum.KeyCode.J
 end
@@ -22,8 +22,8 @@ An action can have any number of bindings, and they are ordinary children:
 ```luau
 --!strict
 local extra = Instance.new("InputBinding")
-extra.KeyCode = Enum.KeyCode.KeypadZero
-extra.DeviceType = Enum.InputDeviceType.Keyboard
+extra.KeyCode = Enum.KeyCode.Up
+extra.DeviceType = Enum.InputDeviceType.KeyboardMouse
 extra.Parent = jump
 ```
 

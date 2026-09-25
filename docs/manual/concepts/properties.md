@@ -19,7 +19,7 @@ the engine acts on it, and naming one the class does not have raises
 local part = Instance.new("Part")
 part.Anchored = true
 part.Size = vector.create(4, 1, 4)
-part.Color = Color3.fromRGB(200, 90, 40)
+part.Name = "Platform"
 ```
 
 **A write that changes nothing enqueues nothing.** Assigning a property the

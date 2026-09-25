@@ -13,7 +13,7 @@ local function makeCrateTemplate(): Model
 
     local body = Instance.new("Part")
     body.Size = vector.create(1.2, 1.2, 1.2)
-    body.Color = Color3.fromRGB(150, 108, 62)
+    body:SetMaterialParameter("Color", Color3.fromRGB(150, 108, 62))
     body.Density = 0.4
     body:AddTag("Pickup")
     body.Parent = crate

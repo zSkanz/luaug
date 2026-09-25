@@ -15,22 +15,35 @@ What is underneath it is not familiar, and that is deliberate too.
   scripting language chosen later.
 - **A data-oriented ECS** behind the `Instance` facade. The tree is what you
   write against; contiguous component pools are what iterate.
-- **A deterministic fixed tick.** The simulation runs at a fixed timestep with a
-  stated determinism guarantee, and rendering interpolates between ticks.
+- **A deterministic fixed tick.** The simulation runs at a fixed timestep and
+  gives the same result on every platform it ships on, and rendering
+  interpolates between ticks.
 - **A custom rendering interface** over the platform's own graphics API, with
-  cascaded shadows, clustered lights, image-based lighting from the sky, and a
-  post chain.
-- **Jolt** for 3D physics, behind an engine interface — no backend type reaches
-  a script.
-- **Chunk streaming with a floating origin**, for worlds larger than memory and
-  larger than 32-bit floats are comfortable with.
+  cascaded shadows, clustered lights with shadows of their own, image-based
+  lighting from the sky or a skybox, materials as assets, an atmosphere, and a
+  post chain of effects you add as instances.
+- **Jolt** for 3D physics and a 2D physics library for the plane, behind engine
+  interfaces: no backend type reaches a script. Joints, welds and ragdolls are
+  instances.
+- **Worlds of every size**: chunk streaming with a floating origin for worlds
+  larger than memory, voxel terrain you dig and sculpt, block worlds, and a
+  navigation mesh built where agents ask for one.
+- **A 2D layer**: sprites, tilemaps and an orthographic camera, in the same
+  world as 3D.
+- **Multiplayer**: one authority, replicas that predict their own character and
+  interpolate everyone else, and `RemoteEvent` and `RemoteFunction` for your own
+  messages.
+- **A visual editor** that is a mode of the engine: the same binary and the
+  same world, with a script editor that type-checks as you write.
 - **Sub-second hot reload**: save a file and the world is rebuilt around you.
 
 ## What that buys you
 
-**A world that reproduces.** Same build, same platform, same seed, same inputs,
-same result — verified by hashing the simulation and replaying recorded input.
-That turns "it happened once" into a test.
+**A world that reproduces.** Same build, same seed, same inputs, same result,
+and since level C, the same result on Windows, Linux and macOS. It is verified
+by hashing the simulation and replaying recorded input, which turns "it
+happened once" into a test, and it is what lets a replica and its authority
+agree.
 
 **A surface you can trust the analyzer about.** Every class, property, method
 and event is declared once in a typed definition, and the same source produces
@@ -49,10 +62,9 @@ smaller promise and a portable one.
   are borrowed; the code, assets and semantics are not. Several familiar
   spellings are deliberately different, and each difference has a reason written
   down.
-- **Not a hosted platform.** No accounts, no data stores, no matchmaking.
-- **Not multiplayer yet.** There is no replication in this release. The fixed
-  tick and the determinism guarantee are the foundations it will rest on.
-- **Not mobile yet.** Desktop first.
+- **Not a hosted platform.** No accounts, no data stores, no matchmaking. A match
+  is hosted by a player's machine or by a server you run.
+- **Not mobile or web yet.** Desktop first: Windows, Linux and macOS.
 
 ## The honest gaps
 
@@ -60,13 +72,14 @@ Worth knowing before you start rather than after:
 
 | Missing | State |
 |---|---|
-| Constraints beyond a rigid weld | Not scheduled |
-| `BasePart.Material` | Not shipped; a surface look rather than body state |
 | A filesystem for scripts | Not present; persistence is a backend |
-| Shadows from point and spot lights | Stored and not yet acted on |
 | A concave mesh collider | Accepted and behaves as a convex hull |
+| Shaders you write yourself | Designed (ADR 0091), not built |
+| An HDR panorama sky, motion blur | Not present |
+| Building a game for anything but 64-bit Windows | `luaug build` refuses the rest |
 
-Each of those has a page saying what exists instead.
+Each of those has a page saying what exists instead, and
+[What is not here](manual:migrating/not-here) is the full list.
 
 ## Where to look next
 
