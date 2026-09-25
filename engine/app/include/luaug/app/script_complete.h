@@ -121,6 +121,26 @@ enum class CompletionQuoted : core::u8
     Child,
     // Inside the quotes of `GetService(`, so what is being typed is a service.
     Service,
+    // **Every other string whose argument is a NAME the engine knows** (the
+    // owner: "Instance.new(\"AASS\") should be completed, in the string, and
+    // the same for other things").
+    //
+    // `Instance.new(`: a class a person may create.
+    NewClass,
+    // `IsA(`, `FindFirstChildOfClass(`, `FindFirstChildWhichIsA(`,
+    // `FindFirstAncestorOfClass(`: any class, abstract ones included --
+    // `IsA("BasePart")` is the commonest question there is.
+    Class,
+    // `GetPropertyChangedSignal(`: a property of what the call hangs off.
+    Property,
+    // `GetAttribute(`, `SetAttribute(`, `GetAttributeChangedSignal(`: an
+    // attribute the instance has in the tree.
+    Attribute,
+    // `HasTag(`, `AddTag(`, `RemoveTag(` and `TagService`'s three: a tag
+    // something in the world already carries.
+    Tag,
+    // `FindFirstAncestor(`: the name of one of the instance's ancestors.
+    Ancestor,
     // Inside quotes that are nobody's argument -- a message, a path, a name
     // being built by hand. **Offers nothing**, which is a state of its own
     // rather than a fall-through: the alternative is a list of every keyword

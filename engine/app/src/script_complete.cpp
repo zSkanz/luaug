@@ -1,5 +1,6 @@
 #include "luaug/app/script_complete.h"
 
+#include "luaug/app/inspector.h"
 #include "luaug/core/name_atom.h"
 #include "luaug/scene/class_registry.h"
 #include "luaug/scene/world.h"
@@ -156,6 +157,25 @@ void collectMembers(const scene::ClassRegistry& classes, const core::AtomTable& 
 [[nodiscard]] bool namesAChild(std::string_view method) noexcept
 {
     return method == "WaitForChild" || method == "FindFirstChild";
+}
+
+// What the string argument of a call to `method` names, when it names
+// something the engine can list. `No` for a method whose string is free text.
+[[nodiscard]] CompletionQuoted quotedFor(std::string_view method) noexcept
+{
+    if (method == "IsA" || method == "FindFirstChildOfClass" || method == "FindFirstChildWhichIsA" ||
+        method == "FindFirstAncestorOfClass")
+        return CompletionQuoted::Class;
+    if (method == "GetPropertyChangedSignal")
+        return CompletionQuoted::Property;
+    if (method == "GetAttribute" || method == "SetAttribute" || method == "GetAttributeChangedSignal")
+        return CompletionQuoted::Attribute;
+    if (method == "HasTag" || method == "AddTag" || method == "RemoveTag" || method == "GetTagged" ||
+        method == "GetInstanceAddedSignal" || method == "GetInstanceRemovedSignal")
+        return CompletionQuoted::Tag;
+    if (method == "FindFirstAncestor")
+        return CompletionQuoted::Ancestor;
+    return CompletionQuoted::No;
 }
 
 // Where an unterminated string starts on this line, or npos.
@@ -560,7 +580,26 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
             request.quoted = CompletionQuoted::Service;
             return request;
         }
-        if (!namesAChild(method))
+        // `Instance.new("` -- the one constructor whose string is a class.
+        if (method == "new") {
+            u32 owner = nameStart;
+            if (owner > 0 && line[owner - 1] == '.') {
+                --owner;
+                u32 ownerStart = owner;
+                while (ownerStart > 0 && isWordByte(line[ownerStart - 1]))
+                    --ownerStart;
+                if (line.substr(ownerStart, owner - ownerStart) == "Instance")
+                    request.quoted = CompletionQuoted::NewClass;
+            }
+            return request;
+        }
+        const CompletionQuoted named = quotedFor(method);
+        if (named == CompletionQuoted::Class || named == CompletionQuoted::Tag) {
+            // A class or a tag is the same list whatever the call hangs off.
+            request.quoted = named;
+            return request;
+        }
+        if (!namesAChild(method) && named == CompletionQuoted::No)
             return request;
 
         // The chain the call hangs off. `nameStart - 1` is its `.` or `:`.
@@ -570,7 +609,7 @@ CompletionRequest completionAt(const ScriptDocument& document, Position caret)
         if (request.path.empty())
             return request;
         request.subject = request.path.back();
-        request.quoted = CompletionQuoted::Child;
+        request.quoted = named != CompletionQuoted::No ? named : CompletionQuoted::Child;
         return request;
     }
 
@@ -617,6 +656,58 @@ void collectCompletions(const ScriptDocument& document, const CompletionRequest&
         std::vector<std::string> path = request.path;
         (void)expandLocals(document, path);
         collectChildren(tree, atoms, resolvePath(tree, atoms, path), request, out);
+        sortCompletions(out, request.prefix);
+        return;
+    }
+    if (request.quoted == CompletionQuoted::NewClass || request.quoted == CompletionQuoted::Class) {
+        const bool creating = request.quoted == CompletionQuoted::NewClass;
+        for (scene::ClassId id = 1; id < static_cast<scene::ClassId>(classes.classCount()); ++id) {
+            const scene::ClassDescriptor* descriptor = classes.find(id);
+            if (descriptor == nullptr || (creating && !creatable(*descriptor)))
+                continue;
+            push(out, request, std::string(atoms.text(descriptor->name)), "class",
+                 descriptor->doc != nullptr ? descriptor->doc : "", CompletionKind::Class);
+        }
+        sortCompletions(out, request.prefix);
+        return;
+    }
+    if (request.quoted == CompletionQuoted::Tag) {
+        if (tree.world != nullptr) {
+            scene::TagSet tags;
+            tree.world->collectAllTags(tags);
+            for (const core::NameAtom tag : tags)
+                push(out, request, std::string(atoms.text(tag)), "tag", "", CompletionKind::Identifier);
+        }
+        sortCompletions(out, request.prefix);
+        return;
+    }
+    if (request.quoted == CompletionQuoted::Property || request.quoted == CompletionQuoted::Attribute ||
+        request.quoted == CompletionQuoted::Ancestor) {
+        std::vector<std::string> path = request.path;
+        (void)expandLocals(document, path);
+        const core::InstanceId at = resolvePath(tree, atoms, path);
+        if (request.quoted == CompletionQuoted::Property) {
+            const scene::ClassId id = at.valid() && tree.world != nullptr
+                                          ? tree.world->classOf(at)
+                                          : classOfSubject(classes, atoms, request.subject);
+            if (id != scene::InvalidClass)
+                collectMembers(classes, atoms, id, request, out);
+            std::erase_if(out, [](const Completion& row) { return row.kind != CompletionKind::Property; });
+        }
+        else if (at.valid() && tree.world != nullptr && request.quoted == CompletionQuoted::Attribute) {
+            scene::AttributeMap attributes;
+            tree.world->collectAttributes(at, attributes);
+            for (const auto& [name, value] : attributes)
+                push(out, request, std::string(atoms.text(name)), "attribute", "", CompletionKind::Property);
+        }
+        else if (at.valid() && tree.world != nullptr) {
+            for (core::InstanceId up = tree.world->parentOf(at); up.valid(); up = tree.world->parentOf(up)) {
+                const std::string_view name = atoms.text(tree.world->name(up));
+                const auto taken = [name](const Completion& row) { return row.label == name; };
+                if (!name.empty() && std::find_if(out.begin(), out.end(), taken) == out.end())
+                    push(out, request, std::string(name), "ancestor", "", CompletionKind::Instance);
+            }
+        }
         sortCompletions(out, request.prefix);
         return;
     }

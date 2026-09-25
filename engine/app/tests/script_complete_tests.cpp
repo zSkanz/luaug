@@ -1073,3 +1073,38 @@ TEST_CASE("the likely word first: its own case, then the shortest")
     REQUIRE(place("position") < names.size());
     CHECK(place("pos") < place("position"));
 }
+
+TEST_CASE("a string that names something the engine knows is completed, in the string")
+{
+    // **The owner**: `Instance.new("AASS")` should be completed inside the
+    // quotes, "and the same for other things".
+    Reflection fixture;
+    Tree tree(fixture);
+    (void)tree.world.setAttribute(tree.baseplate, fixture.atoms.intern("Health"), scene::Value{true});
+    (void)tree.world.addTag(tree.baseplate, fixture.atoms.intern("Enemy"));
+
+    // A class a person may create -- and not an abstract one.
+    const std::vector<Completion> made = at(fixture, tree, "local p = Instance.new(\"Pa");
+    CHECK(has(made, "Part"));
+    CHECK(has(made, "Part2D"));
+    CHECK_FALSE(has(made, "BasePart"));
+    CHECK_FALSE(has(made, "Workspace"));
+
+    // Any class, where the question is what something IS.
+    CHECK(has(at(fixture, tree, "if hit:IsA(\"BaseP"), "BasePart"));
+    CHECK(has(at(fixture, tree, "workspace:FindFirstChildOfClass(\"Pa"), "Part"));
+
+    // A property of what the call hangs off, and only properties.
+    const std::vector<Completion> watched = at(fixture, tree, "workspace.Baseplate:GetPropertyChangedSignal(\"");
+    CHECK(has(watched, "Name"));
+    CHECK_FALSE(has(watched, "Destroy"));
+
+    // An attribute the instance has, a tag the world uses, an ancestor's name.
+    CHECK(has(at(fixture, tree, "workspace.Baseplate:GetAttribute(\""), "Health"));
+    CHECK(has(at(fixture, tree, "workspace.Baseplate:HasTag(\""), "Enemy"));
+    CHECK(has(at(fixture, tree, "TagService:GetTagged(\"En"), "Enemy"));
+    CHECK(has(at(fixture, tree, "workspace.Baseplate:FindFirstAncestor(\""), "Workspace"));
+
+    // Free text stays free: a message is nobody's name.
+    CHECK(at(fixture, tree, "print(\"Pa").empty());
+}
