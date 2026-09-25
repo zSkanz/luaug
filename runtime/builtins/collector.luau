@@ -69,8 +69,9 @@ local function clean(entry: Entry)
         -- Found through the object's metatable too, which is where a class
         -- keeps it: `setmetatable(self, Class)` with `Class.__index = Class`.
         -- A FUNCTION, not merely present -- a `Destroy` field holding
-        -- anything else is not something to call.
-        object:Destroy()
+        -- anything else is not something to call. Called through `any`: the
+        -- check above is one a solver cannot carry into the call.
+        (object :: any):Destroy()
     else
         error(`Collector cannot clean a {kind}; give the method to call as :Add's second argument`, 3)
     end

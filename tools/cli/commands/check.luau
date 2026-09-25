@@ -64,6 +64,65 @@ local function collectLuau(root: string, ignore: { string }): { string }
     return files
 end
 
+--- **The definitions, as the new solver can read them** (R2, D192). The
+--- generated file types `Instance.new` as an intersection of one overload per
+--- creatable class, which the old solver reads and the new one gives up on as
+--- "code too complex" -- so every `Instance.new("Part")` became an `Instance`.
+--- The new solver has what the intersection spelled out: a table from name to
+--- class, read with `index<>` over a name constrained to `keyof<>` of it, so a
+--- literal keeps its name and a wrong one is an error.
+---
+--- A copy, not an edit: the generated file stays readable by the old solver,
+--- which is what an editor extension left on its default still runs, and the
+--- engine's own checker reads it with a magic function instead (ADR 0093).
+--- Returns the path to analyse with, which is the original when there is no
+--- intersection to rewrite.
+local function forNewSolver(definition: string, scratch: string): string
+    local text = fs.readFileToString(definition)
+    local lines = string.split(text, "\n")
+    local first: number? = nil
+    for index, line in lines do
+        if line == "declare Instance: {" and string.sub(lines[index + 1] or "", 1, 12) == '    new: (("' then
+            first = index + 1
+            break
+        end
+    end
+    if first == nil then
+        return definition
+    end
+    local last = first
+    while string.sub(lines[last + 1] or "", 1, 13) == '        & (("' do
+        last += 1
+    end
+    local entries: { string } = {}
+    for index = first, last do
+        for name, class in string.gmatch(lines[index], '%(%("(%w+)"%) %-> (%w+)%)') do
+            table.insert(entries, `    {name}: {class},`)
+        end
+    end
+    local out: { string } = {}
+    for index = 1, first - 2 do
+        table.insert(out, lines[index])
+    end
+    table.insert(out, "type InstanceClasses = {")
+    for _, entry in entries do
+        table.insert(out, entry)
+    end
+    table.insert(out, "}")
+    table.insert(out, "")
+    table.insert(out, "declare Instance: {")
+    table.insert(out, "    new: <K>(className: K & keyof<InstanceClasses>) -> index<InstanceClasses, K>,")
+    for index = last + 1, #lines do
+        table.insert(out, lines[index])
+    end
+    if not fs.exists(scratch) then
+        fs.createDirectory(scratch, { makeParents = true })
+    end
+    local target = projectlib.joined(scratch, "engine.d.luau")
+    fs.writeStringToFile(target, table.concat(out, "\n"))
+    return target
+end
+
 local function toolMissing(tool: string): boolean
     local probe = process.run({ tool, "--version" }, { stdio = "none" })
     return not probe.ok
@@ -87,9 +146,11 @@ local function run(options: Options): number
         end
     end
 
-    local analyze: { string } = { "luau-lsp", "analyze", "--platform=standard" }
+    -- The new solver, which is what R2 says every script is checked by.
+    local analyze: { string } = { "luau-lsp", "analyze", "--platform=standard", "--flag:LuauSolverV2=true" }
+    local scratch = projectlib.joined(options.path, ".luaug/check")
     for _, definition in options.definitions do
-        table.insert(analyze, `--definitions={definition}`)
+        table.insert(analyze, `--definitions={forNewSolver(definition, scratch)}`)
     end
     for _, pattern in options.ignore do
         table.insert(analyze, `--ignore=**/{pattern}/**`)

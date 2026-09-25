@@ -229,12 +229,15 @@ local function sortedByKey<T>(items: { T }, keyOf: (T) -> string): { T }
     for index, item in items do
         table.insert(decorated, { Key = keyOf(item), Index = index, Item = item })
     end
-    table.sort(decorated, function(left, right): boolean
-        if left.Key ~= right.Key then
-            return left.Key < right.Key
+    table.sort(
+        decorated,
+        function(left: { Key: string, Index: number, Item: T }, right: { Key: string, Index: number, Item: T }): boolean
+            if left.Key ~= right.Key then
+                return left.Key < right.Key
+            end
+            return left.Index < right.Index
         end
-        return left.Index < right.Index
-    end)
+    )
 
     local ordered: { T } = {}
     for _, entry in decorated do

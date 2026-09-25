@@ -246,8 +246,9 @@ local function start(options: Options): Handle
             -- supplied a callback. It owns the protocol; `onChanged` is a
             -- notification, and a caller that did not want one should not
             -- thereby get a watcher that notices saves and does nothing.
-            if options.onChanged ~= nil then
-                options.onChanged(changed)
+            local onChanged = options.onChanged
+            if onChanged ~= nil then
+                onChanged(changed)
             end
             sendReload(changed)
         end

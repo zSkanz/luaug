@@ -163,12 +163,12 @@ local function emitDoc(lines: { string }, indent: string, doc: string?)
     -- Wrapped at a width that keeps the generated file inside stylua's column
     -- budget once the indent is added.
     local width = 100 - #indent
-    local line = ""
+    local line: string = ""
     for word in string.gmatch(doc, "%S+") do
         if line == "" then
             line = word
         elseif #line + #word + 1 <= width then
-            line ..= ` {word}`
+            line = `{line} {word}`
         else
             table.insert(lines, `{indent}--- {line}`)
             line = word

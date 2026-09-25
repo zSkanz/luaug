@@ -10,6 +10,7 @@
 ]]
 
 local fs = require("@std/fs")
+local path = require("@std/path")
 local process = require("@std/process")
 
 local catalog = require("../catalog")
@@ -111,6 +112,7 @@ end
 return {
     run = run,
     defaultParent = function(): string
-        return process.cwd()
+        -- A `Path`, not a string: formatted, or the caller got a table.
+        return path.format(process.cwd())
     end,
 }

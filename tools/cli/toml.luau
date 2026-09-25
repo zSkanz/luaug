@@ -72,7 +72,7 @@ type Parsed = { value: any, rest: string, error: string? }
 local parseValue: (text: string) -> Parsed
 
 local function parseBasicString(text: string): Parsed
-    local out = {}
+    local out: { string } = {}
     local index = 2
     while index <= #text do
         local c = string.sub(text, index, index)
@@ -179,7 +179,7 @@ end
 local function splitKey(text: string): { string }?
     local parts: { string } = {}
     local index = 1
-    local current = {}
+    local current: { string } = {}
 
     while index <= #text do
         local c = string.sub(text, index, index)

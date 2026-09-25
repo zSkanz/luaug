@@ -114,7 +114,7 @@ end
 -- engine's writer spells a material's floats -- so a file this writes is the
 -- file the editor would save.
 local function f32(value: number): number
-    return (string.unpack("<f", string.pack("<f", value)))
+    return (string.unpack("<f", string.pack("<f", value))) :: number
 end
 
 local function shortest(value: number): string

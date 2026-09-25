@@ -1,7 +1,7 @@
 --!strict
 local markdown = require("./markdown")
 
-local options = {
+local options: markdown.RenderOptions = {
     resolveSymbol = function(text: string): string?
         return if text == "Part" then "reference/Part.html" else nil
     end,

@@ -162,7 +162,9 @@ local function run(options: Options): number
         print(tr("cli.build.warn.dev_host", { path = fallback }))
         engine = fallback
     end
-    local engineContent = projectlib.joined(path.dirname(engine), "content")
+    -- Found, the fallback, or returned above.
+    local enginePath = engine :: string
+    local engineContent = projectlib.joined(path.dirname(enginePath), "content")
     if not fs.exists(engineContent) then
         print(tr("cli.build.err.no_engine_content", { path = engineContent }))
         return 1
@@ -211,7 +213,7 @@ local function run(options: Options): number
 
     -- The engine: its binary under the game's name, and its content beside it.
     local executable = projectlib.joined(output, projectlib.executableName(name))
-    fs.copy(engine, executable)
+    fs.copy(enginePath, executable)
     copyTree(engineContent, projectlib.joined(output, "content"))
 
     -- The game. Source rather than compiled bytecode -- ADR 0045 says why, and

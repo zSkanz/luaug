@@ -87,7 +87,7 @@ local Root = Instance.new("Folder")
 Root.Name = "Rings"
 Root.Parent = workspace
 
-local Cubes: { Part } = table.create(ModelCount * PerModel)
+local Cubes: { Part } = table.create(ModelCount * PerModel) :: { Part }
 for modelIndex = 1, ModelCount do
     local model = Instance.new("Model")
     model.Name = `Ring{modelIndex}`

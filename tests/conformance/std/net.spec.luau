@@ -95,7 +95,8 @@ describe("@std/net", function()
             -- A request that cannot be made is a fact about the world, not a
             -- bug in the script, and a caller should be able to handle it
             -- without wrapping every call in pcall.
-            local response
+            -- Assigned inside the closure, which a solver cannot follow.
+            local response: any
             expect(function()
                 response = net.request({ url = UnreachableUrl })
             end).Never:ToThrow()

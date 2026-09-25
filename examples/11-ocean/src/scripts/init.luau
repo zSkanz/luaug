@@ -91,11 +91,11 @@ local WaveDefinitions = {
 -- an interpreter with no JIT (R16) — this is the same work, arranged so the hot
 -- loop only ever indexes numbers.
 local WaveCount = #WaveDefinitions
-local WaveKx: { number } = table.create(WaveCount)
-local WaveKz: { number } = table.create(WaveCount)
-local WaveAmplitude: { number } = table.create(WaveCount)
-local WaveOmega: { number } = table.create(WaveCount)
-local WavePhase: { number } = table.create(WaveCount)
+local WaveKx: { number } = table.create(WaveCount) :: { number }
+local WaveKz: { number } = table.create(WaveCount) :: { number }
+local WaveAmplitude: { number } = table.create(WaveCount) :: { number }
+local WaveOmega: { number } = table.create(WaveCount) :: { number }
+local WavePhase: { number } = table.create(WaveCount) :: { number }
 
 for index, wave in WaveDefinitions do
     local k = (2 * math.pi) / wave.Length
@@ -150,7 +150,7 @@ local Horizon = Color3.fromRGB(146, 158, 172)
 --- layout genuinely does carry a per-instance colour, and it is not the thing
 --- that decides the batch.
 local PaletteSize = 12
-local Palette: { Color3 } = table.create(PaletteSize)
+local Palette: { Color3 } = table.create(PaletteSize) :: { Color3 }
 for step = 1, PaletteSize do
     local lift = (step - 1) / (PaletteSize - 1)
     Palette[step] = Color3.new(
@@ -189,17 +189,17 @@ ocean.Parent = workspace
 
 --- Every tile, in row-major order, allocated once. `GridSide * GridSide` parts
 --- is the entire cost of the water for the rest of the session.
-local Tiles: { Part } = table.create(GridSide * GridSide)
+local Tiles: { Part } = table.create(GridSide * GridSide) :: { Part }
 --- Which palette step each tile is wearing. A tile only pays for a colour write
 --- when its step actually changes, which on a slow swell is a small fraction of
 --- the grid on any given tick.
-local TileLevel: { number } = table.create(GridSide * GridSide)
+local TileLevel: { number } = table.create(GridSide * GridSide) :: { number }
 --- This tick's height under every tile. Filled first, read second: the tilt of a
 --- plate is the slope between its NEIGHBOURS, and those are heights the grid has
 --- already paid for. Taking the derivative analytically instead means a
 --- `math.cos` per wave per tile on top of the `math.sin`, and that measured at
 --- five milliseconds a frame -- for a number two array reads already answer.
-local Heights: { number } = table.create(GridSide * GridSide)
+local Heights: { number } = table.create(GridSide * GridSide) :: { number }
 
 for row = 0, GridSide - 1 do
     for column = 0, GridSide - 1 do

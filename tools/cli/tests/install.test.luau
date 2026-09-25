@@ -21,7 +21,7 @@ local test = require("@std/test")
 
 local projectlib = require("../project")
 
-local Roots = {
+local Roots: projectlib.Roots = {
     explicit = "/somewhere/luaug-host",
     buildRoot = "/build",
     install = "/install",

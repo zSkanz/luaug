@@ -50,7 +50,7 @@ local Escapes: { [string]: string } = {
 
 local function readString(text: string, at: number): (string, string, number)
     -- `at` is the opening quote.
-    local out = {}
+    local out: { string } = {}
     local index = at + 1
     while true do
         local char = string.sub(text, index, index)

@@ -93,10 +93,13 @@ local function hasTag(class: Schema.Class, tag: Schema.ClassTag): boolean
     return false
 end
 
-local function sortedCopy<T>(list: { T }, key: (T) -> string): { T }
+-- Every list a page shows is ordered by name. One function rather than a key
+-- passed in: a key function's return is an inference the new solver does not
+-- make through a generic `for`.
+local function sortedByName<T>(list: { T }): { T }
     local copy = table.clone(list)
-    table.sort(copy, function(a, b)
-        return key(a) < key(b)
+    table.sort(copy, function(a: any, b: any): boolean
+        return a.Name < b.Name
     end)
     return copy
 end
@@ -109,11 +112,7 @@ local function emitProperties(lines: { string }, properties: { Schema.Property }
     table.insert(lines, "")
     table.insert(lines, "| Name | Type | Default | Access | Description |")
     table.insert(lines, "|---|---|---|---|---|")
-    for _, property in
-        sortedCopy(properties, function(p)
-            return p.Name
-        end)
-    do
+    for _, property in sortedByName(properties) do
         local access = if property.ReadOnly then "read-only" else "read/write"
         if property.Inert then
             -- **The one tag a reference must never omit.** `Inert` means the
@@ -137,11 +136,7 @@ local function emitMethods(lines: { string }, methods: { Schema.Method }, headin
     end
     table.insert(lines, `## {heading}`)
     table.insert(lines, "")
-    for _, method in
-        sortedCopy(methods, function(m)
-            return m.Name
-        end)
-    do
+    for _, method in sortedByName(methods) do
         table.insert(lines, `### \`{method.Name}{signature(method)}\``)
         table.insert(lines, "")
         if method.Yields then
@@ -162,11 +157,7 @@ local function emitEvents(lines: { string }, events: { Schema.Event })
     table.insert(lines, "Every signal here is **deferred** (ADR 0015): a handler runs at the next")
     table.insert(lines, "drain point, never inside the call that fired it.")
     table.insert(lines, "")
-    for _, event in
-        sortedCopy(events, function(e)
-            return e.Name
-        end)
-    do
+    for _, event in sortedByName(events) do
         table.insert(lines, `### \`{event.Name}{eventSignature(event)}\``)
         table.insert(lines, "")
         table.insert(lines, event.Doc)
@@ -183,11 +174,7 @@ local function emitCallbacks(lines: { string }, callbacks: { Schema.Callback })
     table.insert(lines, "A function a script **assigns** and the engine calls: one at a time, and")
     table.insert(lines, "assigning nil removes it.")
     table.insert(lines, "")
-    for _, callback in
-        sortedCopy(callbacks, function(c)
-            return c.Name
-        end)
-    do
+    for _, callback in sortedByName(callbacks) do
         local parts: { string } = {}
         for _, parameter in callback.Parameters do
             table.insert(parts, `{parameter.Name}: {parameter.Type}`)
@@ -268,11 +255,7 @@ local function datatypesPage(datatypes: { Schema.Datatype })
     table.insert(lines, "`cf:Inverse()`). That split is ADR 0034 and it is the whole naming rule.")
     table.insert(lines, "")
 
-    for _, datatype in
-        sortedCopy(datatypes, function(d)
-            return d.Name
-        end)
-    do
+    for _, datatype in sortedByName(datatypes) do
         table.insert(lines, `## {datatype.Name}`)
         table.insert(lines, "")
         table.insert(lines, datatype.Doc)
@@ -307,11 +290,7 @@ local function enumsPage(enums: { Schema.Enum })
     table.insert(lines, "declared as an item rather than left to a nil (ADR 0039).")
     table.insert(lines, "")
 
-    for _, enumeration in
-        sortedCopy(enums, function(e)
-            return e.Name
-        end)
-    do
+    for _, enumeration in sortedByName(enums) do
         table.insert(lines, `## Enum.{enumeration.Name}`)
         table.insert(lines, "")
         table.insert(lines, enumeration.Doc)
@@ -335,11 +314,7 @@ local function librariesPage(libraries: { Schema.Library }, globals: { Schema.Me
     table.insert(lines, "library is a namespace and not an object (ADR 0034).")
     table.insert(lines, "")
 
-    for _, library in
-        sortedCopy(libraries, function(l)
-            return l.Name
-        end)
-    do
+    for _, library in sortedByName(libraries) do
         table.insert(lines, `## {library.Name}`)
         table.insert(lines, "")
         table.insert(lines, library.Doc)
@@ -391,11 +366,7 @@ local function indexPage(classes: { Schema.Class })
         table.insert(lines, "")
         table.insert(lines, "| Class | Inherits | Summary |")
         table.insert(lines, "|---|---|---|")
-        for _, class in
-            sortedCopy(list, function(c)
-                return c.Name
-            end)
-        do
+        for _, class in sortedByName(list) do
             -- The first sentence, because an index is a list of what to open
             -- rather than a place to read. The rest is on the page.
             local summary = string.match(class.Doc, "^(.-%.)%s") or class.Doc

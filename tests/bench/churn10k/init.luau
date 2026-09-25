@@ -43,7 +43,7 @@ Root.Parent = workspace
 local PartCount = 10000
 local ListenerCount = 1000
 
-local Parts: { Part } = table.create(PartCount)
+local Parts: { Part } = table.create(PartCount) :: { Part }
 local Notified = 0
 
 for index = 1, PartCount do
