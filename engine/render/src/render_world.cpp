@@ -593,6 +593,11 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.environment.fogStart = lighting->fogStart;
         out.environment.fogEnd = lighting->fogEnd;
         out.environment.exposureCompensation = lighting->exposureCompensation;
+        out.environment.environmentDiffuseScale = lighting->environmentDiffuseScale;
+        out.environment.environmentSpecularScale = lighting->environmentSpecularScale;
+        out.environment.shadowSoftness = lighting->shadowSoftness;
+        out.environment.globalShadows = lighting->globalShadows;
+        out.environment.autoExposure = lighting->autoExposure;
     }
 
     // The look (ADR 0096): `Lighting`'s children and the current camera's. The

@@ -1730,4 +1730,56 @@ bool setSkyCloudColor(scene::World& world, core::InstanceId id, const Value& val
     return writeValue(world.skies(), id, value, &scene::SkyComponent::cloudColor);
 }
 
+// Lighting: ADR 0096's five, beside the look's shapes they are written in.
+
+Value getLightingEnvironmentDiffuseScale(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.lighting(), id, &scene::LightingComponent::environmentDiffuseScale);
+}
+
+bool setLightingEnvironmentDiffuseScale(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.lighting(), id, value, &scene::LightingComponent::environmentDiffuseScale, 0.0f, 1.0f);
+}
+
+Value getLightingEnvironmentSpecularScale(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.lighting(), id, &scene::LightingComponent::environmentSpecularScale);
+}
+
+bool setLightingEnvironmentSpecularScale(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.lighting(), id, value, &scene::LightingComponent::environmentSpecularScale, 0.0f, 1.0f);
+}
+
+Value getLightingShadowSoftness(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.lighting(), id, &scene::LightingComponent::shadowSoftness);
+}
+
+bool setLightingShadowSoftness(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.lighting(), id, value, &scene::LightingComponent::shadowSoftness, 0.0f, 1.0f);
+}
+
+Value getLightingGlobalShadows(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.lighting(), id, &scene::LightingComponent::globalShadows);
+}
+
+bool setLightingGlobalShadows(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.lighting(), id, value, &scene::LightingComponent::globalShadows);
+}
+
+Value getLightingAutoExposure(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.lighting(), id, &scene::LightingComponent::autoExposure);
+}
+
+bool setLightingAutoExposure(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.lighting(), id, value, &scene::LightingComponent::autoExposure);
+}
+
 } // namespace luaug::render::native

@@ -148,6 +148,14 @@ struct RenderEnvironment
     // frame measured", positive is brighter, and the unit is the one a person
     // who has used a camera already knows. `Lighting.ExposureCompensation`.
     f32 exposureCompensation = 0.0f;
+    // ADR 0096: `Lighting`'s five, as the renderer applies them. Defaults
+    // reproduce the picture before they existed, to the bit.
+    f32 environmentDiffuseScale = 1.0f;
+    f32 environmentSpecularScale = 1.0f;
+    // `ShadowSoftness`, 0 to 1.
+    f32 shadowSoftness = 0.2f;
+    bool globalShadows = true;
+    bool autoExposure = true;
 };
 
 // A material, resolved into what the GPU binds.

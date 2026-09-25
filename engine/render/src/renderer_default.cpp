@@ -353,7 +353,7 @@ struct EnvironmentCache
         if (core::dot(params.sunDirection, target.sunDirection) < kEnvironmentRebuildCosine)
             return true;
         return !(params.horizonColor == target.horizonColor && params.zenithColor == target.zenithColor &&
-                 params.sunColor == target.sunColor);
+                 params.sunColor == target.sunColor && params.specularScale == target.specularScale);
     }
 };
 
@@ -1741,6 +1741,13 @@ void DefaultRenderer::updateEnvironment(rhi::ICmdList& cmd, const SkyParams& par
         environment_.levels[level].assign(static_cast<core::usize>(size) * size * 4, 0);
         bakeEnvironmentLevel(environment_.target, size, roughness, environmentSampleCount(level),
                              environment_.levels[level]);
+        // `Lighting.EnvironmentSpecularScale`, applied where the chain is made
+        // and skipped at its default, so a world that never sets it bakes the
+        // same halves it always did.
+        if (environment_.target.specularScale != 1.0f) {
+            for (core::u16& half : environment_.levels[level])
+                half = floatToHalf(halfToFloat(half) * environment_.target.specularScale);
+        }
         environment_.dirty[level] = false;
     };
 
@@ -2819,8 +2826,9 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // hour exactly as the horizon was -- warm at dusk, dark at night -- and the
     // sky, the reflections and the air laid over the world all agree on it.
     const bool air = world.look.atmosphere.present;
-    const SkyParams sky =
+    SkyParams sky =
         skyParamsFor(world.environment.sunDirection, air ? world.look.atmosphere.color : world.environment.fogColor);
+    sky.specularScale = world.environment.environmentSpecularScale;
     updateEnvironment(cmd, sky);
 
     // The clustered light assignment, and its three tables. Built on the CPU
@@ -3108,7 +3116,10 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         // `shadowCascades` being a setting: the sampler needs no idea how many
         // there are, because a fragment that selects a tile nobody drew into
         // gets the same answer as one that falls outside a cascade entirely.
-        for (u32 index = 0; index < settings_.shadowCascades; ++index) {
+        // `Lighting.GlobalShadows` off (ADR 0096) is the same mechanism with
+        // no cascade drawn: the atlas is cleared and every fragment reads lit.
+        const u32 cascadesDrawn = world.environment.globalShadows ? settings_.shadowCascades : 0u;
+        for (u32 index = 0; index < cascadesDrawn; ++index) {
             const auto tile = static_cast<f32>(settings_.shadowTileResolution);
             const f32 x = static_cast<f32>(index & 1u) * tile;
             const f32 y = static_cast<f32>(index >> 1u) * tile;
@@ -3284,7 +3295,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // forward pass because the forward pass samples what it writes. Off, it is
     // a white clear, which the forward pass's `min` then ignores.
     cmd.pushDebugGroup("contact-shadow");
-    if (!settings_.contactShadows || !world.camera.valid || settings_.shadowCascades == 0 || orthographic) {
+    if (!settings_.contactShadows || !world.camera.valid || settings_.shadowCascades == 0 || orthographic ||
+        !world.environment.globalShadows) {
         clearPass(cmd, contact_, renderWidth_, renderHeight_, "contact-off", rhi::ColorRgba{1.0f, 1.0f, 1.0f, 1.0f});
     }
     else {
@@ -3421,7 +3433,11 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             frame.cascadeTexelWorld[index] = cascades.texelWorld[index];
             frame.cascadeDepthRange[index] = cascades.depthRange[index];
         }
-        frame.shadowParams[0] = kShadowFilterWorldRadius;
+        // `Lighting.ShadowSoftness` (ADR 0096): a quarter of a metre at 1, so
+        // its default of 0.2 is the engine's own radius to the bit -- 0.2f
+        // times a power of two is exact.
+        frame.shadowParams[0] = world.environment.shadowSoftness == 0.2f ? kShadowFilterWorldRadius
+                                                                         : world.environment.shadowSoftness * 0.25f;
         frame.shadowParams[1] = kShadowNormalOffsetTexels;
         frame.shadowParams[2] = kShadowCascadeBlend;
         frame.shadowParams[3] = kShadowDepthBiasMetres;
@@ -3445,10 +3461,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         frame.environmentParams[0] = static_cast<f32>(kEnvironmentMipCount);
         frame.environmentParams[1] = 1.0f;
         frame.environmentParams[2] = 1.0f;
+        // `Lighting.EnvironmentDiffuseScale` (ADR 0096) on the nine
+        // coefficients -- linear in them, so the sky's diffuse light scales
+        // with no shader knowing. One is one, and the bytes are unchanged.
+        const f32 diffuseScale = world.environment.environmentDiffuseScale;
         for (u32 index = 0; index < 9; ++index) {
-            frame.irradianceSh[index][0] = environment_.irradiance[index].x;
-            frame.irradianceSh[index][1] = environment_.irradiance[index].y;
-            frame.irradianceSh[index][2] = environment_.irradiance[index].z;
+            frame.irradianceSh[index][0] = environment_.irradiance[index].x * diffuseScale;
+            frame.irradianceSh[index][1] = environment_.irradiance[index].y * diffuseScale;
+            frame.irradianceSh[index][2] = environment_.irradiance[index].z * diffuseScale;
             frame.irradianceSh[index][3] = 0.0f;
         }
 
@@ -3774,7 +3794,10 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     exposureIndex_ = nextExposure;
 
     cmd.pushDebugGroup("exposure");
-    if (!settings_.autoExposure) {
+    // The machine's switch and the world's, and either turns it off: a scene
+    // that wants a fixed exposure gets one, and a machine that cannot afford
+    // the metering does not pay for it (ADR 0044, ADR 0096).
+    if (!settings_.autoExposure || !world.environment.autoExposure) {
         // A neutral gain, written directly. Skipping the three passes is the
         // point of the setting -- what is left is `ExposureCompensation` and
         // `Lighting.Brightness`, which is exactly the fixed exposure the engine

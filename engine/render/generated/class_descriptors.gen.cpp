@@ -1226,7 +1226,7 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(animationPlayerDesc);
 
     // --- Lighting ---
-    static std::array<scene::PropertyDesc, 10> lightingProperties;
+    static std::array<scene::PropertyDesc, 15> lightingProperties;
     lightingProperties = {{
         scene::PropertyDesc{
             .name = atoms.intern("ClockTime"),
@@ -1326,6 +1326,61 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_exposure_stops"),
             .get = native::getLightingExposureCompensation,
             .set = native::setLightingExposureCompensation,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("EnvironmentDiffuseScale"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How much the sky lights the world's matte surfaces, from 0 to 1: 1 is all of its light, 0 none -- a surface is then lit by the sun, its lamps and `Ambient` alone. The sky itself is drawn as it is either way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getLightingEnvironmentDiffuseScale,
+            .set = native::setLightingEnvironmentDiffuseScale,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("EnvironmentSpecularScale"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How much the sky is reflected in the world's shiny surfaces, from 0 to 1. 0 leaves metal reflecting nothing but the sun's highlight, which is what an interior with the sky shut out should look like.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getLightingEnvironmentSpecularScale,
+            .set = native::setLightingEnvironmentSpecularScale,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("ShadowSoftness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "How soft the edge of a sun shadow is, from 0 (as hard as the shadow map allows) to 1 (a quarter of a metre of penumbra either side of the edge). The default is the edge the engine drew before this property existed.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getLightingShadowSoftness,
+            .set = native::setLightingShadowSoftness,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("GlobalShadows"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the sun -- or the moon, at night -- casts shadows. Off, nothing shades anything from it: the look of an overcast day, or of a stylised world with no shadows at all. Lamps that cast shadows still do.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getLightingGlobalShadows,
+            .set = native::setLightingGlobalShadows,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("AutoExposure"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether the picture's brightness follows what the camera sees, as an eye adapting from a cave to daylight does. Off holds the exposure fixed, so a world lit darker LOOKS darker; `ExposureCompensation` still applies either way. A machine whose graphics settings turn automatic exposure off has it off whatever this says.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getLightingAutoExposure,
+            .set = native::setLightingAutoExposure,
         },
         scene::PropertyDesc{
             .name = atoms.intern("SunDirection"),

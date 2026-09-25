@@ -246,6 +246,19 @@ local Variants: { [string]: () -> () } = {
     ["night"] = function()
         Lighting.ClockTime = 22
     end,
+    ["shadows-off"] = function()
+        Lighting.GlobalShadows = false
+    end,
+    ["shadows-soft"] = function()
+        Lighting.ShadowSoftness = 1
+    end,
+    ["sky-light-off"] = function()
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+    end,
+    ["exposure-fixed"] = function()
+        Lighting.AutoExposure = false
+    end,
 }
 
 local apply = Variants[Variant]

@@ -99,6 +99,11 @@ struct SkyParams
     // million times and two cosines of a constant is two cosines too many.
     f32 discCosOuter = 0.9998f;
     f32 discCosInner = 0.99984f;
+    // `Lighting.EnvironmentSpecularScale` (ADR 0096): what the prefiltered
+    // chain is multiplied by when it is baked. Here rather than in a uniform so
+    // that no shader changes for it -- the sky pass ignores it, and the chain
+    // rebakes when it changes, as it does for a new horizon colour.
+    f32 specularScale = 1.0f;
 };
 
 // The derivation, and the one place it happens.

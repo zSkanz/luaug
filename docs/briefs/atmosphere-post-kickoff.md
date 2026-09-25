@@ -119,12 +119,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 7 — `Lighting` properties, in one commit
 
-- [ ] `EnvironmentDiffuseScale`, `EnvironmentSpecularScale`, `ShadowSoftness`,
+- [x] `EnvironmentDiffuseScale`, `EnvironmentSpecularScale`, `ShadowSoftness`,
       `GlobalShadows`, `AutoExposure`. Defaults reproduce today's image exactly,
       and the goldens prove it.
-- [ ] **All determinism traces move once, here.** Re-record them all, with the
+- [x] **All determinism traces move once, here.** Re-record them all, with the
       semantic change named in the commit (ADR 0060's rule).
-- [ ] M1 in `docs/briefs/mandate-2026-09-24.md` is ticked, pointing here.
+- [x] M1 in `docs/briefs/mandate-2026-09-24.md` is ticked, pointing here.
 
 ## Stage 8 — `Sky`
 
@@ -269,3 +269,11 @@ here*.
    takes `FogColor`'s place in the sky's derivation, so it is tinted by the hour
    as the horizon always was -- warm at dusk, dark at night -- and the sky, the
    reflections and the air over the world agree on it.
+16. **`Lighting`'s five changed no shader** (Stage 7), so the command-stream
+   captures and the image goldens stayed exact while every determinism trace
+   moved. The diffuse scale multiplies the nine irradiance coefficients --
+   linear in them -- and the specular scale the prefiltered chain as it is
+   baked, rebaking when it changes; `ShadowSoftness` is the filter radius a
+   quarter of a metre at 1, so its default of 0.2 is the engine's 0.05 m to the
+   bit; `GlobalShadows` off draws no cascade and clears the contact term; and
+   `AutoExposure` off takes the same branch the machine's switch does.

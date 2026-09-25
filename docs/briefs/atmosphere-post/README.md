@@ -87,3 +87,17 @@ hour with one, so the air is the only thing that differs.
 
 With an `Atmosphere`, `Lighting.FogStart`, `FogEnd` and `FogColor` are kept and
 not used, and the Properties panel says so on `Lighting`.
+
+## Stage 7 -- `Lighting`'s five properties
+
+Not a look to judge so much as a proof: with every one at its default the
+picture is the engine's own to the bit (the command-stream captures and the
+image goldens did not move). These show what each does when it is changed.
+
+| File | What changed | What to look at |
+|---|---|---|
+| `none.png` | nothing | The "before" |
+| `shadows-off.png` | `GlobalShadows = false` | No sun shadows anywhere; the lamp still glows |
+| `shadows-soft.png` | `ShadowSoftness = 1` | The shadows' edges widen into a penumbra |
+| `sky-light-off.png` | `EnvironmentDiffuseScale` and `EnvironmentSpecularScale` both 0 | The blue fill the sky gives the shadows is gone: they read darker and neutral, lit only by `Ambient` |
+| `exposure-fixed.png` | `AutoExposure = false` | The exposure holds at the calibration value instead of following the frame |

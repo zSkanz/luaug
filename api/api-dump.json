@@ -1508,12 +1508,27 @@
           "Type": "Color3"
         },
         {
+          "Name": "AutoExposure",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
           "Name": "Brightness",
           "Type": "number"
         },
         {
           "Name": "ClockTime",
           "Type": "number"
+        },
+        {
+          "Name": "EnvironmentDiffuseScale",
+          "Type": "number",
+          "Default": "1"
+        },
+        {
+          "Name": "EnvironmentSpecularScale",
+          "Type": "number",
+          "Default": "1"
         },
         {
           "Name": "ExposureCompensation",
@@ -1536,8 +1551,18 @@
           "Type": "number"
         },
         {
+          "Name": "GlobalShadows",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
           "Name": "OutdoorAmbient",
           "Type": "Color3"
+        },
+        {
+          "Name": "ShadowSoftness",
+          "Type": "number",
+          "Default": "0.2"
         },
         {
           "Name": "SunDirection",

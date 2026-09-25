@@ -292,6 +292,50 @@ local Classes: { Schema.Class } = {
                     .. "unit a camera uses. It is a look rather than a limit, so it is not clamped.",
             },
             {
+                Name = "EnvironmentDiffuseScale",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How much the sky lights the world's matte surfaces, from 0 to 1: 1 is all of its light, "
+                    .. "0 none -- a surface is then lit by the sun, its lamps and `Ambient` alone. The sky "
+                    .. "itself is drawn as it is either way.",
+            },
+            {
+                Name = "EnvironmentSpecularScale",
+                Type = "number",
+                Default = "1",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How much the sky is reflected in the world's shiny surfaces, from 0 to 1. 0 leaves metal "
+                    .. "reflecting nothing but the sun's highlight, which is what an interior with the sky "
+                    .. "shut out should look like.",
+            },
+            {
+                Name = "ShadowSoftness",
+                Type = "number",
+                Default = "0.2",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How soft the edge of a sun shadow is, from 0 (as hard as the shadow map allows) to 1 "
+                    .. "(a quarter of a metre of penumbra either side of the edge). The default is the edge the "
+                    .. "engine drew before this property existed.",
+            },
+            {
+                Name = "GlobalShadows",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the sun -- or the moon, at night -- casts shadows. Off, nothing shades anything "
+                    .. "from it: the look of an overcast day, or of a stylised world with no shadows at all. "
+                    .. "Lamps that cast shadows still do.",
+            },
+            {
+                Name = "AutoExposure",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether the picture's brightness follows what the camera sees, as an eye adapting from a "
+                    .. "cave to daylight does. Off holds the exposure fixed, so a world lit darker LOOKS darker; "
+                    .. "`ExposureCompensation` still applies either way. A machine whose graphics settings turn "
+                    .. "automatic exposure off has it off whatever this says.",
+            },
+            {
                 Name = "SunDirection",
                 Type = "vector",
                 ReadOnly = true,

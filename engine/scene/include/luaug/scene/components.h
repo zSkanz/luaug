@@ -471,6 +471,16 @@ struct LightingComponent
     // light. Unbounded on purpose -- an exposure a scene deliberately blows out
     // is a look, not an error.
     f32 exposureCompensation = 0.0f;
+    // ADR 0096's five, whose defaults are the picture before they existed:
+    // how much the sky lights and reflects, as multiples of what it does; how
+    // soft a sun shadow's edge is, 0 to 1 (0.2 is the filter the engine
+    // shipped); whether the sun casts at all; and whether this world meters
+    // its exposure (the machine's `auto_exposure` still wins).
+    f32 environmentDiffuseScale = 1.0f;
+    f32 environmentSpecularScale = 1.0f;
+    f32 shadowSoftness = 0.2f;
+    bool globalShadows = true;
+    bool autoExposure = true;
 };
 
 // --- The look of a world (ADR 0096) -------------------------------------------
