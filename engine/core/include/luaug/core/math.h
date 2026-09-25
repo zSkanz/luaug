@@ -321,6 +321,17 @@ struct CFrameD
 // one operation it will be built out of.
 [[nodiscard]] Mat4 toRenderMatrix(const CFrameD& cf, DVec3 origin) noexcept;
 
+// `toRenderMatrix(cf, origin) * scaling(scale)`, **bit for bit**, without the
+// general 4x4 product. Every part is drawn every frame from exactly that
+// product, and sixty of its sixty-four multiplications are by a zero the scale
+// matrix is known to hold. Each element of the product is then one non-zero
+// term summed with signed zeros, which is that term plus `0.0f` -- and the
+// `+ 0.0f` is not decoration: it is what turns a `-0` into the `+0` the long
+// form produces, so a capture of the command stream cannot tell the two apart.
+// (The one input where they differ is an infinite position, where the long
+// form multiplies it by zero into a NaN; a part there is not drawable anyway.)
+[[nodiscard]] Mat4 toRenderMatrixScaled(const CFrameD& cf, DVec3 origin, Vec3 scale) noexcept;
+
 // The other direction: a `Mat4` read back as a rigid frame.
 //
 // **Orthonormalised, and that is the whole reason this is not four assignments.**

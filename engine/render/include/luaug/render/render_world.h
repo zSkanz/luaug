@@ -395,6 +395,17 @@ struct RenderWorld
     // each their own (`familyOf`).
     std::vector<u32> materialFamilies;
     std::vector<DrawItem> draws;
+
+    // **Scratch for `extract`'s sort, not part of the snapshot.** Kept here so
+    // its capacity survives from one frame to the next, as every vector above
+    // does; nothing reads it after `extract` returns, and `clear` leaves it.
+    struct SortEntry
+    {
+        u64 key = 0;
+        u32 index = 0;
+    };
+    std::vector<SortEntry> sortScratch;
+    std::vector<DrawItem> drawScratch;
     // Every skinned draw's palette, concatenated. One vector rather than one per
     // draw because it is uploaded per draw anyway and a vector of vectors would
     // be a heap allocation per character per frame.

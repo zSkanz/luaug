@@ -324,7 +324,8 @@ struct FrameMaterial
 };
 
 [[nodiscard]] PartLook lookOf(const scene::World& world, const scene::PartComponent& part,
-                              const TextureLibrary* textures, std::vector<FrameMaterial>& frame)
+                              const TextureLibrary* textures, std::vector<FrameMaterial>& frame,
+                              usize& lastFrameMaterial)
 {
     PartLook look;
     const asset::MaterialOverrides& overrides = part.materialParameters;
@@ -341,11 +342,19 @@ struct FrameMaterial
         return look;
     }
 
+    // **The entry the previous part matched is asked first.** Parts that wear
+    // one material tend to be made together and so sit together in the pool,
+    // and the entries are unique by (material, clone), so the first match the
+    // scan would find is this one whenever this one matches.
     const FrameMaterial* found = nullptr;
-    for (const FrameMaterial& candidate : frame) {
-        if (candidate.material == part.material && candidate.clone == part.materialClone) {
-            found = &candidate;
-            break;
+    if (lastFrameMaterial < frame.size() && frame[lastFrameMaterial].material == part.material &&
+        frame[lastFrameMaterial].clone == part.materialClone) {
+        found = &frame[lastFrameMaterial];
+    }
+    for (usize index = 0; found == nullptr && index < frame.size(); ++index) {
+        if (frame[index].material == part.material && frame[index].clone == part.materialClone) {
+            found = &frame[index];
+            lastFrameMaterial = index;
         }
     }
     if (found == nullptr) {
@@ -356,6 +365,7 @@ struct FrameMaterial
         made.block = blockOf(world, made.resolved.properties, textures);
         frame.push_back(std::move(made));
         found = &frame.back();
+        lastFrameMaterial = frame.size() - 1;
     }
 
     const asset::MaterialProperties& base = found->resolved.properties;
@@ -734,6 +744,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     std::vector<ResolvedMaterial> resolved;
     // The authored materials this frame draws, each resolved once.
     std::vector<FrameMaterial> frameMaterials;
+    usize lastFrameMaterial = std::numeric_limits<usize>::max();
 
     // **Every material a part adds goes in through here**, which files it in
     // its family (D184): the first earlier material that is the same bind set
@@ -806,7 +817,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // What the part itself says about its surface, resolved once for the
         // whole mesh rather than once per section: `Material` is a property of
         // the PART, and every section of it gets the same answer.
-        const PartLook look = lookOf(world, *part, materials, frameMaterials);
+        const PartLook look = lookOf(world, *part, materials, frameMaterials, lastFrameMaterial);
 
         for (u32 section = 0; section < entry->sectionCount; ++section) {
             // Resolved before the cull test so that `material` is meaningful
@@ -1086,7 +1097,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (const scene::PartComponent* part = world.parts().find(world.parentOf(id)); part != nullptr)
             frame = at(world.parentOf(id), part->cframe) * decal.cframe;
         RenderDecal drawn;
-        drawn.boxToWorld = core::toRenderMatrix(frame, origin) * core::scaling(decal.size);
+        drawn.boxToWorld = core::toRenderMatrixScaled(frame, origin, decal.size);
         const AABB bounds =
             core::transformed(drawn.boxToWorld, AABB{Vec3{-0.5f, -0.5f, -0.5f}, Vec3{0.5f, 0.5f, 0.5f}});
         if (!core::intersects(out.camera.frustum, bounds))
@@ -1267,6 +1278,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         u32 slot;
     };
     std::vector<ResolvedPartMaterial> partMaterials;
+    usize lastPartMaterial = std::numeric_limits<usize>::max();
 
     world.parts().forEach([&](core::InstanceId id, const scene::PartComponent& part) {
         if (!inWorld(world, id, root))
@@ -1282,13 +1294,13 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (entry == nullptr)
             return;
 
-        const PartLook look = lookOf(world, part, materials, frameMaterials);
+        const PartLook look = lookOf(world, part, materials, frameMaterials, lastFrameMaterial);
         const f32 opacity = 1.0f - look.transparency;
         if (opacity <= 0.0f)
             return;
 
-        const Mat4 transform = core::toRenderMatrix(at(id, part.cframe, teleportReach(part.size)), origin) *
-                               core::scaling(primitiveScale(shape, part.size));
+        const Mat4 transform = core::toRenderMatrixScaled(at(id, part.cframe, teleportReach(part.size)), origin,
+                                                          primitiveScale(shape, part.size));
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
         ++out.candidateDraws;
@@ -1304,13 +1316,22 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // Deduplicated by the look rather than by colour alone: two parts
         // wearing one material with one set of overrides are one bind set, and
         // two sharing a tint but not a material are not.
+        //
+        // The previous part's entry is asked first, for the reason `lookOf`
+        // gives: the entries are unique looks, so a hit there is the entry the
+        // scan would have found.
         u32 materialSlot = 0;
         bool found = false;
-        for (const ResolvedPartMaterial& candidate : partMaterials) {
-            if (candidate.look.builtIn == look.builtIn && candidate.look.sameBlock(look)) {
-                materialSlot = candidate.slot;
+        if (lastPartMaterial < partMaterials.size() && partMaterials[lastPartMaterial].look.builtIn == look.builtIn &&
+            partMaterials[lastPartMaterial].look.sameBlock(look)) {
+            materialSlot = partMaterials[lastPartMaterial].slot;
+            found = true;
+        }
+        for (usize index = 0; !found && index < partMaterials.size(); ++index) {
+            if (partMaterials[index].look.builtIn == look.builtIn && partMaterials[index].look.sameBlock(look)) {
+                materialSlot = partMaterials[index].slot;
+                lastPartMaterial = index;
                 found = true;
-                break;
             }
         }
         if (!found) {
@@ -1335,6 +1356,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             }
             materialSlot = addMaterial(material);
             partMaterials.push_back(ResolvedPartMaterial{look, materialSlot});
+            lastPartMaterial = partMaterials.size() - 1;
         }
 
         const bool transparent = opacity < 1.0f;
@@ -1364,8 +1386,24 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // therefore a pure function of the operation sequence. `std::sort` is a
     // quicksort and would order them by whatever the partition happened to do
     // (R10) -- the same trap the api-dump generator hit on the same day.
-    std::stable_sort(out.draws.begin(), out.draws.end(),
-                     [](const DrawItem& a, const DrawItem& b) { return a.sortKey < b.sortKey; });
+    //
+    // **Sorted as (key, index) pairs and permuted once**, which is the same
+    // order: the index breaks every tie exactly the way stability does. What
+    // changed is what moves. A `DrawItem` is over a hundred bytes and a merge
+    // sort moves each one about log2(n) times; a pair is sixteen, and each item
+    // is then copied exactly once, into the buffer the previous frame left.
+    out.sortScratch.resize(out.draws.size());
+    for (usize index = 0; index < out.draws.size(); ++index)
+        out.sortScratch[index] = RenderWorld::SortEntry{out.draws[index].sortKey, static_cast<u32>(index)};
+    std::sort(out.sortScratch.begin(), out.sortScratch.end(),
+              [](const RenderWorld::SortEntry& a, const RenderWorld::SortEntry& b) {
+                  return a.key != b.key ? a.key < b.key : a.index < b.index;
+              });
+    out.drawScratch.clear();
+    out.drawScratch.reserve(out.draws.size());
+    for (const RenderWorld::SortEntry& entry : out.sortScratch)
+        out.drawScratch.push_back(out.draws[entry.index]);
+    out.draws.swap(out.drawScratch);
 }
 
 } // namespace luaug::render

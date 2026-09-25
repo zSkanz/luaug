@@ -1,6 +1,7 @@
 #include "luaug/core/math.h"
 
 #include <cmath>
+#include <cstring>
 #include <doctest/doctest.h>
 
 using namespace luaug::core;
@@ -1279,4 +1280,36 @@ TEST_CASE("cframeFromMatrix answers with a usable frame for a collapsed basis")
 
     CHECK(out.rotation == Mat3{});
     CHECK(nearD(out.position, DVec3{0.0, 9.0, 0.0}));
+}
+
+TEST_CASE("toRenderMatrixScaled is toRenderMatrix times scaling, bit for bit")
+{
+    // The render path draws every part from this, and a capture golden hashes
+    // the bytes, so "close" is not the bar: the two must be the same bits,
+    // negative zeros included -- which is why the scales below include 0 and
+    // negatives, and the rotations include axis-aligned ones full of exact zeros.
+    const Vec3 axes[] = {{0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {0.3f, -0.8f, 0.52f}};
+    const float angles[] = {0.0f, 1.5707964f, 3.1415927f, -0.7f, 2.2f};
+    const Vec3 scales[] = {
+        {1.0f, 1.0f, 1.0f}, {2.0f, 0.5f, 4.0f}, {-1.0f, 3.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {-0.25f, -2.0f, 7.5f}};
+    const DVec3 positions[] = {{0.0, 0.0, 0.0}, {-0.0, 12.5, -3.25}, {1.0e7, -250.0, 8.0e6}};
+    const DVec3 origins[] = {{0.0, 0.0, 0.0}, {1.0e7, -250.0, 8.0e6}, {-3.0, 0.0, 17.0}};
+
+    int compared = 0;
+    for (const Vec3& axis : axes) {
+        for (const float angle : angles) {
+            for (const Vec3& scale : scales) {
+                for (const DVec3& position : positions) {
+                    for (const DVec3& origin : origins) {
+                        const CFrameD cf{position, fromAxisAngle(normalize(axis), angle)};
+                        const Mat4 longForm = toRenderMatrix(cf, origin) * scaling(scale);
+                        const Mat4 fused = toRenderMatrixScaled(cf, origin, scale);
+                        CHECK(std::memcmp(&longForm, &fused, sizeof(Mat4)) == 0);
+                        ++compared;
+                    }
+                }
+            }
+        }
+    }
+    CHECK(compared == 4 * 5 * 5 * 3 * 3);
 }

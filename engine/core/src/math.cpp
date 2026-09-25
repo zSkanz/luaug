@@ -561,6 +561,25 @@ bool intersects(const AABB& a, const AABB& b) noexcept
            a.max.z >= b.min.z;
 }
 
+Mat4 toRenderMatrixScaled(const CFrameD& cf, DVec3 origin, Vec3 scale) noexcept
+{
+    // The same f64 subtraction and single narrowing `toRenderMatrix` makes.
+    const Vec3 t = toVec3(cf.position - origin);
+    const f32 s[3] = {scale.x, scale.y, scale.z};
+
+    Mat4 result;
+    for (int c = 0; c < 3; ++c) {
+        for (int row = 0; row < 3; ++row)
+            result.m[c][row] = cf.rotation.m[c][row] * s[c] + 0.0f;
+        result.m[c][3] = 0.0f;
+    }
+    result.m[3][0] = t.x + 0.0f;
+    result.m[3][1] = t.y + 0.0f;
+    result.m[3][2] = t.z + 0.0f;
+    result.m[3][3] = 1.0f;
+    return result;
+}
+
 AABB transformed(const Mat4& m, const AABB& box) noexcept
 {
     if (isEmpty(box)) {
