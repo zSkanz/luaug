@@ -95,9 +95,13 @@ struct SoakThresholds
     // late makes the same claim and covers that path, a patrol, a figure-eight
     // and a circuit alike.
     //
-    // The pair is searched between the first quarter of the run and the last, so
-    // the two visits are far apart in time and a leak has the whole soak to
-    // accumulate in between.
+    // Places are searched between the second quarter of the run and the last,
+    // so the visits are far apart in time and a leak has half the soak to
+    // accumulate in -- and not the first quarter, which is the world arriving
+    // from nothing at whatever speed the machine has (D186). Every revisited
+    // place counts, and the verdict is the median of each side: what a moving
+    // focus finds at one place is how far streaming trails it, which moves
+    // single places either way; a leak lifts all of them.
     //
     // **Zero asserts nothing**, like every other threshold here: only the caller
     // running a particular fly-through knows whether its path doubles back. When
@@ -166,13 +170,14 @@ struct SoakVerdict
     u64 lateInstances = 0;
     u64 peakInstances = 0;
 
-    // The returning-focus check's own two numbers, and whether it ran at all.
+    // The returning-focus check's own two numbers -- the median instance count
+    // over every revisited place, early and late -- and whether it ran at all.
     // Populated whatever the verdict, because a passing run's numbers are the
     // baseline the next one is read against.
     bool focusReturned = false;
     u64 departureInstances = 0;
     u64 returnInstances = 0;
-    // How many frames apart the two visits were, so a pair that is technically
+    // How many frames apart the visits were (the median), so a pair that is technically
     // early-and-late but only seconds apart is visible rather than trusted.
     usize revisitFrameGap = 0;
     // The nearest any early frame came to any late one. Reported whatever the

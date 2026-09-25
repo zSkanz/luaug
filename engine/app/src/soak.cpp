@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 namespace luaug::app {
 namespace {
@@ -204,8 +206,15 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
             return std::sqrt(dx * dx + dy * dy + dz * dz);
         };
 
+        // **The second quarter against the fourth, as the growth check above
+        // reads them** (D186), and not the first: the first quarter is the
+        // world arriving from nothing, and how long that takes is the
+        // machine's speed -- under load `05-streaming` was still filling in
+        // across its whole first lap, a median of 1499 instances against
+        // 1675 at the same places four laps on.
         const usize count = m_samples.size();
-        const usize earlyEnd = count / 4;
+        const usize earlyBegin = count / 4;
+        const usize earlyEnd = count / 2;
         const usize lateBegin = count - count / 4;
 
         // **Strided, so the search is bounded rather than quadratic in the run.**
@@ -215,25 +224,53 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         // travels in N frames. The stride is chosen so that neither side ever
         // examines more than `kRevisitSamples` points.
         constexpr usize kRevisitSamples = 384;
-        const usize earlyStride = earlyEnd > kRevisitSamples ? earlyEnd / kRevisitSamples : 1;
+        const usize earlySpan = earlyEnd - earlyBegin;
+        const usize earlyStride = earlySpan > kRevisitSamples ? earlySpan / kRevisitSamples : 1;
         const usize lateSpan = count - lateBegin;
         const usize lateStride = lateSpan > kRevisitSamples ? lateSpan / kRevisitSamples : 1;
 
+        // **Every place revisited, and the MEDIAN of what came back** (D186).
+        // One place is not a measurement: what is resident where a MOVING
+        // focus stands depends on how far materialisation trails it, and that
+        // is the millisecond budget again -- one run of `05-streaming` held
+        // 1194 instances at a place on one lap and 1689 on another while both
+        // quarters of the run averaged 1938. So every late sample is paired
+        // with the LATEST early visit of the same place -- the one with the
+        // most time behind it to have settled -- and the verdict compares the median of
+        // one side with the median of the other. Lag moves single places
+        // either way and cancels there; a leak lifts every place, and the
+        // median with it. (A median of per-place RATIOS against the FULLEST
+        // early visit was the first draft: it hid a twenty per cent leak under
+        // the lag `soak_tests.cpp` models.)
+        std::vector<u64> departures;
+        std::vector<u64> returns;
+        std::vector<usize> gaps;
+        const f64 radius = static_cast<f64>(thresholds.returnRadiusMetres);
         f64 closest = std::numeric_limits<f64>::max();
         f64 furthest = 0.0;
-        usize bestEarly = 0;
-        usize bestLate = 0;
-        for (usize early = 0; early < earlyEnd; early += earlyStride) {
-            for (usize late = lateBegin; late < count; late += lateStride) {
+        for (usize late = lateBegin; late < count; late += lateStride) {
+            bool matched = false;
+            usize latest = 0;
+            for (usize early = earlyBegin; early < earlyEnd; early += earlyStride) {
                 const f64 apart = distance(m_samples[early].focus, m_samples[late].focus);
                 furthest = std::max(furthest, apart);
-                if (apart < closest) {
-                    closest = apart;
-                    bestEarly = early;
-                    bestLate = late;
+                closest = std::min(closest, apart);
+                if (apart <= radius) {
+                    matched = true;
+                    latest = early;
                 }
             }
+            if (matched) {
+                departures.push_back(m_samples[latest].instanceCount);
+                returns.push_back(m_samples[late].instanceCount);
+                gaps.push_back(late - latest);
+            }
         }
+        const auto medianOf = [](auto& values) {
+            const auto middle = values.begin() + static_cast<std::ptrdiff_t>(values.size() / 2);
+            std::nth_element(values.begin(), middle, values.end());
+            return *middle;
+        };
 
         verdict.furthestMetres = furthest;
         verdict.closestReturnMetres = closest == std::numeric_limits<f64>::max() ? 0.0 : closest;
@@ -244,28 +281,17 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         const bool revisited = moved && closest <= static_cast<f64>(thresholds.returnRadiusMetres);
 
         verdict.focusReturned = revisited;
-        if (revisited) {
-            verdict.departureInstances = m_samples[bestEarly].instanceCount;
-            verdict.returnInstances = m_samples[bestLate].instanceCount;
-            verdict.revisitFrameGap = bestLate - bestEarly;
+        if (revisited && !returns.empty()) {
+            verdict.departureInstances = medianOf(departures);
+            verdict.returnInstances = medianOf(returns);
+            verdict.revisitFrameGap = medianOf(gaps);
 
             const auto allowed =
                 static_cast<u64>(static_cast<f64>(verdict.departureInstances) * (1.0 + thresholds.returnTolerance));
             if (verdict.departureInstances > thresholds.growthFloor && verdict.returnInstances > allowed) {
                 const core::I18nArg args[] = {{"start", static_cast<core::i64>(verdict.departureInstances)},
                                               {"back", static_cast<core::i64>(verdict.returnInstances)}};
-                // **Quarantined, not gating** (D186, section 12: four flakes).
-                // The flagship's path comes back within the radius only near
-                // where it BEGAN, and there the first visit is the initial load:
-                // 1153, 1197 and 1447 instances against 1691 on the same tree,
-                // because a count is how far a millisecond budget had got. Two
-                // fixes were tried and neither holds -- excluding the initial
-                // load leaves no revisit at all (13 m against 8 m), and a
-                // maximum over the early visit is still a visit caught loading.
-                // It keeps running and reporting, as the growth check does; the
-                // replacement needs a path that revisits a place after the
-                // world has arrived, which is a change to the scene's route.
-                verdict.quarantined.push_back(core::makeError(LUAUG_TR("engine.soak.err.return_grew"), args));
+                verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.return_grew"), args));
             }
         }
         else {

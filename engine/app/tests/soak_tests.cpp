@@ -1,6 +1,7 @@
 #include "luaug/app/soak.h"
 #include "luaug/core/i18n.h"
 
+#include <cmath>
 #include <doctest/doctest.h>
 #include <string>
 #include <string_view>
@@ -327,11 +328,9 @@ TEST_CASE("the same path with more world at the end of it does not")
     // Ten per cent more, against an eight per cent tolerance.
     const SoakVerdict verdict = outAndBack(4000, 4400).evaluate(kRevisit);
 
-    // Said, and quarantined rather than failed (D186): the check still sees it
-    // and the report still carries it.
-    CHECK(verdict.ok);
+    CHECK_FALSE(verdict.ok);
     CHECK(verdict.focusReturned);
-    CHECK(mentionsQuarantined(verdict, "engine.soak.err.return_grew"));
+    CHECK(mentions(verdict, "engine.soak.err.return_grew"));
     CHECK(verdict.returnInstances == 4400);
 }
 
@@ -343,6 +342,75 @@ TEST_CASE("a little more world is inside the tolerance, because streaming is not
     // would be one nobody could keep green.
     const SoakVerdict verdict = outAndBack(4000, 4080).evaluate(kRevisit);
     CHECK(verdict.ok);
+}
+
+namespace {
+
+// `05-streaming`'s shape: a circuit that comes back to every place exactly,
+// every period. `held` says what is resident at each frame.
+template <typename Held>
+[[nodiscard]] SoakRecorder circuit(Held held)
+{
+    SoakRecorder recorder(0);
+    constexpr int period = 100;
+    for (int index = 0; index < 800; ++index) {
+        const double angle = 6.283185307179586 * static_cast<double>(index % period) / period;
+        recorder.sample({.frameMs = 8.0,
+                         .residentBytes = 64u * 1024u * 1024u,
+                         .instanceCount = held(index),
+                         .focus = core::Vec3{static_cast<core::f32>(std::cos(angle) * 300.0), 0.0f,
+                                             static_cast<core::f32>(std::sin(angle) * 300.0)}});
+    }
+    return recorder;
+}
+
+// What a streaming focus leaves behind it at one place on one lap: up to a
+// third fewer instances, as the budget fell behind, on a pattern that repeats
+// on no period the circuit has. Deterministic, so the test is.
+[[nodiscard]] core::u64 lagging(int index, core::u64 settled)
+{
+    const auto scramble = static_cast<core::u64>(index) * 2654435761u;
+    return settled - settled * ((scramble >> 7) % 34) / 100;
+}
+
+} // namespace
+
+TEST_CASE("a circuit is not compared while the world was arriving (D186)")
+{
+    // Every phase of an exact circuit ties at a distance of nothing, and the
+    // check first took the FIRST tie -- frame zero, the world half there. Then
+    // a loaded machine was still filling the world in across its whole first
+    // lap, so here the world arrives over the entire first quarter.
+    seedRealCatalog();
+    const SoakVerdict verdict = circuit([](int index) {
+                                    return index < 200 ? 2000u + static_cast<core::u64>(index) * 10u : 4000u;
+                                }).evaluate(kRevisit);
+    CHECK(verdict.ok);
+    CHECK(verdict.focusReturned);
+    CHECK(verdict.departureInstances == 4000);
+}
+
+TEST_CASE("a place that lagged on one lap is not a leak, because the verdict is every place's median (D186)")
+{
+    // The flake the first fix still had: 1194 instances at a place on one lap
+    // and 1689 on another, in a run whose quarters both averaged 1938.
+    seedRealCatalog();
+    const SoakVerdict verdict = circuit([](int index) { return lagging(index, 4000); }).evaluate(kRevisit);
+    CHECK(verdict.ok);
+    CHECK(verdict.focusReturned);
+}
+
+TEST_CASE("the same lag with a leak under it still fails")
+{
+    // Twenty per cent more by the late quarter, under the same noise: the
+    // median is what moves, which is the point of reading it.
+    seedRealCatalog();
+    const SoakVerdict verdict = circuit([](int index) {
+                                    const core::u64 settled = index < 600 ? 4000u : 4800u;
+                                    return lagging(index, settled);
+                                }).evaluate(kRevisit);
+    CHECK_FALSE(verdict.ok);
+    CHECK(mentions(verdict, "engine.soak.err.return_grew"));
 }
 
 TEST_CASE("a path that never doubles back FAILS rather than passing quietly")
