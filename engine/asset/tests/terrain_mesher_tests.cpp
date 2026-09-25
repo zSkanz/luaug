@@ -251,6 +251,35 @@ TEST_CASE("one section per material, in id order")
     CHECK(meshed.mesh.submeshes.size() == meshed.sectionMaterials.size());
 }
 
+TEST_CASE("each side's skirt is a section of its own, after the surface")
+{
+    // **The one-sided skirt**: a draw leaves out the skirts on the sides whose
+    // neighbour is not coarser, so they cannot share a section with the
+    // surface or with each other.
+    TerrainField field = flatGround(0.0f);
+    MeshRegion region = regionAt(0, -8, 0);
+    region.skirt = 2.0f;
+    const TerrainMesh meshed = meshField(field, region);
+    REQUIRE(meshed.sectionSides.size() == meshed.sectionMaterials.size());
+    REQUIRE_FALSE(meshed.sectionSides.empty());
+    CHECK(meshed.sectionSides.front() == 0);
+    bool skirtSeen = false;
+    unsigned sidesSeen = 0;
+    for (const core::u8 side : meshed.sectionSides) {
+        if (side == 0) {
+            // The surface first: no surface section after a skirt.
+            CHECK_FALSE(skirtSeen);
+            continue;
+        }
+        skirtSeen = true;
+        // One side each.
+        CHECK((side == 1 || side == 2 || side == 4 || side == 8));
+        sidesSeen |= side;
+    }
+    // A flat ground cut on all four sides has a skirt on all four.
+    CHECK(sidesSeen == 15u);
+}
+
 TEST_CASE("meshing the same field twice produces the same bytes")
 {
     TerrainField field = flatGround(1.0f);

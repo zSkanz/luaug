@@ -294,6 +294,11 @@ struct TerrainNodeDraw
 {
     core::InstanceId terrain;
     core::NameAtom urn;
+    // **The sides whose skirt is drawn** (the one-sided skirt): 1 low x,
+    // 2 high x, 4 low z, 8 high z -- the sides that meet a COARSER neighbour,
+    // the only kind that leaves a crack. All four is what a caller that does
+    // not know gets.
+    core::u8 skirts = 0x0F;
 };
 
 // One decal as drawn (F2): its box, in camera-relative space, and what it paints.
@@ -629,6 +634,10 @@ public:
         // material per section, because a file whose four primitives share one
         // material should upload one material.
         std::vector<u32> sectionMaterial;
+        // A terrain node's: which side's skirt each section is, zero for the
+        // surface (see `asset::TerrainMesh::sectionSides`). Empty for any other
+        // mesh, which has no skirts.
+        std::vector<core::u8> sectionSide;
         std::vector<RenderMaterial> materials;
 
         // The mesh's vertex POSITIONS, for whoever needs a collision hull

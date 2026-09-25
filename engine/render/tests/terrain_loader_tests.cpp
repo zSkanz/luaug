@@ -14,6 +14,7 @@
 #include "luaug/scene/enum_registry.h"
 #include "luaug/scene/world.h"
 
+#include <algorithm>
 #include <chrono>
 #include <doctest/doctest.h>
 #include <map>
@@ -307,4 +308,30 @@ TEST_CASE("what meshing a terrain node costs" * doctest::skip())
         MESSAGE("voxel " << voxel << " m: a full-detail node meshes in " << leaf << " ms (" << triangles
                          << " triangles); a ball of radius 6 voxels writes in " << brush << " ms");
     }
+}
+
+TEST_CASE("a node hangs a skirt only on the sides that meet a coarser node")
+{
+    // **The one-sided skirt** (the 2026-09-24 mandate, M2): only a coarser
+    // neighbour leaves a crack; the same level shares its edge and a finer
+    // neighbour hangs its own skirt.
+    //
+    // A level-0 node at x 1, z 2: the same level on its low x and its high
+    // z, a level-1 node over its high x, and nothing on its low z.
+    std::vector<TerrainNodeKey> drawn;
+    drawn = {
+        TerrainNodeKey{0, 1, 2}, // the subject
+        TerrainNodeKey{0, 0, 2}, // same level, low x
+        TerrainNodeKey{1, 1, 1}, // coarser: level-0 x 2..3, z 2..3 -- the high x
+        TerrainNodeKey{0, 1, 3}, // same level, high z
+    };
+    std::sort(drawn.begin(), drawn.end());
+    CHECK(terrainSkirtSides(drawn, TerrainNodeKey{0, 1, 2}) == 2u);
+
+    // A node with only finer neighbours hangs nothing.
+    std::vector<TerrainNodeKey> finer{TerrainNodeKey{1, 0, 0}, TerrainNodeKey{0, 2, 0}, TerrainNodeKey{0, 2, 1}};
+    std::sort(finer.begin(), finer.end());
+    CHECK(terrainSkirtSides(finer, TerrainNodeKey{1, 0, 0}) == 0u);
+    // And the finer one beside it hangs its skirt toward the coarse one.
+    CHECK(terrainSkirtSides(finer, TerrainNodeKey{0, 2, 0}) == 1u);
 }

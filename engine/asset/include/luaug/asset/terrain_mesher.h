@@ -81,6 +81,13 @@ struct TerrainMesh
     // What each submesh is made of, parallel to `mesh.submeshes`: one section
     // per material, in id order.
     std::vector<core::u8> sectionMaterials;
+    // **Which side's skirt a section is**, parallel too: zero for the surface,
+    // else one bit -- 1 low x, 2 high x, 4 low z, 8 high z. The surface's
+    // sections come first. Kept apart so a draw can leave out the skirts on
+    // the sides whose neighbour is not coarser (the one-sided skirt): only a
+    // coarser neighbour leaves a crack, and a skirt with nothing to cover is a
+    // wall a camera inside the ground can see.
+    std::vector<core::u8> sectionSides;
 
     // The same surface as a plain position list and index triples, skirts left
     // out, which is what `ShapeType::TriangleMesh` takes.

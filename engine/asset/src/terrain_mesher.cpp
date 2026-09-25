@@ -221,11 +221,14 @@ void appendMesh(TerrainMesh& into, const TerrainMesh& from)
     // Sections stay one per material, in id order: both meshes' triangles of a
     // material are gathered into one run.
     const auto offset = static_cast<u32>(into.mesh.vertices.size());
-    std::map<u8, std::vector<u32>> buckets;
+    // By side and then material, so the surface stays first and each side's
+    // skirt stays a section of its own.
+    std::map<std::pair<u8, u8>, std::vector<u32>> buckets;
     const auto gather = [&](const TerrainMesh& mesh, u32 shift) {
         for (usize section = 0; section < mesh.mesh.submeshes.size(); ++section) {
             const Submesh& sub = mesh.mesh.submeshes[section];
-            std::vector<u32>& bucket = buckets[mesh.sectionMaterials[section]];
+            const u8 side = section < mesh.sectionSides.size() ? mesh.sectionSides[section] : u8{0};
+            std::vector<u32>& bucket = buckets[{side, mesh.sectionMaterials[section]}];
             for (u32 at = 0; at < sub.indexCount; ++at)
                 bucket.push_back(mesh.mesh.indices[sub.firstIndex + at] + shift);
         }
@@ -236,13 +239,15 @@ void appendMesh(TerrainMesh& into, const TerrainMesh& from)
     into.mesh.indices.clear();
     into.mesh.submeshes.clear();
     into.sectionMaterials.clear();
-    for (const auto& [material, indices] : buckets) {
+    into.sectionSides.clear();
+    for (const auto& [key, indices] : buckets) {
         Submesh section;
         section.firstIndex = static_cast<u32>(into.mesh.indices.size());
         section.indexCount = static_cast<u32>(indices.size());
         into.mesh.indices.insert(into.mesh.indices.end(), indices.begin(), indices.end());
         into.mesh.submeshes.push_back(section);
-        into.sectionMaterials.push_back(material);
+        into.sectionMaterials.push_back(key.second);
+        into.sectionSides.push_back(key.first);
     }
     const auto colliderOffset = static_cast<u32>(into.colliderPoints.size());
     into.colliderPoints.insert(into.colliderPoints.end(), from.colliderPoints.begin(), from.colliderPoints.end());
@@ -804,6 +809,9 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
     // neighbour; a strip hung from it along the negative normal covers a crack
     // to a neighbour meshed at another level. Both windings, because which face
     // a camera sees depends on which neighbour is the coarse one.
+    // Each side's skirt, by material, apart from the surface (see
+    // `TerrainMesh::sectionSides`).
+    std::map<std::pair<u8, u8>, std::vector<u32>> skirts;
     if (region.skirt > 0.0f && !buckets.empty()) {
         std::unordered_map<core::u64, u32> uses;
         const auto edgeKey = [](u32 a, u32 b) {
@@ -862,19 +870,23 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
             return made;
         };
         for (auto& entry : buckets) {
-            std::vector<u32>& list = entry.second;
-            const usize triangles = list.size();
-            for (usize at = 0; at + 2 < triangles; at += 3) {
+            const std::vector<u32>& list = entry.second;
+            for (usize at = 0; at + 2 < list.size(); at += 3) {
                 const u32 corners[3] = {list[at], list[at + 1], list[at + 2]};
                 for (int edgeIndex = 0; edgeIndex < 3; ++edgeIndex) {
                     const u32 a = corners[edgeIndex];
                     const u32 b = corners[(edgeIndex + 1) % 3];
-                    if ((vertexRing[a] & vertexRing[b]) == 0 || uses[edgeKey(a, b)] != 1)
+                    const u32 shared = vertexRing[a] & vertexRing[b];
+                    if (shared == 0 || uses[edgeKey(a, b)] != 1)
                         continue;
+                    // The side the edge is on: its lowest shared bit, which is
+                    // the one side a corner-to-corner edge also runs along.
+                    const auto side = static_cast<u8>(shared & (~shared + 1u));
                     const u32 la = lowerOf(a);
                     const u32 lb = lowerOf(b);
-                    list.insert(list.end(), {a, b, lb, a, lb, la});
-                    list.insert(list.end(), {a, lb, b, a, la, lb});
+                    std::vector<u32>& skirt = skirts[{side, entry.first}];
+                    skirt.insert(skirt.end(), {a, b, lb, a, lb, la});
+                    skirt.insert(skirt.end(), {a, lb, b, a, la, lb});
                 }
             }
         }
@@ -905,6 +917,16 @@ TerrainMesh meshField(const TerrainField& field, const MeshRegion& region)
         out.mesh.indices.insert(out.mesh.indices.end(), entry.second.begin(), entry.second.end());
         out.mesh.submeshes.push_back(section);
         out.sectionMaterials.push_back(entry.first);
+        out.sectionSides.push_back(0);
+    }
+    for (const auto& [key, indices] : skirts) {
+        Submesh section;
+        section.firstIndex = static_cast<u32>(out.mesh.indices.size());
+        section.indexCount = static_cast<u32>(indices.size());
+        out.mesh.indices.insert(out.mesh.indices.end(), indices.begin(), indices.end());
+        out.mesh.submeshes.push_back(section);
+        out.sectionMaterials.push_back(key.second);
+        out.sectionSides.push_back(key.first);
     }
     return out;
 }

@@ -136,6 +136,7 @@ struct ChunkSpan
     entry.bounds = meshed.mesh.bounds;
     entry.sectionCount = static_cast<u32>(meshed.mesh.submeshes.size());
     entry.sectionMaterial.resize(entry.sectionCount);
+    entry.sectionSide = meshed.sectionSides;
     entry.materials.reserve(entry.sectionCount);
     for (u32 section = 0; section < entry.sectionCount; ++section) {
         const core::u8 materialId = section < meshed.sectionMaterials.size() ? meshed.sectionMaterials[section] : 0;
@@ -325,7 +326,7 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
             Node& node = nodeFor(key);
             node.used = m_frame;
             if (node.mesh.valid())
-                m_drawn.push_back(Drawn{&world, TerrainNodeDraw{id, node.urn}});
+                m_drawn.push_back(Drawn{&world, TerrainNodeDraw{id, node.urn}, key});
         };
 
         const auto childrenOf = [&](TerrainNodeKey key, std::array<TerrainNodeKey, 4>& out) {
@@ -526,12 +527,50 @@ u32 TerrainLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::W
     return m_lastBuilds;
 }
 
+core::u8 terrainSkirtSides(std::span<const TerrainNodeKey> drawn, TerrainNodeKey key) noexcept
+{
+    const auto coarserAt = [drawn](TerrainNodeKey cell) {
+        for (u32 level = cell.level + 1; level <= TerrainTopLevel; ++level) {
+            const i32 span = 1 << (level - cell.level);
+            const TerrainNodeKey ancestor{level, asset::floorDiv(cell.x, span), asset::floorDiv(cell.z, span)};
+            if (std::binary_search(drawn.begin(), drawn.end(), ancestor))
+                return true;
+        }
+        return false;
+    };
+    core::u8 sides = 0;
+    if (coarserAt(TerrainNodeKey{key.level, key.x - 1, key.z}))
+        sides |= 1u;
+    if (coarserAt(TerrainNodeKey{key.level, key.x + 1, key.z}))
+        sides |= 2u;
+    if (coarserAt(TerrainNodeKey{key.level, key.x, key.z - 1}))
+        sides |= 4u;
+    if (coarserAt(TerrainNodeKey{key.level, key.x, key.z + 1}))
+        sides |= 8u;
+    return sides;
+}
+
 std::vector<TerrainNodeDraw> TerrainLoader::draws(const scene::World& world) const
 {
+    // **Which sides meet a coarser node** (the one-sided skirt). A side's
+    // neighbour, one cell over at this node's level, is coarser when an
+    // ancestor of it is what is drawn there. The same level needs no skirt --
+    // the two meshes share their edge -- and a finer neighbour hangs its own.
+    // Each terrain's drawn nodes, sorted, for `terrainSkirtSides`.
     std::vector<TerrainNodeDraw> out;
+    std::vector<TerrainNodeKey> keys;
     for (const Drawn& drawn : m_drawn) {
-        if (drawn.world == &world)
-            out.push_back(drawn.draw);
+        if (drawn.world != &world)
+            continue;
+        keys.clear();
+        for (const Drawn& other : m_drawn) {
+            if (other.world == &world && other.draw.terrain == drawn.draw.terrain)
+                keys.push_back(other.key);
+        }
+        std::sort(keys.begin(), keys.end());
+        TerrainNodeDraw draw = drawn.draw;
+        draw.skirts = terrainSkirtSides(keys, drawn.key);
+        out.push_back(draw);
     }
     return out;
 }

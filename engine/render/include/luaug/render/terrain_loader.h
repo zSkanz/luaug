@@ -49,6 +49,13 @@ struct TerrainNodeKey
 // the default voxel, meshed from each chunk's single level-5 value.
 inline constexpr core::u32 TerrainTopLevel = asset::ChunkLevels - 1;
 
+// **The sides of `key` that meet a coarser node** among the nodes of one
+// terrain that are drawn (`drawn`, sorted): 1 low x, 2 high x, 4 low z, 8 high
+// z. A side's neighbour, one cell over at this node's level, is coarser when an
+// ancestor of it is what is drawn there. The same level needs no skirt -- the
+// two meshes share their edge -- and a finer neighbour hangs its own.
+[[nodiscard]] core::u8 terrainSkirtSides(std::span<const TerrainNodeKey> drawn, TerrainNodeKey key) noexcept;
+
 // The URN a node's mesh is filed under: `terrain://<instance>/<level>/<x>,<z>`.
 [[nodiscard]] std::string terrainNodeUrn(core::InstanceId terrain, TerrainNodeKey node);
 
@@ -148,6 +155,9 @@ private:
     {
         const scene::World* world = nullptr;
         TerrainNodeDraw draw;
+        // Where in the quadtree, so `draws` can tell which neighbours are
+        // coarser.
+        TerrainNodeKey key;
     };
     std::vector<Drawn> m_drawn;
 };

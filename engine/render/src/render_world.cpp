@@ -979,6 +979,11 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             const bool visible = core::intersects(out.camera.frustum, worldBounds);
 
             for (u32 section = 0; section < entry->sectionCount; ++section) {
+                // A skirt on a side whose neighbour is not coarser covers no
+                // crack, and is left out (the one-sided skirt).
+                if (section < entry->sectionSide.size() && entry->sectionSide[section] != 0 &&
+                    (entry->sectionSide[section] & node.skirts) == 0)
+                    continue;
                 u32 localMaterial = 0;
                 if (section < entry->sectionMaterial.size())
                     localMaterial = entry->sectionMaterial[section];
