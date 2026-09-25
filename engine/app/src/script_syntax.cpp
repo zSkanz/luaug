@@ -547,10 +547,67 @@ public:
     }
 };
 
+// The libraries and constructors whose calls only compute a value: a call to
+// one standing as a statement does nothing at all.
+[[nodiscard]] bool pureCall(const Luau::AstExprCall* call)
+{
+    const auto* index = call->func->as<Luau::AstExprIndexName>();
+    const auto* owner = index != nullptr ? index->expr->as<Luau::AstExprGlobal>() : nullptr;
+    if (owner == nullptr)
+        return false;
+    const std::string_view library = owner->name.value;
+    const std::string_view member = index->index.value;
+    if (library == "math" || library == "string" || library == "vector" || library == "bit32" || library == "utf8")
+        return member != "randomseed";
+    const bool constructor = member == "new" || member.starts_with("from");
+    return constructor && (library == "Vector3" || library == "Vector2" || library == "CFrame" || library == "Color3" ||
+                           library == "UDim" || library == "UDim2" || library == "Rect");
+}
+
+// The source text of a call's callee, `math.atan2`, for a message.
+[[nodiscard]] std::string calleeName(const Luau::AstExprCall* call)
+{
+    const auto* index = call->func->as<Luau::AstExprIndexName>();
+    const auto* owner = index != nullptr ? index->expr->as<Luau::AstExprGlobal>() : nullptr;
+    if (owner == nullptr)
+        return "the call";
+    return std::string(owner->name.value) + "." + index->index.value;
+}
+
 class Lints : public Luau::AstVisitor
 {
 public:
     explicit Lints(std::vector<Diagnostic>& out) : m_out(out) {}
+
+    // **A `local` with no value, and an expression right after it on the same
+    // line** (the owner, after a long hunt: `local angle  math.atan2(dz, dx)`).
+    // Without its `=`, that is two statements Luau accepts -- an empty local
+    // and a call whose result goes nowhere -- so neither the parser nor the
+    // checker says a word, and `angle` is nil. A call to a function that only
+    // computes a value, standing as a statement anywhere, is the same mistake
+    // in another shape: it does nothing.
+    bool visit(Luau::AstStatBlock* block) override
+    {
+        for (std::size_t at = 0; at < block->body.size; ++at) {
+            const auto* statement = block->body.data[at]->as<Luau::AstStatExpr>();
+            const auto* call = statement != nullptr ? statement->expr->as<Luau::AstExprCall>() : nullptr;
+            if (call == nullptr)
+                continue;
+            const auto* before = at > 0 ? block->body.data[at - 1]->as<Luau::AstStatLocal>() : nullptr;
+            const bool joined = before != nullptr && before->values.size == 0 && before->vars.size == 1 &&
+                                before->location.end.line == call->location.begin.line;
+            if (joined) {
+                const std::string name = before->vars.data[0]->name.value;
+                warn(before->location, "`local " + name + "` is declared without a value, and " + calleeName(call) +
+                                           "(...) after it is a separate statement -- a missing `=`?");
+            }
+            else if (pureCall(call)) {
+                warn(call->location,
+                     "the result of " + calleeName(call) + "(...) is not used, so this call does nothing");
+            }
+        }
+        return true;
+    }
 
     // **A value returned from a `Promise.new` executor goes nowhere** (the
     // owner's module loader: every promise stayed pending, so `Promise.all`
@@ -649,6 +706,18 @@ private:
                 return true;
         }
         return false;
+    }
+
+    void warn(const Luau::Location& where, std::string message)
+    {
+        const auto begin = static_cast<core::u32>(where.begin.column);
+        const auto end = static_cast<core::u32>(where.end.column);
+        m_out.push_back(Diagnostic{
+            .at = Position{static_cast<core::u32>(where.begin.line), begin},
+            .length = where.begin.line == where.end.line && end > begin ? end - begin : 0,
+            .message = std::move(message),
+            .severity = Severity::Warning,
+        });
     }
 
     void report(const Luau::Location& where, std::string message)

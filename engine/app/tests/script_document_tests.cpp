@@ -908,3 +908,28 @@ TEST_CASE("a value returned from a Promise.new executor is a warning")
     REQUIRE(lines.size() == 1);
     CHECK(lines.front() == 2);
 }
+
+TEST_CASE("a local with no value before a call on its line is a missing `=`; a pure call alone does nothing")
+{
+    // **The owner, after a long hunt**: `local angle  math.atan2(dz, dx)` is
+    // two statements Luau accepts, and `angle` was nil.
+    ScriptDocument document("local dz, dx = 1, 2\n"
+                            "local angle  math.atan2(dz, dx)\n"
+                            "math.floor(dz)\n"
+                            "local fine = math.atan2(dz, dx)\n"
+                            "local later\n"
+                            "print(angle, fine, later)\n");
+    document.refreshDiagnostics();
+    bool missingEquals = false;
+    bool unusedCall = false;
+    for (const app::Diagnostic& diagnostic : document.diagnostics()) {
+        if (diagnostic.at.line == 1 && diagnostic.message.find("missing `=`") != std::string::npos)
+            missingEquals = true;
+        if (diagnostic.at.line == 2 && diagnostic.message.find("is not used") != std::string::npos)
+            unusedCall = true;
+        CHECK(diagnostic.at.line != 3);
+        CHECK(diagnostic.at.line != 4);
+    }
+    CHECK(missingEquals);
+    CHECK(unusedCall);
+}

@@ -61,6 +61,32 @@ describe("Collector", function()
         expect(timerRan):ToBe(false)
     end)
 
+    it("calls a Destroy found through a class's metatable, as Janitor does", function()
+        local Class = {}
+        Class.__index = Class
+        local destroyed = 0
+        function Class.new()
+            return setmetatable({}, Class)
+        end
+        function Class:Destroy()
+            destroyed += 1
+        end
+
+        local collector = Collector.new()
+        collector:Add(Class.new())
+        collector:Add(Class.new())
+        collector:Cleanup()
+        expect(destroyed):ToBe(2)
+    end)
+
+    it("refuses a table whose Destroy is not a function, and says what to do", function()
+        local collector = Collector.new()
+        collector:Add({ Destroy = true })
+        expect(function()
+            collector:Cleanup()
+        end):ToThrow("give the method to call")
+    end)
+
     it("cleans newest first, and stays usable after Cleanup", function()
         local collector = Collector.new()
         local order: { string } = {}

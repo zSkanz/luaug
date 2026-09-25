@@ -65,7 +65,11 @@ local function clean(entry: Entry)
         object:Destroy()
     elseif isPromise(object) then
         object:Cancel()
-    elseif (kind == "table" or kind == "userdata") and object.Destroy ~= nil then
+    elseif (kind == "table" or kind == "userdata") and type(object.Destroy) == "function" then
+        -- Found through the object's metatable too, which is where a class
+        -- keeps it: `setmetatable(self, Class)` with `Class.__index = Class`.
+        -- A FUNCTION, not merely present -- a `Destroy` field holding
+        -- anything else is not something to call.
         object:Destroy()
     else
         error(`Collector cannot clean a {kind}; give the method to call as :Add's second argument`, 3)
