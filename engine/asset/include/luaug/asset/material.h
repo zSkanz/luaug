@@ -100,6 +100,24 @@ enum class MaterialAlphaMode : core::i32
 // The flat description: every field with a value. **The defaults are the engine
 // default material**, which looks exactly as a plain part always has: white,
 // dielectric, roughness 0.7.
+// One value of the surface shader a material names (ADR 0091), by the name the
+// shader declares it under: a number or vector in `value` (as many components
+// as `components` says), or a texture by URN. Kept apart from the built-in
+// fields on purpose: their set is closed and every system that walks it -- the
+// panel, the wire, the overrides -- stays as it was.
+struct ShaderParameter
+{
+    std::string name;
+    std::array<core::f32, 4> value{};
+    core::u8 components = 1;
+    std::string texture;
+    // A texture that is data -- a normal or a height -- rather than a colour.
+    bool linear = false;
+
+    [[nodiscard]] bool isTexture() const noexcept { return !texture.empty(); }
+    [[nodiscard]] bool operator==(const ShaderParameter&) const = default;
+};
+
 struct MaterialProperties
 {
     core::Color3 color{1.0f, 1.0f, 1.0f};
@@ -122,6 +140,17 @@ struct MaterialProperties
     core::f32 alphaCutoff = 0.5f;
     bool doubleSided = false;
 
+    // **The surface shader** (ADR 0091): a URN, or empty for the built-in
+    // surface. `readsSceneColor` asks the renderer for what is behind.
+    std::string shader;
+    bool readsSceneColor = false;
+    // The shader's values, sorted by name; a name no parameter of the shader
+    // declares is kept and ignored, so switching shaders loses nothing.
+    std::vector<ShaderParameter> shaderParameters;
+
+    [[nodiscard]] const ShaderParameter* shaderParameter(std::string_view name) const noexcept;
+    // Sets one, keeping the list sorted.
+    void setShaderParameter(ShaderParameter parameter);
     [[nodiscard]] bool operator==(const MaterialProperties&) const = default;
 };
 
@@ -142,6 +171,9 @@ struct MaterialAsset
     // writes every one; a variant writes only what it overrides, and every
     // other field comes from its parent.
     MaterialFieldMask written = 0;
+    // Whether this file says `shader` and `readsSceneColor` -- a variant that
+    // does not keeps its parent's.
+    bool shaderWritten = false;
     // The values; meaningful for the `written` fields.
     MaterialProperties properties;
 

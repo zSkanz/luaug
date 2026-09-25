@@ -280,6 +280,21 @@ namespace {
     };
     out.setMaps(mapOf(material.colorMap), mapOf(material.normalMap), mapOf(material.metallicRoughnessMap),
                 mapOf(material.emissiveMap));
+
+    // The surface shader and its values (ADR 0091), by name: the renderer
+    // holds the shader's layout and packs them. A texture that has not loaded
+    // yet travels as no texture, and reads as the shader's fallback.
+    out.surface = material.shader;
+    out.surfaceValues.reserve(material.shaderParameters.size());
+    for (const asset::ShaderParameter& parameter : material.shaderParameters) {
+        SurfaceValue value;
+        value.name = parameter.name;
+        value.value = parameter.value;
+        value.isTexture = parameter.isTexture();
+        if (value.isTexture)
+            value.texture = mapOf(parameter.texture);
+        out.surfaceValues.push_back(std::move(value));
+    }
     return out;
 }
 
@@ -419,7 +434,8 @@ struct FrameMaterial
             return false;
     }
     return x.baseColor[3] == y.baseColor[3] && a.baseColor == b.baseColor && a.normal == b.normal &&
-           a.metallicRoughness == b.metallicRoughness && a.emissive == b.emissive;
+           a.metallicRoughness == b.metallicRoughness && a.emissive == b.emissive && a.surface == b.surface &&
+           a.surfaceValues == b.surfaceValues;
 }
 
 void tintBy(RenderMaterial& material, const Color3& color)

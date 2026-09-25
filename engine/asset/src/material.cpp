@@ -6,6 +6,7 @@
 #include "luaug/core/log.h"
 #include "luaug/platform/file.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -180,6 +181,94 @@ void writeField(core::JsonWriter& out, MaterialField field, const MaterialProper
 
 } // namespace
 
+const ShaderParameter* MaterialProperties::shaderParameter(std::string_view name) const noexcept
+{
+    for (const ShaderParameter& parameter : shaderParameters) {
+        if (parameter.name == name)
+            return &parameter;
+    }
+    return nullptr;
+}
+
+void MaterialProperties::setShaderParameter(ShaderParameter parameter)
+{
+    const auto at =
+        std::lower_bound(shaderParameters.begin(), shaderParameters.end(), parameter.name,
+                         [](const ShaderParameter& entry, const std::string& name) { return entry.name < name; });
+    if (at != shaderParameters.end() && at->name == parameter.name)
+        *at = std::move(parameter);
+    else
+        shaderParameters.insert(at, std::move(parameter));
+}
+
+namespace {
+
+// A shader parameter as a material file writes it: a number, a boolean, an
+// array of two to four numbers, a texture URN, or `{"texture": urn,
+// "linear": true}` for a texture that is data.
+[[nodiscard]] std::optional<ShaderParameter> readShaderParameter(std::string_view name, const core::JsonValue& json)
+{
+    ShaderParameter out;
+    out.name = std::string(name);
+    switch (json.type()) {
+    case core::JsonType::Number:
+        out.value[0] = static_cast<core::f32>(json.asNumber());
+        return std::isfinite(out.value[0]) ? std::optional<ShaderParameter>(out) : std::nullopt;
+    case core::JsonType::Boolean:
+        out.value[0] = json.asBool() ? 1.0f : 0.0f;
+        return out;
+    case core::JsonType::String:
+        out.texture = std::string(json.asString());
+        return out.texture.empty() ? std::nullopt : std::optional<ShaderParameter>(out);
+    case core::JsonType::Array:
+        if (json.size() < 2 || json.size() > 4)
+            return std::nullopt;
+        out.components = static_cast<core::u8>(json.size());
+        for (core::usize index = 0; index < json.size(); ++index) {
+            if (json.at(index).type() != core::JsonType::Number)
+                return std::nullopt;
+            out.value[index] = static_cast<core::f32>(json.at(index).asNumber());
+            if (!std::isfinite(out.value[index]))
+                return std::nullopt;
+        }
+        return out;
+    case core::JsonType::Object:
+        if (json["texture"].type() != core::JsonType::String || json["texture"].asString().empty())
+            return std::nullopt;
+        out.texture = std::string(json["texture"].asString());
+        out.linear = json["linear"].type() == core::JsonType::Boolean && json["linear"].asBool();
+        return out;
+    default:
+        return std::nullopt;
+    }
+}
+
+void writeShaderParameter(core::JsonWriter& out, const ShaderParameter& parameter)
+{
+    out.key(parameter.name);
+    if (parameter.isTexture()) {
+        if (!parameter.linear) {
+            out.value(parameter.texture);
+            return;
+        }
+        out.beginObject();
+        out.field("texture", parameter.texture);
+        out.field("linear", true);
+        out.endObject();
+        return;
+    }
+    if (parameter.components <= 1) {
+        out.valueFloat(parameter.value[0]);
+        return;
+    }
+    out.beginInlineArray();
+    for (core::u8 index = 0; index < parameter.components && index < 4; ++index)
+        out.valueFloat(parameter.value[index]);
+    out.endArray();
+}
+
+} // namespace
+
 std::string_view materialFieldName(MaterialField field) noexcept
 {
     const auto index = static_cast<core::usize>(field);
@@ -290,6 +379,26 @@ std::optional<MaterialAsset> readMaterialAsset(std::string_view json, MaterialRe
             }
             continue;
         }
+        if (key == "shader") {
+            if (value.type() == core::JsonType::String) {
+                out.properties.shader = std::string(value.asString());
+                out.shaderWritten = true;
+            }
+            else {
+                noted.malformedFields.emplace_back(key);
+            }
+            continue;
+        }
+        if (key == "readsSceneColor") {
+            if (value.type() == core::JsonType::Boolean) {
+                out.properties.readsSceneColor = value.asBool();
+                out.shaderWritten = true;
+            }
+            else {
+                noted.malformedFields.emplace_back(key);
+            }
+            continue;
+        }
         if (key == "properties") {
             if (value.type() != core::JsonType::Object) {
                 noted.malformedFields.emplace_back(key);
@@ -299,7 +408,15 @@ std::optional<MaterialAsset> readMaterialAsset(std::string_view json, MaterialRe
                 const std::string_view name = value.keyAt(item);
                 const std::optional<MaterialField> field = materialFieldNamed(name);
                 if (!field.has_value()) {
-                    noted.unknownFields.push_back("properties." + std::string(name));
+                    // **Not a built-in field: a parameter of the shader**
+                    // (ADR 0091), kept whatever the shader turns out to
+                    // declare. Reported only where it cannot be one -- a base
+                    // that names no shader.
+                    std::optional<ShaderParameter> parameter = readShaderParameter(name, value[name]);
+                    if (!parameter.has_value())
+                        noted.malformedFields.push_back("properties." + std::string(name));
+                    else
+                        out.properties.setShaderParameter(std::move(*parameter));
                     continue;
                 }
                 if (!readField(*field, value[name], out.properties)) {
@@ -312,6 +429,10 @@ std::optional<MaterialAsset> readMaterialAsset(std::string_view json, MaterialRe
         }
         noted.unknownFields.emplace_back(key);
     }
+    if (out.parent.empty() && out.properties.shader.empty()) {
+        for (const ShaderParameter& parameter : out.properties.shaderParameters)
+            noted.unknownFields.push_back("properties." + parameter.name);
+    }
     return out;
 }
 
@@ -322,6 +443,10 @@ std::string writeMaterialAsset(const MaterialAsset& material)
     out.field("format", MaterialFormat);
     out.field("version", MaterialFormatVersion);
     out.field("parent", material.parent);
+    if (material.shaderWritten || (material.parent.empty() && !material.properties.shader.empty())) {
+        out.field("shader", material.properties.shader);
+        out.field("readsSceneColor", material.properties.readsSceneColor);
+    }
 
     out.key("instanceParameters");
     out.beginInlineArray();
@@ -343,6 +468,8 @@ std::string writeMaterialAsset(const MaterialAsset& material)
         if ((written & fieldBit(field)) != 0)
             writeField(out, field, material.properties);
     }
+    for (const ShaderParameter& parameter : material.properties.shaderParameters)
+        writeShaderParameter(out, parameter);
     out.endObject();
     out.endObject();
 
@@ -406,6 +533,13 @@ ResolvedMaterial resolveMaterial(std::string_view urn, const MaterialLookup& loo
             if ((asset.written & fieldBit(field)) != 0)
                 copyMaterialField(field, asset.properties, out.properties);
         }
+        if (asset.shaderWritten || link == chain.rbegin()) {
+            out.properties.shader = asset.properties.shader;
+            out.properties.readsSceneColor = asset.properties.readsSceneColor;
+        }
+        // A variant's parameter replaces its parent's of the same name.
+        for (const ShaderParameter& parameter : asset.properties.shaderParameters)
+            out.properties.setShaderParameter(parameter);
         out.instanceParameters |= static_cast<MaterialFieldMask>(asset.instanceParameters & DeclarableParameters);
     }
     return out;
@@ -571,7 +705,8 @@ void MaterialLibrary::put(std::string_view urn, MaterialAsset material)
 namespace {
 
 constexpr std::array<char, 4> CompiledMagic{'L', 'M', 'A', 'T'};
-constexpr core::u32 CompiledVersion = 1;
+// 2: the surface shader and its parameters (ADR 0091).
+constexpr core::u32 CompiledVersion = 2;
 
 class ByteWriter
 {
@@ -673,6 +808,18 @@ std::vector<std::byte> encodeMaterial(const CompiledMaterial& material)
         const std::array<std::byte, 16> hash = core::toBytes(material.mapHashes[index]);
         out.raw(hash.data(), hash.size());
     }
+    out.word(asset.shaderWritten ? 1u : 0u);
+    out.text(p.shader);
+    out.word(p.readsSceneColor ? 1u : 0u);
+    out.word(static_cast<core::u32>(p.shaderParameters.size()));
+    for (const ShaderParameter& parameter : p.shaderParameters) {
+        out.text(parameter.name);
+        for (const core::f32 component : parameter.value)
+            out.real(component);
+        out.word(parameter.components);
+        out.text(parameter.texture);
+        out.word(parameter.linear ? 1u : 0u);
+    }
     return out.take();
 }
 
@@ -709,6 +856,29 @@ std::optional<CompiledMaterial> decodeMaterial(std::span<const std::byte> bytes)
         if (!in.text(*maps[index]) || !in.bytes(hash))
             return std::nullopt;
         out.mapHashes[index] = core::fromBytes(std::span<const std::byte, 16>(hash));
+    }
+    core::u32 shaderWritten = 0;
+    core::u32 readsSceneColor = 0;
+    core::u32 parameters = 0;
+    if (!in.word(shaderWritten) || !in.text(p.shader) || !in.word(readsSceneColor) || !in.word(parameters))
+        return std::nullopt;
+    asset.shaderWritten = shaderWritten != 0;
+    p.readsSceneColor = readsSceneColor != 0;
+    for (core::u32 index = 0; index < parameters; ++index) {
+        ShaderParameter parameter;
+        core::u32 components = 0;
+        core::u32 linear = 0;
+        if (!in.text(parameter.name))
+            return std::nullopt;
+        for (core::f32& component : parameter.value) {
+            if (!in.real(component))
+                return std::nullopt;
+        }
+        if (!in.word(components) || components > 4 || !in.text(parameter.texture) || !in.word(linear))
+            return std::nullopt;
+        parameter.components = static_cast<core::u8>(components);
+        parameter.linear = linear != 0;
+        p.shaderParameters.push_back(std::move(parameter));
     }
     if (!in.done())
         return std::nullopt;

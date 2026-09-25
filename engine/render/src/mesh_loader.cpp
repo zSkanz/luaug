@@ -489,6 +489,12 @@ core::u32 MeshLoader::syncTextures(rhi::IDevice& device, rhi::ICmdList& cmd, sce
         map(material.properties.normalMap, false);
         map(material.properties.metallicRoughnessMap, false);
         map(material.properties.emissiveMap, true);
+        // A surface shader's textures (ADR 0091): colours unless the material
+        // says the texture is data.
+        for (const asset::ShaderParameter& parameter : material.properties.shaderParameters) {
+            if (parameter.isTexture())
+                map(parameter.texture, !parameter.linear);
+        }
     });
     // A sky's sun and moon (ADR 0096): colours. Its six faces are not here --
     // they are resampled on the CPU by `SkyLoader`, which reads them itself.

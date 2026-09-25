@@ -158,8 +158,11 @@ TEST_CASE("an unknown field is reported and not fatal; a wrong-shaped one reads 
     CHECK(read->written == fieldBit(MaterialField::Color));
     // A map is not declarable, and a name that is not a field is not a field.
     CHECK(read->instanceParameters == fieldBit(MaterialField::Color));
-    CHECK(notes.unknownFields.size() == 4);
+    // `shader` is a field since ADR 0091, and with a shader named, a field the
+    // built-in set lacks is one of the shader's parameters -- `Glow` here.
+    CHECK(notes.unknownFields.size() == 2);
     CHECK(notes.malformedFields.size() == 1);
+    CHECK(read->properties.shaderParameter("Glow") != nullptr);
 
     // What is not a material at all is refused, with a reason.
     std::string error;
@@ -243,4 +246,100 @@ TEST_CASE("a part's overrides apply only where the material declares them, and c
     asset::clearOverride(overrides, MaterialField::Roughness);
     asset::clearOverride(overrides, MaterialField::Color);
     CHECK(overrides == asset::MaterialOverrides{});
+}
+
+// --- ADR 0091: a material that names a surface shader -------------------------
+
+using namespace luaug::asset;
+
+TEST_CASE("a material names its shader, and a field the built-in set does not have is a parameter of it")
+{
+    const std::string_view text = R"({
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/ocean.surface.hlsl",
+  "readsSceneColor": true,
+  "properties": {
+    "Roughness": 0.1,
+    "WaveHeight": 0.5,
+    "Deep": [0.0, 0.1, 0.2],
+    "Foamy": true,
+    "Foam": "asset://textures/foam.png",
+    "Ripples": {"texture": "asset://textures/ripples.png", "linear": true}
+  }
+})";
+    MaterialReadNotes notes;
+    const std::optional<MaterialAsset> read = readMaterialAsset(text, &notes);
+    REQUIRE(read.has_value());
+    CHECK(notes.unknownFields.empty());
+    CHECK(notes.malformedFields.empty());
+    CHECK(read->shaderWritten);
+    CHECK(read->properties.shader == "asset://shaders/ocean.surface.hlsl");
+    CHECK(read->properties.readsSceneColor);
+    REQUIRE(read->properties.shaderParameters.size() == 5);
+    // Sorted by name, whatever order the file wrote them in.
+    CHECK(read->properties.shaderParameters[0].name == "Deep");
+    CHECK(read->properties.shaderParameter("Deep")->components == 3);
+    CHECK(read->properties.shaderParameter("Foamy")->value[0] == 1.0f);
+    CHECK(read->properties.shaderParameter("Foam")->isTexture());
+    CHECK(read->properties.shaderParameter("Ripples")->linear);
+
+    // And back, to the same asset.
+    // (A base writes every built-in field, so compare what it says, not which
+    // fields it happened to write.)
+    const std::optional<MaterialAsset> again = readMaterialAsset(writeMaterialAsset(*read));
+    REQUIRE(again.has_value());
+    CHECK(again->properties == read->properties);
+    CHECK(again->shaderWritten);
+
+    // Through the compiled form a pack carries, too.
+    CompiledMaterial compiled;
+    compiled.asset = *read;
+    const std::optional<CompiledMaterial> decoded = decodeMaterial(encodeMaterial(compiled));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->asset == *read);
+}
+
+namespace {
+
+ShaderParameter number(std::string name, core::f32 value)
+{
+    ShaderParameter out;
+    out.name = std::move(name);
+    out.value[0] = value;
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("a variant keeps its parent's shader and replaces its parameters by name")
+{
+    MaterialAsset parent;
+    parent.properties.shader = "asset://shaders/ocean.surface.hlsl";
+    parent.shaderWritten = true;
+    parent.properties.setShaderParameter(number("WaveHeight", 0.5f));
+    parent.properties.setShaderParameter(number("Speed", 1.0f));
+    MaterialAsset child;
+    child.parent = "asset://materials/sea.material.json";
+    child.properties.setShaderParameter(number("WaveHeight", 2.0f));
+
+    const MaterialLookup lookup = [&](std::string_view urn) -> const MaterialAsset* {
+        if (urn == "asset://materials/sea.material.json")
+            return &parent;
+        if (urn == "asset://materials/storm.material.json")
+            return &child;
+        return nullptr;
+    };
+    const ResolvedMaterial resolved = resolveMaterial("asset://materials/storm.material.json", lookup);
+    CHECK(resolved.properties.shader == "asset://shaders/ocean.surface.hlsl");
+    CHECK(resolved.properties.shaderParameter("WaveHeight")->value[0] == 2.0f);
+    CHECK(resolved.properties.shaderParameter("Speed")->value[0] == 1.0f);
+
+    // A base with no shader has no business with a field it cannot use.
+    MaterialReadNotes notes;
+    (void)readMaterialAsset(R"({"format":"luaug-material","version":1,"parent":"","properties":{"Mystery":1}})",
+                            &notes);
+    REQUIRE(notes.unknownFields.size() == 1);
+    CHECK(notes.unknownFields[0] == "properties.Mystery");
 }
