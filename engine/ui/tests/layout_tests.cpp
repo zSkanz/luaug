@@ -153,6 +153,31 @@ TEST_CASE("a screen nothing changed runs no solver")
     CHECK(ui::layoutStats().solverRuns == first);
 }
 
+TEST_CASE("a frame moved into another is laid out against its new parent, with nothing else written")
+{
+    // **The owner**: a frame reparented into another kept its old place and
+    // size until one of its properties was touched. A move is not a write, so
+    // it marked nothing; `World::setParent` marks both screens now.
+    Fixture fixture;
+    const InstanceId screen = fixture.child("ScreenGui", fixture.service);
+    const InstanceId wide = fixture.child("Frame", screen);
+    const InstanceId narrow = fixture.child("Frame", screen);
+    fixture.object(wide).size = core::UDim2{core::UDim{0.0f, 800.0f}, core::UDim{0.0f, 400.0f}};
+    fixture.object(narrow).size = core::UDim2{core::UDim{0.0f, 200.0f}, core::UDim{0.0f, 100.0f}};
+    fixture.object(narrow).position = core::UDim2{core::UDim{0.0f, 900.0f}, core::UDim{0.0f, 0.0f}};
+    const InstanceId half = fixture.child("Frame", wide);
+    fixture.object(half).size = core::UDim2{core::UDim{0.5f, 0.0f}, core::UDim{0.5f, 0.0f}};
+    fixture.run();
+    CHECK(fixture.object(half).absoluteSize.x == doctest::Approx(400.0));
+
+    // Moved, and only moved.
+    REQUIRE_FALSE(fixture.world->setParent(half, narrow).has_value());
+    fixture.run();
+    CHECK(fixture.object(half).absoluteSize.x == doctest::Approx(100.0));
+    CHECK(fixture.object(half).absoluteSize.y == doctest::Approx(50.0));
+    CHECK(fixture.object(half).absolutePosition.x == doctest::Approx(900.0));
+}
+
 TEST_CASE("a vertical list stacks its children with the padding between them")
 {
     Fixture fixture;

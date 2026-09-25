@@ -363,6 +363,24 @@ std::optional<core::TextKey> World::setParent(core::InstanceId id, core::Instanc
     for (const core::InstanceId member : subtree)
         m_changes.push({ChangeKind::AncestryChanged, member, parentOf(member), core::NameAtom{}});
 
+    // **A UI element moved is a layout to redo, on both sides** (the owner: a
+    // frame reparented into another kept its old place and size until one of
+    // its properties was touched). Only a layout-affecting WRITE marked its
+    // screen dirty, and a move is not a write -- so the screen it left and the
+    // one it joined are marked here, the new one found from the instance
+    // itself so a `ScreenGui` that moved marks its own tree. Destroying goes
+    // through here as a move to nil.
+    const auto markScreen = [this](core::InstanceId from) {
+        for (core::InstanceId at = from; at.valid(); at = parentOf(at)) {
+            if (ScreenGuiComponent* screen = m_screenGuis.find(at); screen != nullptr) {
+                screen->layoutDirty = true;
+                return;
+            }
+        }
+    };
+    markScreen(oldParent);
+    markScreen(id);
+
     return std::nullopt;
 }
 
