@@ -224,11 +224,7 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         usize bestEarly = 0;
         usize bestLate = 0;
         for (usize early = 0; early < earlyEnd; early += earlyStride) {
-            if (!m_samples[early].settled)
-                continue;
             for (usize late = lateBegin; late < count; late += lateStride) {
-                if (!m_samples[late].settled)
-                    continue;
                 const f64 apart = distance(m_samples[early].focus, m_samples[late].focus);
                 furthest = std::max(furthest, apart);
                 if (apart < closest) {
@@ -258,7 +254,18 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
             if (verdict.departureInstances > thresholds.growthFloor && verdict.returnInstances > allowed) {
                 const core::I18nArg args[] = {{"start", static_cast<core::i64>(verdict.departureInstances)},
                                               {"back", static_cast<core::i64>(verdict.returnInstances)}};
-                verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.return_grew"), args));
+                // **Quarantined, not gating** (D186, section 12: four flakes).
+                // The flagship's path comes back within the radius only near
+                // where it BEGAN, and there the first visit is the initial load:
+                // 1153, 1197 and 1447 instances against 1691 on the same tree,
+                // because a count is how far a millisecond budget had got. Two
+                // fixes were tried and neither holds -- excluding the initial
+                // load leaves no revisit at all (13 m against 8 m), and a
+                // maximum over the early visit is still a visit caught loading.
+                // It keeps running and reporting, as the growth check does; the
+                // replacement needs a path that revisits a place after the
+                // world has arrived, which is a change to the scene's route.
+                verdict.quarantined.push_back(core::makeError(LUAUG_TR("engine.soak.err.return_grew"), args));
             }
         }
         else {

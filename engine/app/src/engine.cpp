@@ -1480,8 +1480,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                              .streamingMs = streaming.lastPumpMilliseconds(),
                              .residentBytes = platform::residentBytes(),
                              .instanceCount = static_cast<core::u64>(host->world().instanceCount()),
-                             .focus = focusPosition,
-                             .settled = streaming.stats().loading == 0 && streaming.stats().decoded == 0});
+                             .focus = focusPosition});
             }
             lastFrameNs = sampleNs;
         }
