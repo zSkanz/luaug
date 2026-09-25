@@ -15,7 +15,7 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Brightness` | `number` | `0` | read/write, **inert** | Light added to every pixel, from -1 to 1. A frame's average sits near 0.45 after exposure, so 0.1 is a gentle lift and -0.2 a clear darkening; the darkest pixels stop at black. |
-| `Contrast` | `number` | `0` | read/write, **inert** | How far every pixel is pushed from the frame's average brightness, from -1 to 1. 0 leaves it, 0.5 spreads it half as far again, and -1 flattens the picture to one grey. |
-| `Saturation` | `number` | `0` | read/write, **inert** | How vivid colours are, from -1 to 1. -1 is black and white, 0 leaves them, 1 is twice as far from grey. |
-| `TintColor` | `Color3` | `Color3.new(1, 1, 1)` | read/write, **inert** | Multiplies the picture. White changes nothing; a warm white warms it. |
+| `Brightness` | `number` | `0` | read/write | Light added to every pixel, from -1 to 1. A frame's average sits near 0.45 after exposure, so 0.1 is a gentle lift and -0.2 a clear darkening; the darkest pixels stop at black. |
+| `Contrast` | `number` | `0` | read/write | How far every pixel is pushed from the frame's average brightness, from -1 to 1. 0 leaves it, 0.5 spreads it half as far again, and -1 flattens the picture to one grey. |
+| `Saturation` | `number` | `0` | read/write | How vivid colours are, from -1 to 1. -1 is black and white, 0 leaves them, 1 is twice as far from grey. |
+| `TintColor` | `Color3` | `Color3.new(1, 1, 1)` | read/write | Multiplies the picture. White changes nothing; a warm white warms it. |

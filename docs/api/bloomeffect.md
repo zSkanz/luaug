@@ -15,6 +15,6 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Intensity` | `number` | `1` | read/write, **inert** | How strongly the glow is added, as a multiple of the engine's own: 1 is the look every world has without this instance, 2 is twice the glow, 0 is none. |
-| `Size` | `number` | `24` | read/write, **inert** | How far the glow reaches, from 0 to 56. 24 is the engine's own reach; 48 spreads the same light about twice as far, and fainter for it. |
-| `Threshold` | `number` | `1.1` | read/write, **inert** | How bright a pixel must be, after exposure, before it glows. Exposure maps a frame's average to about 0.45, so the default blooms what is a little over twice as bright as the average; 0 makes everything glow a little. |
+| `Intensity` | `number` | `1` | read/write | How strongly the glow is added, as a multiple of the engine's own: 1 is the look every world has without this instance, 2 is twice the glow, 0 is none. |
+| `Size` | `number` | `24` | read/write | How far the glow reaches, from 0 to 56. 24 is the engine's own reach; 48 spreads the same light about twice as far, and fainter for it. |
+| `Threshold` | `number` | `1.1` | read/write | How bright a pixel must be, after exposure, before it glows. Exposure maps a frame's average to about 0.45, so the default blooms what is a little over twice as bright as the average; 0 makes everything glow a little. |

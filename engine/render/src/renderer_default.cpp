@@ -99,6 +99,9 @@ constexpr f32 kBloomKnee = 0.6f;
 // that reads as a glow rather than as a haze is mostly threshold and radius, and
 // the intensity is what stops it from becoming fog.
 constexpr f32 kBloomIntensity = 0.05f;
+// `BloomEffect.Size` at which the upsample's tent has its own radius of one
+// source texel: the engine's own reach, and the class's default (ADR 0096).
+constexpr f32 kBloomSize = 24.0f;
 
 // The most instances one frame may draw through the instanced path, and the one
 // vertex buffer they all live in. Five megabytes, allocated once: the alternative
@@ -163,9 +166,14 @@ constexpr f32 kOcclusionStrength = 1.0f;
 // chain has. Written once because eleven copies of it would be eleven places to
 // forget the scissor, and a missing scissor is a pass that draws nothing on a
 // backend that requires one.
+//
+// `secondUniforms` is the fragment stage's slot 1, for a pass that keeps an
+// existing block at slot 0 unchanged and adds its own beside it -- the graded
+// tonemap, which must leave the plain one's block byte for byte as it was.
 void fullscreenPass(rhi::ICmdList& cmd, rhi::PipelineHandle pipeline, rhi::TextureHandle target, u32 width, u32 height,
                     std::string_view name, std::span<const rhi::TextureBinding> textures,
-                    std::span<const std::byte> uniforms, rhi::LoadOp loadOp = rhi::LoadOp::Clear)
+                    std::span<const std::byte> uniforms, rhi::LoadOp loadOp = rhi::LoadOp::Clear,
+                    std::span<const std::byte> secondUniforms = {})
 {
     const std::array<rhi::ColorAttachment, 1> attachment{rhi::ColorAttachment{
         .texture = target,
@@ -178,6 +186,8 @@ void fullscreenPass(rhi::ICmdList& cmd, rhi::PipelineHandle pipeline, rhi::Textu
     cmd.setScissor({.width = static_cast<core::i32>(width), .height = static_cast<core::i32>(height)});
     if (!uniforms.empty())
         cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, uniforms);
+    if (!secondUniforms.empty())
+        cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, secondUniforms);
     if (!textures.empty())
         cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
     cmd.draw(3, 1, 0, 0);
@@ -408,6 +418,18 @@ private:
     // lazy terms: a world with nothing on the plane builds neither.
     [[nodiscard]] bool ensureSprites(rhi::IDevice& device);
 
+    // **A pipeline the look needs (ADR 0096), made the first frame it is
+    // used** -- as the decals' and the particles' are, and for their reason: a
+    // world with none of these instances builds none of them, so its command
+    // stream is the one it always was, shader for shader.
+    struct LookPipeline
+    {
+        rhi::PipelineHandle handle{};
+        bool tried = false;
+    };
+    [[nodiscard]] bool ensureLookPipeline(rhi::IDevice& device, LookPipeline& slot, const char* shader,
+                                          rhi::TextureFormat format, bool additive = false);
+
     // Bakes whatever the environment owes this frame and uploads it. Called
     // once per frame, inside the frame, because `uploadTexture` needs a command
     // list and `create` has none.
@@ -461,7 +483,7 @@ private:
     // without a second list. Sized with room: `create` silently stops recording
     // once it is full and the overflow leaks at shutdown, which is a bug that
     // announces itself nowhere.
-    rhi::ShaderHandle shaders_[64]{};
+    rhi::ShaderHandle shaders_[128]{};
     core::usize shaderCount_ = 0;
 
     rhi::TextureHandle hdr_{};
@@ -627,6 +649,15 @@ private:
     u32 spriteCount_ = 0;
     // The palette the terrain shader reads, filled once a frame.
     GpuTerrainSurfaceUniforms terrainSurface_{};
+
+    // --- The look (ADR 0096) --------------------------------------------------
+    //
+    // `tonemap.hlsl` with every colour correction folded in, for a frame that
+    // has one.
+    LookPipeline gradedTonemap_;
+
+    // Every look pipeline, for `destroy`.
+    [[nodiscard]] std::array<LookPipeline*, 1> lookPipelines() noexcept { return {&gradedTonemap_}; }
 };
 
 } // namespace
@@ -1477,6 +1508,11 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     particleTried_ = false;
     decalTried_ = false;
     worldUiTried_ = false;
+    for (LookPipeline* look : lookPipelines()) {
+        if (look->handle.valid())
+            device.destroy(look->handle);
+        *look = {};
+    }
 
     for (rhi::SamplerHandle* sampler : {&linearSampler_, &shadowSampler_, &environmentSampler_, &pointSampler_}) {
         if (sampler->valid())
@@ -2083,6 +2119,45 @@ bool DefaultRenderer::ensureDecals(rhi::IDevice& device)
         .debugName = "decal",
     });
     return decalPipeline_.valid();
+}
+
+bool DefaultRenderer::ensureLookPipeline(rhi::IDevice& device, LookPipeline& slot, const char* shader,
+                                         rhi::TextureFormat format, bool additive)
+{
+    if (slot.tried)
+        return slot.handle.valid();
+    slot.tried = true;
+    if (shaderLibrary_ == nullptr)
+        return false;
+    core::EngineError error;
+    const rhi::ShaderHandle vertex = shaderLibrary_->create(device, shader, rhi::ShaderStage::Vertex, &error);
+    const rhi::ShaderHandle fragment = shaderLibrary_->create(device, shader, rhi::ShaderStage::Fragment, &error);
+    for (const rhi::ShaderHandle handle : {vertex, fragment}) {
+        if (handle.valid() && shaderCount_ < std::size(shaders_))
+            shaders_[shaderCount_++] = handle;
+    }
+    if (!vertex.valid() || !fragment.valid()) {
+        core::logText(core::LogLevel::Warn, error.message);
+        return false;
+    }
+    rhi::ColorTargetDesc target{.format = format};
+    if (additive) {
+        target.blend = {.enabled = true,
+                        .srcColor = rhi::BlendFactor::One,
+                        .dstColor = rhi::BlendFactor::One,
+                        .srcAlpha = rhi::BlendFactor::Zero,
+                        .dstAlpha = rhi::BlendFactor::One};
+    }
+    const std::array<rhi::ColorTargetDesc, 1> targets{target};
+    slot.handle = device.createGraphicsPipeline({
+        .vertexShader = vertex,
+        .fragmentShader = fragment,
+        .primitive = rhi::PrimitiveType::TriangleList,
+        .rasterizer = {.cullMode = rhi::CullMode::None},
+        .colorTargets = targets,
+        .debugName = shader,
+    });
+    return slot.handle.valid();
 }
 
 bool DefaultRenderer::ensureParticles(rhi::IDevice& device)
@@ -3315,8 +3390,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // Down with a thirteen-tap box, up with a tent, each level its own texture
     // because a `ColorAttachment` names a texture and not a mip level. The
     // threshold is applied once, on the way in.
+    // **A `BloomEffect` governs bloom when one counts** (ADR 0096): its numbers
+    // replace the engine's own, and one that is disabled turns bloom off. With
+    // none, every number below is the constant it always was. The machine's
+    // switch still wins over the world's (ADR 0044).
+    const RenderLook& look = world.look;
+    const bool bloomOn = settings_.bloom && look.bloomEnabled;
     cmd.pushDebugGroup("bloom");
-    if (!settings_.bloom) {
+    if (!bloomOn) {
         // Black adds nothing, and the tonemap adds `bloom_[0]` unconditionally.
         // Cheaper than the eight passes it replaces and, unlike leaving the
         // chain's textures alone, does not depend on what was in them.
@@ -3332,7 +3413,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             bloom.texelRadius[1] = 1.0f / static_cast<f32>(sourceHeight);
             bloom.texelRadius[2] = 1.0f;
             if (level == 0) {
-                bloom.threshold[0] = kBloomThreshold;
+                bloom.threshold[0] = look.bloomGoverned ? look.bloomThreshold : kBloomThreshold;
                 bloom.threshold[1] = kBloomKnee;
             }
             // **Clamped at the edges, never wrapped** (D181): the material
@@ -3351,7 +3432,9 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             GpuBloomUniforms bloom;
             bloom.texelRadius[0] = 1.0f / static_cast<f32>(bloomLevelSize(renderWidth_, level));
             bloom.texelRadius[1] = 1.0f / static_cast<f32>(bloomLevelSize(renderHeight_, level));
-            bloom.texelRadius[2] = 1.0f;
+            // The tent's radius is how far the glow reaches: every level's
+            // kernel widens together, so the falloff keeps its shape.
+            bloom.texelRadius[2] = look.bloomGoverned ? look.bloomSize / kBloomSize : 1.0f;
             const std::array<rhi::TextureBinding, 1> source{rhi::TextureBinding{bloom_[level], environmentSampler_}};
             // `LoadOp::Load`, because the pipeline blends ADDITIVELY into what
             // the downsample already put there -- reading and writing one target
@@ -3372,7 +3455,20 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // tonemapped image to find edges in.
     GpuTonemapUniforms tonemap;
     tonemap.exposureBloom[0] = world.environment.exposureCompensation;
-    tonemap.exposureBloom[1] = kBloomIntensity;
+    tonemap.exposureBloom[1] = look.bloomGoverned ? kBloomIntensity * look.bloomIntensity : kBloomIntensity;
+
+    // **Every colour correction, as one affine map, in the graded twin of the
+    // tonemap** -- chosen only on a frame that has one, so a world without
+    // draws through the plain pipeline with the plain block.
+    GpuGradeUniforms grade;
+    // The plain tonemap's own target format, whichever target it writes.
+    const bool graded = look.graded && ensureLookPipeline(device, gradedTonemap_, "tonemap_graded", kLdrFormat);
+    if (graded) {
+        for (u32 row = 0; row < 3; ++row) {
+            for (u32 column = 0; column < 4; ++column)
+                grade.rows[row][column] = look.grade[row][column];
+        }
+    }
     const std::array<rhi::TextureBinding, 3> tonemapBindings{
         rhi::TextureBinding{hdr_, environmentSampler_}, rhi::TextureBinding{bloom_[0], environmentSampler_},
         rhi::TextureBinding{exposure_[nextExposure], linearSampler_}};
@@ -3383,10 +3479,11 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // fullscreen pass into a larger target sampling a smaller source is exactly
     // a bilinear upscale.
     cmd.pushDebugGroup("tonemap");
-    fullscreenPass(cmd, tonemapPipeline_, settings_.antiAliasing ? ldr_ : target.color,
+    fullscreenPass(cmd, graded ? gradedTonemap_.handle : tonemapPipeline_, settings_.antiAliasing ? ldr_ : target.color,
                    settings_.antiAliasing ? renderWidth_ : target.width,
                    settings_.antiAliasing ? renderHeight_ : target.height, "tonemap", tonemapBindings,
-                   asBytes(&tonemap, sizeof(tonemap)));
+                   asBytes(&tonemap, sizeof(tonemap)), rhi::LoadOp::Clear,
+                   graded ? asBytes(&grade, sizeof(grade)) : std::span<const std::byte>{});
     cmd.popDebugGroup();
 
     // --- Anti-aliasing -------------------------------------------------------

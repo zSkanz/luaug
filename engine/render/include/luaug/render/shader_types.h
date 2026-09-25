@@ -306,6 +306,20 @@ struct GpuOutlineUniforms
 
 static_assert(sizeof(GpuOutlineUniforms) == 48, "GpuOutlineUniforms is a cbuffer layout");
 
+// `tonemap_graded.hlsl`'s second block (ADR 0096): every enabled
+// `ColorCorrectionEffect` composed into one affine map of exposed linear colour,
+// as three rows -- `out.r = dot(rows[0], (r, g, b, 1))`. At the fragment stage's
+// slot 1, so the plain tonemap's block at slot 0 is left exactly as it was.
+struct GpuGradeUniforms
+{
+    f32 rows[3][4]{
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f},
+    };
+};
+static_assert(sizeof(GpuGradeUniforms) == 48, "GpuGradeUniforms is mirrored by tonemap_graded.hlsl");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

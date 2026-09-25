@@ -1,0 +1,21 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "instanceParameters": ["Color"],
+  "properties": {
+    "Color": [1, 0.9, 0.75],
+    "Transparency": 0,
+    "ColorMap": "",
+    "NormalMap": "",
+    "MetallicRoughnessMap": "",
+    "Emissive": [8, 6.5, 4.5],
+    "EmissiveMap": "",
+    "Metalness": 0,
+    "Roughness": 0.9,
+    "NormalScale": 1,
+    "AlphaMode": "Opaque",
+    "AlphaCutoff": 0.5,
+    "DoubleSided": false
+  }
+}

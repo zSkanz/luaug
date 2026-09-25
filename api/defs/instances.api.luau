@@ -1800,7 +1800,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Enabled",
                 Type = "boolean",
-                Inert = true,
                 Default = "true",
                 Doc = "Whether this effect takes part. Off is not the same as deleting it: a `BloomEffect` that "
                     .. "is off still governs bloom, and governs it to nothing.",
@@ -1820,7 +1819,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Intensity",
                 Type = "number",
-                Inert = true,
                 Default = "1",
                 ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How strongly the glow is added, as a multiple of the engine's own: 1 is the look every "
@@ -1829,7 +1827,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Size",
                 Type = "number",
-                Inert = true,
                 Default = "24",
                 ErrorKey = "scene.err.number_bloom_size",
                 Doc = "How far the glow reaches, from 0 to 56. 24 is the engine's own reach; 48 spreads the "
@@ -1838,7 +1835,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Threshold",
                 Type = "number",
-                Inert = true,
                 Default = "1.1",
                 ErrorKey = "scene.err.number_at_least_zero",
                 Doc = "How bright a pixel must be, after exposure, before it glows. Exposure maps a frame's "
@@ -1861,7 +1857,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Brightness",
                 Type = "number",
-                Inert = true,
                 Default = "0",
                 ErrorKey = "scene.err.number_minus_one_to_one",
                 Doc = "Light added to every pixel, from -1 to 1. A frame's average sits near 0.45 after "
@@ -1871,7 +1866,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Contrast",
                 Type = "number",
-                Inert = true,
                 Default = "0",
                 ErrorKey = "scene.err.number_minus_one_to_one",
                 Doc = "How far every pixel is pushed from the frame's average brightness, from -1 to 1. 0 "
@@ -1880,7 +1874,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Saturation",
                 Type = "number",
-                Inert = true,
                 Default = "0",
                 ErrorKey = "scene.err.number_minus_one_to_one",
                 Doc = "How vivid colours are, from -1 to 1. -1 is black and white, 0 leaves them, 1 is twice "
@@ -1889,7 +1882,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "TintColor",
                 Type = "Color3",
-                Inert = true,
                 Default = "Color3.new(1, 1, 1)",
                 Doc = "Multiplies the picture. White changes nothing; a warm white warms it.",
             },

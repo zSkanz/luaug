@@ -364,20 +364,17 @@
         {
           "Name": "Intensity",
           "Type": "number",
-          "Default": "1",
-          "Inert": true
+          "Default": "1"
         },
         {
           "Name": "Size",
           "Type": "number",
-          "Default": "24",
-          "Inert": true
+          "Default": "24"
         },
         {
           "Name": "Threshold",
           "Type": "number",
-          "Default": "1.1",
-          "Inert": true
+          "Default": "1.1"
         }
       ],
       "Methods": [],
@@ -530,26 +527,22 @@
         {
           "Name": "Brightness",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         },
         {
           "Name": "Contrast",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         },
         {
           "Name": "Saturation",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         },
         {
           "Name": "TintColor",
           "Type": "Color3",
-          "Default": "Color3.new(1, 1, 1)",
-          "Inert": true
+          "Default": "Color3.new(1, 1, 1)"
         }
       ],
       "Methods": [],
@@ -2198,8 +2191,7 @@
         {
           "Name": "Enabled",
           "Type": "boolean",
-          "Default": "true",
-          "Inert": true
+          "Default": "true"
         }
       ],
       "Methods": [],

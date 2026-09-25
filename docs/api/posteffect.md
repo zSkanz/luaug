@@ -16,4 +16,4 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Enabled` | `boolean` | `true` | read/write, **inert** | Whether this effect takes part. Off is not the same as deleting it: a `BloomEffect` that is off still governs bloom, and governs it to nothing. |
+| `Enabled` | `boolean` | `true` | read/write | Whether this effect takes part. Off is not the same as deleting it: a `BloomEffect` that is off still governs bloom, and governs it to nothing. |

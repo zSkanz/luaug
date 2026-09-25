@@ -67,16 +67,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 2 — `BloomEffect` and `ColorCorrectionEffect`
 
-- [ ] `BloomEffect` (`Intensity`, `Size`, `Threshold`) drives the existing bloom
+- [x] `BloomEffect` (`Intensity`, `Size`, `Threshold`) drives the existing bloom
       chain. With none present, today's bloom applies unchanged. With
       `Enabled = false`, bloom is off.
-- [ ] `ColorCorrectionEffect` (`Brightness`, `Contrast`, `Saturation`,
+- [x] `ColorCorrectionEffect` (`Brightness`, `Contrast`, `Saturation`,
       `TintColor`) applied in the tonemap pass, after exposure and before the
       curve. Several compose in order.
-- [ ] A 2D check: `examples/20-platformer` with a disabled `BloomEffect` has
+- [x] A 2D check: `examples/20-platformer` with a disabled `BloomEffect` has
       sprites that no longer glow. That is M1's own
       acceptance.
-- [ ] Captures for the owner, then goldens.
+- [~] Captures for the owner (`atmosphere-post/stage2/`), then goldens -- awaiting the owner.
 
 ## Stage 3 — `BlurEffect`
 
@@ -204,3 +204,21 @@ here*.
    wire carries `Lighting`'s own fields but not its contents -- it has no
    `Contents = true` (ADR 0080) -- so the effects are listed as excluded,
    "not yet", until Stage 10 carries them.
+6. **A new effect never touches an old shader** (Stage 2). The command-stream
+   goldens record every shader's size and every uniform block's size and
+   digest, so a field added to the tonemap's block, or a branch added to its
+   source, would have moved all of them for a world that uses none of this.
+   So each effect is its OWN pipeline, made the first frame it is needed, as
+   the decals' and the particles' are: the colour grade is `tonemap_graded`,
+   which includes `tonemap.hlsl` whole, renames its entry point away and adds
+   its block at the fragment stage's second slot. A world without these
+   instances builds none of them, and the captures stayed byte-identical.
+7. **A 2D game's bloom is subtle, and it is there** (Stage 2). The
+   platformer's sprites never blow out; what bloom gives them is a faint halo
+   under the brick platform and round the coins, which a disabled
+   `BloomEffect` removes. M1's complaint is real at that size, and now
+   answered.
+8. **The captures and the costs come from one scene and one script**
+   (Stage 2). `tests/look` holds the valley, and `tools/repo/look_captures.py`
+   copies it once per variant with its one `Variant` line rewritten, so a
+   before and an after differ in the effects and in nothing else.
