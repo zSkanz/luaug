@@ -97,11 +97,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 5 — `SunRaysEffect`
 
-- [ ] `Intensity`, `Spread`. A radial gather towards the sun's screen position
+- [x] `Intensity`, `Spread`. A radial gather towards the sun's screen position
       over a mask of what is sky in the depth buffer, so geometry occludes the
       rays. It fades to nothing as the sun leaves the view or goes below the
       horizon.
-- [ ] Budget ≤ 0.4 ms. The machine switch `sun_rays`.
+- [~] Budget ≤ 0.4 ms (measured with the others on the packaged build). The machine switch `sun_rays`, off in the Low preset -- landed.
 
 ## Stage 6 — `Atmosphere`
 
@@ -240,3 +240,12 @@ here*.
    is drawn at the frame's own resolution. A blurred foreground spreads over
    what is behind it, as through a lens. The machine switch landed here rather
    than in Stage 10, with the Low and Medium presets off.
+12. **Sun rays need something to stream past, and half resolution to show it**
+   (Stage 5). The mask is the open sky near the sun, from the depth buffer --
+   anything nearer is a hole in it -- and a sixty-four-tap gather towards the
+   sun turns the holes into shafts. At a quarter of the frame, which the brief's
+   budget suggested, a post in front of the sun was a texel or two of the mask
+   and its shaft drowned in the glow; at half it reads. The test scene gained
+   a slatted fence across the sun for the same reason: a thin frame alone gave
+   a glow and no shafts, which is the right answer for that scene and no way to
+   judge the effect.

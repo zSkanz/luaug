@@ -54,3 +54,20 @@ through the unchanged tonemap. The command-stream goldens did not move.
 The widest blur, at an intensity of 1, is 16 pixels of a 1080-line picture.
 A machine whose graphics settings turn `depth_of_field` off -- the Low and
 Medium presets do -- draws these pictures sharp.
+
+## Stage 5 -- `SunRaysEffect`
+
+From this stage on the scene has a slatted fence standing across the sun,
+behind the dark frame: shafts of light need gaps to stream through, and the
+frame alone was too thin to show any. `none.png` here is that scene.
+
+| File | What is in the world | What to look at |
+|---|---|---|
+| `none.png` | nothing | The "before": the sun behind the fence |
+| `rays.png` | a `SunRaysEffect` with its defaults (`Intensity` 0.25, `Spread` 0.5) | A soft glow around the sun, broken by the slats into faint shafts above and around the fence |
+| `rays-strong.png` | `Intensity` 0.8, `Spread` 1 | Clear shafts fanning out from the sun through every gap, reaching well across the picture -- and a haze where the light is thickest |
+| `rays-away.png` | the strong rays, with the camera turned away so the sun is off to the right of the picture | The shafts fade out as the sun leaves the view, rather than cutting off |
+
+Only open sky shines: a slat, a post or the ground is a hole in the light, which
+is where the dark between the shafts comes from. A machine whose graphics
+settings turn `sun_rays` off -- the Low preset does -- draws without them.

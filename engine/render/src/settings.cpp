@@ -29,6 +29,7 @@ GraphicsSettings settingsFor(QualityLevel quality) noexcept
         settings.antiAliasing = true;
         settings.autoExposure = true;
         settings.depthOfField = false;
+        settings.sunRays = false;
         break;
 
     case QualityLevel::Medium:

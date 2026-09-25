@@ -49,4 +49,18 @@ float focusCircle(float deviceDepth)
 }
 #endif
 
+#if defined(LUAUG_UNIFORMS_RAYS)
+// `render::GpuLookRaysUniforms`, 32 bytes.
+cbuffer GpuLookRaysUniforms : register(b0, space3)
+{
+    // xy where the sun is on the screen, in texture space -- it may be off the
+    // screen; z how present it is, 0 to 1, with the intensity folded in; w the
+    // screen's width over its height.
+    float4 RaysSun;
+    // x how far towards the sun the gather reaches, as a fraction of the way;
+    // y how many taps; z how much each tap fades from the last; w unused.
+    float4 RaysGather;
+};
+#endif
+
 #endif // LUAUG_LOOK_HLSLI

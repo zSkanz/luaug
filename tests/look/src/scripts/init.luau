@@ -83,6 +83,13 @@ block(
     Color3.fromRGB(40, 36, 32)
 )
 
+-- A slatted fence across the sun, further back: boards with gaps between
+-- them, which is what sun rays need to be seen at all -- light streaming
+-- through gaps, as through a forest's trunks.
+for index = 0, 7 do
+    block(`Slat{index}`, vector.create(0.8, 34, 1.1), CFrame.new(-70, 17, -8 + index * 2.4), Color3.fromRGB(52, 46, 40))
+end
+
 local camera = Instance.new("Camera")
 camera.FieldOfView = 60
 camera.NearPlane = 0.1
@@ -181,6 +188,24 @@ local Variants: { [string]: () -> () } = {
         focus.NearIntensity = 1
         focus.FarIntensity = 0
         focus.Parent = Lighting
+    end,
+    ["rays"] = function()
+        local rays = Instance.new("SunRaysEffect")
+        rays.Parent = Lighting
+    end,
+    ["rays-strong"] = function()
+        local rays = Instance.new("SunRaysEffect")
+        rays.Intensity = 0.8
+        rays.Spread = 1
+        rays.Parent = Lighting
+    end,
+    ["rays-away"] = function()
+        -- The camera turned away from the sun: the shafts fade out rather
+        -- than cut off.
+        local rays = Instance.new("SunRaysEffect")
+        rays.Intensity = 0.8
+        rays.Parent = Lighting
+        camera.CFrame = CFrame.lookAt(vector.create(6, 3, 1), vector.create(-40, 9, 60))
     end,
 }
 

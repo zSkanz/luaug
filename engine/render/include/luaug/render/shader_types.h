@@ -346,6 +346,18 @@ struct GpuLookFocusUniforms
 };
 static_assert(sizeof(GpuLookFocusUniforms) == 48, "GpuLookFocusUniforms is mirrored by luaug_look.hlsli");
 
+// `luaug_look.hlsli`'s rays block (ADR 0096), shared by sun rays' two passes.
+struct GpuLookRaysUniforms
+{
+    // Where the sun is on the screen in texture space, how present it is with
+    // the intensity folded in, and the screen's width over its height.
+    f32 sun[4]{};
+    // How much of the way to the sun the gather reaches, how many taps, and how
+    // much each counts less than the last.
+    f32 gather[4]{};
+};
+static_assert(sizeof(GpuLookRaysUniforms) == 32, "GpuLookRaysUniforms is mirrored by luaug_look.hlsli");
+
 // Fragment stage, `b0 space3`, shared by the bloom chain's two pipelines.
 struct GpuBloomUniforms
 {

@@ -1962,7 +1962,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Intensity",
                 Type = "number",
-                Inert = true,
                 Default = "0.25",
                 ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How bright the shafts are, from 0 to 1.",
@@ -1970,7 +1969,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "Spread",
                 Type = "number",
-                Inert = true,
                 Default = "0.5",
                 ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How far the shafts reach from the sun, from 0 (a halo) to 1 (across the screen).",

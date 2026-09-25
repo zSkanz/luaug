@@ -2851,14 +2851,12 @@
         {
           "Name": "Intensity",
           "Type": "number",
-          "Default": "0.25",
-          "Inert": true
+          "Default": "0.25"
         },
         {
           "Name": "Spread",
           "Type": "number",
-          "Default": "0.5",
-          "Inert": true
+          "Default": "0.5"
         }
       ],
       "Methods": [],

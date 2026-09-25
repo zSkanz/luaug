@@ -15,5 +15,5 @@ offers is on the base's page, which is what keeps one added member on
 
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
-| `Intensity` | `number` | `0.25` | read/write, **inert** | How bright the shafts are, from 0 to 1. |
-| `Spread` | `number` | `0.5` | read/write, **inert** | How far the shafts reach from the sun, from 0 (a halo) to 1 (across the screen). |
+| `Intensity` | `number` | `0.25` | read/write | How bright the shafts are, from 0 to 1. |
+| `Spread` | `number` | `0.5` | read/write | How far the shafts reach from the sun, from 0 (a halo) to 1 (across the screen). |

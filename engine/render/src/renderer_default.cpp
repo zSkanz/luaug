@@ -113,6 +113,15 @@ constexpr f32 kLookBlurLevelSigma = 4.0f;
 // The widest circle of confusion `DepthOfFieldEffect` draws, in pixels of a
 // 1080-line picture: what `NearIntensity` or `FarIntensity` of 1 reaches.
 constexpr f32 kFocusWidestPixels = 16.0f;
+// Sun rays: how many taps the gather takes towards the sun, how much each
+// counts less than the one before, and how bright the shafts are at an
+// `Intensity` of 1 against the sky they come from.
+constexpr u32 kRaysTaps = 64;
+constexpr f32 kRaysDecay = 0.975f;
+constexpr f32 kRaysStrength = 3.0f;
+// How far past the screen's edge, in the screen's half-widths, the sun may go
+// before its rays have faded away entirely.
+constexpr f32 kRaysEdgeFade = 0.6f;
 
 // The most instances one frame may draw through the instanced path, and the one
 // vertex buffer they all live in. Five megabytes, allocated once: the alternative
@@ -674,11 +683,17 @@ private:
     LookPipeline focusPrepare_;
     LookPipeline focusGather_;
     LookPipeline focusComposite_;
+    // Sun rays' two passes, and the resample again with an additive blend, to
+    // lay the shafts over the frame without reading it.
+    LookPipeline raysMask_;
+    LookPipeline raysGather_;
+    LookPipeline raysAdd_;
 
     // Every look pipeline, for `destroy`.
-    [[nodiscard]] std::array<LookPipeline*, 6> lookPipelines() noexcept
+    [[nodiscard]] std::array<LookPipeline*, 9> lookPipelines() noexcept
     {
-        return {&gradedTonemap_, &blur_, &resample_, &focusPrepare_, &focusGather_, &focusComposite_};
+        return {&gradedTonemap_,  &blur_,     &resample_,   &focusPrepare_, &focusGather_,
+                &focusComposite_, &raysMask_, &raysGather_, &raysAdd_};
     }
 
     // **The look's own images, made the first frame one is needed** and
@@ -694,6 +709,9 @@ private:
     // and what the gather made of it.
     rhi::TextureHandle focusPrepared_{};
     rhi::TextureHandle focusGathered_{};
+    // Sun rays at half the frame: what can shine, and the shafts.
+    rhi::TextureHandle raysMasked_{};
+    rhi::TextureHandle raysGathered_{};
     u32 lookWidth_ = 0;
     u32 lookHeight_ = 0;
     [[nodiscard]] bool lookTexture(rhi::IDevice& device, rhi::TextureHandle& slot, u32 width, u32 height,
@@ -705,6 +723,9 @@ private:
     // returns that one -- or `image` itself when the passes cannot be made.
     [[nodiscard]] rhi::TextureHandle focusImage(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
                                                 rhi::TextureHandle image);
+    // Adds the sun's shafts onto `image`.
+    void sunRaysOnto(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world, const SkyParams& sky,
+                     rhi::TextureHandle image);
 };
 
 } // namespace
@@ -2239,6 +2260,71 @@ void DefaultRenderer::releaseLookTextures(rhi::IDevice& device)
         release(level);
     release(focusPrepared_);
     release(focusGathered_);
+    release(raysMasked_);
+    release(raysGathered_);
+}
+
+void DefaultRenderer::sunRaysOnto(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
+                                  const SkyParams& sky, rhi::TextureHandle image)
+{
+    // **Where the sun is on the screen**: its direction projected as a point at
+    // infinity -- w of zero, so only the view's rotation and the lens act on it.
+    // Behind the camera there is nothing to stream from.
+    const Mat4& viewProjection = world.camera.viewProjection;
+    const Vec3 sun = sky.sunDirection;
+    f32 clip[4]{};
+    for (u32 row = 0; row < 4; ++row) {
+        clip[row] =
+            viewProjection.m[0][row] * sun.x + viewProjection.m[1][row] * sun.y + viewProjection.m[2][row] * sun.z;
+    }
+    if (!(clip[3] > 1e-4f))
+        return;
+    const f32 ndcX = clip[0] / clip[3];
+    const f32 ndcY = clip[1] / clip[3];
+
+    // **Present only while the sun is.** Past the screen's edge the shafts fade
+    // over `kRaysEdgeFade` half-widths, and below the horizon they go with the
+    // day -- so a sunset takes its rays with it rather than cutting them off.
+    const f32 outside = std::max(std::abs(ndcX), std::abs(ndcY)) - 1.0f;
+    const f32 onScreen = std::clamp(1.0f - outside / kRaysEdgeFade, 0.0f, 1.0f);
+    const f32 presence = onScreen * sky.dayFactor * world.look.sunRaysIntensity * kRaysStrength;
+    if (!(presence > 0.0f))
+        return;
+
+    if (!ensureLookPipeline(device, raysMask_, "look_rays_mask", kHdrFormat) ||
+        !ensureLookPipeline(device, raysGather_, "look_rays_gather", kHdrFormat) ||
+        !ensureLookPipeline(device, raysAdd_, "look_resample", kHdrFormat, true))
+        return;
+    // Half resolution: at a quarter, a post or a branch in front of the sun was
+    // a texel or two of the mask, and its shaft drowned in the glow around it.
+    const u32 raysWidth = std::max(renderWidth_ / 2, 1u);
+    const u32 raysHeight = std::max(renderHeight_ / 2, 1u);
+    if (!lookTexture(device, raysMasked_, raysWidth, raysHeight, "look-rays-mask") ||
+        !lookTexture(device, raysGathered_, raysWidth, raysHeight, "look-rays"))
+        return;
+
+    GpuLookRaysUniforms rays;
+    rays.sun[0] = ndcX * 0.5f + 0.5f;
+    rays.sun[1] = 0.5f - ndcY * 0.5f;
+    rays.sun[2] = presence;
+    rays.sun[3] = static_cast<f32>(renderWidth_) / static_cast<f32>(renderHeight_);
+    // `Spread` is how much of the way to the sun a texel looks: a quarter at
+    // 0, a halo round the sun; all of it at 1, shafts across the screen.
+    rays.gather[0] = 0.25f + 0.75f * world.look.sunRaysSpread;
+    rays.gather[1] = static_cast<f32>(kRaysTaps);
+    rays.gather[2] = kRaysDecay;
+
+    cmd.pushDebugGroup("sun-rays");
+    const std::array<rhi::TextureBinding, 2> mask{rhi::TextureBinding{image, environmentSampler_},
+                                                  rhi::TextureBinding{depth_, pointSampler_}};
+    fullscreenPass(cmd, raysMask_.handle, raysMasked_, raysWidth, raysHeight, "rays-mask", mask,
+                   asBytes(&rays, sizeof(rays)));
+    const std::array<rhi::TextureBinding, 1> gather{rhi::TextureBinding{raysMasked_, environmentSampler_}};
+    fullscreenPass(cmd, raysGather_.handle, raysGathered_, raysWidth, raysHeight, "rays-gather", gather,
+                   asBytes(&rays, sizeof(rays)));
+    const std::array<rhi::TextureBinding, 1> shafts{rhi::TextureBinding{raysGathered_, environmentSampler_}};
+    fullscreenPass(cmd, raysAdd_.handle, image, renderWidth_, renderHeight_, "rays-add", shafts, {}, rhi::LoadOp::Load);
+    cmd.popDebugGroup();
 }
 
 rhi::TextureHandle DefaultRenderer::focusImage(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
@@ -3559,6 +3645,12 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // view -- and not on a machine that has turned it off (ADR 0044).
     if (look.depthOfField && settings_.depthOfField && world.camera.valid && !orthographic)
         sceneColor = focusImage(device, cmd, world, sceneColor);
+
+    // **Sun rays**, after the focus -- a shaft is light in the air between the
+    // camera and everything, which no lens focuses away -- and before the blur,
+    // which softens them with the rest.
+    if (look.sunRays && settings_.sunRays && world.camera.valid && !orthographic)
+        sunRaysOnto(device, cmd, world, sky, sceneColor);
 
     // **The blur**, last of them: it softens whatever the others made. On the
     // HDR image and before exposure, so a highlight blurs as light does -- a

@@ -54,6 +54,8 @@ void applyFile(const core::TomlDocument& document, GraphicsSettings& settings)
         settings.autoExposure = *value;
     if (const std::optional<bool> value = document.boolean("graphics.depth_of_field"))
         settings.depthOfField = *value;
+    if (const std::optional<bool> value = document.boolean("graphics.sun_rays"))
+        settings.sunRays = *value;
 }
 
 void applyOverrides(const GraphicsOverrides& overrides, GraphicsSettings& settings)

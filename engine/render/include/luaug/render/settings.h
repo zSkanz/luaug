@@ -86,6 +86,8 @@ struct GraphicsSettings
     // SAY something -- a pause, a flash of damage -- and turning them off would
     // change what the picture means rather than what it costs.
     bool depthOfField = true;
+    // Whether a world's `SunRaysEffect` is drawn, by the same rule.
+    bool sunRays = true;
 
     // False holds the exposure at the calibration key instead of metering the
     // frame. The scene still tonemaps and `ExposureCompensation` still applies;
