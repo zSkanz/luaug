@@ -912,3 +912,61 @@ message from it was fatal.
 **D182 held**: the windowed SNAKE repro that died with EXECUTION ERROR #646 ran
 three times to the end with the layer asked for (`--gpu-debug`), 756 draws a
 frame, before D184 took the draws away.
+
+## The look of a world (ADR 0096)
+
+Every effect at 1920x1080 on the reference machine, **the packaged build**
+(the release profile, no D3D12 debug layer), in `tests/look` -- the valley at
+17:00 with each effect alone -- by `tools/repo/look_captures.py`'s scene.
+
+**How a GPU cost was measured here, since a headless frame's own time is not
+one.** A headless frame does not wait for the GPU: `--frame-stats` gave 0.16 ms
+a frame for this scene at 1080p with or without any effect, which is the CPU
+submitting and nothing else. A run that ends in a screenshot does wait -- the
+readback needs every frame before it -- so each variant ran 200 frames and
+2,200 frames, and the difference in whole-run wall time over the 2,000 frames
+between is what a frame costs once the GPU is the limit; the start-up, the
+same for both, cancels. Three rounds each, median:
+
+| Effect | Variant | Cost at 1080p | Budget (ADR 0096) |
+|---|---|---|---|
+| none | -- | 0.615 ms a frame (the base) | -- |
+| `BloomEffect` | `Intensity` 4, `Size` 48, `Threshold` 0.6 | -0.02 ms | the engine's own bloom |
+| `ColorCorrectionEffect` | warm, contrast and saturation | +0.04 ms | ~0 |
+| `BlurEffect` | `Size` 4 | +0.10 ms | 0.3 ms |
+| `BlurEffect` | `Size` 80 | +0.04 ms | 0.3 ms |
+| `DepthOfFieldEffect` | focus at 20 m | +0.08 ms | 0.6 ms |
+| `SunRaysEffect` | `Intensity` 0.8, `Spread` 1 | +0.08 ms | 0.4 ms |
+| `Atmosphere` | defaults | -0.03 ms | 0.2 ms |
+| `Atmosphere` | `Density` 0.6, `Glare` 3, `Haze` 2 | -0.01 ms | 0.2 ms |
+| `Sky` | six 1024-texel pictures | +0.09 ms | -- |
+| `Sky` | `CloudCover` 0.5 | +0.02 ms | -- |
+
+**Every effect is inside its budget, and every one is at this method's noise
+floor**: a round of one variant spread by up to 0.15 ms, and the base itself
+by 0.055 ms. The honest reading is "under a tenth of a millisecond each on
+this machine", not the second decimal -- the same floor M7.5's table records
+for bloom and ambient occlusion, and for the same reason: the RHI has no
+timestamp query (ADR 0037), and a pass this cheap is below what a wall clock
+around a whole run resolves. A small blur costing more than a wide one is that
+floor, and it is also true to the design: a blur of 4 runs its Gaussian at
+full resolution, and one of 80 a thirty-second of the frame down.
+
+| `Sky` bake | 1024-texel faces into a 2048-texel picture, eight bands | Budget |
+|---|---|---|
+| Packaged build, three runs | 39.5, 45.4 and 48.8 ms, **off the frame thread** | 50 ms |
+| `dev` build | 79 ms | -- |
+
+Inside the budget on the build that ships, with little room, and no frame
+waits for it either way: the previous sky draws until it is done.
+
+**CityBench against Godot, the owner's benchmark** (`luaug-playground/benchmark`),
+before Stage 1 and after Stage 10, three rounds each at raised priority. The
+city has none of these instances, so this is the check that the renderer's
+default path lost nothing:
+
+| | LuauG median | Godot median |
+|---|---|---|
+| Before (package of `905e0c5a`) | 1.58, 1.63, 1.55 ms | 2.19, 2.31, 2.13 ms |
+| After (package of `4ba0d790`) | 1.51, 1.54, 1.50 ms | 1.90, 2.02, 1.91 ms |
+

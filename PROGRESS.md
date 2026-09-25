@@ -355,6 +355,16 @@ public API, so the release that carries it is a major version, and tagging it
 is the owner's.** The mandate's unstarted stages are next, built against
 protocol 12.
 
+**Atmosphere, post effects and a sky (ADR 0096) are built**, all ten stages
+of [`docs/briefs/atmosphere-post-kickoff.md`](docs/briefs/atmosphere-post-kickoff.md),
+with twenty-three findings: `Atmosphere`, `Sky` (six pictures, sun, moon,
+stars, clouds), `BloomEffect`, `ColorCorrectionEffect`, `BlurEffect`,
+`DepthOfFieldEffect` and `SunRaysEffect` as instances under `Lighting` or the
+camera, five new `Lighting` properties, protocol 13, and
+`examples/22-atmosphere`. A world with none draws as before, to the byte of
+the command-stream goldens. **The look of Stages 2 to 9 awaits the owner** in
+`docs/briefs/atmosphere-post/`; their goldens are recorded after.
+
 **User surface shaders (ADR 0091) follow the materials work**, since they
 build on the material asset and its panel. Their Stage 0 -- verifying that a
 source-built DXC emits DXIL retail D3D12 accepts (`U-64`) -- depends on
@@ -376,6 +386,20 @@ and a block world -- went to
 [`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
 2026-09-23.
 
+- **Session 36 — atmosphere, post effects and a sky, 2026-09-25.** ADR
+  0096's ten stages, each on the full local gate and pushed behind a green CI.
+  The rule that held them together: **a new effect never touches an old
+  shader** -- each is its own pipeline made the first frame it is needed, so a
+  world without it keeps its command stream byte for byte, and the one commit
+  that moved anything moved only the determinism traces (Stage 7's five
+  `Lighting` properties, ADR 0060). Two things worth keeping: **a headless
+  frame's time is the CPU's** -- the GPU cost of a post pass was measured as
+  the slope of whole-run wall time between two run lengths ending in a
+  screenshot, and every effect sits under a tenth of a millisecond at 1080p;
+  and **D186 was quarantined, not fixed** -- two fixes to the soak's revisit
+  check were tried and backed out, because the flagship's route revisits a
+  place only while the world is still loading. The owner's CityBench against
+  Godot did not move (LuauG 1.50-1.54 ms against 1.55-1.63 before).
 - **Session 35 — a user's game, and the script editor, 2026-09-24/25.**
   D182-D185 from benchmarking the owner's friend's game, each row closed
   with its commit and how it was verified: the SDL D3D12 descriptor heap

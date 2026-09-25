@@ -83,7 +83,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] `Size` in pixels at 1080p, scaled with the render resolution so a blur
       looks the same at any window size. Separable Gaussian, downsampled for
       large sizes. Several combine as `sqrt(a² + b²)`.
-- [~] Budget ≤ 0.3 ms. A blur of `Size = 0` costs nothing (it builds no pass); the cost is measured with the others on the packaged build.
+- [x] Budget ≤ 0.3 ms: +0.04 to +0.10 ms at 1080p, at the noise floor (`docs/perf-baselines.md`). A blur of `Size = 0` builds no pass.
 - [x] The UI is drawn **after** the blur, so a pause menu over a blurred world is
       sharp.
 
@@ -92,7 +92,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] `FocusDistance`, `InFocusRadius`, `NearIntensity`, `FarIntensity`. A
       circle of confusion from the scene depth, a gather at half resolution, and
       a composite. The sky counts as infinitely far.
-- [~] Budget ≤ 0.6 ms (measured with the others on the packaged build). The machine switch `depth_of_field` in `luaug.toml`
+- [x] Budget ≤ 0.6 ms: +0.08 ms at 1080p. The machine switch `depth_of_field` in `luaug.toml`
       (ADR 0044) turns it off.
 
 ## Stage 5 — `SunRaysEffect`
@@ -101,7 +101,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       over a mask of what is sky in the depth buffer, so geometry occludes the
       rays. It fades to nothing as the sun leaves the view or goes below the
       horizon.
-- [~] Budget ≤ 0.4 ms (measured with the others on the packaged build). The machine switch `sun_rays`, off in the Low preset -- landed.
+- [x] Budget ≤ 0.4 ms: +0.08 ms at 1080p. The machine switch `sun_rays`, off in the Low preset -- landed.
 
 ## Stage 6 — `Atmosphere`
 
@@ -115,7 +115,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] With an `Atmosphere`, the linear fog is off: `FogStart`, `FogEnd` and
       `FogColor` are kept and ignored, and the Properties panel says so. Without
       one, nothing changes.
-- [~] Budget ≤ 0.2 ms (measured with the others on the packaged build). Captures at noon, dusk and night for the owner -- awaiting the owner.
+- [x] Budget ≤ 0.2 ms: at the noise floor (-0.03 to -0.01 ms). Captures at noon, dusk and night -- the look awaits the owner.
 
 ## Stage 7 — `Lighting` properties, in one commit
 
@@ -145,7 +145,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       `examples/` with a licence that R6 allows, recorded in
       `THIRD_PARTY_NOTICES.md`, or drawn procedurally by a script in
       `tools/repo`.
-- [~] Bake ≤ 50 ms, off the frame thread (measured with the others). A frame never waits for it.
+- [x] Bake ≤ 50 ms, off the frame thread: 39.5 to 48.8 ms on the packaged build, 79 ms on `dev`. A frame never waits for it.
       Captures for the owner.
 
 ## Stage 9 — Clouds
@@ -167,7 +167,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] Manual: `rendering/post.md` and `rendering/lighting.md` rewritten for the
       instances; a new `rendering/atmosphere-and-sky.md`; a divergence row for
       the face names; and the sentence "there is no skybox" removed.
-- [ ] `CHANGELOG.md`, `PROGRESS.md`, this ledger ticked, and **Findings**
+- [x] `CHANGELOG.md`, `PROGRESS.md`, this ledger ticked, and **Findings**
       appended.
 
 ## Not in this work
@@ -316,7 +316,16 @@ here*.
    replica's own give way to the authority's; a camera is excluded, and its
    subtree with it, so a viewer's effects never cross -- a session test holds
    both. Protocol 13.
-21. **The sky's bake is over its budget on the dev build** -- 79 ms against 50
-   for 2048-texel pictures of 1024-texel faces, in eight bands. It is off the
-   frame thread either way, so no frame waits for it; the packaged build's
-   number is in `docs/perf-baselines.md`, beside the others.
+21. **The sky's bake is inside its budget where it ships, and only there**
+   (Stage 10): 39.5 to 48.8 ms on the packaged build against 50, and 79 ms on
+   the `dev` build. It is off the frame thread either way.
+22. **A headless frame's time is the CPU's, not the GPU's** (Stage 10). Every
+   effect measured 0.16 ms a frame with `--frame-stats` whatever it was,
+   because a headless frame does not wait for the GPU. The costs in the
+   baselines are the slope of whole-run wall time between a 200- and a
+   2,200-frame run that each end in a screenshot, whose readback waits for the
+   GPU -- and they sit at that method's noise floor, under a tenth of a
+   millisecond each. The RHI still has no timestamp query (ADR 0037).
+23. **What still needs the owner:** the look of Stages 2 to 9 in
+   `docs/briefs/atmosphere-post/`, after which their goldens are recorded;
+   nothing else. The class icons already existed (finding 1).
