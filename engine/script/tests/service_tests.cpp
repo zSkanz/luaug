@@ -811,3 +811,61 @@ TEST_CASE("Sound:Play starts from the start, Resume carries on, and a seek is wh
         assert(sound.TimePosition == 0)
     )") == "");
 }
+
+TEST_CASE("Promise and Collector are globals, and work (ADR 0094)")
+{
+    Fixture fixture;
+
+    CHECK(fixture.failure(R"(
+        assert(type(Promise) == "table" and type(Collector) == "table")
+        assert(Promise.new(function() end):GetStatus() == Enum.PromiseState.Started)
+
+        -- The executor runs at once; a chain resolves through its handlers.
+        local order = {}
+        local p = Promise.new(function(resolve)
+            table.insert(order, "executor")
+            resolve(2)
+        end)
+        table.insert(order, "after new")
+        assert(order[1] == "executor" and order[2] == "after new")
+        local doubled = p:AndThen(function(x) return x * 2 end)
+        local ok, value = doubled:Await()
+        assert(ok and value == 4, "chain resolves")
+
+        -- A handler that errors rejects; Catch recovers.
+        local recovered = Promise.resolve(1):AndThen(function() error("boom") end):Catch(function(e)
+            return "recovered"
+        end)
+        assert(recovered:ExpectAsync() == "recovered")
+
+        -- Adopting a promise; all; race.
+        assert(Promise.resolve(Promise.resolve(7)):ExpectAsync() == 7)
+        local values = Promise.all({ Promise.resolve(1), Promise.resolve(2) }):ExpectAsync()
+        assert(values[1] == 1 and values[2] == 2)
+        assert(Promise.race({ Promise.resolve("first"), Promise.new(function() end) }):ExpectAsync() == "first")
+
+        -- Cancelling runs the hook and settles as Cancelled.
+        local hooked = false
+        local pending = Promise.new(function(_, _, onCancel)
+            onCancel(function() hooked = true end)
+        end)
+        pending:Cancel()
+        assert(hooked and pending:GetStatus() == Enum.PromiseState.Cancelled)
+
+        -- Collector: newest first, keyed, destroyed.
+        local cleaned = {}
+        local c = Collector.new()
+        c:Add(function() table.insert(cleaned, "a") end)
+        c:Add(function() table.insert(cleaned, "b") end)
+        c:Add(function() table.insert(cleaned, "keyed") end, nil, "k")
+        c:Remove("k")
+        assert(cleaned[1] == "keyed")
+        c:Cleanup()
+        assert(cleaned[2] == "b" and cleaned[3] == "a", "reverse order")
+        local part = c:Add(Instance.new("Part"))
+        local signal = c:Add(Signal.new())
+        c:Destroy()
+        assert(part.Parent == nil)
+        assert(not pcall(function() c:Add(function() end) end), "a destroyed Collector refuses")
+    )") == "");
+}

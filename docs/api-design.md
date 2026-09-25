@@ -14,7 +14,7 @@ during implementation goes through an ADR + an edit here in the same commit.
 
 | Tier | What lives there | Rationale |
 |---|---|---|
-| **Globals** | The world model: `game`, `workspace`, `script`, `Instance`, datatypes (`Vector2`, `Vector3`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Rect`, `TweenInfo`, `RaycastParams`, `Random`, `Signal`), `Enum`, plus the Luau builtins listed in full below | Roblox muscle memory: you never require Vector3 |
+| **Globals** | The world model: `game`, `workspace`, `script`, `Instance`, datatypes (`Vector2`, `Vector3`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Rect`, `TweenInfo`, `RaycastParams`, `Random`, `Signal`, `Collector`, `Promise`), `Enum`, plus the Luau builtins listed in full below | Roblox muscle memory: you never require Vector3 |
 | **`@std/…`** | The cross-runtime stdlib (Lute-compatible surface, §7): `@std/json`, `@std/net`, `@std/fs`, `@std/path`, `@std/task`, `@std/stringext`, `@std/tableext`, … This is the scope, not the state: §7 says which of them the game VM registers, and today it is one | The convergence bet (ADR 0030): utility code runs unchanged on Roblox/Lute/LuauG |
 | **`@luaug/…`** | Engine-provided optional Luau libraries (not core world): `@luaug/camera` (third-person/orbit rigs), `@luaug/testing` (engine-aware test helpers) | Keeps the global surface small; optional things are opt-in |
 

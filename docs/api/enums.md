@@ -327,6 +327,17 @@ Where a `Tween` is in its life (§2.1). A state rather than a pair of booleans, 
 | `Completed` | 4 | Reached its end. The goal values have been written exactly, not approached: a tween that stopped at 0.9999 of the way would leave a property somebody has to explain. |
 | `Cancelled` | 5 | Stopped before its end by `Cancel`. The property keeps whatever value it had reached -- cancelling is not undoing. |
 
+## Enum.PromiseState
+
+Where a `Promise` is in its life (ADR 0094). Settled once, and never again.
+
+| Item | Value | Description |
+|---|---|---|
+| `Started` | 0 | Neither resolved nor rejected yet. |
+| `Resolved` | 1 | Resolved, with the values `Await` returns. |
+| `Rejected` | 2 | Rejected, with the values its handlers receive. |
+| `Cancelled` | 3 | Cancelled before it settled: its executor stopped and its handlers will not run. |
+
 ## Enum.RaycastFilterType
 
 Whether a `RaycastParams` filter list names what a cast may hit or what it must ignore (§2.3).

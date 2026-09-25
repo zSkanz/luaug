@@ -3925,6 +3925,36 @@ void registerEnums(EnumRegistry& enums, core::AtomTable& atoms)
     playbackStateDesc.items = playbackStateItems;
     enums.registerEnum(playbackStateDesc);
 
+    // --- PromiseState ---
+    static std::array<EnumItemDesc, 4> promiseStateItems;
+    promiseStateItems = {{
+        EnumItemDesc{
+            .name = atoms.intern("Started"),
+            .value = 0,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Resolved"),
+            .value = 1,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Rejected"),
+            .value = 2,
+            .docKey = {},
+        },
+        EnumItemDesc{
+            .name = atoms.intern("Cancelled"),
+            .value = 3,
+            .docKey = {},
+        },
+    }};
+    EnumDescriptor promiseStateDesc;
+    promiseStateDesc.name = atoms.intern("PromiseState");
+    promiseStateDesc.docKey = {};
+    promiseStateDesc.items = promiseStateItems;
+    enums.registerEnum(promiseStateDesc);
+
     // --- FillDirection ---
     static std::array<EnumItemDesc, 2> fillDirectionItems;
     fillDirectionItems = {{

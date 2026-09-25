@@ -21,6 +21,7 @@ export type Signal<T...> = {
     Wait: (self: Signal<T...>) -> (T...),
     Fire: (self: Signal<T...>, ...any) -> (),
     Destroy: (self: Signal<T...>) -> (),
+    DisconnectAll: (self: Signal<T...>) -> (),
 }
 
 declare extern type EnumItem with
@@ -78,6 +79,9 @@ declare extern type EnumEasingDirection extends EnumItem with
 end
 
 declare extern type EnumPlaybackState extends EnumItem with
+end
+
+declare extern type EnumPromiseState extends EnumItem with
 end
 
 declare extern type EnumFillDirection extends EnumItem with
@@ -344,6 +348,64 @@ declare extern type RaycastResult2D with
     read Normal: Vector2
     --- How far along the ray the hit is, in metres.
     read Distance: number
+end
+
+declare extern type Collector with
+    --- Takes `object` to clean later and returns it. A function is called, a thread cancelled, a
+    --- `Connection` disconnected, an `Instance`, a `Signal` or anything with `Destroy` destroyed, a
+    --- `Promise` cancelled. `method` names the method to call instead, or `true` calls the object;
+    --- `key` names it for `Remove` and `Get`, and adding under a key already held cleans what was there
+    --- first.
+    function Add(self, object: any, method: (string | boolean)?, key: any?): any
+    --- Takes a promise to cancel on cleanup, and returns it. Once it settles on its own it is let go.
+    function AddPromise(self, promise: Promise): Promise
+    --- Cleans the object held under `key` now, and forgets it.
+    function Remove(self, key: any): ()
+    --- Forgets the object held under `key` without cleaning it.
+    function RemoveNoClean(self, key: any): ()
+    --- The object held under `key`, or nil.
+    function Get(self, key: any): any
+    --- Cleans everything, newest first, and stays usable. Reverse insertion order is the order
+    --- destructors run in, and it is the same on every run.
+    function Cleanup(self): ()
+    --- Cleans everything; adding to this Collector afterwards is an error.
+    function Destroy(self): ()
+    --- Cleans this Collector when `instance` is destroyed, and returns that connection. A new link
+    --- replaces the last unless `allowMultiple` is true.
+    function LinkToInstance(self, instance: Instance, allowMultiple: boolean?): Connection
+end
+
+declare extern type Promise with
+    --- A promise of what `onResolved` returns, or of what `onRejected` returns when this rejects. A
+    --- handler that errors rejects it; one that returns a promise is waited on.
+    function AndThen(self, onResolved: ((...any) -> ...any)?, onRejected: ((...any) -> ...any)?): Promise
+    --- `AndThen(nil, onRejected)`.
+    function Catch(self, onRejected: (...any) -> ...any): Promise
+    --- Calls `fn` with the final status however this settles, and settles as this one did.
+    function Finally(self, fn: (status: EnumPromiseState) -> ...any): Promise
+    --- Calls `fn` with the resolved values and passes those values on, whatever it returns.
+    function Tap(self, fn: (...any) -> ...any): Promise
+    --- On resolution calls `fn` with these arguments rather than the values.
+    function AndThenCall(self, fn: (...any) -> ...any, ...: any): Promise
+    --- On resolution, resolves with these values instead.
+    function AndThenReturn(self, ...: any): Promise
+    --- Waits for this to settle: `true` and its values, or `false` and the rejection. Cancelled is
+    --- `false`.
+    function Await(self): (boolean, ...any)
+    --- `Await`, with the status in place of the boolean.
+    function AwaitStatus(self): (EnumPromiseState, ...any)
+    --- The resolved values, or an error raised with the rejection.
+    function ExpectAsync(self): ...any
+    --- Passes a resolved promise on; otherwise rejects at once with `rejection`.
+    function Now(self, rejection: any?): Promise
+    --- Cancels: the executor stops, its cancel hook runs, every consumer is cancelled, and the parent
+    --- is once no consumer of it is left.
+    function Cancel(self): ()
+    --- `Enum.PromiseState.Started`, `Resolved`, `Rejected` or `Cancelled`.
+    function GetStatus(self): EnumPromiseState
+    --- Rejects with `rejection` unless this settles within `seconds` of simulation time, and is
+    --- cancelled then.
+    function Timeout(self, seconds: number, rejection: any?): Promise
 end
 
 declare extern type TweenInfo with
@@ -2584,6 +2646,13 @@ declare Enum: {
         Cancelled: EnumPlaybackState,
         GetEnumItems: (self: any) -> { EnumPlaybackState },
     },
+    PromiseState: {
+        Started: EnumPromiseState,
+        Resolved: EnumPromiseState,
+        Rejected: EnumPromiseState,
+        Cancelled: EnumPromiseState,
+        GetEnumItems: (self: any) -> { EnumPromiseState },
+    },
     FillDirection: {
         Horizontal: EnumFillDirection,
         Vertical: EnumFillDirection,
@@ -2807,6 +2876,47 @@ declare Signal: {
     --- annotate it (`Signal<string>`, `Signal<()>`) where inference has nothing to work from, such as
     --- an array element type.
     new: (<T...>() -> Signal<T...>),
+}
+
+declare Collector: {
+    --- A new, empty Collector.
+    new: (() -> Collector),
+}
+
+declare Promise: {
+    --- A promise run by `executor(resolve, reject, onCancel)`, at once and on its own thread.
+    new: ((executor: (resolve: (...any) -> (), reject: (...any) -> (), onCancel: (hook: (() -> ())?) -> boolean) -> ()) -> Promise),
+    --- `new`, but the executor runs after the drain rather than at once.
+    defer: ((executor: (resolve: (...any) -> (), reject: (...any) -> (), onCancel: (hook: (() -> ())?) -> boolean) -> ()) -> Promise),
+    --- Resolved already, with these values.
+    resolve: ((...any) -> Promise),
+    --- Rejected already, with these values.
+    reject: ((...any) -> Promise),
+    --- A promise of `fn(...)`: what it returns resolves it, what it raises rejects it.
+    try: ((fn: (...any) -> ...any, ...any) -> Promise),
+    --- Resolves after `seconds` of simulation time, with `seconds`; never the wall clock.
+    delay: ((seconds: number) -> Promise),
+    --- Resolves with every value, in order, when all resolve; rejects with the first rejection and
+    --- cancels the rest.
+    all: ((promises: { Promise }) -> Promise),
+    --- Resolves when every promise has settled, with each one's final status.
+    allSettled: ((promises: { Promise }) -> Promise),
+    --- Settles as the first to settle does, and cancels the rest.
+    race: ((promises: { Promise }) -> Promise),
+    --- Resolves with the first value to resolve; rejects if all of them reject.
+    any: ((promises: { Promise }) -> Promise),
+    --- Resolves with the first `count` values to resolve; rejects once that cannot happen.
+    some: ((promises: { Promise }, count: number) -> Promise),
+    --- Resolves with the arguments of the next fire `predicate` accepts, and disconnects.
+    fromEvent: ((event: Signal<...any>, predicate: ((...any) -> boolean)?) -> Promise),
+    --- `try(fn, ...)`, tried again up to `times` more times while it rejects.
+    retry: ((fn: (...any) -> ...any, times: number, ...any) -> Promise),
+    --- `retry`, with `seconds` of simulation time before each new try.
+    retryWithDelay: ((fn: (...any) -> ...any, times: number, seconds: number, ...any) -> Promise),
+    --- Whether `value` is a Promise.
+    is: ((value: any) -> boolean),
+    --- `fn`, made to return a promise of what it returns.
+    promisify: ((fn: (...any) -> ...any) -> (...any) -> Promise),
 }
 
 declare TweenInfo: {

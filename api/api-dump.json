@@ -4258,6 +4258,115 @@
       ]
     },
     {
+      "Name": "Collector",
+      "Constructors": [
+        {
+          "Name": "new",
+          "Parameters": [],
+          "Returns": ["Collector"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "Add",
+          "Parameters": [
+            {
+              "Name": "object",
+              "Type": "any"
+            },
+            {
+              "Name": "method",
+              "Type": "(string | boolean)?",
+              "Default": "nil"
+            },
+            {
+              "Name": "key",
+              "Type": "any?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["any"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "AddPromise",
+          "Parameters": [
+            {
+              "Name": "promise",
+              "Type": "Promise"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Cleanup",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Destroy",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Get",
+          "Parameters": [
+            {
+              "Name": "key",
+              "Type": "any"
+            }
+          ],
+          "Returns": ["any"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "LinkToInstance",
+          "Parameters": [
+            {
+              "Name": "instance",
+              "Type": "Instance"
+            },
+            {
+              "Name": "allowMultiple",
+              "Type": "boolean?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["Connection"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Remove",
+          "Parameters": [
+            {
+              "Name": "key",
+              "Type": "any"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "RemoveNoClean",
+          "Parameters": [
+            {
+              "Name": "key",
+              "Type": "any"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Operators": []
+    },
+    {
       "Name": "Color3",
       "Constructors": [
         {
@@ -4551,6 +4660,362 @@
       "Operators": []
     },
     {
+      "Name": "Promise",
+      "Constructors": [
+        {
+          "Name": "all",
+          "Parameters": [
+            {
+              "Name": "promises",
+              "Type": "{ Promise }"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "allSettled",
+          "Parameters": [
+            {
+              "Name": "promises",
+              "Type": "{ Promise }"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "any",
+          "Parameters": [
+            {
+              "Name": "promises",
+              "Type": "{ Promise }"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "defer",
+          "Parameters": [
+            {
+              "Name": "executor",
+              "Type": "(resolve: (...any) -> (), reject: (...any) -> (), onCancel: (hook: (() -> ())?) -> boolean) -> ()"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "delay",
+          "Parameters": [
+            {
+              "Name": "seconds",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "fromEvent",
+          "Parameters": [
+            {
+              "Name": "event",
+              "Type": "Signal<...any>"
+            },
+            {
+              "Name": "predicate",
+              "Type": "((...any) -> boolean)?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "is",
+          "Parameters": [
+            {
+              "Name": "value",
+              "Type": "any"
+            }
+          ],
+          "Returns": ["boolean"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "new",
+          "Parameters": [
+            {
+              "Name": "executor",
+              "Type": "(resolve: (...any) -> (), reject: (...any) -> (), onCancel: (hook: (() -> ())?) -> boolean) -> ()"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "promisify",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(...any) -> ...any"
+            }
+          ],
+          "Returns": ["(...any) -> Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "race",
+          "Parameters": [
+            {
+              "Name": "promises",
+              "Type": "{ Promise }"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "reject",
+          "Parameters": [
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "resolve",
+          "Parameters": [
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "retry",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(...any) -> ...any"
+            },
+            {
+              "Name": "times",
+              "Type": "number"
+            },
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "retryWithDelay",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(...any) -> ...any"
+            },
+            {
+              "Name": "times",
+              "Type": "number"
+            },
+            {
+              "Name": "seconds",
+              "Type": "number"
+            },
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "some",
+          "Parameters": [
+            {
+              "Name": "promises",
+              "Type": "{ Promise }"
+            },
+            {
+              "Name": "count",
+              "Type": "number"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "try",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(...any) -> ...any"
+            },
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Constants": [],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "AndThen",
+          "Parameters": [
+            {
+              "Name": "onResolved",
+              "Type": "((...any) -> ...any)?",
+              "Default": "nil"
+            },
+            {
+              "Name": "onRejected",
+              "Type": "((...any) -> ...any)?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "AndThenCall",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(...any) -> ...any"
+            },
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "AndThenReturn",
+          "Parameters": [
+            {
+              "Name": "values",
+              "Type": "...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Await",
+          "Parameters": [],
+          "Returns": ["boolean", "...any"],
+          "Yields": true,
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "AwaitStatus",
+          "Parameters": [],
+          "Returns": ["EnumPromiseState", "...any"],
+          "Yields": true,
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Cancel",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Catch",
+          "Parameters": [
+            {
+              "Name": "onRejected",
+              "Type": "(...any) -> ...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "ExpectAsync",
+          "Parameters": [],
+          "Returns": ["...any"],
+          "Yields": true,
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Finally",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(status: EnumPromiseState) -> ...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetStatus",
+          "Parameters": [],
+          "Returns": ["EnumPromiseState"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Now",
+          "Parameters": [
+            {
+              "Name": "rejection",
+              "Type": "any?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Tap",
+          "Parameters": [
+            {
+              "Name": "fn",
+              "Type": "(...any) -> ...any"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "Timeout",
+          "Parameters": [
+            {
+              "Name": "seconds",
+              "Type": "number"
+            },
+            {
+              "Name": "rejection",
+              "Type": "any?",
+              "Default": "nil"
+            }
+          ],
+          "Returns": ["Promise"],
+          "ThreadSafety": "Unsafe"
+        }
+      ],
+      "Operators": []
+    },
+    {
       "Name": "Random",
       "Constructors": [
         {
@@ -4797,6 +5262,12 @@
         },
         {
           "Name": "Destroy",
+          "Parameters": [],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "DisconnectAll",
           "Parameters": [],
           "Returns": [],
           "ThreadSafety": "Unsafe"
@@ -6494,6 +6965,27 @@
         {
           "Name": "Playing",
           "Value": 2
+        }
+      ]
+    },
+    {
+      "Name": "PromiseState",
+      "Items": [
+        {
+          "Name": "Cancelled",
+          "Value": 3
+        },
+        {
+          "Name": "Rejected",
+          "Value": 2
+        },
+        {
+          "Name": "Resolved",
+          "Value": 1
+        },
+        {
+          "Name": "Started",
+          "Value": 0
         }
       ]
     },

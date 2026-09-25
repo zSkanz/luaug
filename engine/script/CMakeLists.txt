@@ -15,6 +15,7 @@ luaug_add_module(script
     LAYER 5
     SOURCES
         src/animation.cpp
+        src/builtins.cpp
         src/input_events.cpp
         src/binding.cpp
         src/datatypes.cpp
@@ -79,3 +80,27 @@ if(LUAUG_BUILD_TESTS)
     target_compile_definitions(luaug_script_tests PRIVATE
         LUAUG_TEST_CATALOG="${CMAKE_SOURCE_DIR}/i18n/en.json")
 endif()
+
+# **The builtins written in Luau, compiled at build time** (ADR 0094). The
+# shipping profile has no compiler, so `Collector` and `Promise` ship as
+# bytecode, compiled by a host tool with the runtime's own options
+# (`compile_options.h`) and embedded in this module. In install order.
+add_executable(luaug_luauembed tools/luauembed.cpp)
+target_include_directories(luaug_luauembed PRIVATE include)
+target_link_libraries(luaug_luauembed PRIVATE luaug::warnings Luau.Compiler)
+
+set(LUAUG_BUILTINS
+    Promise=${CMAKE_SOURCE_DIR}/runtime/builtins/promise.luau
+    Collector=${CMAKE_SOURCE_DIR}/runtime/builtins/collector.luau)
+set(LUAUG_BUILTIN_FILES
+    ${CMAKE_SOURCE_DIR}/runtime/builtins/promise.luau
+    ${CMAKE_SOURCE_DIR}/runtime/builtins/collector.luau)
+set(LUAUG_BUILTINS_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated/builtins.gen.cpp)
+add_custom_command(
+    OUTPUT ${LUAUG_BUILTINS_GENERATED}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/generated
+    COMMAND luaug_luauembed ${LUAUG_BUILTINS_GENERATED} ${LUAUG_BUILTINS}
+    DEPENDS luaug_luauembed ${LUAUG_BUILTIN_FILES}
+    COMMENT "Compiling the builtins written in Luau"
+    VERBATIM)
+target_sources(luaug_script PRIVATE ${LUAUG_BUILTINS_GENERATED})

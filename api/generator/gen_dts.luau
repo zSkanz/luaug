@@ -308,6 +308,7 @@ local Lines: { string } = {
     "    Wait: (self: Signal<T...>) -> (T...),",
     "    Fire: (self: Signal<T...>, ...any) -> (),",
     "    Destroy: (self: Signal<T...>) -> (),",
+    "    DisconnectAll: (self: Signal<T...>) -> (),",
     "}",
     "",
 }

@@ -55,19 +55,20 @@ inline constexpr EnumId InputRateEnumId = 14;
 inline constexpr EnumId EasingStyleEnumId = 15;
 inline constexpr EnumId EasingDirectionEnumId = 16;
 inline constexpr EnumId PlaybackStateEnumId = 17;
-inline constexpr EnumId FillDirectionEnumId = 18;
-inline constexpr EnumId HorizontalAlignmentEnumId = 19;
-inline constexpr EnumId VerticalAlignmentEnumId = 20;
-inline constexpr EnumId SortOrderEnumId = 21;
-inline constexpr EnumId AutomaticSizeEnumId = 22;
-inline constexpr EnumId ScaleTypeEnumId = 23;
-inline constexpr EnumId NetworkTopologyEnumId = 24;
-inline constexpr EnumId ParticleShapeEnumId = 25;
-inline constexpr EnumId FaceEnumId = 26;
-inline constexpr EnumId BlockOpacityEnumId = 27;
-inline constexpr EnumId Shape2DEnumId = 28;
-inline constexpr EnumId TextureFilterEnumId = 29;
-inline constexpr EnumId CameraProjectionEnumId = 30;
+inline constexpr EnumId PromiseStateEnumId = 18;
+inline constexpr EnumId FillDirectionEnumId = 19;
+inline constexpr EnumId HorizontalAlignmentEnumId = 20;
+inline constexpr EnumId VerticalAlignmentEnumId = 21;
+inline constexpr EnumId SortOrderEnumId = 22;
+inline constexpr EnumId AutomaticSizeEnumId = 23;
+inline constexpr EnumId ScaleTypeEnumId = 24;
+inline constexpr EnumId NetworkTopologyEnumId = 25;
+inline constexpr EnumId ParticleShapeEnumId = 26;
+inline constexpr EnumId FaceEnumId = 27;
+inline constexpr EnumId BlockOpacityEnumId = 28;
+inline constexpr EnumId Shape2DEnumId = 29;
+inline constexpr EnumId TextureFilterEnumId = 30;
+inline constexpr EnumId CameraProjectionEnumId = 31;
 
 } // namespace generated
 

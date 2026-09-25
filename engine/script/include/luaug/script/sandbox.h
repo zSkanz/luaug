@@ -14,7 +14,6 @@
 #pragma once
 
 struct lua_State;
-struct lua_CompileOptions;
 
 namespace luaug::script {
 
@@ -40,13 +39,7 @@ void sealGlobals(lua_State* L);
 // the same bits everywhere. Runs before the seal, like every other global.
 void installDeterministicMath(lua_State* L);
 
-// The library functions the compiler must not turn into a fastcall, because a
-// fastcall reaches the C runtime directly and never sees the functions
-// `installDeterministicMath` put in the table. Null-terminated.
-extern const char* const DeterministicBuiltins[];
-
-// Every script is compiled with these: the builtins above disabled. Called by
-// each place the engine compiles a chunk, so none can forget.
-void applyDeterministicBuiltins(lua_CompileOptions& options) noexcept;
+// The builtins the compiler must leave alone for these to be reached are in
+// `compile_options.h`, with every other compile option (ADR 0094).
 
 } // namespace luaug::script

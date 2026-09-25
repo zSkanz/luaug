@@ -122,8 +122,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       to a call -- when the document has none for it.
 - [x] **Saving the scene clears every scene script's floppy**, not only the
       tab that asked; a stamp's scripts likewise.
-- [ ] **`Signal`, `Collector` and `Promise` are native**, modelled on the
-      community libraries the owner named.
+- [x] **`Signal`, `Collector` and `Promise` are native** (ADR 0094): `Signal`
+      audited against GoodSignal and given `DisconnectAll`; `Collector` on
+      Janitor's surface, newest first; `Promise` on evaera's semantics with
+      `Enum.PromiseState` and `ExpectAsync`. The last two are Luau compiled at
+      build time, so the shipping profile runs them too.
 
 ## Console
 

@@ -374,6 +374,22 @@ int signalDestroy(lua_State* L)
     return 0;
 }
 
+// **Every connection ended, the signal kept** (ADR 0094, the member
+// GoodSignal has that this one lacked). A script's own signal only, for the
+// reason `Destroy` gives: on an instance's event it would end every other
+// script's handlers without any of them knowing.
+int signalDisconnectAll(lua_State* L)
+{
+    SignalRecord& record = checkSignal(L, 1);
+    if (record.kind != SignalKind::Script)
+        raise(L, LUAUG_TR("script.err.signal_not_disconnectable"));
+    // Copied, because `disconnectRecord` erases from the very vector this walks.
+    const std::vector<ConnectionId> live = record.connections;
+    for (const ConnectionId connection : live)
+        disconnectRecord(L, connection);
+    return 0;
+}
+
 int signalNew(lua_State* L)
 {
     SignalRecord record;
@@ -734,6 +750,7 @@ void registerSignals(lua_State* L)
     signalMethods.push_back(MemberEntry{atoms.intern("Wait"), signalWait});
     signalMethods.push_back(MemberEntry{atoms.intern("Fire"), signalFire});
     signalMethods.push_back(MemberEntry{atoms.intern("Destroy"), signalDestroy});
+    signalMethods.push_back(MemberEntry{atoms.intern("DisconnectAll"), signalDisconnectAll});
 
     ctx.getters[static_cast<usize>(UserdataTag::Connection)].push_back(
         MemberEntry{atoms.intern("Connected"), connectionGetConnected});

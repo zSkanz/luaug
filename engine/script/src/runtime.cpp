@@ -3,6 +3,7 @@
 #include "luaug/core/error.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
+#include "luaug/script/builtins.h"
 #include "luaug/script/datatypes.h"
 #include "luaug/script/debugger.h"
 #include "luaug/script/input_events.h"
@@ -22,6 +23,8 @@
 // with the Compiler that profile drops. `runSource` refuses below rather than
 // pretending to have run something.
 #if LUAUG_LUAU_COMPILER
+#include "luaug/script/compile_options.h"
+
 #include <luacode.h>
 #endif
 
@@ -237,6 +240,9 @@ std::optional<core::EngineError> ScriptRuntime::boot(core::InstanceId adoptDataM
     // reached through `require` and through nothing else, which is what keeps
     // it off the exhaustive global list in api-design.md 1.1.
     registerStdModules(L);
+    // `Collector` and `Promise`, written in Luau against every global above
+    // and installed before the seal (ADR 0094).
+    installBuiltins(L);
 
     sealGlobals(L);
     return std::nullopt;
@@ -387,16 +393,8 @@ std::optional<core::EngineError> ScriptRuntime::runSource(std::string_view sourc
 #else
     size_t bytecodeSize = 0;
     lua_CompileOptions options{};
-    options.optimizationLevel = 2;
-    options.debugLevel = 2;
-    // ADR 0013: these three are what make `Vector3.new(1, 2, 3)` a constant
-    // rather than a call, and what makes a dynamic one a fastcall. The type
-    // name is a checker hint only -- the folding comes from the library and
-    // constructor names alone.
-    options.vectorLib = "Vector3";
-    options.vectorCtor = "new";
-    options.vectorType = "Vector3";
-    applyDeterministicBuiltins(options);
+    // The one set of options, shared with the build-time compile (ADR 0094).
+    configureCompileOptions(options);
 
     const std::string chunk = "@" + std::string(chunkName);
     char* bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);

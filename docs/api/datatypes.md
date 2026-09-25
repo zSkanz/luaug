@@ -147,6 +147,50 @@ Moves a **direction** out of this frame into world space, rotation only. Defined
 | `__mul` | `(point: vector): vector` | Transforms a **point** -- the translation is applied. `VectorToWorldSpace` is the direction form, and a surface normal put through this one comes out wrong by exactly the frame's position. |
 | `__eq` | `(other: CFrame): boolean` | Exact and component-wise: an identity test, never a tolerance. Two frames built by different routes to the same place are equal only if every stored number matches. |
 
+## Collector
+
+A bag of things to clean up together (ADR 0094), on the surface of Janitor. What a thing is decides how it is cleaned, and `Cleanup` runs newest first. Written in Luau and shipped as bytecode, like `Promise`.
+
+## Collector — constructors
+
+### `new(): Collector`
+
+A new, empty Collector.
+
+## Collector — methods
+
+### `Add(object: any, method: (string | boolean)? = nil, key: any? = nil): any`
+
+Takes `object` to clean later and returns it. A function is called, a thread cancelled, a `Connection` disconnected, an `Instance`, a `Signal` or anything with `Destroy` destroyed, a `Promise` cancelled. `method` names the method to call instead, or `true` calls the object; `key` names it for `Remove` and `Get`, and adding under a key already held cleans what was there first.
+
+### `AddPromise(promise: Promise): Promise`
+
+Takes a promise to cancel on cleanup, and returns it. Once it settles on its own it is let go.
+
+### `Cleanup()`
+
+Cleans everything, newest first, and stays usable. Reverse insertion order is the order destructors run in, and it is the same on every run.
+
+### `Destroy()`
+
+Cleans everything; adding to this Collector afterwards is an error.
+
+### `Get(key: any): any`
+
+The object held under `key`, or nil.
+
+### `LinkToInstance(instance: Instance, allowMultiple: boolean? = nil): Connection`
+
+Cleans this Collector when `instance` is destroyed, and returns that connection. A new link replaces the last unless `allowMultiple` is true.
+
+### `Remove(key: any)`
+
+Cleans the object held under `key` now, and forgets it.
+
+### `RemoveNoClean(key: any)`
+
+Forgets the object held under `key` without cleaning it.
+
 ## Color3
 
 An RGB colour in three f32 channels, nominally 0-1 and deliberately **not clamped**: values outside the range are legal and meaningful for HDR emissives and tint multipliers over 1, so clamping belongs to the consumer that actually has a range to respect. No BrickColor. `==` is exact and component-wise.
@@ -267,6 +311,136 @@ The shared, read-only handle for a material asset: `Material.load("asset://mater
 
 A writable runtime copy: the same properties, the same `Source`, owned by nobody and never saved. Put it on a part with `part.Material = copy`, then change it -- every part wearing this copy changes with it, and nothing else does.
 
+## Promise
+
+A value that arrives later (ADR 0094), with evaera's semantics: the executor runs at once on its own thread, resolving with a promise adopts it, a handler that errors rejects, cancelling reaches every consumer, and a rejection nothing handled is warned about after the drain. Timing is the simulation's clock, never the wall clock.
+
+## Promise — constructors
+
+### `all(promises: { Promise }): Promise`
+
+Resolves with every value, in order, when all resolve; rejects with the first rejection and cancels the rest.
+
+### `allSettled(promises: { Promise }): Promise`
+
+Resolves when every promise has settled, with each one's final status.
+
+### `any(promises: { Promise }): Promise`
+
+Resolves with the first value to resolve; rejects if all of them reject.
+
+### `defer(executor: (resolve: (...any) -> (), reject: (...any) -> (), onCancel: (hook: (() -> ())?) -> boolean) -> ()): Promise`
+
+`new`, but the executor runs after the drain rather than at once.
+
+### `delay(seconds: number): Promise`
+
+Resolves after `seconds` of simulation time, with `seconds`; never the wall clock.
+
+### `fromEvent(event: Signal<...any>, predicate: ((...any) -> boolean)? = nil): Promise`
+
+Resolves with the arguments of the next fire `predicate` accepts, and disconnects.
+
+### `is(value: any): boolean`
+
+Whether `value` is a Promise.
+
+### `new(executor: (resolve: (...any) -> (), reject: (...any) -> (), onCancel: (hook: (() -> ())?) -> boolean) -> ()): Promise`
+
+A promise run by `executor(resolve, reject, onCancel)`, at once and on its own thread.
+
+### `promisify(fn: (...any) -> ...any): (...any) -> Promise`
+
+`fn`, made to return a promise of what it returns.
+
+### `race(promises: { Promise }): Promise`
+
+Settles as the first to settle does, and cancels the rest.
+
+### `reject(values: ...any): Promise`
+
+Rejected already, with these values.
+
+### `resolve(values: ...any): Promise`
+
+Resolved already, with these values.
+
+### `retry(fn: (...any) -> ...any, times: number, values: ...any): Promise`
+
+`try(fn, ...)`, tried again up to `times` more times while it rejects.
+
+### `retryWithDelay(fn: (...any) -> ...any, times: number, seconds: number, values: ...any): Promise`
+
+`retry`, with `seconds` of simulation time before each new try.
+
+### `some(promises: { Promise }, count: number): Promise`
+
+Resolves with the first `count` values to resolve; rejects once that cannot happen.
+
+### `try(fn: (...any) -> ...any, values: ...any): Promise`
+
+A promise of `fn(...)`: what it returns resolves it, what it raises rejects it.
+
+## Promise — methods
+
+### `AndThen(onResolved: ((...any) -> ...any)? = nil, onRejected: ((...any) -> ...any)? = nil): Promise`
+
+A promise of what `onResolved` returns, or of what `onRejected` returns when this rejects. A handler that errors rejects it; one that returns a promise is waited on.
+
+### `AndThenCall(fn: (...any) -> ...any, values: ...any): Promise`
+
+On resolution calls `fn` with these arguments rather than the values.
+
+### `AndThenReturn(values: ...any): Promise`
+
+On resolution, resolves with these values instead.
+
+### `Await(): (boolean, ...any)`
+
+**Yields.** The calling thread parks until it completes.
+
+Waits for this to settle: `true` and its values, or `false` and the rejection. Cancelled is `false`.
+
+### `AwaitStatus(): (EnumPromiseState, ...any)`
+
+**Yields.** The calling thread parks until it completes.
+
+`Await`, with the status in place of the boolean.
+
+### `Cancel()`
+
+Cancels: the executor stops, its cancel hook runs, every consumer is cancelled, and the parent is once no consumer of it is left.
+
+### `Catch(onRejected: (...any) -> ...any): Promise`
+
+`AndThen(nil, onRejected)`.
+
+### `ExpectAsync(): ...any`
+
+**Yields.** The calling thread parks until it completes.
+
+The resolved values, or an error raised with the rejection.
+
+### `Finally(fn: (status: EnumPromiseState) -> ...any): Promise`
+
+Calls `fn` with the final status however this settles, and settles as this one did.
+
+### `GetStatus(): EnumPromiseState`
+
+`Enum.PromiseState.Started`, `Resolved`, `Rejected` or `Cancelled`.
+
+### `Now(rejection: any? = nil): Promise`
+
+Passes a resolved promise on; otherwise rejects at once with `rejection`.
+
+### `Tap(fn: (...any) -> ...any): Promise`
+
+Calls `fn` with the resolved values and passes those values on, whatever it returns.
+
+### `Timeout(seconds: number, rejection: any? = nil): Promise`
+
+Rejects with `rejection` unless this settles within `seconds` of simulation time, and is cancelled then.
+
 ## Random
 
 A seeded pseudorandom generator, and the only sanctioned source of randomness in simulation code. A seeded stream is reproducible: the same seed yields the same sequence for the same engine build on the same platform, which is the level-B guarantee recorded replays rest on -- replays store seeds, not draws (ADR 0025).
@@ -383,6 +557,10 @@ Registers `handler` and returns the Connection that ends it. Handlers of one fir
 ### `Destroy()`
 
 Closes the signal. Already-queued fires find no live connections and invoke nothing, and every Connection reports `Connected == false` once the drain ends. Only script-created signals are destroyable; an instance's own signals are closed by `Instance:Destroy`.
+
+### `DisconnectAll()`
+
+Disconnects every connection and keeps the signal: it can be connected to and fired again. A script's own signal only -- on an instance's event it would end other scripts' handlers.
 
 ### `Fire(values: T...)`
 

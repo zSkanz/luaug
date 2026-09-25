@@ -5,11 +5,6 @@
 #include <lua.h>
 #include <lualib.h>
 
-// Only a build that compiles source has compile options to set (ADR 0002).
-#if LUAUG_LUAU_COMPILER
-#include <luacode.h>
-#endif
-
 #include <cmath>
 
 namespace luaug::script {
@@ -123,18 +118,6 @@ int vectorAngle(lua_State* L)
 }
 
 } // namespace
-
-const char* const DeterministicBuiltins[] = {
-    "math.sin",  "math.cos",  "math.tan", "math.asin", "math.acos",  "math.atan", "math.atan2",   "math.sinh",
-    "math.cosh", "math.tanh", "math.exp", "math.log",  "math.log10", "math.pow",  "vector.angle", nullptr,
-};
-
-#if LUAUG_LUAU_COMPILER
-void applyDeterministicBuiltins(lua_CompileOptions& options) noexcept
-{
-    options.disabledBuiltins = DeterministicBuiltins;
-}
-#endif
 
 void installDeterministicMath(lua_State* L)
 {

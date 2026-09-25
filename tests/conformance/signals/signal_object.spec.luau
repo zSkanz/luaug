@@ -120,4 +120,37 @@ describe("Signal:Destroy", function()
         task.wait()
         expect(connection.Connected):ToBe(false)
     end)
+
+    it("DisconnectAll ends every connection and keeps the signal (ADR 0094)", function()
+        local sig = Signal.new()
+        local count = 0
+        local first = sig:Connect(function()
+            count += 1
+        end)
+        local second = sig:Connect(function()
+            count += 1
+        end)
+        sig:DisconnectAll()
+        expect(first.Connected):ToBe(false)
+        expect(second.Connected):ToBe(false)
+        sig:Fire()
+        task.wait()
+        expect(count):ToBe(0)
+
+        -- Still usable: DisconnectAll is not Destroy.
+        sig:Connect(function()
+            count += 1
+        end)
+        sig:Fire()
+        task.wait()
+        expect(count):ToBe(1)
+    end)
+
+    it("DisconnectAll refuses an instance's own event", function()
+        local part = Instance.new("Part")
+        expect(function()
+            part.Touched:DisconnectAll()
+        end):ToThrow()
+        part:Destroy()
+    end)
 end)

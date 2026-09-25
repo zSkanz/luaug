@@ -476,7 +476,10 @@ local function checkMethod(errors: { string }, owner: string, method: Method, na
     -- member is PascalCase (ADR 0034), so the two spellings of the same word
     -- are the only difference between them -- and the exception is about the
     -- word, not about where the capital falls.
-    local saysSoAlready = string.lower(string.sub(method.Name, 1, 4)) == "wait"
+    -- And `Await*` (ADR 0094): the same word with a prefix that means the same
+    -- thing -- `Promise:Await` says it parks as plainly as `WaitForChild` does.
+    local lowered = string.lower(method.Name)
+    local saysSoAlready = string.sub(lowered, 1, 4) == "wait" or string.sub(lowered, 1, 5) == "await"
     if yields and not (named or saysSoAlready) then
         table.insert(errors, `{where}: a yielding method's name ends in Async (§9)`)
     elseif named and not yields then

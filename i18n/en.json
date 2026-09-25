@@ -381,6 +381,8 @@
   "script.err.task_not_scheduled": "task.cancel: this thread has no pending resumption (status: {status}). A finished, already cancelled, or currently running thread has nothing to cancel.",
   "script.err.expected_enum_item": "{function} takes an item of Enum.{enumName} for {parameter}.",
   "script.err.signal_not_destroyable": "Only a signal made with Signal.new can be destroyed; an instance's own signals are closed by Instance:Destroy.",
+  "script.err.builtin_failed": "The built-in {name} did not install: {message}",
+  "script.err.signal_not_disconnectable": "Only a signal made with Signal.new can disconnect everything at once; on an instance's event that would end other scripts' handlers.",
   "script.err.color_hex_invalid": "Not a valid hex color: \"{value}\". Color3.fromHex takes 3 or 6 hex digits, with or without a leading #.",
   "script.err.random_range": "NextInteger({min}, {max}): both bounds must be whole numbers, and min cannot be greater than max.",
   "script.err.heap_limit": "Script memory limit reached ({limitMb} MB).",

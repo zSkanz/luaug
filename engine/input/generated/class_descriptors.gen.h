@@ -57,19 +57,20 @@ inline constexpr scene::EnumId InputRateEnumId = 14;
 inline constexpr scene::EnumId EasingStyleEnumId = 15;
 inline constexpr scene::EnumId EasingDirectionEnumId = 16;
 inline constexpr scene::EnumId PlaybackStateEnumId = 17;
-inline constexpr scene::EnumId FillDirectionEnumId = 18;
-inline constexpr scene::EnumId HorizontalAlignmentEnumId = 19;
-inline constexpr scene::EnumId VerticalAlignmentEnumId = 20;
-inline constexpr scene::EnumId SortOrderEnumId = 21;
-inline constexpr scene::EnumId AutomaticSizeEnumId = 22;
-inline constexpr scene::EnumId ScaleTypeEnumId = 23;
-inline constexpr scene::EnumId NetworkTopologyEnumId = 24;
-inline constexpr scene::EnumId ParticleShapeEnumId = 25;
-inline constexpr scene::EnumId FaceEnumId = 26;
-inline constexpr scene::EnumId BlockOpacityEnumId = 27;
-inline constexpr scene::EnumId Shape2DEnumId = 28;
-inline constexpr scene::EnumId TextureFilterEnumId = 29;
-inline constexpr scene::EnumId CameraProjectionEnumId = 30;
+inline constexpr scene::EnumId PromiseStateEnumId = 18;
+inline constexpr scene::EnumId FillDirectionEnumId = 19;
+inline constexpr scene::EnumId HorizontalAlignmentEnumId = 20;
+inline constexpr scene::EnumId VerticalAlignmentEnumId = 21;
+inline constexpr scene::EnumId SortOrderEnumId = 22;
+inline constexpr scene::EnumId AutomaticSizeEnumId = 23;
+inline constexpr scene::EnumId ScaleTypeEnumId = 24;
+inline constexpr scene::EnumId NetworkTopologyEnumId = 25;
+inline constexpr scene::EnumId ParticleShapeEnumId = 26;
+inline constexpr scene::EnumId FaceEnumId = 27;
+inline constexpr scene::EnumId BlockOpacityEnumId = 28;
+inline constexpr scene::EnumId Shape2DEnumId = 29;
+inline constexpr scene::EnumId TextureFilterEnumId = 30;
+inline constexpr scene::EnumId CameraProjectionEnumId = 31;
 
 } // namespace generated
 

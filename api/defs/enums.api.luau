@@ -635,6 +635,20 @@ local Definition: Schema.Definition = {
             } :: { Schema.EnumItem },
         },
         {
+            Name = "PromiseState",
+            Doc = "Where a `Promise` is in its life (ADR 0094). Settled once, and never again.",
+            Items = {
+                { Name = "Started", Value = 0, Doc = "Neither resolved nor rejected yet." },
+                { Name = "Resolved", Value = 1, Doc = "Resolved, with the values `Await` returns." },
+                { Name = "Rejected", Value = 2, Doc = "Rejected, with the values its handlers receive." },
+                {
+                    Name = "Cancelled",
+                    Value = 3,
+                    Doc = "Cancelled before it settled: its executor stopped and its handlers will not run.",
+                },
+            } :: { Schema.EnumItem },
+        },
+        {
             Name = "FillDirection",
             Doc = "Which way a `UIListLayout` stacks its siblings (§2.2).",
             Items = {

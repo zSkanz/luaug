@@ -14,6 +14,8 @@
 // header does not exist in that build. Everything under the guard is the one
 // source-to-bytecode path this module has.
 #if LUAUG_LUAU_COMPILER
+#include "luaug/script/compile_options.h"
+
 #include <luacode.h>
 #endif
 
@@ -45,12 +47,7 @@ namespace {
 {
     size_t bytecodeSize = 0;
     lua_CompileOptions options{};
-    options.optimizationLevel = 2;
-    options.debugLevel = 2;
-    options.vectorLib = "Vector3";
-    options.vectorCtor = "new";
-    options.vectorType = "Vector3";
-    applyDeterministicBuiltins(options);
+    configureCompileOptions(options);
 
     const std::string chunk = "@" + std::string(chunkName);
     char* bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);
