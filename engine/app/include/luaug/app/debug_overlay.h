@@ -230,6 +230,11 @@ public:
     // exists, and it is replaced whenever the world is.
     void setSkeleton(const scene::SkeletonHost* skeleton) noexcept;
 
+    // **Play starts on an empty console** (the owner: "the console should clear
+    // when I press play"): what the last session printed is not what this one
+    // did, and reading the two as one log is how an old error gets chased.
+    void clearConsole();
+
     // What the shell asked for while it drew, taken by the frame loop and reset.
     // Draining rather than reading, so a command cannot be acted on twice
     // because a frame did not draw.

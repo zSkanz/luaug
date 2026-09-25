@@ -9581,6 +9581,13 @@ void DebugOverlay::setThumbnails(ThumbnailCache* thumbnails) noexcept
     g_thumbnails = thumbnails;
 }
 
+void DebugOverlay::clearConsole()
+{
+    ConsoleLog& log = console();
+    std::lock_guard<std::mutex> lock(log.mutex);
+    log.lines.clear();
+}
+
 void DebugOverlay::setSkeleton(const scene::SkeletonHost* skeleton) noexcept
 {
     g_skeleton = skeleton;
@@ -9745,6 +9752,9 @@ void DebugOverlay::handleEvents(std::span<const platform::Event>)
 // picture in. The frame loop still owns a cache and still offers it, which is
 // what keeps that loop free of an #ifdef.
 void DebugOverlay::setThumbnails(ThumbnailCache*) noexcept
+{}
+
+void DebugOverlay::clearConsole()
 {}
 
 void DebugOverlay::setSkeleton(const scene::SkeletonHost*) noexcept

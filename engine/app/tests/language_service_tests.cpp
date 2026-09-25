@@ -165,6 +165,24 @@ TEST_CASE("Signal is typed, made by a script or an event")
     CHECK(offers(core.complete("game.ScriptService.Event", eventCaret), "Connect"));
 }
 
+TEST_CASE("a signal's type is a pack, and the error for one type says how to write it")
+{
+    // **The owner**: `Signal.new<<Vector2>>()` "should work, shouldn't it?" --
+    // it is Luau's rule that a pack is passed in parentheses, and its message
+    // did not say so. Ours does, and the parenthesised form checks clean.
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    (void)builder.add(service, "Bare", "Script", "--!strict\nlocal moved = Signal.new<<Vector2>>()\nprint(moved)\n");
+    (void)builder.add(service, "Pack", "Script", "--!strict\nlocal moved = Signal.new<<(Vector2)>>()\nprint(moved)\n");
+    core.update(builder.tree);
+
+    const app::LanguageCheck bare = core.check("game.ScriptService.Bare");
+    REQUIRE(bare.diagnostics.size() == 1);
+    CHECK(bare.diagnostics.front().message.find("<<(Vector2)>>") != std::string::npos);
+    CHECK(core.check("game.ScriptService.Pack").diagnostics.empty());
+}
+
 TEST_CASE("signature help names the parameters and the one being typed")
 {
     LanguageCore core(definitions());

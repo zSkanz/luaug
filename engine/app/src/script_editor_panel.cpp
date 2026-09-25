@@ -1437,6 +1437,10 @@ void handleDocumentKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t 
     // one thing wherever somebody presses it.
     if (pressed(ScriptAction::Save))
         out.save = index;
+    // **Ctrl+W closes the tab** (the owner), through the same command its
+    // cross sends, so a tab with unsaved work is handled one way.
+    if (pressed(ScriptAction::CloseTab))
+        out.close = index;
 
     // **Ctrl+/ comments the line, or every line the selection touches**, and
     // uncomments them when they all are.

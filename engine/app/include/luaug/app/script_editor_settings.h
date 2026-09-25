@@ -130,6 +130,8 @@ enum class ScriptAction : core::u8
     SplitIntoLines,
     TriggerCompletion,
     ResetZoom,
+    // Closes the tab, as its cross does -- unsaved work asks first there too.
+    CloseTab,
 
     Count,
 };

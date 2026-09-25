@@ -1004,6 +1004,14 @@ LanguageCheck LanguageCore::check(const std::string& module)
                                 ? error.location.end.column - error.location.begin.column
                                 : 0;
         diagnostic.message = Luau::toString(error);
+        // **Luau's message says what is wrong and not what to write** (the
+        // owner, on `Signal.new<<Vector2>>()`): a function generic over a PACK
+        // takes its explicit arguments as a pack, which is written in
+        // parentheses. One type where only packs are wanted is that mistake.
+        if (const auto* count = Luau::get<Luau::TypeInstantiationCountMismatch>(error);
+            count != nullptr && count->maximumTypes == 0 && count->providedTypePacks == 0 &&
+            count->maximumTypePacks > 0 && count->providedTypes <= count->maximumTypePacks)
+            diagnostic.message += " It takes a type pack: write the types in parentheses, as in <<(Vector2)>>.";
         diagnostic.severity = Severity::Error;
         out.diagnostics.push_back(std::move(diagnostic));
     }

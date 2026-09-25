@@ -96,6 +96,7 @@ constexpr std::array<ScriptActionInfo, kScriptActionCount> kActions{{
     {"splitIntoLines", "Split selection into lines", "Shift+Alt+I"},
     {"triggerCompletion", "Show suggestions", "Ctrl+Space"},
     {"resetZoom", "Reset zoom", "Ctrl+0"},
+    {"closeTab", "Close the tab", "Ctrl+W"},
 }};
 
 [[nodiscard]] bool sameWord(std::string_view a, std::string_view b) noexcept
