@@ -16,9 +16,9 @@ offers is on the base's page, which is what keeps one added member on
 | Name | Type | Default | Access | Description |
 |---|---|---|---|---|
 | `CelestialBodiesShown` | `boolean` | `true` | read/write | Whether the sun, the moon and the stars are drawn. Off leaves only the images and the clouds -- the light still comes from where the clock puts the sun. |
-| `CloudColor` | `Color3` | `Color3.new(1, 1, 1)` | read/write, **inert** | The clouds' colour where the sun lights them. |
-| `CloudCover` | `number` | `0` | read/write, **inert** | How much of the sky the clouds cover, from 0 (none) to 1 (overcast). They drift with the game's own clock, so a paused game's clouds stand still and a replay's move the same way. |
-| `CloudDensity` | `number` | `0.5` | read/write, **inert** | How thick each cloud is, from 0 (wisps the sky shows through) to 1 (solid, with dark undersides). |
+| `CloudColor` | `Color3` | `Color3.new(1, 1, 1)` | read/write | The clouds' colour where the sun lights them. |
+| `CloudCover` | `number` | `0` | read/write | How much of the sky the clouds cover, from 0 (none) to 1 (overcast). They drift with the game's own clock, so a paused game's clouds stand still and a replay's move the same way. |
+| `CloudDensity` | `number` | `0.5` | read/write | How thick each cloud is, from 0 (wisps the sky shows through) to 1 (solid, with dark undersides). |
 | `MoonAngularSize` | `number` | `2` | read/write | How wide the moon looks, in degrees across, above 0 and at most 60. |
 | `MoonTexture` | `Content` | — | read/write | An image drawn as the moon's disc at night. None draws a plain pale disc. |
 | `SkyboxBack` | `Content` | — | read/write | The image towards +Z, before `SkyboxOrientation` turns the set. None of the six means the engine's own sky, drawn from the time of day. |

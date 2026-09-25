@@ -180,3 +180,34 @@ TEST_CASE("a sky of pictures replaces the gradient in the environment, and keeps
     params.celestial = false;
     CHECK(nearly(render::evaluateSky(params, core::Vec3{0.0f, 1.0f, 0.0f}).x, 0.25f));
 }
+
+TEST_CASE("clouds: none without cover, a layer over the sky with it, and none below the horizon")
+{
+    render::SkyParams params = render::skyParamsFor(core::Vec3{0.0f, 1.0f, 0.3f}, core::Color3{0.6f, 0.7f, 0.85f});
+    const core::Vec3 up{0.2f, 1.0f, 0.1f};
+    const core::Vec3 clear = render::evaluateSky(params, up);
+
+    params.cloudCover = 1.0f;
+    params.cloudDensity = 1.0f;
+    const core::Vec3 overcast = render::evaluateSky(params, up);
+    // Overcast is a different sky overhead -- and a greyer one: the blue's
+    // lead over the red shrinks under white cloud.
+    CHECK((overcast.z - overcast.x) < (clear.z - clear.x));
+
+    // Below the horizon the layer is not seen at all.
+    const core::Vec3 down{0.2f, -0.5f, 0.1f};
+    params.cloudCover = 0.0f;
+    const core::Vec3 bare = render::evaluateSky(params, down);
+    params.cloudCover = 1.0f;
+    const core::Vec3 covered = render::evaluateSky(params, down);
+    CHECK(nearly(bare.x, covered.x));
+    CHECK(nearly(bare.z, covered.z));
+
+    // And the wind moves them: the same direction a little later is another
+    // part of the layer.
+    params.cloudCover = 0.5f;
+    const core::Vec3 before = render::evaluateSky(params, up);
+    params.cloudDriftX = 0.37f;
+    const core::Vec3 after = render::evaluateSky(params, up);
+    CHECK(!(nearly(before.x, after.x, 1e-4f) && nearly(before.y, after.y, 1e-4f)));
+}

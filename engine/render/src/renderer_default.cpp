@@ -137,6 +137,11 @@ constexpr f32 kAirGlareStrength = 0.35f;
 constexpr f32 kMoonGlow = 1.6f;
 constexpr f32 kStarGlow = 1.2f;
 constexpr f32 kStarChance = 0.5f;
+// The clouds' wind, in layer units a second of game time, and where its
+// offset wraps: far enough that a game would have to run for days to see the
+// layer jump, near enough that f32 keeps every step of it.
+constexpr core::f64 kCloudWind = 0.004;
+constexpr core::f64 kCloudWindWrap = 1024.0;
 // The share of the air a ray into the open sky counts (`look_air.hlsl`): the
 // gradient is already the air above, so the whole integral again drew a grey
 // afternoon. The horizon, where the integral is largest, is buried either way.
@@ -309,6 +314,10 @@ struct InstanceBatch
 // frame would light the first six frames of every run differently from the
 // seventh, and that is a difference a golden recorded at frame two and a
 // screenshot taken at frame thirty would disagree about.
+// How far the clouds may drift, in layer units, before the reflections are
+// rebuilt to show where they went: about every five seconds of game time.
+constexpr f32 kCloudRebakeDrift = 0.02f;
+
 struct EnvironmentCache
 {
     SkyParams target{};
@@ -363,7 +372,10 @@ struct EnvironmentCache
         return !(params.horizonColor == target.horizonColor && params.zenithColor == target.zenithColor &&
                  params.sunColor == target.sunColor && params.specularScale == target.specularScale &&
                  params.skybox == target.skybox && params.celestial == target.celestial &&
-                 params.sunAngularRadius == target.sunAngularRadius);
+                 params.sunAngularRadius == target.sunAngularRadius && params.cloudCover == target.cloudCover &&
+                 params.cloudDensity == target.cloudDensity && params.cloudColor == target.cloudColor &&
+                 std::abs(params.cloudDriftX - target.cloudDriftX) < kCloudRebakeDrift &&
+                 std::abs(params.cloudDriftZ - target.cloudDriftZ) < kCloudRebakeDrift);
     }
 };
 
@@ -2884,6 +2896,15 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         sky.celestial = skyLook.celestialBodiesShown;
         if (skyLook.image.valid())
             sky.skybox = skyLook.radiance;
+        // The clouds, carried by a wind of about sixteen metres a second at
+        // the layer's scale, on the game's clock, folded in f64 before it
+        // becomes f32 so an hour-long game drifts as smoothly as a new one.
+        sky.cloudCover = skyLook.cloudCover;
+        sky.cloudDensity = skyLook.cloudDensity;
+        sky.cloudColor = skyLook.cloudColor;
+        const core::f64 drift = std::fmod(world.environment.simTime * kCloudWind, kCloudWindWrap);
+        sky.cloudDriftX = static_cast<f32>(drift);
+        sky.cloudDriftZ = static_cast<f32>(drift * 0.37);
     }
     updateEnvironment(cmd, sky);
 
@@ -3456,6 +3477,14 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             lookSky.stars[0] = skyLook.starCount > 0 ? std::max(cells, 1.0f) : 0.0f;
             lookSky.stars[1] = kStarChance;
             lookSky.stars[2] = night * night * kStarGlow;
+            lookSky.clouds[0] = sky.cloudCover;
+            lookSky.clouds[1] = sky.cloudDensity;
+            lookSky.clouds[2] = sky.cloudDriftX;
+            lookSky.clouds[3] = sky.cloudDriftZ;
+            lookSky.cloudColor[0] = sky.cloudColor.r;
+            lookSky.cloudColor[1] = sky.cloudColor.g;
+            lookSky.cloudColor[2] = sky.cloudColor.b;
+            lookSky.cloudColor[3] = kCloudSunLight;
             cmd.setPipeline(skyLook_.handle);
             cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&skyUniforms, sizeof(skyUniforms)));
             cmd.bindUniforms(rhi::ShaderStage::Fragment, 1, asBytes(&lookSky, sizeof(lookSky)));

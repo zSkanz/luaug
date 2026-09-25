@@ -150,7 +150,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 9 — Clouds
 
-- [ ] `Sky.CloudCover`, `CloudDensity`, `CloudColor`: a procedural cloud layer
+- [x] `Sky.CloudCover`, `CloudDensity`, `CloudColor`: a procedural cloud layer
       in the sky pass, lit by the sun, drifting on the simulation clock, and
       included in the environment bake. Captures for the owner.
 
@@ -297,3 +297,11 @@ here*.
    already the light model's. A folder of six pictures dropped on a `Sky` in
    the Explorer fills the faces by the names' last word (`back`, `bk`, `px`
    and the rest, `skyFaceOfName`).
+19. **The clouds are four octaves of value noise on a sheet seen from below**
+   (Stage 9), thresholded by `CloudCover`, darkened underneath by
+   `CloudDensity`, lit by the sun's colour and the sky around them, and carried
+   by a wind on `SimTime` folded in f64 before it becomes f32. The same function
+   is written twice -- `lookClouds` in `luaug_look.hlsli` and `cloudsAt` in
+   `environment.cpp`, operation for operation -- so the reflections show the
+   clouds the sky does; the prefiltered chain rebuilds after about five seconds
+   of drift.

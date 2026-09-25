@@ -156,6 +156,10 @@ struct RenderEnvironment
     f32 shadowSoftness = 0.2f;
     bool globalShadows = true;
     bool autoExposure = true;
+    // The game's own clock, `RunService.SimTime`, for what drifts with it --
+    // the clouds (ADR 0096). Never a wall clock (R10): a paused game's clouds
+    // stand still and a replay's move the same way.
+    core::f64 simTime = 0.0;
 };
 
 // A material, resolved into what the GPU binds.

@@ -114,7 +114,19 @@ struct SkyParams
     // `Sky.CelestialBodiesShown`: the sun's disc and glow are in the sky, and
     // therefore in its reflection. The light the sun casts is not this.
     bool celestial = true;
+    // `Sky.CloudCover`, `CloudDensity` and `CloudColor` (ADR 0096), and where
+    // the wind has carried the layer, in layer units -- a function of the
+    // game's own clock. Zero cover is no clouds, and no cost.
+    f32 cloudCover = 0.0f;
+    f32 cloudDensity = 0.5f;
+    Color3 cloudColor{1.0f, 1.0f, 1.0f};
+    f32 cloudDriftX = 0.0f;
+    f32 cloudDriftZ = 0.0f;
 };
+
+// How much a cloud layer's light the sun supplies, against the sky's around
+// it -- `sky_look.hlsl`'s `LookCloudColor.w`.
+inline constexpr f32 kCloudSunLight = 1.2f;
 
 // The derivation, and the one place it happens.
 //

@@ -598,6 +598,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.environment.shadowSoftness = lighting->shadowSoftness;
         out.environment.globalShadows = lighting->globalShadows;
         out.environment.autoExposure = lighting->autoExposure;
+        out.environment.simTime = world.engineState().simTime;
     }
 
     // The look (ADR 0096): `Lighting`'s children and the current camera's. The

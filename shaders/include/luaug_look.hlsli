@@ -136,6 +136,55 @@ float2 lookOctahedralUv(float3 direction)
     }
     return f * 0.5f + 0.5f;
 }
+
+// **The cloud layer** (`Sky.CloudCover`, ADR 0096): a sheet of value noise at a
+// fixed height, seen from below, carried by the wind. `render::cloudsAt` is the
+// same function on the CPU, for the environment bake -- a reflection sees the
+// clouds the sky shows.
+float lookHash(float2 cell)
+{
+    const float3 p = frac(float3(cell.xyx) * 0.1031f);
+    const float3 q = p + dot(p, p.yzx + 33.33f);
+    return frac((q.x + q.y) * q.z);
+}
+
+float lookNoise(float2 at)
+{
+    const float2 cell = floor(at);
+    const float2 f = at - cell;
+    const float2 s = f * f * (3.0f - 2.0f * f);
+    const float a = lookHash(cell);
+    const float b = lookHash(cell + float2(1.0f, 0.0f));
+    const float c = lookHash(cell + float2(0.0f, 1.0f));
+    const float d = lookHash(cell + float2(1.0f, 1.0f));
+    return lerp(lerp(a, b, s.x), lerp(c, d, s.x), s.y);
+}
+
+// How much cloud a direction sees, 0 to 1, and how far into its thickness.
+float2 lookClouds(float3 direction)
+{
+    if (LookClouds.x <= 0.0f || direction.y <= 0.0f)
+        return float2(0.0f, 0.0f);
+    // Where the ray meets the layer, in layer units: a unit is four kilometres
+    // of sky at two kilometres up, so a cloud a unit across fills a good part of
+    // the view overhead and shrinks towards the horizon.
+    const float2 at = direction.xz / max(direction.y, 0.02f) * 0.5f + LookClouds.zw;
+    float sum = 0.0f;
+    float amplitude = 0.5f;
+    float2 probe = at * 3.0f;
+    [unroll]
+    for (int octave = 0; octave < 4; ++octave)
+    {
+        sum += lookNoise(probe) * amplitude;
+        probe = probe * 2.03f + float2(17.0f, 31.0f);
+        amplitude *= 0.5f;
+    }
+    // `CloudCover` moves the threshold: none at 0, the whole sky at 1.
+    const float cover = saturate((sum - (1.0f - LookClouds.x) * 0.94f) / 0.18f);
+    // Thinner towards the horizon, where the sheet is seen edge-on and far.
+    const float horizon = saturate(direction.y * 6.0f);
+    return float2(cover * horizon, sum);
+}
 #endif
 
 #endif // LUAUG_LOOK_HLSLI

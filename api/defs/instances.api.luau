@@ -2138,7 +2138,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "CloudCover",
                 Type = "number",
-                Inert = true,
                 Default = "0",
                 ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How much of the sky the clouds cover, from 0 (none) to 1 (overcast). They drift with the "
@@ -2147,7 +2146,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "CloudDensity",
                 Type = "number",
-                Inert = true,
                 Default = "0.5",
                 ErrorKey = "scene.err.number_zero_to_one",
                 Doc = "How thick each cloud is, from 0 (wisps the sky shows through) to 1 (solid, with dark "
@@ -2156,7 +2154,6 @@ local Classes: { Schema.Class } = {
             {
                 Name = "CloudColor",
                 Type = "Color3",
-                Inert = true,
                 Default = "Color3.new(1, 1, 1)",
                 Doc = "The clouds' colour where the sun lights them.",
             },

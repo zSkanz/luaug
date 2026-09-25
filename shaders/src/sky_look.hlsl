@@ -168,5 +168,19 @@ float4 FragmentMain(Interpolants input) : SV_Target0
         }
     }
 
+    // **The clouds, last**: over the stars, the moon and the sun, which a thin
+    // cloud lets through a little and a thick one hides. Lit from above by the
+    // sun and by the sky around them, darker underneath where they are thick.
+    const float2 cloud = lookClouds(direction);
+    if (cloud.x > 0.0f)
+    {
+        const float thick = LookClouds.y;
+        const float alpha = cloud.x * lerp(0.35f, 0.95f, thick);
+        const float shade = lerp(1.0f, 0.5f, thick * saturate(cloud.y * 2.0f - 0.6f));
+        const float3 lit = LookCloudColor.rgb *
+                           (SunColor.rgb * LookCloudColor.w + ZenithColor.rgb * 0.5f + HorizonColor.rgb * 0.5f);
+        sky = lerp(sky, lit * shade, alpha);
+    }
+
     return float4(sky, 1.0f);
 }

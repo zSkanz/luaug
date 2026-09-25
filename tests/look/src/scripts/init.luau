@@ -294,6 +294,24 @@ local Variants: { [string]: () -> () } = {
     ["night-before"] = function()
         Lighting.ClockTime = 5
     end,
+    ["clouds"] = function()
+        local sky = Instance.new("Sky")
+        sky.CloudCover = 0.5
+        sky.Parent = Lighting
+    end,
+    ["clouds-overcast"] = function()
+        local sky = Instance.new("Sky")
+        sky.CloudCover = 0.9
+        sky.CloudDensity = 0.9
+        sky.Parent = Lighting
+    end,
+    ["clouds-dusk"] = function()
+        Lighting.ClockTime = 17.8
+        local sky = Instance.new("Sky")
+        sky.CloudCover = 0.6
+        sky.CloudColor = Color3.fromRGB(255, 236, 222)
+        sky.Parent = Lighting
+    end,
 }
 
 local apply = Variants[Variant]

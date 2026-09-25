@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace luaug::render {
 namespace {
@@ -355,6 +356,72 @@ void setSunAngularRadius(SkyParams& params, f32 radius) noexcept
     params.discCosInner = std::cos(radius * 0.9f);
 }
 
+namespace {
+
+// --- The cloud layer (ADR 0096) ------------------------------------------------
+//
+// The CPU half of `lookClouds` and its shading in `sky_look.hlsl`, operation for
+// operation, for the environment bake: a reflection sees the clouds the sky
+// shows. `luaug_render_tests` holds a direction or two of it against numbers.
+
+[[nodiscard]] f32 fract(f32 value) noexcept
+{
+    return value - std::floor(value);
+}
+
+[[nodiscard]] f32 cloudHash(f32 x, f32 y) noexcept
+{
+    const f32 px = fract(x * 0.1031f);
+    const f32 py = fract(y * 0.1031f);
+    const f32 pz = fract(x * 0.1031f);
+    const f32 dot = px * (py + 33.33f) + py * (pz + 33.33f) + pz * (px + 33.33f);
+    const f32 qx = px + dot;
+    const f32 qy = py + dot;
+    const f32 qz = pz + dot;
+    return fract((qx + qy) * qz);
+}
+
+[[nodiscard]] f32 cloudNoise(f32 x, f32 y) noexcept
+{
+    const f32 cx = std::floor(x);
+    const f32 cy = std::floor(y);
+    const f32 fx = x - cx;
+    const f32 fy = y - cy;
+    const f32 sx = fx * fx * (3.0f - 2.0f * fx);
+    const f32 sy = fy * fy * (3.0f - 2.0f * fy);
+    const f32 a = cloudHash(cx, cy);
+    const f32 b = cloudHash(cx + 1.0f, cy);
+    const f32 c = cloudHash(cx, cy + 1.0f);
+    const f32 d = cloudHash(cx + 1.0f, cy + 1.0f);
+    const f32 top = a + (b - a) * sx;
+    const f32 bottom = c + (d - c) * sx;
+    return top + (bottom - top) * sy;
+}
+
+// `lookClouds` in `luaug_look.hlsli`: how much cloud a direction sees, and the
+// raw sum it thresholded -- which the shading darkens thick clouds by.
+[[nodiscard]] std::pair<f32, f32> cloudsAt(const SkyParams& params, Vec3 d) noexcept
+{
+    if (params.cloudCover <= 0.0f || d.y <= 0.0f)
+        return {0.0f, 0.0f};
+    const f32 rise = std::max(d.y, 0.02f);
+    f32 x = (d.x / rise * 0.5f + params.cloudDriftX) * 3.0f;
+    f32 y = (d.z / rise * 0.5f + params.cloudDriftZ) * 3.0f;
+    f32 sum = 0.0f;
+    f32 amplitude = 0.5f;
+    for (int octave = 0; octave < 4; ++octave) {
+        sum += cloudNoise(x, y) * amplitude;
+        x = x * 2.03f + 17.0f;
+        y = y * 2.03f + 31.0f;
+        amplitude *= 0.5f;
+    }
+    const f32 cover = saturate((sum - (1.0f - params.cloudCover) * 0.94f) / 0.18f);
+    const f32 horizon = saturate(d.y * 6.0f);
+    return {cover * horizon, sum};
+}
+
+} // namespace
+
 Vec3 evaluateSky(const SkyParams& params, Vec3 direction) noexcept
 {
     const Vec3 d = core::normalize(direction);
@@ -398,7 +465,21 @@ Vec3 evaluateSky(const SkyParams& params, Vec3 direction) noexcept
     const f32 discIntensity = kSunDiscIntensity * params.dayFactor;
     const Color3 sun = scale(params.sunColor, params.celestial ? disc * discIntensity + glow : 0.0f);
 
-    return Vec3{sky.r + sun.r, sky.g + sun.g, sky.b + sun.b};
+    Vec3 out{sky.r + sun.r, sky.g + sun.g, sky.b + sun.b};
+
+    // The clouds, as `sky_look.hlsl` lays them on.
+    if (const auto [amount, sum] = cloudsAt(params, d); amount > 0.0f) {
+        const f32 alpha = amount * (0.35f + (0.95f - 0.35f) * params.cloudDensity);
+        const f32 shade = 1.0f + (0.5f - 1.0f) * params.cloudDensity * saturate(sum * 2.0f - 0.6f);
+        const Vec3 lit{params.cloudColor.r * (params.sunColor.r * kCloudSunLight + params.zenithColor.r * 0.5f +
+                                              params.horizonColor.r * 0.5f),
+                       params.cloudColor.g * (params.sunColor.g * kCloudSunLight + params.zenithColor.g * 0.5f +
+                                              params.horizonColor.g * 0.5f),
+                       params.cloudColor.b * (params.sunColor.b * kCloudSunLight + params.zenithColor.b * 0.5f +
+                                              params.horizonColor.b * 0.5f)};
+        out = out + (lit * shade - out) * alpha;
+    }
+    return out;
 }
 
 Vec3 octahedralDirection(f32 u, f32 v) noexcept

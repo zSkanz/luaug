@@ -117,3 +117,17 @@ in** -- the engine draws the sun where the clock puts it.
 | `sky-big-sun.png` | a `Sky` with no pictures and `SunAngularSize` 8 | The engine's gradient kept, and a sun four times the size |
 | `night-before.png` | 05:00, no `Sky` | The engine's own night: dark, no moon disc, no stars |
 | `sky-night.png` | 05:00 with a `Sky` and its defaults | The stars and the moon a `Sky` adds -- the moon low in the west behind the fence, opposite the sun, lighting the scene -- in the same places every night |
+
+## Stage 9 -- Clouds
+
+| File | What is in the world | What to look at |
+|---|---|---|
+| `none.png` | nothing | The "before" |
+| `clouds.png` | a `Sky` with `CloudCover` 0.5 | Scattered cumulus over the engine's own gradient, smaller and flatter towards the horizon as a sheet seen from below is |
+| `clouds-overcast.png` | `CloudCover` 0.9, `CloudDensity` 0.9 | An overcast sky with darker undersides where the cloud is thick; the sun only just shows through |
+| `clouds-dusk.png` | 17:48, `CloudCover` 0.6, a warm `CloudColor` | The same layer lit by a low sun: the clouds take the sunset's colour |
+
+The clouds drift on the game's own clock (`RunService.SimTime`), never a wall
+clock: a paused game's clouds stand still, and a replay's move the same way.
+They are in the reflections too -- the environment rebuilds every few seconds
+of drift.

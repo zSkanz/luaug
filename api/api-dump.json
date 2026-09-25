@@ -2526,20 +2526,17 @@
         {
           "Name": "CloudColor",
           "Type": "Color3",
-          "Default": "Color3.new(1, 1, 1)",
-          "Inert": true
+          "Default": "Color3.new(1, 1, 1)"
         },
         {
           "Name": "CloudCover",
           "Type": "number",
-          "Default": "0",
-          "Inert": true
+          "Default": "0"
         },
         {
           "Name": "CloudDensity",
           "Type": "number",
-          "Default": "0.5",
-          "Inert": true
+          "Default": "0.5"
         },
         {
           "Name": "MoonAngularSize",
