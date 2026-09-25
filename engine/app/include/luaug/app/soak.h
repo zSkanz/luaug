@@ -146,6 +146,17 @@ struct SoakSample
     // are right to: a soak that does not declare a return radius has no use for
     // one.
     core::Vec3 focus{};
+
+    // **Whether streaming had caught up on this frame** (D186): nothing being
+    // read and nothing decoded and waiting for the budget to materialise it.
+    // The revisit check compares only frames where this holds, because the
+    // resident set it compares is "what this place holds" only once the
+    // streamer has finished putting it there -- a frame still loading holds
+    // however much a millisecond budget had managed under whatever load the
+    // machine was under, and that is what flaked it (1153, 1197 and 1447
+    // instances against 1691, on three runs of one tree). True by default, so
+    // a sample from a world that does not stream counts as it always did.
+    bool settled = true;
 };
 
 struct SoakVerdict

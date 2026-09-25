@@ -343,6 +343,33 @@ TEST_CASE("a little more world is inside the tolerance, because streaming is not
     CHECK(verdict.ok);
 }
 
+TEST_CASE("a place is compared only where streaming had caught up (D186)")
+{
+    // The flake, reproduced: the first visit was still loading -- fewer
+    // instances than the place holds -- and the return, settled, held all of
+    // them. Comparing the two called a slow machine a leak. With the frames
+    // that were still loading excluded, the settled frames on either side
+    // agree.
+    seedRealCatalog();
+    SoakRecorder recorder(0);
+    const int steps = 400;
+    for (int index = 0; index < steps; ++index) {
+        const int half = steps / 2;
+        const int along = index <= half ? index : steps - index;
+        // The first twenty frames at the start were still streaming in.
+        const bool loading = index < 20;
+        recorder.sample({.frameMs = 8.0,
+                         .residentBytes = 64u * 1024u * 1024u,
+                         .instanceCount = loading ? 2800u : 4000u,
+                         .focus = core::Vec3{static_cast<core::f32>(along), 0.0f, 0.0f},
+                         .settled = !loading});
+    }
+    const SoakVerdict verdict = recorder.evaluate(kRevisit);
+    CHECK(verdict.ok);
+    CHECK(verdict.focusReturned);
+    CHECK(verdict.departureInstances == 4000);
+}
+
 TEST_CASE("a path that never doubles back FAILS rather than passing quietly")
 {
     // **The vacuous pass, refused.** A caller that declares a radius is saying

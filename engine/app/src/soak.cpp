@@ -224,7 +224,11 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         usize bestEarly = 0;
         usize bestLate = 0;
         for (usize early = 0; early < earlyEnd; early += earlyStride) {
+            if (!m_samples[early].settled)
+                continue;
             for (usize late = lateBegin; late < count; late += lateStride) {
+                if (!m_samples[late].settled)
+                    continue;
                 const f64 apart = distance(m_samples[early].focus, m_samples[late].focus);
                 furthest = std::max(furthest, apart);
                 if (apart < closest) {
