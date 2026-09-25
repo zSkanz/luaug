@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+<defs><mask id="ink" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+<polyline points="5,12 5.01499,11.5422 5.05989,11.0863 5.1345,10.6344 5.23852,10.1883 5.37149,9.74992 5.53284,9.32122 5.72189,8.90398 5.93782,8.5 6.17971,8.11101 6.44653,7.73867 6.73712,7.38458 7.05025,7.05025 7.38458,6.73712 7.73867,6.44653 8.11101,6.17971 8.5,5.93782 8.90398,5.72189 9.32122,5.53284 9.74992,5.37149 10.1883,5.23852 10.6344,5.1345 11.0863,5.05989 11.5422,5.01499 12,5 12.4578,5.01499 12.9137,5.05989 13.3656,5.1345 13.8117,5.23852 14.2501,5.37149 14.6788,5.53284 15.096,5.72189 15.5,5.93782 15.889,6.17971 16.2613,6.44653 16.6154,6.73712 16.9497,7.05025 17.2629,7.38458 17.5535,7.73867 17.8203,8.11101 18.0622,8.5 18.2781,8.90398 18.4672,9.32122 18.6285,9.74992 18.7615,10.1883 18.8655,10.6344 18.9401,11.0863 18.985,11.5422 19,12" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="3,13 21,13" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="5,17 19,17" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="8,21 16,21" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</mask></defs><rect width="24" height="24" fill="white" mask="url(#ink)"/>
+</svg>

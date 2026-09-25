@@ -275,6 +275,8 @@ Scope changes require human approval (see `MASTER_PROMPT.md` §10).
     way for a material to point at a shader other than the built-in. Known
     caller: vertex-displaced water, where the ocean is a static grid displaced
     in the vertex shader rather than a mesh edited per frame.
+    **Decided on 2026-09-24 by ADR 0091**: a material names a surface shader the
+    user writes, and the ocean becomes user code over it.
   - **Draw order and batching belong to `extract`, not to a backend.**
     `RenderWorld` is a POD snapshot, so grouping by pipeline and material there
     is inherited by every backend; doing it inside `rhi_sdlgpu` is work bgfx

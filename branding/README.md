@@ -1,8 +1,9 @@
 # LuauG branding ? Orbit G
 
 The refreshed engine identity, created 2026-09-23 alongside the Orbit editor
-icons. An open circular G with a detached satellite replaces the earlier
-crescent mark. Rounded geometry, mint accents and Inter typography connect
+icons. A bold open circular G replaces the earlier
+crescent mark. The 2026-09-24 revision removes the detached satellite and adds
+a graphite tile for clearer application icons. Rounded geometry, mint accents and Inter typography connect
 it to the editor icon family.
 
 - [Identity overview](../art/branding/orbit/brand-board.png)
@@ -24,10 +25,12 @@ it to the editor icon family.
 | `luaug-lockup-stacked-{light,dark}.png` | Surface-specific stacked lockups |
 | `luaug-social-card.png` | 1280 by 640 repository/link preview artwork |
 | `icon/luaug-{16,24,32,48,64,128,256}.png` | Application icon at native OS sizes |
+| `luaug-app-icon-512.png` | Large application tile for presentations and previews |
+| `icon/luaug.svg` | Editable mint-on-graphite application icon |
 | `icon/luaug.ico` | Seven PNG-compressed Windows icon entries |
 
 Use the light variant on light backgrounds, the dark variant on dark
-backgrounds. Use the standalone symbol for small application icons, and a
+backgrounds. Use the graphite tile from `icon/` for application icons, and a
 lockup wherever the full name should be visible. Never squeeze the wordmark
 into a 16-pixel square.
 
@@ -44,7 +47,7 @@ the icon art tools, and the vendored Inter font; no engine dependency is added.
 The wordmark is exactly **LuauG**, set in Inter at weight 650, optical size 32,
 tracking -2.5% em. Its letters share one weight and one color. Lockups are
 exported as PNGs so they remain exact without installing the font. The symbol
-is an authored SVG arc, bar and circle; it is not an autotraced bitmap.
+is an authored SVG arc and bar; it is not an autotraced bitmap.
 
 ## Windows resource contract
 

@@ -36,9 +36,9 @@ def orbit_points():
     # Counterclockwise from the open shoulder, around the bowl, into the G bar.
     points = []
     for step in range(181):
-        angle = math.radians(-55 - 305 * step / 180)
-        points.append((30 + 21 * math.cos(angle), 33 + 21 * math.sin(angle)))
-    points.append((37, 33))
+        angle = math.radians(-48 - 312 * step / 180)
+        points.append((32 + 20 * math.cos(angle), 32 + 20 * math.sin(angle)))
+    points.append((34, 32))
     return points
 
 
@@ -49,11 +49,10 @@ def mark(size, color=PRIMARY):
     image = Image.new("RGBA", (edge, edge))
     draw = ImageDraw.Draw(image)
     points = [(x * unit, y * unit) for x, y in orbit_points()]
-    draw.line(points, fill=color, width=round(7 * unit), joint="curve")
+    draw.line(points, fill=color, width=round(9 * unit), joint="curve")
     for x, y in points:
-        r = 3.5 * unit
+        r = 4.5 * unit
         draw.ellipse((x-r, y-r, x+r, y+r), fill=color)
-    draw.ellipse(tuple(v * unit for v in (49.5, 5.5, 58.5, 14.5)), fill=color)
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
@@ -62,9 +61,20 @@ def mark_svg(color):
     return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" '
             'width="512" height="512" role="img" aria-labelledby="title">\n'
             '<title id="title">LuauG — Orbit G</title>\n'
-            f'<path d="M {x:.4f} {y:.4f} A 21 21 0 1 0 51 33 L 37 33" fill="none" stroke="{color}" '
-            'stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>\n'
-            f'<circle cx="54" cy="10" r="4.5" fill="{color}"/>\n</svg>\n')
+            f'<path d="M {x:.4f} {y:.4f} A 20 20 0 1 0 52 32 L 34 32" fill="none" stroke="{color}" '
+            'stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>\n'
+            '</svg>\n')
+
+
+def app_icon(size):
+    # A stable dark silhouette keeps the mint mark legible on any OS surface.
+    edge = max(1024, size * 4)
+    unit = edge / 64
+    image = Image.new("RGBA", (edge, edge))
+    ImageDraw.Draw(image).rounded_rectangle(
+        (unit, unit, 63 * unit, 63 * unit), radius=14 * unit, fill=NIGHT)
+    image.alpha_composite(mark(edge, MINT))
+    return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def wordmark(height, color):
@@ -142,7 +152,7 @@ def preview():
     label(d, (70, 1150), "Small by design.", 28, INK, 650)
     x = 70
     for size in (16, 24, 32, 48, 64):
-        image = mark(size)
+        image = app_icon(size)
         board.paste(image, (x, 1235-size//2), image)
         label(d, (x, 1280), str(size), 14, "#61737B")
         x += 94
@@ -152,6 +162,22 @@ def preview():
         label(d, (x, 1296), color, 13, "#61737B")
     label(d, (70, 1370), "Rounded geometry. One name. Built for light and dark.", 16, "#61737B")
     board.save(ART / "brand-board.png")
+
+
+def icon_preview():
+    board = Image.new("RGB", (960, 440), PAPER)
+    draw = ImageDraw.Draw(board)
+    label(draw, (32, 20), "APPLICATION ICON / NATIVE SIZES", 20, TEAL, 650)
+    for row, background, foreground in ((0, "#FFFFFF", INK), (1, "#202020", PAPER)):
+        top = 70 + row * 180
+        draw.rounded_rectangle((20, top, 940, top + 164), radius=16, fill=background)
+        x = 55
+        for size in (16, 24, 32, 48, 64, 128):
+            icon = app_icon(size)
+            board.paste(icon, (x, top + 70 - size // 2), icon)
+            label(draw, (x, top + 137), str(size) + " px", 13, foreground)
+            x += 145
+    board.save(ART / "icon-review.png")
 
 
 def social():
@@ -188,11 +214,15 @@ def main():
     word = word.resize((472, round(word.height * 472 / word.width)), Image.Resampling.LANCZOS)
     canvas.alpha_composite(word, (20, (512-word.height)//2))
     canvas.save(OUT / "luaug-logo-512.png")
-    icon_images = [mark(size) for size in SIZES]
+    icon_images = [app_icon(size) for size in SIZES]
     for size, image in zip(SIZES, icon_images):
         image.save(OUT / f"icon/luaug-{size}.png")
     (OUT / "icon/luaug.ico").write_bytes(ico(icon_images))
+    app_icon(512).save(OUT / "luaug-app-icon-512.png")
+    tile_svg = mark_svg(MINT).replace('<path', f'<rect x="1" y="1" width="62" height="62" rx="14" fill="{NIGHT}"/>\n<path')
+    (OUT / "icon/luaug.svg").write_text(tile_svg, encoding="utf-8")
     preview()
+    icon_preview()
     social()
     print("Orbit G: mark variants, lockups, wordmark, social card, seven PNG icon sizes and PNG-only ICO exported.")
 

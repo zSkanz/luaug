@@ -130,6 +130,19 @@ def draw_icon(group, name):
             if name == "Forward": i.line((3,12),(16,12))
             if name == "Collapse":
                 i = Icon().line((5,9),(12,16),(19,9))
+        elif name in ("Replace", "ReplaceAll"):
+            i.line((3,5),(11,5)).line((3,9),(8,9)).line((12,7),(21,7)).line((17,3),(21,7),(17,11))
+            i.line((10,17),(21,17)).line((10,21),(18,21))
+            if name == "ReplaceAll": i.line((3,13),(3,19),(6,19)).line((4,17),(6,19),(4,21))
+        elif name == "StepOver":
+            i.line((3,12),(3,8),(6,4),(15,4),(19,8),(19,12)).line((15,8),(19,12),(23,8)).circle(12,19,2,True)
+        elif name in ("StepInto", "StepOut"):
+            if name == "StepInto": i.line((12,3),(12,14)).line((7,9),(12,14),(17,9)).circle(12,20,2,True)
+            else: i.line((12,14),(12,3)).line((7,8),(12,3),(17,8)).circle(12,20,2,True)
+        elif name == "Revert":
+            i.arc(12,12,8,200,490).line((4,3),(4,9),(10,9)).line((9,15),(15,15))
+        elif name == "Inherit":
+            i.rect(3,3,7,6,1).rect(14,15,7,6,1).line((6,9),(6,18),(11,18)).line((8,15),(11,18),(8,21))
         elif name == "NewMaterial":
             i.circle(9,10,7).line((4,14),(12,4)).line((7,16),(15,6)).line((14,18),(22,18)).line((18,14),(18,22))
         elif name == "MaterialVariant":
@@ -272,6 +285,29 @@ def draw_icon(group, name):
         for a in range(0,360,45):
             c,s=math.cos(math.radians(a)),math.sin(math.radians(a))
             i.line((12+7*c,12+7*s),(12+10*c,12+10*s))
+    elif name == "Atmosphere":
+        i.arc(12,12,7,180,360).line((3,13),(21,13)).line((5,17),(19,17)).line((8,21),(16,21))
+    elif name == "Sky":
+        i.rect(2,3,20,18,2).circle(16,8,2)
+        i.line((3,16),(6,16)).arc(10,16,4,180,360).line((14,16),(21,16))
+    elif name == "BloomEffect":
+        i.line((12,3),(14.5,9.5),(21,12),(14.5,14.5),(12,21),(9.5,14.5),(3,12),(9.5,9.5),closed=True)
+        i.line((4,4),(6,6)).line((18,18),(20,20)).line((18,6),(20,4)).line((4,20),(6,18))
+    elif name == "ColorCorrectionEffect":
+        i.circle(12,12,9).line((12,3),(12,21))
+        i.line((15,5),(15,19)).line((18,7),(18,17))
+    elif name == "BlurEffect":
+        i.circle(12,12,4)
+        for y in (5,12,19):
+            i.line((2,y),(5,y)).line((19,y),(22,y))
+    elif name == "DepthOfFieldEffect":
+        i.line((3,8),(3,3),(8,3)).line((16,3),(21,3),(21,8))
+        i.line((3,16),(3,21),(8,21)).line((16,21),(21,21),(21,16)).circle(12,12,4)
+    elif name == "SunRaysEffect":
+        i.circle(6,6,3).line((11,11),(21,21)).line((12,6),(22,10)).line((6,12),(10,22))
+    elif name == "PostEffect":
+        i.rect(3,3,15,15,2).line((7,21),(21,21),(21,7))
+        i.line((6,12),(9,12),(11,7),(13,14),(15,10))
     elif name == "Lighting": i.arc(12,9,6,145,395).line((7,13),(9,17),(15,17),(17,13)).line((9,21),(15,21))
     elif name == "SpotLight": i.line((5,3),(14,7),(10,15),(2,11),closed=True).line((15,10),(22,12)).line((13,15),(19,20)).line((9,18),(10,22))
     elif name == "Material": i.circle(12,12,9).line((5,18),(18,5)).line((10,20),(20,10)).line((15,20),(20,15))
@@ -338,6 +374,23 @@ def preview(theme, images):
                 sheet.paste(Image.new("RGB",(size,size),color),(x+offset,y+32-size),alpha)
             d.text((x,y+43),path.split("/")[1][:-4],font=font,fill=fg)
         sheet.save(ART / f"preview-{mode}.png")
+    # Planned ADR 0096 classes: keep a reproducible, native-size review together.
+    lighting = ("Atmosphere", "Sky", "BloomEffect", "ColorCorrectionEffect",
+                "BlurEffect", "DepthOfFieldEffect", "SunRaysEffect", "PostEffect")
+    sheet = Image.new("RGB", (960, 380))
+    d = ImageDraw.Draw(sheet)
+    for row, (mode, bg) in enumerate((("dark", "#191E28"), ("light", "#F4F6FA"))):
+        d.rectangle((0, row * 190, 960, (row + 1) * 190), fill=bg)
+        fg = "#DCE3F1" if mode == "dark" else "#273247"
+        for n, name in enumerate(lighting):
+            x, y = 20 + (n % 4) * 240, row * 190 + 14 + (n // 4) * 90
+            im = images[f"class/{name}.png"]
+            color = theme["palette"]["light"][mode]
+            for offset, size in ((0,32), (45,24), (82,16), (110,13)):
+                alpha = im.getchannel("A").resize((size,size), Image.Resampling.BOX)
+                sheet.paste(Image.new("RGB",(size,size),color),(x+offset,y+32-size),alpha)
+            d.text((x,y+43), name, font=font, fill=fg)
+    sheet.save(ART / "lighting-review.png")
     cards=[]
     for path in images:
         cards.append(f'<figure><div><img src="{path.replace(".png", ".svg")}" width="48"><img src="{path.replace(".png", ".svg")}" width="24"><img src="{path.replace(".png", ".svg")}" width="16"></div><figcaption>{html.escape(path[:-4])}</figcaption></figure>')

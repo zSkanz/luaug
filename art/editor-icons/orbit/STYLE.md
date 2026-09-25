@@ -1,7 +1,7 @@
 # Orbit — LuauG editor icon system
 
 Created 2026-09-23. This is the active style for the default editor theme:
-120 unique drawings serving 132 logical IDs. The application logo and branding
+135 unique drawings serving 147 logical IDs. The application logo and branding
 are a separate identity. Earlier PNG masters and briefs in the parent directory
 are retained as historical sources; this specification supersedes their style.
 
@@ -81,7 +81,7 @@ for flatten, a brush for paint, and conventional clipboard/scissors/document
 symbols. Preserve Orbit's 24-unit grid, rounded strokes and white alpha masks.
 
 Validation: all 71 classes in the generated engine reflection descriptors
-resolve to a declared icon. All 132 IDs resolve to existing 256 x 256 RGBA
+resolve to a declared icon. All 147 IDs resolve to existing 256 x 256 RGBA
 white masks with nonempty alpha. Dark/light sheets cover 32/24/16/13 px.
 
 Further action subjects: Import uses an arrow entering a tray; NewFolder adds
@@ -125,3 +125,48 @@ Refresh refinement: use two opposing open circular arcs with arrowheads
 connected to their endpoints. Keep clear gaps between the arrows and an open
 center so the refresh silhouette survives at 13/16 px. Do not reuse Rotate's
 single arc or add disconnected arrowhead marks.
+
+
+Script and material actions extension (2026-09-24) ? exact drawing prompt:
+> Extend Orbit on its existing 24-unit grid, with 1.8-unit rounded strokes,
+> white RGBA masks and no embedded text. Replace shows source text lines and
+> a right arrow leading to replacement lines; ReplaceAll adds a second route
+> into those lines. StepOver arches over a stopped point, StepInto points
+> down toward that point, StepOut points upward away from it. Revert uses a
+> return arc around a value line. Inherit connects a parent box to a child box
+> with a downward elbow arrow. Keep every action neutral and distinguish the
+> three debugger steps by silhouette. Inspect at 32, 24, 16 and 13 pixels on
+> light and dark surfaces. Retain labels on replacement and debugger controls;
+> compact close/revert/inherit controls have descriptive tooltips.
+
+Seven new drawings: Replace, ReplaceAll, StepOver, StepInto, StepOut, Revert,
+Inherit. Existing Play, Close, Save, Undo, Redo and Copy are reused. The theme
+now resolves 139 IDs to 127 drawings. [Focused review](script-actions-review.png).
+
+
+## Planned lighting classes ? 2026-09-24
+
+Source: [accepted ADR 0096](../../../docs/decisions/0096-atmosphere-post-effects-and-a-sky-are-instances-under-lighting.md)
+and its [implementation plan](../../../docs/briefs/atmosphere-post-kickoff.md).
+Seven concrete classes plus the abstract PostEffect base; these assets reserve
+names in the icon theme, not new classes in the runtime API. Explorer lookups
+will resolve them by class name once those classes are implemented.
+
+Exact authored-vector prompt:
+> Extend the Orbit family with eight lighting icons on its 24-unit grid,
+> using 1.8-unit rounded white strokes and transparent RGBA masks. Atmosphere
+> is a horizon dome above three receding haze layers. Sky is a framed sky
+> with a small sun and a cloud arc. BloomEffect is a four-point glow with
+> separated diagonal rays. ColorCorrectionEffect is a circle split between
+> a clear half and a hatched half. BlurEffect is a central circle with three
+> short horizontal diffusion marks on each side. DepthOfFieldEffect is a
+> sharp central circle inside four focus corners. SunRaysEffect is a sun
+> in the upper left emitting three long divergent shafts. PostEffect is
+> two offset image layers with a processing curve on the front. Use the
+> existing light palette role; no baked-in color, gradients, letters or new
+> dependencies. Keep each silhouette distinct from Lighting, PointLight and
+> SpotLight. Review all eight at 32/24/16/13 pixels on light and dark surfaces.
+
+[Focused lighting review](lighting-review.png). Reproduce with
+`python tools/repo/draw_icons.py`, then `lute tools/repo/genicons.luau`.
+Current total: 147 IDs, 135 drawings, including these eight planned class IDs.
