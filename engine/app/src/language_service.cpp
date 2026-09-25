@@ -7,9 +7,11 @@
 #include <Luau/Autocomplete.h>
 #include <Luau/BuiltinDefinitions.h>
 #include <Luau/ConfigResolver.h>
+#include <Luau/ConstraintSolver.h>
 #include <Luau/Error.h>
 #include <Luau/FileResolver.h>
 #include <Luau/Frontend.h>
+#include <Luau/LinterConfig.h>
 #include <Luau/ToString.h>
 #include <Luau/Type.h>
 #include <Luau/TypePack.h>
@@ -499,6 +501,76 @@ struct FirstReturn : Luau::AstVisitor
     }
 };
 
+// --- `Instance.new`, by name ---------------------------------------------------
+
+// **What `Instance.new("Part")` is, told to the new solver the way the
+// reference editor's checker tells it**: the definitions' forty-odd overloads
+// -- `(("Part") -> Part) & (("Model") -> Model) & ...` -- are "code too complex"
+// to the new solver, so the checker is given `(className: string) -> Instance`
+// and this answers the call instead: a literal name of a creatable class is
+// that class, anything else is an `Instance`. The overloads stay in the file,
+// which `luaug check` and every other reader still use.
+struct CreatableClasses
+{
+    std::string definitions;
+    std::vector<std::pair<std::string, std::string>> classes;
+};
+
+[[nodiscard]] CreatableClasses withoutInstanceOverloads(std::string_view definitions)
+{
+    CreatableClasses out;
+    out.definitions = std::string(definitions);
+    constexpr std::string_view Head = "declare Instance: {\n    new: ";
+    const std::size_t start = out.definitions.find(Head);
+    if (start == std::string::npos)
+        return out;
+    const std::size_t from = start + Head.size();
+    const std::size_t end = out.definitions.find(",\n    ", from);
+    if (end == std::string::npos)
+        return out;
+    const std::string_view overloads = std::string_view(out.definitions).substr(from, end - from);
+    for (std::size_t at = overloads.find("((\""); at != std::string_view::npos; at = overloads.find("((\"", at + 1)) {
+        const std::size_t nameEnd = overloads.find('"', at + 3);
+        const std::size_t arrow = overloads.find("-> ", nameEnd);
+        const std::size_t close = overloads.find(')', arrow);
+        if (nameEnd == std::string_view::npos || arrow == std::string_view::npos || close == std::string_view::npos)
+            break;
+        out.classes.emplace_back(std::string(overloads.substr(at + 3, nameEnd - at - 3)),
+                                 std::string(overloads.substr(arrow + 3, close - arrow - 3)));
+    }
+    out.definitions.replace(from, end - from, "(className: string) -> Instance");
+    return out;
+}
+
+class MagicInstanceNew final : public Luau::MagicFunction
+{
+public:
+    std::unordered_map<std::string, Luau::TypeId> classes;
+
+    std::optional<Luau::WithPredicate<Luau::TypePackId>> handleOldSolver(Luau::TypeChecker&,
+                                                                         const std::shared_ptr<Luau::Scope>&,
+                                                                         const Luau::AstExprCall&,
+                                                                         Luau::WithPredicate<Luau::TypePackId>) override
+    {
+        return std::nullopt;
+    }
+
+    bool infer(const Luau::MagicFunctionCallContext& context) override
+    {
+        if (context.callSite->args.size < 1)
+            return false;
+        const auto* name = context.callSite->args.data[0]->as<Luau::AstExprConstantString>();
+        if (name == nullptr)
+            return false;
+        const auto found = classes.find(std::string(name->value.data, name->value.size));
+        if (found == classes.end())
+            return false;
+        const Luau::TypePackId result = context.solver->arena->addTypePack({found->second});
+        Luau::asMutable(context.result)->ty.emplace<Luau::BoundTypePack>(result);
+        return true;
+    }
+};
+
 } // namespace
 
 struct LanguageCore::Impl
@@ -518,22 +590,23 @@ struct LanguageCore::Impl
     }
 
     explicit Impl(std::string_view definitions)
-        // **The old solver, at this pin, and measured rather than preferred**
-        // (ADR 0093). The new one stops at the definitions' `Instance.new` --
-        // one intersection of every creatable class's overload -- with "code
-        // too complex", and that is neither a budget nor a flag: every limit
-        // raised a hundredfold and every flag on still fail, while the same
-        // file without that intersection loads. It moves with the pin that
-        // can.
-        : frontend(Luau::SolverMode::Old, &resolver, &config, options())
+        // **The new solver** (the owner, 2026-09-25, and R2; ADR 0093 as
+        // amended). It had stopped at the definitions' `Instance.new` -- one
+        // intersection of forty-odd overloads -- with "code too complex"; it
+        // is now given one signature and a magic function that answers a
+        // literal class name (`MagicInstanceNew`), which is how the reference
+        // editor's checker types the same call. The new solver has one module
+        // and one set of globals for checking and completing alike, so there
+        // is no second copy of either.
+        : frontend(Luau::SolverMode::New, &resolver, &config, options())
     {
         resolver.tree = &tree;
         Luau::registerBuiltinGlobals(frontend, frontend.globals, false);
-        Luau::registerBuiltinGlobals(frontend, frontend.globalsForAutocomplete, true);
-        for (const bool forAutocomplete : {false, true}) {
-            Luau::GlobalTypes& globals = forAutocomplete ? frontend.globalsForAutocomplete : frontend.globals;
+        const CreatableClasses creatable = withoutInstanceOverloads(definitions);
+        {
+            Luau::GlobalTypes& globals = frontend.globals;
             const Luau::LoadDefinitionFileResult loaded = frontend.loadDefinitionFile(
-                globals, globals.globalScope, definitions, "@luaug", /*captureComments*/ false, forAutocomplete);
+                globals, globals.globalScope, creatable.definitions, "@luaug", /*captureComments*/ false, false);
             if (!loaded.success && loadError.empty()) {
                 loadError = "the engine definitions did not load";
                 if (!loaded.parseResult.errors.empty())
@@ -543,18 +616,42 @@ struct LanguageCore::Impl
                                  "): " + Luau::toString(loaded.module->errors.front()) + " -- " +
                                  std::to_string(loaded.module->errors.size()) + " error(s)";
             }
+            attachInstanceNew(globals, creatable);
             Luau::freeze(globals.globalTypes);
         }
         docs = indexDocs(definitions);
     }
 
+    // Hands `Instance.new` its magic (see `MagicInstanceNew`): each creatable
+    // name to the type the definitions declare for it.
+    static void attachInstanceNew(Luau::GlobalTypes& globals, const CreatableClasses& creatable)
+    {
+        const std::optional<Luau::Binding> instance = globals.globalScope->linearSearchForBinding("Instance");
+        if (!instance.has_value())
+            return;
+        const auto* table = Luau::get<Luau::TableType>(Luau::follow(instance->typeId));
+        if (table == nullptr)
+            return;
+        const auto newProperty = table->props.find("new");
+        if (newProperty == table->props.end() || !newProperty->second.readTy.has_value())
+            return;
+        auto magic = std::make_shared<MagicInstanceNew>();
+        for (const auto& [name, className] : creatable.classes) {
+            if (const std::optional<Luau::TypeFun> declared = globals.globalScope->lookupType(className);
+                declared.has_value())
+                magic->classes.emplace(name, declared->type);
+        }
+        Luau::attachMagicFunction(Luau::follow(*newProperty->second.readTy), std::move(magic));
+    }
+
+    // The one checked module the new solver keeps, for checking and
+    // completing alike.
     [[nodiscard]] Luau::ModulePtr checked(const std::string& module, bool forAutocomplete)
     {
+        (void)forAutocomplete;
         Luau::FrontendOptions options = Impl::options();
-        options.forAutocomplete = forAutocomplete;
         (void)frontend.check(module, options);
-        return forAutocomplete ? frontend.moduleResolverForAutocomplete.getModule(module)
-                               : frontend.moduleResolver.getModule(module);
+        return frontend.moduleResolver.getModule(module);
     }
 
     // **What a constructor BUILT, when what it was declared to return is an
@@ -584,7 +681,7 @@ struct LanguageCore::Impl
             !function->definition->definitionModuleName.has_value())
             return std::nullopt;
         const std::string& owner = *function->definition->definitionModuleName;
-        const Luau::ModulePtr defined = frontend.moduleResolverForAutocomplete.getModule(owner);
+        const Luau::ModulePtr defined = frontend.moduleResolver.getModule(owner);
         const Luau::SourceModule* definedSource = frontend.getSourceModule(owner);
         if (defined == nullptr || definedSource == nullptr || definedSource->root == nullptr)
             return std::nullopt;
@@ -690,7 +787,33 @@ LanguageCheck LanguageCore::check(const std::string& module)
 {
     LanguageCheck out;
     Luau::FrontendOptions options = Impl::options();
+    // **Luau's own linter too** (the owner: "it should not let me define the
+    // same thing twice" -- a table type's field written twice is the
+    // `TableLiteral` lint, not a type error). The set is the reference
+    // editor's: the defaults, less the three unused-name lints it turns off
+    // and the unknown global the checker already reports -- which is also
+    // what keeps them from repeating this editor's own lint of the same.
+    options.runLintChecks = true;
+    Luau::LintOptions lints;
+    lints.setDefaults();
+    for (const Luau::LintWarning::Code off :
+         {Luau::LintWarning::Code_UnknownGlobal, Luau::LintWarning::Code_LocalUnused,
+          Luau::LintWarning::Code_FunctionUnused, Luau::LintWarning::Code_ImportUnused})
+        lints.disableWarning(off);
+    options.enabledLintWarnings = lints;
     const Luau::CheckResult result = m_impl->frontend.check(module, options);
+    for (const bool asError : {true, false}) {
+        for (const Luau::LintWarning& lint : asError ? result.lintResult.errors : result.lintResult.warnings) {
+            Diagnostic diagnostic;
+            diagnostic.at = Position{lint.location.begin.line, lint.location.begin.column};
+            diagnostic.length = lint.location.end.line == lint.location.begin.line
+                                    ? lint.location.end.column - lint.location.begin.column
+                                    : 0;
+            diagnostic.message = lint.text;
+            diagnostic.severity = asError ? Severity::Error : Severity::Warning;
+            out.diagnostics.push_back(std::move(diagnostic));
+        }
+    }
     for (const Luau::TypeError& error : result.errors) {
         if (error.moduleName != module || !reported(error))
             continue;
@@ -815,7 +938,7 @@ std::optional<SignatureHelp> LanguageCore::signature(const std::string& module, 
     Luau::TypeId declared = *found;
     if (const auto* global = call->func->as<Luau::AstExprGlobal>(); global != nullptr) {
         if (const std::optional<Luau::Binding> binding =
-                m_impl->frontend.globalsForAutocomplete.globalScope->linearSearchForBinding(global->name.value))
+                m_impl->frontend.globals.globalScope->linearSearchForBinding(global->name.value))
             declared = binding->typeId;
     }
     const Luau::TypeId* callee = &declared;
@@ -862,8 +985,12 @@ std::optional<SignatureHelp> LanguageCore::signature(const std::string& module, 
     const Luau::AstExprFunction* written = m_impl->definitionOf(*function, definedIn);
     // The written function's `args` leave out a `self` the type has.
     const std::size_t selfShift = written != nullptr && written->self != nullptr ? 1 : 0;
+    // **A parameter that was annotated is shown as it was written**: the
+    // name somebody chose for a type says more than what the solver made of
+    // it -- an undeclared `Position` is an error type, and an unannotated one
+    // is a generic `a` under the new solver.
     const auto shown = [&](Luau::TypeId type, const Luau::AstType* annotation) {
-        if (Luau::get<Luau::ErrorType>(Luau::follow(type)) != nullptr && annotation != nullptr)
+        if (annotation != nullptr)
             return textAt(definedIn, annotation->location);
         return readable(Luau::toString(type, types));
     };
@@ -881,7 +1008,10 @@ std::optional<SignatureHelp> LanguageCore::signature(const std::string& module, 
         help.label += shown(params[index], annotation);
         help.parameters.emplace_back(begin, static_cast<u32>(help.label.size()));
     }
-    if (tail.has_value()) {
+    // The new solver gives a function declared without `...` a variadic
+    // `...any` tail; the signature says what was written.
+    const bool variadic = written == nullptr || written->vararg;
+    if (tail.has_value() && variadic) {
         if (params.size() > first)
             help.label += ", ";
         const u32 begin = static_cast<u32>(help.label.size());
@@ -897,7 +1027,7 @@ std::optional<SignatureHelp> LanguageCore::signature(const std::string& module, 
     }
     help.label += ")";
     std::string returns = readable(Luau::toString(function->retTypes, types));
-    if (written != nullptr && written->returnAnnotation != nullptr && returns.find("*error-type*") != std::string::npos)
+    if (written != nullptr && written->returnAnnotation != nullptr)
         returns = textAt(definedIn, written->returnAnnotation->location);
     if (!returns.empty() && returns != "()")
         help.label += ": " + returns;

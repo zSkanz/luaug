@@ -197,6 +197,46 @@ TEST_CASE("type errors are reported, and a child reached by name is not one")
     CHECK(check.diagnostics.front().at.line == 1);
 }
 
+TEST_CASE("a module cast to the type it promises is not an error, as in the reference's checker")
+{
+    // **The owner's module**: `return NN :: { ... }` where a function's return
+    // did not match. The new solver -- the reference editor's -- accepts that
+    // cast in a nonstrict script and in a strict one; the old solver flagged
+    // it, which is the difference the owner saw.
+    const std::string body = "local NN = {}\n"
+                             "function NN.make(): number return 1 end\n"
+                             "return NN :: { make: () -> string }\n";
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    (void)builder.add(service, "Loose", "ModuleScript", body);
+    (void)builder.add(service, "Strict", "ModuleScript", "--!strict\n" + body);
+    core.update(builder.tree);
+
+    CHECK(core.check("game.ScriptService.Loose").diagnostics.empty());
+    CHECK(core.check("game.ScriptService.Strict").diagnostics.empty());
+}
+
+TEST_CASE("a field written twice is a warning, in a table type and in a table")
+{
+    // **The owner**: "it should not let me define the same thing twice".
+    LanguageCore core(definitions());
+    TreeBuilder builder;
+    const core::u32 service = builder.add(0, "ScriptService", "ScriptService");
+    (void)builder.add(service, "Main", "Script",
+                      "type T = {\n\tweights: number,\n\tweights: number,\n}\nlocal t = { a = 1, a = 2 }\nprint(t)\n");
+    core.update(builder.tree);
+
+    const app::LanguageCheck check = core.check("game.ScriptService.Main");
+    const auto duplicateAt = [&check](core::u32 line) {
+        return std::any_of(check.diagnostics.begin(), check.diagnostics.end(), [line](const app::Diagnostic& d) {
+            return d.at.line == line && d.message.find("duplicate") != std::string::npos;
+        });
+    };
+    CHECK(duplicateAt(2));
+    CHECK(duplicateAt(4));
+}
+
 TEST_CASE("the tree a require walks is the scripts and their ancestors")
 {
     app::testing::Fixture fixture;

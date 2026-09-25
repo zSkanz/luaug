@@ -1,6 +1,6 @@
 # 0093 — The script editor types code with Luau's own checker
 
-- Status: accepted
+- Status: accepted; amended 2026-09-25 (the new solver -- see the end)
 - Date: 2026-09-24
 - Amends: [0057](0057-a-script-is-an-instance-and-the-editor-edits-one-thing.md)
   §5 (autocomplete comes from the engine's own reflection, not from Analysis)
@@ -95,3 +95,37 @@ check is still running. Once the analyzer is in, it is removed.
 - Every change to the definitions that the generators emit is now a change
   the editor sees, which ties the generated `.d.luau` to editor behaviour. Its
   tests check that the file loads without errors.
+
+## Amendment, 2026-09-25: the new solver
+
+The owner: "we should use the New Solver, not the old one". The editor's
+checker now runs `SolverMode::New`, which is R2's rule and the reference
+editor's own, and three things that decision above measured are answered:
+
+- **`Instance.new` is a magic function, not forty-odd overloads.** The new
+  solver refuses the intersection as "code too complex" -- so does `luau-lsp`'s
+  newer Luau, measured the same day, so it is the shape and not the pin. The
+  reference platform's definitions declare `Instance.new(className: string) ->
+  Instance` and type the literal call in C++; this does the same: the
+  definitions keep their overloads (every other reader uses them), the editor
+  loads them with one signature in their place, and `MagicInstanceNew` answers
+  a literal class name with its class. A generic over a map of names
+  (`index<Map, K>`) was tried first and widens the literal to `string`.
+- **One module and one set of globals.** The new solver checks and completes
+  from the same module, so the second copy the old one needed is gone.
+- **What a signature shows is what was written**: a parameter or a return
+  that is annotated is shown as its annotation, and a function declared
+  without `...` does not show the `...: any` tail the new solver gives it.
+
+Two behaviours move with it, both towards the reference: a module cast to the
+type it promises (`return M :: { ... }`) is no longer an error when a member
+does not match -- the new solver allows the cast in nonstrict and strict alike,
+as the reference editor does -- and Luau's own linter now runs beside the
+checker, with the reference's set (the defaults, less the three unused-name
+lints it disables and the unknown global the checker already reports), which
+is what reports a field written twice in a table or a table type.
+
+`luaug check` still runs `luau-lsp` without the new solver's flag, which D192
+records: under that flag the definitions' `Instance.new` is "code too complex"
+there too, and `luau-lsp`'s standard platform has no magic function to put in
+its place.
