@@ -312,6 +312,74 @@ bool setPlayerCharacter(World& world, core::InstanceId id, const Value& value)
     return true;
 }
 
+Value getPlayerTeam(const World& world, core::InstanceId id)
+{
+    const PlayerComponent* player = world.players().find(id);
+    return player == nullptr ? Value{} : Value{player->team};
+}
+
+bool setPlayerTeam(World& world, core::InstanceId id, const Value& value)
+{
+    PlayerComponent* player = world.players().find(id);
+    const auto* team = std::get_if<core::InstanceId>(&value);
+    if (player == nullptr || team == nullptr)
+        return false;
+    if (team->valid() && world.teams().find(*team) == nullptr)
+        return false;
+    player->team = *team;
+    return true;
+}
+
+// --- Team (ADR 0099) ----------------------------------------------------------
+
+void attachTeamComponents(World& world, core::InstanceId id)
+{
+    world.teams().add(id, TeamComponent{});
+}
+
+void detachTeamComponents(World& world, core::InstanceId id)
+{
+    // A player on a side that is gone is on none: `Team` never names a
+    // destroyed instance.
+    world.players().forEach([&](core::InstanceId, PlayerComponent& player) {
+        if (player.team == id)
+            player.team = core::InstanceId{};
+    });
+    world.teams().remove(id);
+}
+
+Value getTeamColor(const World& world, core::InstanceId id)
+{
+    const TeamComponent* team = world.teams().find(id);
+    return team == nullptr ? Value{} : Value{team->color};
+}
+
+bool setTeamColor(World& world, core::InstanceId id, const Value& value)
+{
+    TeamComponent* team = world.teams().find(id);
+    const auto* color = std::get_if<core::Color3>(&value);
+    if (team == nullptr || color == nullptr)
+        return false;
+    team->color = *color;
+    return true;
+}
+
+Value getTeamAutoAssign(const World& world, core::InstanceId id)
+{
+    const TeamComponent* team = world.teams().find(id);
+    return team == nullptr ? Value{} : Value{team->autoAssign};
+}
+
+bool setTeamAutoAssign(World& world, core::InstanceId id, const Value& value)
+{
+    TeamComponent* team = world.teams().find(id);
+    const auto* flag = std::get_if<bool>(&value);
+    if (team == nullptr || flag == nullptr)
+        return false;
+    team->autoAssign = *flag;
+    return true;
+}
+
 Value getPlayerUserId(const World& world, core::InstanceId id)
 {
     const PlayerComponent* player = world.players().find(id);

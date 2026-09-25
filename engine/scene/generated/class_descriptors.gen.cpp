@@ -613,7 +613,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .set = nullptr,
         },
     }};
-    static std::array<MethodDesc, 4> basePartMethods;
+    static std::array<MethodDesc, 6> basePartMethods;
     basePartMethods = {{
         MethodDesc{
             .name = atoms.intern("SetMaterialParameter"),
@@ -632,6 +632,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .yields = false,
             .threadSafety = ThreadSafety::Unsafe,
             .doc = "Removes this part's override of one parameter, so it draws with the material's value again. Clearing one that is not overridden does nothing.",
+        },
+        MethodDesc{
+            .name = atoms.intern("SetNetworkOwner"),
+            .yields = false,
+            .threadSafety = ThreadSafety::Unsafe,
+            .doc = "Hands this part to one player's machine (ADR 0099), which then simulates it and sends where it is: what that player pushes moves at once rather than a round trip later. `nil` hands it back to the authority. Only the authority may call it, and only on a part that is not anchored; a player who leaves gives back everything they owned. **What the owner sends is trusted** -- a game that must not trust it checks it, or does not hand the part over.",
+        },
+        MethodDesc{
+            .name = atoms.intern("GetNetworkOwner"),
+            .yields = false,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .doc = "The player whose machine simulates this part, or `nil` for the authority. A replica knows only about itself: it answers its own `Player` for a part it owns, and `nil` otherwise.",
         },
         MethodDesc{
             .name = atoms.intern("ApplyImpulse"),
@@ -2160,6 +2172,74 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     replicatedStorageDesc.doc = "What every machine has and nobody sees (ADR 0080): templates to clone, `RemoteEvent`s, anything a game keeps rather than shows. It is not the world -- nothing under it is drawn, collides or moves -- and it is saved with the scene, so what the editor puts here is here when the game starts.\012\012**Its contents reach every replica, whatever their distance.** A replica's copy is the authority's: what the scene put here on the replica is replaced by what the authority sends, as `Workspace` is. Reach it with `game:GetService(\"ReplicatedStorage\")`, and clone what you want in the world into `Workspace`.";
     classes.registerClass(replicatedStorageDesc);
 
+    // --- TeamService ---
+    static std::array<MethodDesc, 1> teamServiceMethods;
+    teamServiceMethods = {{
+        MethodDesc{
+            .name = atoms.intern("GetTeams"),
+            .yields = false,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .doc = "Every team under this service, in child order.",
+        },
+    }};
+    ClassDescriptor teamServiceDesc;
+    teamServiceDesc.name = atoms.intern("TeamService");
+    teamServiceDesc.super = instanceClass;
+    teamServiceDesc.flags = ClassFlags::Service | ClassFlags::NotCreatable;
+    teamServiceDesc.defaultName = atoms.intern("TeamService");
+    teamServiceDesc.doc = "Where the sides of a game live (ADR 0099): every `Team` under it reaches every replica, whatever their distance, as `ReplicatedStorage`'s contents do. It is saved with the scene.";
+    teamServiceDesc.methods = teamServiceMethods;
+    classes.registerClass(teamServiceDesc);
+
+    // --- Team ---
+    static std::array<PropertyDesc, 2> teamProperties;
+    teamProperties = {{
+        PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = ValueType::Color3,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The side's colour, for a game to paint name tags, scoreboards and shirts with.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getTeamColor,
+            .set = native::setTeamColor,
+        },
+        PropertyDesc{
+            .name = atoms.intern("AutoAssign"),
+            .type = ValueType::Bool,
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "Whether a player who joins may be put on this team. The engine picks the `AutoAssign` team with the fewest players.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getTeamAutoAssign,
+            .set = native::setTeamAutoAssign,
+        },
+    }};
+    static std::array<MethodDesc, 1> teamMethods;
+    teamMethods = {{
+        MethodDesc{
+            .name = atoms.intern("GetPlayers"),
+            .yields = false,
+            .threadSafety = ThreadSafety::ReadParallel,
+            .doc = "Every player on this team, in the order they joined.",
+        },
+    }};
+    ClassDescriptor teamDesc;
+    teamDesc.name = atoms.intern("Team");
+    teamDesc.super = instanceClass;
+    teamDesc.flags = ClassFlags::None;
+    teamDesc.defaultName = atoms.intern("Team");
+    teamDesc.doc = "A side (ADR 0099): a name -- its `Name` -- a colour, and the players whose `Player.Team` is it. It counts only under `TeamService`, which is what carries it to every replica.";
+    static constexpr std::array<std::string_view, 3> teamParents{{"TeamService", "ReplicatedStorage", "ServerStorage"}};
+    teamDesc.parents = teamParents;
+    teamDesc.properties = teamProperties;
+    teamDesc.methods = teamMethods;
+    teamDesc.attachComponents = native::attachTeamComponents;
+    teamDesc.detachComponents = native::detachTeamComponents;
+    classes.registerClass(teamDesc);
+
     // --- ServerStorage ---
     ClassDescriptor serverStorageDesc;
     serverStorageDesc.name = atoms.intern("ServerStorage");
@@ -2332,7 +2412,7 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     classes.registerClass(remoteFunctionDesc);
 
     // --- Player ---
-    static std::array<PropertyDesc, 2> playerProperties;
+    static std::array<PropertyDesc, 3> playerProperties;
     playerProperties = {{
         PropertyDesc{
             .name = atoms.intern("UserId"),
@@ -2344,6 +2424,18 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
             .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_number"),
             .get = native::getPlayerUserId,
             .set = nullptr,
+        },
+        PropertyDesc{
+            .name = atoms.intern("Team"),
+            .type = ValueType::Instance,
+            .instanceClass = atoms.intern("Team"),
+            .threadSafety = ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = false,
+            .doc = "The side this player is on (ADR 0099), or `nil` for none. **The authority's game sets it**, and every replica learns it with the roster. A player who joins is put on the `AutoAssign` team with the fewest players -- ties to the first -- or on none when there is no such team.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_instance"),
+            .get = native::getPlayerTeam,
+            .set = native::setPlayerTeam,
         },
         PropertyDesc{
             .name = atoms.intern("Character"),

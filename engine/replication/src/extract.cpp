@@ -255,6 +255,21 @@ using generated::Source;
         return false;
     }
 
+    if (field.pool == "teams") {
+        const scene::TeamComponent* team = world.teams().find(id);
+        if (team == nullptr)
+            return false;
+        if (field.name == "Color") {
+            setVec3(out, core::Vec3{team->color.r, team->color.g, team->color.b});
+            return true;
+        }
+        if (field.name == "AutoAssign") {
+            setBool(out, team->autoAssign);
+            return true;
+        }
+        return false;
+    }
+
     if (field.pool == "lighting") {
         const scene::LightingComponent* lighting = world.lighting().find(id);
         if (lighting == nullptr) {
@@ -1019,6 +1034,22 @@ using generated::Source;
         return false;
     }
 
+    if (field.pool == "teams") {
+        scene::TeamComponent* team = world.teams().find(id);
+        if (team == nullptr)
+            return false;
+        if (field.name == "Color") {
+            const core::Vec3 v = asVec3(value);
+            team->color = core::Color3{v.x, v.y, v.z};
+            return true;
+        }
+        if (field.name == "AutoAssign") {
+            team->autoAssign = asBool(value);
+            return true;
+        }
+        return false;
+    }
+
     if (field.pool == "lighting") {
         scene::LightingComponent* lighting = world.lighting().find(id);
         if (lighting == nullptr) {
@@ -1414,7 +1445,7 @@ usize clearForReplica(scene::World& world, InstanceId workspace)
         const std::string_view name = world.atoms().text(descriptor->name);
         // `Lighting`'s children travel too (ADR 0096): the authority's
         // effects, air and sky replace whatever the replica's scene put there.
-        if (name == "ReplicatedStorage" || name == "Lighting") {
+        if (name == "ReplicatedStorage" || name == "Lighting" || name == "TeamService") {
             cleared += clearReplicated(world, service);
         }
         else if (name == "ServerStorage") {

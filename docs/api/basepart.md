@@ -47,9 +47,17 @@ Removes this part's override of one parameter, so it draws with the material's v
 
 The value this part draws with for one parameter: its override when it has one the material declares, and the material's own value otherwise.
 
+### `GetNetworkOwner(): Player?`
+
+The player whose machine simulates this part, or `nil` for the authority. A replica knows only about itself: it answers its own `Player` for a part it owns, and `nil` otherwise.
+
 ### `SetMaterialParameter(name: string, value: Color3 | number)`
 
 Overrides one parameter of the material this part wears, for this part alone. **Raises for a parameter the material does not declare**: a material decides what a part may change about it, and a tint written to one that did not allow it would be a surface that silently ignores its script. `Color` and `Emissive` take a `Color3`; the rest take a number.
+
+### `SetNetworkOwner(player: Player?)`
+
+Hands this part to one player's machine (ADR 0099), which then simulates it and sends where it is: what that player pushes moves at once rather than a round trip later. `nil` hands it back to the authority. Only the authority may call it, and only on a part that is not anchored; a player who leaves gives back everything they owned. **What the owner sends is trusted** -- a game that must not trust it checks it, or does not hand the part over.
 
 ## Events
 

@@ -1136,6 +1136,48 @@ int networkServiceGetPlayers(lua_State* L)
     return 1;
 }
 
+// Players on one side, in join order -- `NetworkService`'s child order.
+int teamGetPlayers(lua_State* L)
+{
+    const core::InstanceId self = checkInstance(L, 1);
+    const World& w = world(L);
+    std::vector<core::InstanceId> players;
+    // The data model is the top of the tree the team is in.
+    core::InstanceId top = self;
+    while (w.parentOf(top).valid())
+        top = w.parentOf(top);
+    const core::InstanceId network = scene::networkServiceOf(w, top);
+    for (core::InstanceId child = network.valid() ? w.firstChild(network) : core::InstanceId{}; child.valid();
+         child = w.nextSibling(child)) {
+        const scene::PlayerComponent* player = w.players().find(child);
+        if (player != nullptr && player->team == self && !w.destroyed(child))
+            players.push_back(child);
+    }
+    lua_createtable(L, static_cast<int>(players.size()), 0);
+    for (usize index = 0; index < players.size(); ++index) {
+        pushInstance(L, players[index]);
+        lua_rawseti(L, -2, static_cast<int>(index) + 1);
+    }
+    return 1;
+}
+
+int teamServiceGetTeams(lua_State* L)
+{
+    const core::InstanceId self = checkInstance(L, 1);
+    const World& w = world(L);
+    std::vector<core::InstanceId> teams;
+    for (core::InstanceId child = w.firstChild(self); child.valid(); child = w.nextSibling(child)) {
+        if (w.teams().find(child) != nullptr && !w.destroyed(child))
+            teams.push_back(child);
+    }
+    lua_createtable(L, static_cast<int>(teams.size()), 0);
+    for (usize index = 0; index < teams.size(); ++index) {
+        pushInstance(L, teams[index]);
+        lua_rawseti(L, -2, static_cast<int>(index) + 1);
+    }
+    return 1;
+}
+
 int playerGetIntent(lua_State* L)
 {
     const core::InstanceId self = checkInstance(L, 1);
@@ -1668,6 +1710,8 @@ constexpr InstanceMethodBinding ServiceMethods[] = {
 
     {"InputAction", "GetState", inputActionGetState},
     {"NetworkService", "GetPlayers", networkServiceGetPlayers},
+    {"Team", "GetPlayers", teamGetPlayers},
+    {"TeamService", "GetTeams", teamServiceGetTeams},
     {"Player", "GetIntent", playerGetIntent},
     {"ParticleEmitter", "Emit", particleEmitterEmit},
     {"InputAction", "GetPreferredBinding", inputActionGetPreferredBinding},

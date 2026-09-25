@@ -35,6 +35,7 @@ guided tour.
 | [`ServerStorage`](serverstorage.md) | [`Instance`](instance.md) | What only the authority has (ADR 0080): templates and data a client has no business holding. |
 | [`StreamingService`](streamingservice.md) | [`Instance`](instance.md) | The streamed world's controls (api-design.md §2.1). |
 | [`TagService`](tagservice.md) | [`Instance`](instance.md) | Finds instances by tag. |
+| [`TeamService`](teamservice.md) | [`Instance`](instance.md) | Where the sides of a game live (ADR 0099): every `Team` under it reaches every replica, whatever their distance, as `ReplicatedStorage`'s contents do. |
 | [`TweenService`](tweenservice.md) | [`Instance`](instance.md) | Property animation (§2.1). |
 | [`UIService`](uiservice.md) | [`Instance`](instance.md) | The parent of every `ScreenGui` and the source of the two numbers a layout needs about the screen it is on (§2.1). |
 | [`VoxelService`](voxelservice.md) | [`Instance`](instance.md) | A world made of blocks: the service for block games -- mining, building, a world of cubes in chunks. |
@@ -96,6 +97,7 @@ guided tour.
 | [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its forward direction -- its holder's, turned by its own `CFrame`, or its own alone when nothing holds it (ADR 0095). |
 | [`SunRaysEffect`](sunrayseffect.md) | [`PostEffect`](posteffect.md) | Shafts of light streaming from the sun past whatever stands in front of it. |
 | [`SurfaceGui`](surfacegui.md) | [`Instance`](instance.md) | A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. |
+| [`Team`](team.md) | [`Instance`](instance.md) | A side (ADR 0099): a name -- its `Name` -- a colour, and the players whose `Player.Team` is it. |
 | [`Terrain`](terrain.md) | [`Instance`](instance.md) | A sculpted, collidable landscape: ground you dig into rather than a floor made of parts. |
 | [`TextButton`](textbutton.md) | [`TextLabel`](textlabel.md) | A `TextLabel` that is meant to be pressed. |
 | [`TextInput`](textinput.md) | [`TextLabel`](textlabel.md) | A single-line editable field (§2.2). |

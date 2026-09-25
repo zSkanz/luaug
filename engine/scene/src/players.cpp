@@ -31,6 +31,8 @@ core::InstanceId createPlayer(World& world, core::InstanceId networkService, cor
     }
     world.setName(id, world.atoms().intern("Player" + std::to_string(userId)));
     (void)world.setParent(id, networkService);
+    if (world.engineState().networkTopology != NetworkTopology::Replica)
+        assignTeam(world, id);
     world.changes().push(Change{ChangeKind::InstanceEvent, networkService, id, world.atoms().intern("PlayerAdded")});
     return id;
 }
@@ -41,7 +43,46 @@ void removePlayer(World& world, core::InstanceId networkService, core::InstanceI
         return;
     world.changes().push(
         Change{ChangeKind::InstanceEvent, networkService, player, world.atoms().intern("PlayerRemoving")});
+    // **Whatever they owned is the authority's again** (ADR 0099): nobody is
+    // left to send where it is.
+    if (const PlayerComponent* leaving = world.players().find(player); leaving != nullptr && leaving->userId != 0) {
+        const core::u32 userId = leaving->userId;
+        world.rigidBodies().forEach([userId](core::InstanceId, RigidBodyComponent& body) {
+            if (body.networkOwner == userId)
+                body.networkOwner = 0;
+        });
+    }
     (void)world.destroy(player);
+}
+
+void assignTeam(World& world, core::InstanceId player)
+{
+    PlayerComponent* joining = world.players().find(player);
+    if (joining == nullptr || joining->team.valid())
+        return;
+    const ClassId serviceClass = world.classes().findId(world.atoms().lookup("TeamService"));
+    const core::InstanceId dataModel = world.parentOf(world.parentOf(player));
+    if (serviceClass == InvalidClass || !dataModel.valid())
+        return;
+    const core::InstanceId service = world.findFirstChildOfClass(dataModel, serviceClass);
+    core::InstanceId chosen;
+    core::usize fewest = 0;
+    for (core::InstanceId child = service.valid() ? world.firstChild(service) : core::InstanceId{}; child.valid();
+         child = world.nextSibling(child)) {
+        const TeamComponent* team = world.teams().find(child);
+        if (team == nullptr || !team->autoAssign || world.destroyed(child))
+            continue;
+        core::usize members = 0;
+        world.players().forEach([&](core::InstanceId id, const PlayerComponent& other) {
+            if (other.team == child && !world.destroyed(id))
+                ++members;
+        });
+        if (!chosen.valid() || members < fewest) {
+            chosen = child;
+            fewest = members;
+        }
+    }
+    joining->team = chosen;
 }
 
 core::InstanceId localPlayerOf(const World& world) noexcept

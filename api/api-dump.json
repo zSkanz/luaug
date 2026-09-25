@@ -257,6 +257,12 @@
           "ThreadSafety": "Unsafe"
         },
         {
+          "Name": "GetNetworkOwner",
+          "Parameters": [],
+          "Returns": ["Player?"],
+          "ThreadSafety": "ReadParallel"
+        },
+        {
           "Name": "SetMaterialParameter",
           "Parameters": [
             {
@@ -266,6 +272,17 @@
             {
               "Name": "value",
               "Type": "Color3 | number"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SetNetworkOwner",
+          "Parameters": [
+            {
+              "Name": "player",
+              "Type": "Player?"
             }
           ],
           "Returns": [],
@@ -2280,6 +2297,10 @@
           "Type": "BasePart?"
         },
         {
+          "Name": "Team",
+          "Type": "Team?"
+        },
+        {
           "Name": "UserId",
           "Type": "number",
           "ReadOnly": true,
@@ -3084,6 +3105,47 @@
             }
           ],
           "Returns": ["{Instance}"],
+          "ThreadSafety": "ReadParallel"
+        }
+      ],
+      "Events": []
+    },
+    {
+      "Name": "Team",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "AutoAssign",
+          "Type": "boolean",
+          "Default": "true"
+        },
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)"
+        }
+      ],
+      "Methods": [
+        {
+          "Name": "GetPlayers",
+          "Parameters": [],
+          "Returns": ["{ Player }"],
+          "ThreadSafety": "ReadParallel"
+        }
+      ],
+      "Events": []
+    },
+    {
+      "Name": "TeamService",
+      "Extends": "Instance",
+      "Tags": ["NotCreatable", "Service"],
+      "Properties": [],
+      "Methods": [
+        {
+          "Name": "GetTeams",
+          "Parameters": [],
+          "Returns": ["{ Team }"],
           "ThreadSafety": "ReadParallel"
         }
       ],

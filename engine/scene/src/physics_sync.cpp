@@ -236,8 +236,14 @@ physics::BodyDesc PhysicsSync::descOf(core::InstanceId id, const PartComponent& 
     // Kinematic does both -- it follows a written target, and `writeBack` skips
     // it -- with no branch in game script and no second authority over where a
     // thing is.
-    const bool replicated = m_scene.engineState().networkTopology == NetworkTopology::Replica && !body.anchored;
-    const bool driven = isDriven(id) || replicated || (body.anchored && movingAnchored);
+    //
+    // **Except what this replica owns** (ADR 0099): it simulates that itself,
+    // and the authority is the one that follows. A replica holds an owner only
+    // for its own parts, so any owner here is this machine.
+    const NetworkTopology topology = m_scene.engineState().networkTopology;
+    const bool replicated = topology == NetworkTopology::Replica && !body.anchored && body.networkOwner == 0;
+    const bool ownedElsewhere = topology != NetworkTopology::Replica && body.networkOwner != 0;
+    const bool driven = isDriven(id) || replicated || ownedElsewhere || (body.anchored && movingAnchored);
     desc.motion = driven          ? physics::MotionType::Kinematic
                   : body.anchored ? physics::MotionType::Static
                                   : physics::MotionType::Dynamic;

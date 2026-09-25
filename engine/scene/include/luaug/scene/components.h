@@ -148,6 +148,11 @@ struct RigidBodyComponent
     core::Vec3 linearVelocity{0.0f, 0.0f, 0.0f};
     core::Vec3 angularVelocity{0.0f, 0.0f, 0.0f};
 
+    // **Whose machine simulates it** (ADR 0099): a player's user id, or 0 for
+    // the authority. The authority keeps every owner; a replica learns only
+    // the parts that are its own, and holds 0 for the rest.
+    u32 networkOwner = 0;
+
     // `ApplyImpulse` accumulates here and the mirror drains it at the start of
     // the next tick. A queue rather than an immediate call because a script may
     // run at any point in the frame and the solver may not be interrupted --
@@ -868,6 +873,15 @@ struct PlayerComponent
     std::vector<PlayerIntent> intents;
     // `Player.Character`: the part that is them, on this machine.
     core::InstanceId character;
+    // `Player.Team` (ADR 0099): their side, on this machine.
+    core::InstanceId team;
+};
+
+// A side (ADR 0099). Its name is the instance's.
+struct TeamComponent
+{
+    core::Color3 color{1.0f, 1.0f, 1.0f};
+    bool autoAssign = true;
 };
 
 // The block world `VoxelService` owns. **Not the terrain** -- see

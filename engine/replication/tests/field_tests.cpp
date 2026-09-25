@@ -2,7 +2,9 @@
 // (ADR 0069).
 #include "luaug/replication/field.h"
 
+#include <cstddef>
 #include <doctest/doctest.h>
+#include <iterator>
 #include <ostream>
 
 #include "wire_schema.gen.h"
@@ -126,6 +128,17 @@ TEST_CASE("the wire is smaller than the cell it came out of")
     CHECK(wireBytes(generated::Encoding::CFrameD) < FieldValue::Bytes);
 }
 
+TEST_CASE("every encoding is the size the published protocol says it is (ADR 0100)")
+{
+    // `docs/protocol/wire.md` states these sizes from the same table; a
+    // decoder written from the page must read what this encoder writes.
+    for (std::size_t at = 0; at < std::size(generated::EncodingBytes); ++at) {
+        const auto encoding = static_cast<generated::Encoding>(at);
+        CAPTURE(at);
+        CHECK(wireBytes(encoding) == generated::EncodingBytes[at]);
+    }
+}
+
 TEST_CASE("the generated schema is what the module was built against")
 {
     // A cheap tripwire on a real hazard: the header is checked in and
@@ -135,11 +148,12 @@ TEST_CASE("the generated schema is what the module was built against")
     CHECK(std::size(generated::CommonFields) == 2);
     // BasePart, CharacterBody, Model, Lighting, Decal, ParticleEmitter, Folder,
     // RemoteEvent, ReplicatedStorage, RemoteFunction and Part2D (protocol 11),
-    // and ADR 0096's five effects, `Atmosphere` and `Sky` (protocol 13).
-    CHECK(std::size(generated::Classes) == 18);
+    // ADR 0096's five effects, `Atmosphere` and `Sky` (protocol 13), and
+    // `TeamService` and `Team` (protocol 14).
+    CHECK(std::size(generated::Classes) == 20);
     CHECK(std::size(generated::Channels) == 4);
 
-    // Channel 3 is claimed and unused on purpose, so the numbering cannot shift
-    // when `RemoteEvent` arrives.
-    CHECK(generated::Channels[3].name == "Reserved3");
+    // Channel 3 was claimed from protocol 1 so the numbering could not shift
+    // when ownership arrived (ADR 0099).
+    CHECK(generated::Channels[3].name == "Ownership");
 }

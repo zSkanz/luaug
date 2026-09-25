@@ -330,6 +330,11 @@ u64 World::worldHash() const
         if (const RigidBodyComponent* body = m_rigidBodies.find(id); body != nullptr) {
             hasher.vec3(body->pendingImpulse);
             hasher.flag(body->active);
+            // Who simulates it decides whether the solver moves it (ADR 0099).
+            // Hashed only when somebody other than the authority does, so every
+            // trace recorded before ownership existed still agrees.
+            if (body->networkOwner != 0)
+                hasher.pod(body->networkOwner);
         }
         if (const CharacterBodyComponent* character = m_characterBodies.find(id); character != nullptr) {
             hasher.vec3(character->moveDirection);

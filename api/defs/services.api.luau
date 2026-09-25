@@ -361,6 +361,56 @@ local Classes: { Schema.Class } = {
             .. "what you want in the world into `Workspace`.",
     },
     {
+        Name = "TeamService",
+        Extends = "Instance",
+        Module = "scene",
+        Tags = { "Service", "NotCreatable" } :: { Schema.ClassTag },
+        Doc = "Where the sides of a game live (ADR 0099): every `Team` under it reaches every replica, "
+            .. "whatever their distance, as `ReplicatedStorage`'s contents do. It is saved with the scene.",
+        Methods = {
+            {
+                Name = "GetTeams",
+                Parameters = {},
+                Returns = { "{ Team }" },
+                ThreadSafety = "ReadParallel",
+                Doc = "Every team under this service, in child order.",
+            },
+        } :: { Schema.Method },
+    },
+    {
+        Name = "Team",
+        Extends = "Instance",
+        Module = "scene",
+        Storage = "Team",
+        Parents = { "TeamService", "ReplicatedStorage", "ServerStorage" },
+        Doc = "A side (ADR 0099): a name -- its `Name` -- a colour, and the players whose `Player.Team` is "
+            .. "it. It counts only under `TeamService`, which is what carries it to every replica.",
+        Properties = {
+            {
+                Name = "Color",
+                Type = "Color3",
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "The side's colour, for a game to paint name tags, scoreboards and shirts with.",
+            },
+            {
+                Name = "AutoAssign",
+                Type = "boolean",
+                Default = "true",
+                Doc = "Whether a player who joins may be put on this team. The engine picks the "
+                    .. "`AutoAssign` team with the fewest players.",
+            },
+        } :: { Schema.Property },
+        Methods = {
+            {
+                Name = "GetPlayers",
+                Parameters = {},
+                Returns = { "{ Player }" },
+                ThreadSafety = "ReadParallel",
+                Doc = "Every player on this team, in the order they joined.",
+            },
+        } :: { Schema.Method },
+    },
+    {
         Name = "ServerStorage",
         Extends = "Instance",
         Module = "scene",
@@ -578,6 +628,14 @@ local Classes: { Schema.Class } = {
                 Doc = "The authority's number for this player: 1 for whoever sits at a solo or hosting "
                     .. "machine, 2 and up for replicas in the order they joined. Never reused within a "
                     .. "session, and not an account: a reconnect is a new number.",
+            },
+            {
+                Name = "Team",
+                Type = "Team?",
+                Doc = "The side this player is on (ADR 0099), or `nil` for none. **The authority's game sets it**, "
+                    .. "and every replica learns it with the roster. A player who joins is put on the "
+                    .. "`AutoAssign` team with the fewest players -- ties to the first -- or on none when "
+                    .. "there is no such team.",
             },
             {
                 Name = "Character",

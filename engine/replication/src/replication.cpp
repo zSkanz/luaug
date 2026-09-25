@@ -15,9 +15,9 @@
 namespace luaug::replication {
 namespace {
 
-// The schema's four channels -- Control, State, Intent and the reserved one --
-// opened whether or not all are used, so a peer that uses the reserved one
-// later is not a peer this build refuses at the transport.
+// The schema's four channels -- Control, State, Intent and Ownership (ADR
+// 0099) -- opened whether or not a session uses them all, so the count never
+// depends on what a game does.
 constexpr u8 ChannelCount = static_cast<u8>(std::size(generated::Channels));
 
 class Replication final : public IReplication

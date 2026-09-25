@@ -287,6 +287,7 @@ struct NameIndex
     X(TerrainComponent, terrains)                                                                                      \
     X(VoxelComponent, voxels)                                                                                          \
     X(PlayerComponent, players)                                                                                        \
+    X(TeamComponent, teams)                                                                                            \
     X(ModelComponent, models)                                                                                          \
     X(ScriptComponent, scripts)                                                                                        \
     X(SoundComponent, sounds)                                                                                          \
@@ -816,6 +817,9 @@ public:
     [[nodiscard]] const ComponentPool<VoxelComponent>& voxels() const noexcept { return m_voxels; }
     [[nodiscard]] ComponentPool<PlayerComponent>& players() noexcept { return m_players; }
     [[nodiscard]] const ComponentPool<PlayerComponent>& players() const noexcept { return m_players; }
+
+    [[nodiscard]] ComponentPool<TeamComponent>& teams() noexcept { return m_teams; }
+    [[nodiscard]] const ComponentPool<TeamComponent>& teams() const noexcept { return m_teams; }
 
     [[nodiscard]] ComponentPool<AttachmentComponent>& attachments() noexcept { return m_attachments; }
     [[nodiscard]] const ComponentPool<AttachmentComponent>& attachments() const noexcept { return m_attachments; }

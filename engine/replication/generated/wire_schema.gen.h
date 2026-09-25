@@ -20,7 +20,7 @@ using core::u8;
 // Bumped by hand in the commit that changes the wire, and never derived from
 // the engine version: a release that changes nothing about the protocol must
 // not refuse a peer, and a wire change inside one release must.
-inline constexpr u32 ProtocolVersion = 13;
+inline constexpr u32 ProtocolVersion = 14;
 
 // How a field's bytes are laid down. Every one is fixed-width and
 // little-endian, with no variable-length forms and no nesting -- a wire format
@@ -43,6 +43,26 @@ enum class Encoding : u8
     InstanceRef = 12,
     MaterialOverrides = 13,
     MaterialValues = 14,
+};
+
+// Each encoding's size on the wire, as the published protocol states it (ADR
+// 0100). A test holds `wireBytes` to it, so the two cannot disagree.
+inline constexpr u8 EncodingBytes[] = {
+    1, // Bool
+    1, // U8
+    2, // U16
+    4, // U32
+    4, // I32
+    4, // F32
+    8, // F64
+    12, // Vector3
+    24, // Position
+    60, // CFrameD
+    12, // Color3
+    4, // NameAtom
+    4, // InstanceRef
+    48, // MaterialOverrides
+    52, // MaterialValues
 };
 
 // **`Component` is the case that matters.** The most-replicated fact in any
@@ -245,6 +265,11 @@ inline constexpr FieldDesc SkyFields[] = {
     {"CloudColor", 16, Encoding::Color3, Source::Component, "skies"},
 };
 
+inline constexpr FieldDesc TeamFields[] = {
+    {"Color", 1, Encoding::Color3, Source::Component, "teams"},
+    {"AutoAssign", 2, Encoding::Bool, Source::Component, "teams"},
+};
+
 // Every replicated class, in schema order.
 inline constexpr ClassDesc Classes[] = {
     {"BasePart", BasePartFields, -1, false, false},
@@ -265,6 +290,8 @@ inline constexpr ClassDesc Classes[] = {
     {"SunRaysEffect", SunRaysEffectFields, -1, false, false},
     {"Atmosphere", AtmosphereFields, -1, false, false},
     {"Sky", SkyFields, -1, false, false},
+    {"TeamService", {}, -1, true, true},
+    {"Team", TeamFields, -1, false, false},
 };
 
 // ENet's delivery mode per channel, as `net::Delivery` spells it.
@@ -286,7 +313,7 @@ inline constexpr ChannelDesc Channels[] = {
     {"Control", 0, Delivery::Reliable},
     {"State", 1, Delivery::UnreliableSequenced},
     {"Intent", 2, Delivery::UnreliableSequenced},
-    {"Reserved3", 3, Delivery::Reliable},
+    {"Ownership", 3, Delivery::UnreliableSequenced},
 };
 
 // The message types. An enum rather than bare numbers, so a switch over them
@@ -303,6 +330,8 @@ enum class MessageType : u8
     Players = 8,
     RemoteToAuthority = 9,
     RemoteToReplica = 10,
+    Ownership = 11,
+    OwnedState = 12,
 };
 
 // Which direction a message may travel. A server that accepted a
@@ -333,6 +362,8 @@ inline constexpr MessageDesc Messages[] = {
     {"Players", MessageType::Players, 0, Direction::ToReplica},
     {"RemoteToAuthority", MessageType::RemoteToAuthority, 0, Direction::ToAuthority},
     {"RemoteToReplica", MessageType::RemoteToReplica, 0, Direction::ToReplica},
+    {"Ownership", MessageType::Ownership, 0, Direction::ToReplica},
+    {"OwnedState", MessageType::OwnedState, 3, Direction::ToAuthority},
 };
 
 } // namespace luaug::replication::generated

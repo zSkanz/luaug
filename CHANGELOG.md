@@ -46,6 +46,22 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **Sides and network ownership** (ADR 0099, protocol 14).
+  - `Team` (`Color`, `AutoAssign`, `GetPlayers()`) under the new `TeamService`
+    (`GetTeams()`), whose teams reach every replica. `Player.Team` is a
+    player's side; a player who joins goes to the `AutoAssign` team with the
+    fewest players.
+  - `BasePart:SetNetworkOwner(player?)` hands a loose part to one player's
+    machine, which simulates it and sends its state up; the authority follows
+    it and hands it back on `nil`, when the part is anchored, or when the
+    player leaves. `BasePart:GetNetworkOwner()` answers the owner.
+  - The wire is protocol 14: the roster carries each player's team, channel 3
+    is `Ownership`, and two messages are new. Peers of protocol 13 are refused.
+- **The wire protocol is published** (ADR 0100): `docs/protocol/wire.md`,
+  generated from the schema, states every message byte for byte, and the
+  compatibility policy -- one version, matched exactly, changed whenever the
+  bytes change.
+
 - **Navigation for more than one body, over priced ground, across gaps, in
   crowds, and on the plane** (ADR 0098).
   - `NavigationService:DefineAgent(name, radius, height, maxClimb?, maxSlope?)`

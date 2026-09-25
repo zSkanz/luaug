@@ -57,6 +57,7 @@ using generated::MessageType;
 constexpr u8 ControlChannel = 0;
 constexpr u8 StateChannel = 1;
 constexpr u8 IntentChannel = 2;
+constexpr u8 OwnershipChannel = 3;
 
 // A snapshot record whose fields are the whole set rather than a diff.
 constexpr u8 FullRecord = 1;
@@ -460,6 +461,37 @@ void AuthoritySession::receive(scene::World& world, InstanceId root)
                 }
                 break;
             }
+            if (event.channel == OwnershipChannel && type == MessageType::OwnedState && peer->welcomed) {
+                const u64 tick = reader.u64v();
+                if (!reader.ok() || tick <= peer->ownedTick || peer->userId == 0)
+                    break;
+                peer->ownedTick = tick;
+                const u16 count = reader.u16v();
+                for (u16 at = 0; at < count && reader.ok(); ++at) {
+                    const u32 netId = reader.u32v();
+                    FieldValue cframe;
+                    FieldValue linear;
+                    FieldValue angular;
+                    if (!reader.ok() ||
+                        !decodeField(reader.bytes(), reader.at(), generated::Encoding::CFrameD, cframe) ||
+                        !decodeField(reader.bytes(), reader.at(), generated::Encoding::Vector3, linear) ||
+                        !decodeField(reader.bytes(), reader.at(), generated::Encoding::Vector3, angular)) {
+                        reader.fail();
+                        break;
+                    }
+                    // **Only what it was given**: a part it does not own now --
+                    // never did, or was handed back since -- is not its to move.
+                    const InstanceId id = instanceOfNet(world, netId);
+                    scene::RigidBodyComponent* body = id.valid() ? world.rigidBodies().find(id) : nullptr;
+                    scene::PartComponent* part = id.valid() ? world.parts().find(id) : nullptr;
+                    if (body == nullptr || part == nullptr || body->networkOwner != peer->userId)
+                        continue;
+                    part->cframe = asCFrame(cframe);
+                    body->linearVelocity = asVec3(linear);
+                    body->angularVelocity = asVec3(angular);
+                }
+                break;
+            }
             if (event.channel != ControlChannel)
                 break;
             if (type == MessageType::Hello) {
@@ -698,13 +730,22 @@ void AuthoritySession::send(const scene::World& world, InstanceId root, u64 tick
             continue;
         roster.push_back(player->userId);
         roster.push_back(player->character.valid() ? netIdOf(player->character).value : 0u);
+        roster.push_back(player->team.valid() ? netIdOf(player->team).value : 0u);
     }
 
     for (Peer& peer : m_peers) {
         if (!peer.welcomed)
             continue;
+        // What this peer owns (ADR 0099), in network-id order.
+        std::vector<u32> owned;
+        for (const Captured& entry : m_order) {
+            const scene::RigidBodyComponent* body = world.rigidBodies().find(entry.id);
+            if (body != nullptr && peer.userId != 0 && body->networkOwner == peer.userId)
+                owned.push_back(entry.netId);
+        }
+        std::sort(owned.begin(), owned.end());
         const std::vector<u32> relevant = interestOf(world, peer);
-        sendTo(peer, current, roster, relevant);
+        sendTo(peer, current, roster, relevant, owned);
     }
 }
 
@@ -748,6 +789,10 @@ std::vector<u32> AuthoritySession::interestOf(const scene::World& world, const P
         const f64 distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
         const f64 reach = std::binary_search(peer.known.begin(), peer.known.end(), m_order[at].netId) ? keep : radius;
         inRange[at] = distance <= reach * reach ? 1 : 0;
+        // What the peer owns it simulates, so it has it wherever it is.
+        if (const scene::RigidBodyComponent* owned = world.rigidBodies().find(m_order[at].id);
+            owned != nullptr && peer.userId != 0 && owned->networkOwner == peer.userId)
+            inRange[at] = 1;
     }
 
     // Down: a part in range brings everything under it -- what is attached to
@@ -793,7 +838,7 @@ std::vector<u32> AuthoritySession::interestOf(const scene::World& world, const P
 }
 
 void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const std::vector<u32>& roster,
-                              const std::vector<u32>& relevant)
+                              const std::vector<u32>& relevant, const std::vector<u32>& owned)
 {
     // **This peer's world is what is in its interest.** Everything below --
     // spawns, despawns, the diff and the checksum -- is over this, so a replica
@@ -812,7 +857,7 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const st
     if (!peer.rosterSent || peer.roster != roster) {
         Writer players;
         players.u8v(static_cast<u8>(MessageType::Players));
-        players.u32v(static_cast<u32>(roster.size() / 2));
+        players.u32v(static_cast<u32>(roster.size() / 3));
         for (const u32 value : roster)
             players.u32v(value);
         sendBytes(m_transport, peer.id, players.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
@@ -867,6 +912,18 @@ void AuthoritySession::sendTo(Peer& peer, const WorldState& everything, const st
         m_stats.spawned += static_cast<u32>(entering.size());
     }
     peer.known = std::move(now);
+
+    // --- What this peer owns, whole, when it changed -- after the spawns, so
+    // it never names a part the peer has not been sent.
+    if (peer.owned != owned) {
+        Writer ownership;
+        ownership.u8v(static_cast<u8>(MessageType::Ownership));
+        ownership.u32v(static_cast<u32>(owned.size()));
+        for (const u32 id : owned)
+            ownership.u32v(id);
+        sendBytes(m_transport, peer.id, ownership.bytes, net::Delivery::Reliable, ControlChannel, m_stats);
+        peer.owned = owned;
+    }
     // What this peer holds at this tick, for the baseline a later snapshot is
     // diffed against: the global state then, cut to what this peer had then.
     peer.interest.push_back(PeerInterest{current.tick, peer.known});
@@ -1036,6 +1093,9 @@ void ReplicaSession::receive(scene::World& world, InstanceId root)
         case MessageType::Players:
             onPlayers(world, root, event.payload);
             break;
+        case MessageType::Ownership:
+            onOwnership(world, event.payload);
+            break;
         case MessageType::RemoteToReplica: {
             Reader reader(event.payload);
             (void)reader.u8v();
@@ -1130,7 +1190,7 @@ void ReplicaSession::interpolate(scene::World& world)
     const u64 target = m_serverClock > m_interpolationDelay ? m_serverClock - m_interpolationDelay : 0;
     for (auto& [netId, samples] : m_samples) {
         // Its own character is predicted, never drawn from the past.
-        if (samples.empty() || netId == m_owned)
+        if (samples.empty() || netId == m_owned || m_ownedParts.contains(netId))
             continue;
         const auto local = m_locals.find(netId);
         scene::PartComponent* part =
@@ -1170,6 +1230,12 @@ void ReplicaSession::resolveCharacters(scene::World& world, InstanceId root)
         const auto named = m_characters.find(player->userId);
         const auto local = named != m_characters.end() ? m_locals.find(named->second) : m_locals.end();
         player->character = local != m_locals.end() && world.alive(local->second) ? local->second : InstanceId{};
+        const auto side = m_teams.find(player->userId);
+        const auto team = side != m_teams.end() && side->second != 0 ? m_locals.find(side->second) : m_locals.end();
+        player->team =
+            team != m_locals.end() && world.alive(team->second) && world.teams().find(team->second) != nullptr
+                ? team->second
+                : InstanceId{};
         if (player->local) {
             m_owned = named != m_characters.end() && local != m_locals.end() ? named->second : 0u;
             // What was buffered for it before this machine knew it was its
@@ -1183,6 +1249,82 @@ void ReplicaSession::resolveCharacters(scene::World& world, InstanceId root)
             }
         }
     }
+    // Its own parts, which may have spawned after the list that names them.
+    for (const u32 netId : m_ownedParts) {
+        const auto local = m_locals.find(netId);
+        scene::RigidBodyComponent* body =
+            local != m_locals.end() && world.alive(local->second) ? world.rigidBodies().find(local->second) : nullptr;
+        if (body != nullptr)
+            body->networkOwner = m_playerId;
+    }
+}
+
+void ReplicaSession::onOwnership(scene::World& world, std::span<const u8> bytes)
+{
+    Reader reader(bytes);
+    (void)reader.u8v();
+    const u32 count = reader.u32v();
+    std::set<u32> owned;
+    for (u32 at = 0; at < count && reader.ok(); ++at)
+        owned.insert(reader.u32v());
+    if (!reader.ok() || !reader.done())
+        return;
+    // Handed back: a follower of the snapshots again, from the next one.
+    for (const u32 netId : m_ownedParts) {
+        if (owned.contains(netId))
+            continue;
+        const auto local = m_locals.find(netId);
+        if (local == m_locals.end() || !world.alive(local->second))
+            continue;
+        if (scene::RigidBodyComponent* body = world.rigidBodies().find(local->second); body != nullptr)
+            body->networkOwner = 0;
+        // **Back to where the authority has it**, from the newest state this
+        // replica holds: the snapshots only send what changed, and the
+        // authority's copy may never change again.
+        const EntityState* held = m_states.empty() ? nullptr : findEntity(*m_states.back(), netId);
+        scene::PartComponent* part = world.parts().find(local->second);
+        if (held == nullptr || part == nullptr)
+            continue;
+        const generated::ClassDesc& desc = generated::Classes[held->schema];
+        for (usize at = 0; at < held->fields.size(); ++at) {
+            const generated::FieldDesc* field = fieldAt(desc, at);
+            if (field != nullptr && field->name == "CFrame" && field->pool == "parts")
+                part->cframe = asCFrame(held->fields[at]);
+        }
+    }
+    for (const u32 netId : owned)
+        m_samples.erase(netId);
+    m_ownedParts = std::move(owned);
+}
+
+void ReplicaSession::sendOwned(const scene::World& world, u64 tick)
+{
+    if (m_ownedParts.empty())
+        return;
+    Writer state;
+    state.u8v(static_cast<u8>(MessageType::OwnedState));
+    state.u64v(tick);
+    std::vector<std::pair<u32, InstanceId>> alive;
+    for (const u32 netId : m_ownedParts) {
+        const auto local = m_locals.find(netId);
+        if (local != m_locals.end() && world.alive(local->second) && world.parts().find(local->second) != nullptr &&
+            world.rigidBodies().find(local->second) != nullptr)
+            alive.emplace_back(netId, local->second);
+    }
+    state.u16v(static_cast<u16>(std::min<usize>(alive.size(), 0xFFFF)));
+    for (usize at = 0; at < alive.size() && at < 0xFFFF; ++at) {
+        const scene::PartComponent& part = *world.parts().find(alive[at].second);
+        const scene::RigidBodyComponent& body = *world.rigidBodies().find(alive[at].second);
+        state.u32v(alive[at].first);
+        FieldValue value;
+        setCFrame(value, part.cframe);
+        encodeField(state.bytes, generated::Encoding::CFrameD, value);
+        setVec3(value, body.linearVelocity);
+        encodeField(state.bytes, generated::Encoding::Vector3, value);
+        setVec3(value, body.angularVelocity);
+        encodeField(state.bytes, generated::Encoding::Vector3, value);
+    }
+    sendBytes(m_transport, m_authority, state.bytes, net::Delivery::UnreliableSequenced, OwnershipChannel, m_stats);
 }
 
 void ReplicaSession::sendIntent(const scene::World& world, u64 tick)
@@ -1222,6 +1364,7 @@ void ReplicaSession::sendIntent(const scene::World& world, u64 tick)
         intent.u8v(one.pressed ? 1 : 0);
     }
     sendBytes(m_transport, m_authority, intent.bytes, net::Delivery::UnreliableSequenced, IntentChannel, m_stats);
+    sendOwned(world, tick);
 }
 
 void ReplicaSession::onPlayers(scene::World& world, InstanceId root, std::span<const u8> bytes)
@@ -1231,15 +1374,19 @@ void ReplicaSession::onPlayers(scene::World& world, InstanceId root, std::span<c
     const u32 count = reader.u32v();
     std::vector<u32> roster;
     std::map<u32, u32> characters;
+    std::map<u32, u32> teams;
     for (u32 at = 0; at < count && reader.ok(); ++at) {
         const u32 userId = reader.u32v();
         const u32 character = reader.u32v();
+        const u32 team = reader.u32v();
         roster.push_back(userId);
         characters[userId] = character;
+        teams[userId] = team;
     }
     if (!reader.ok() || !reader.done())
         return;
     m_characters = std::move(characters);
+    m_teams = std::move(teams);
     const InstanceId network = scene::networkServiceOf(world, world.parentOf(root));
     if (!network.valid())
         return;
@@ -1363,6 +1510,8 @@ void ReplicaSession::resetForRejoin(scene::World& world)
     m_states.clear();
     m_samples.clear();
     m_characters.clear();
+    m_teams.clear();
+    m_ownedParts.clear();
     m_predicted.clear();
     m_owned = 0;
     m_ackedIntent = 0;
@@ -1374,6 +1523,7 @@ void ReplicaSession::forget(u32 id)
 {
     m_departed.insert(id);
     m_samples.erase(id);
+    m_ownedParts.erase(id);
     m_locals.erase(id);
     m_written.erase(id);
     // Out of every remembered state too, so a diff against one of them
@@ -1691,6 +1841,11 @@ void ReplicaSession::applyToWorld(scene::World& world, InstanceId root, const Wo
                     continue;
                 if (cframe)
                     continue;
+            }
+            else if (cframe && m_ownedParts.contains(entity.id.value)) {
+                // **Its own part is simulated here** (ADR 0099): the authority's
+                // copy is this machine's, a round trip old.
+                continue;
             }
             else if (cframe && m_interpolationDelay > 0) {
                 std::deque<Sample>& samples = m_samples[entity.id.value];

@@ -1,6 +1,7 @@
 #include "luaug/script/instance_binding.h"
 
 #include "luaug/scene/pivot.h"
+#include "luaug/scene/players.h"
 #include "luaug/scene/ragdoll_build.h"
 #include "luaug/scene/scene_file.h"
 #include "luaug/scene/world.h"
@@ -830,6 +831,43 @@ int methodApplyImpulse(lua_State* L)
     if (scene::RigidBodyComponent* body = world(L).rigidBodies().find(id); body != nullptr)
         body->pendingImpulse = body->pendingImpulse + impulse;
     return 0;
+}
+
+// --- Network ownership (ADR 0099) ---------------------------------------------
+
+int methodSetNetworkOwner(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const core::InstanceId player = lua_isnoneornil(L, 2) ? core::InstanceId{} : checkInstance(L, 2);
+    scene::World& w = world(L);
+    // Handing a part over is the authority's to decide; a replica asking would
+    // be a client deciding who simulates what.
+    if (w.engineState().networkTopology == scene::NetworkTopology::Replica)
+        raise(L, LUAUG_TR("script.err.network_owner_authority"));
+    scene::RigidBodyComponent* body = w.rigidBodies().find(id);
+    if (body == nullptr || body->anchored)
+        raise(L, LUAUG_TR("script.err.network_owner_anchored"));
+    const scene::PlayerComponent* owner = player.valid() ? w.players().find(player) : nullptr;
+    if (player.valid() && (owner == nullptr || !w.alive(player)))
+        raise(L, LUAUG_TR("script.err.network_owner_player"));
+    // The player at the authority's own machine owning it is the authority
+    // simulating it: nothing to hand over.
+    body->networkOwner = owner != nullptr && !owner->local ? owner->userId : 0u;
+    return 0;
+}
+
+int methodGetNetworkOwner(lua_State* L)
+{
+    const core::InstanceId id = liveInstance(L, 1);
+    const scene::World& w = world(L);
+    const scene::RigidBodyComponent* body = w.rigidBodies().find(id);
+    const core::InstanceId owner =
+        body != nullptr && body->networkOwner != 0 ? scene::playerByUserId(w, body->networkOwner) : core::InstanceId{};
+    if (owner.valid())
+        pushInstance(L, owner);
+    else
+        lua_pushnil(L);
+    return 1;
 }
 
 // --- Materials (ADR 0090) -----------------------------------------------------
@@ -1662,6 +1700,8 @@ constexpr InstanceMethodBinding InstanceMethods[] = {
     {"PVInstance", "PivotTo", methodPivotTo},
     {"Model", "GetExtentsSize", methodGetExtentsSize},
     {"BasePart", "ApplyImpulse", methodApplyImpulse},
+    {"BasePart", "SetNetworkOwner", methodSetNetworkOwner},
+    {"BasePart", "GetNetworkOwner", methodGetNetworkOwner},
     {"BasePart", "SetMaterialParameter", methodSetMaterialParameter},
     {"BasePart", "GetMaterialParameter", methodGetMaterialParameter},
     {"BasePart", "ClearMaterialParameter", methodClearMaterialParameter},

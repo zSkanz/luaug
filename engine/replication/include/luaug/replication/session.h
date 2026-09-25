@@ -157,6 +157,10 @@ private:
         // changes.
         std::vector<u32> roster;
         bool rosterSent = false;
+        // The parts it owns as it was last told (ADR 0099), and the newest
+        // tick of theirs it has taken a state from.
+        std::vector<u32> owned;
+        u64 ownedTick = 0;
         // What it held at each of the last `StateHistory` sends.
         std::deque<PeerInterest> interest;
         // `RemoteEvent` messages this tick, against the flood limit.
@@ -188,7 +192,7 @@ private:
     // The subtree as it stands, and the class name each new id is spawned as.
     void capture(const scene::World& world, core::InstanceId root, u64 tick);
     void sendTo(Peer& peer, const WorldState& everything, const std::vector<u32>& roster,
-                const std::vector<u32>& relevant);
+                const std::vector<u32>& relevant, const std::vector<u32>& owned);
     // The ids this peer should hold now, sorted (ADR 0076).
     [[nodiscard]] std::vector<u32> interestOf(const scene::World& world, const Peer& peer) const;
     [[nodiscard]] const WorldState* historyAt(u64 tick) const noexcept;
@@ -294,6 +298,8 @@ private:
     void onPlayers(scene::World& world, core::InstanceId root, std::span<const u8> bytes);
     void applyToWorld(scene::World& world, core::InstanceId root, const WorldState& state);
     void resolveCharacters(scene::World& world, core::InstanceId root);
+    void onOwnership(scene::World& world, std::span<const u8> bytes);
+    void sendOwned(const scene::World& world, u64 tick);
     void reconcile(scene::World& world, core::InstanceId character, const scene::CharacterReplayStart& authority);
     void interpolate(scene::World& world);
     [[nodiscard]] const WorldState* stateAt(u64 tick) const noexcept;
@@ -326,8 +332,13 @@ private:
     Stats m_stats;
     // Every player's character by user id, as the last roster named it.
     std::map<u32, u32> m_characters;
+    // Each player's team, by the network id the roster named (ADR 0099).
+    std::map<u32, u32> m_teams;
     // The NetId of this machine's own player's character, or zero.
     u32 m_owned = 0;
+    // The parts this replica owns (ADR 0099): simulated here, sent up, and
+    // never overwritten by a snapshot.
+    std::set<u32> m_ownedParts;
 
     // One remembered transform at one tick, and for the own character the
     // command that step consumed.

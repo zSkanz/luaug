@@ -1,5 +1,6 @@
 #include "luaug/replication/field.h"
 
+#include <bit>
 #include <cstddef>
 #include <cstring>
 
@@ -209,6 +210,11 @@ usize wireBytes(generated::Encoding encoding) noexcept
     }
     return 0;
 }
+
+// **The wire is little-endian, and the copy below is the host's bytes.** A
+// big-endian target would speak another protocol, and must fail here rather
+// than at a peer.
+static_assert(std::endian::native == std::endian::little, "the wire's field encoding assumes a little-endian host");
 
 void encodeField(std::vector<u8>& out, generated::Encoding encoding, const FieldValue& value)
 {

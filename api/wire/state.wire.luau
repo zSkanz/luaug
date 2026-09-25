@@ -582,6 +582,26 @@ local SkyFields: { Schema.Field } = {
 
 local NoFields: { Schema.Field } = {}
 
+local TeamFields: { Schema.Field } = {
+    {
+        Name = "Color",
+        Id = 1,
+        Encoding = "Color3",
+        Source = "Component",
+        Component = "teams",
+        Doc = "What a side looks like on every machine: a name tag painted on one replica and not another "
+            .. "is two games.",
+    },
+    {
+        Name = "AutoAssign",
+        Id = 2,
+        Encoding = "Bool",
+        Source = "Component",
+        Component = "teams",
+        Doc = "Only the authority assigns, but a replica's scripts may show which sides are open.",
+    },
+}
+
 local LightingFields: { Schema.Field } = {
     {
         Name = "ClockTime",
@@ -1144,6 +1164,20 @@ local Classes: { Schema.Class } = {
         Doc = "The world's look under `Lighting` (ADR 0096, protocol 13): the authority's is every replica's. A camera's stays on its own screen.",
         Fields = SkyFields,
     },
+    {
+        Name = "TeamService",
+        Service = true,
+        Contents = true,
+        Doc = "Where the sides live (ADR 0099, protocol 14): every `Team` under it reaches every "
+            .. "replica, whatever its distance, as `ReplicatedStorage`'s contents do.",
+        Fields = NoFields,
+    },
+    {
+        Name = "Team",
+        Doc = "A side (ADR 0099, protocol 14). Who is on it is not a field of the team: it is the "
+            .. "roster's third column, beside each player's character.",
+        Fields = TeamFields,
+    },
 }
 
 --- Recorded by name, because a class nobody decided about and a class
@@ -1159,8 +1193,9 @@ local Excluded: { Schema.Excluded } = {
     {
         Name = "Player",
         Reason = "Lives under `NetworkService`, which is not replicated, and each end makes its own: an "
-            .. "authority one per peer, a replica one for itself. A replica does not yet see the OTHER "
-            .. "players -- a player list is its own message, owed after N1's first playable build.",
+            .. "authority one per peer, a replica one for itself and one for each player the `Players` "
+            .. "roster names. What a replica knows of a player -- their number, their character and "
+            .. "their team -- is the roster, not a snapshot of the instance.",
     },
     {
         Name = "DataModel",
@@ -1334,10 +1369,10 @@ local ExcludedByTag: { Schema.ExcludedTag } = {
     },
 }
 
---- **Numbers are permanent for the reason field ids are**, and channel 3 is
---- reserved rather than left free so the numbering cannot shift when
---- `NetworkOwnership` or `Team` arrives. `RemoteEvent` arrived without it: its
---- messages ride the Control channel, after the spawns they may name (ADR 0077).
+--- **Numbers are permanent for the reason field ids are.** Channel 3 was
+--- reserved so the numbering could not shift when network ownership arrived,
+--- and it has (ADR 0099). `RemoteEvent` arrived without it: its messages ride
+--- the Control channel, after the spawns they may name (ADR 0077).
 local Channels: { Schema.Channel } = {
     {
         Name = "Control",
@@ -1364,13 +1399,13 @@ local Channels: { Schema.Channel } = {
             .. "authority decides whether it moved and whether it hit.",
     },
     {
-        Name = "Reserved3",
+        Name = "Ownership",
         Id = 3,
-        Delivery = "Reliable",
-        Doc = "Claimed and unused. `NetworkOwnership` and `Team` are deliberately not built, and a "
-            .. "channel number that shifted when one of them arrived would break every build that had "
-            .. "already shipped. `RemoteEvent` does not use it: a message on its own channel could "
-            .. "arrive before the spawn of the event it names.",
+        Delivery = "UnreliableSequenced",
+        Doc = "Where an owner's parts are, from the owner (ADR 0099, protocol 14). Reserved as channel 3 "
+            .. "since protocol 1 so its arrival shifted nothing. Unreliable and sequenced for the reason "
+            .. "the State channel is: a lost state is superseded by the next tick's, and an old one "
+            .. "arriving late would move a part backwards.",
     },
 }
 
@@ -1380,6 +1415,19 @@ local Messages: { Schema.Message } = {
         Id = 1,
         Channel = "Control",
         Direction = "ToAuthority",
+        Layout = {
+            {
+                Name = "protocol",
+                Type = "u32",
+                Doc = "The protocol version the replica speaks. Any other than the authority's is refused.",
+            },
+            {
+                Name = "tokenHigh",
+                Type = "u64",
+                Doc = "The player token the authority gave on an earlier join, or zero the first time.",
+            },
+            { Name = "tokenLow", Type = "u64" },
+        },
         Doc = "A replica announcing itself: protocol version, then the player token the authority "
             .. "gave it last time, or zeros the first time. **Version first, so a mismatch is refused "
             .. "before a single field is parsed** rather than after a decoder has already read a field "
@@ -1391,6 +1439,17 @@ local Messages: { Schema.Message } = {
         Id = 2,
         Channel = "Control",
         Direction = "ToReplica",
+        Layout = {
+            {
+                Name = "protocol",
+                Type = "u32",
+                Doc = "The authority's version; a replica refuses a Welcome in another.",
+            },
+            { Name = "userId", Type = "u32", Doc = "The replica's own player number, 2 and up." },
+            { Name = "tick", Type = "u64", Doc = "The authority's tick when it welcomed." },
+            { Name = "tokenHigh", Type = "u64", Doc = "The high half of the player token (ADR 0085)." },
+            { Name = "tokenLow", Type = "u64", Doc = "The low half." },
+        },
         Doc = "Accepted: the peer's own `Player` id, the authority's tick, and the player token to "
             .. "send back on a reconnect -- the same id again (ADR 0085). A refusal is a disconnect "
             .. "with a keyed reason rather than a silence.",
@@ -1400,6 +1459,23 @@ local Messages: { Schema.Message } = {
         Id = 3,
         Channel = "Control",
         Direction = "ToReplica",
+        Layout = {
+            { Name = "count", Type = "u32" },
+            {
+                Name = "instances",
+                Type = "repeat",
+                Count = "count",
+                Doc = "In ascending network id. A service is never spawned.",
+                Each = {
+                    { Name = "netId", Type = "u32" },
+                    {
+                        Name = "className",
+                        Type = "text",
+                        Doc = "Created by name; a class the replica does not have is skipped.",
+                    },
+                },
+            },
+        },
         Doc = "An instance entering interest: its network id and the class to create. Reliable, "
             .. "because an instance that is never created is a replica missing part of the world for "
             .. "good. **Its fields ride the snapshot**, as a whole record against a baseline that "
@@ -1410,6 +1486,28 @@ local Messages: { Schema.Message } = {
         Id = 4,
         Channel = "Control",
         Direction = "ToReplica",
+        Layout = {
+            { Name = "destroyedCount", Type = "u32" },
+            {
+                Name = "destroyed",
+                Type = "repeat",
+                Count = "destroyedCount",
+                Doc = "Instances the authority destroyed.",
+                Each = {
+                    { Name = "netId", Type = "u32" },
+                },
+            },
+            { Name = "streamedOutCount", Type = "u32" },
+            {
+                Name = "streamedOut",
+                Type = "repeat",
+                Count = "streamedOutCount",
+                Doc = "Instances that left this replica's interest and still exist on the authority.",
+                Each = {
+                    { Name = "netId", Type = "u32" },
+                },
+            },
+        },
         Doc = "Instances a replica no longer has, in two lists: those the authority destroyed, then "
             .. "those that only left this peer's interest (protocol 6). **Leaving interest is the same "
             .. "event as a chunk being evicted**: one a script holds becomes a husk, reparented to nil, "
@@ -1421,6 +1519,61 @@ local Messages: { Schema.Message } = {
         Id = 5,
         Channel = "State",
         Direction = "ToReplica",
+        Layout = {
+            {
+                Name = "tick",
+                Type = "u64",
+                Doc = "The authority tick this is the world at. Older than one applied: dropped.",
+            },
+            {
+                Name = "baseTick",
+                Type = "u64",
+                Doc = "The acknowledged tick this is a diff against, or 0: every record is then whole.",
+            },
+            { Name = "checksum", Type = "u64", Doc = 'Over the replica\'s state once applied; see "The checksum".' },
+            {
+                Name = "intentTick",
+                Type = "u64",
+                Doc = "The newest of this replica's `Intent` ticks the authority has applied.",
+            },
+            { Name = "atomCount", Type = "u16" },
+            {
+                Name = "atoms",
+                Type = "repeat",
+                Count = "atomCount",
+                Doc = "Every name the records mention, in ascending number.",
+                Each = {
+                    { Name = "atom", Type = "u32", Doc = "The authority's number for a name." },
+                    { Name = "text", Type = "text" },
+                },
+            },
+            { Name = "recordCount", Type = "u32" },
+            {
+                Name = "records",
+                Type = "repeat",
+                Count = "recordCount",
+                Doc = "In ascending network id; an instance with nothing changed has none.",
+                Each = {
+                    { Name = "netId", Type = "u32" },
+                    { Name = "schema", Type = "u8", Doc = 'The class\'s index in "Replicated classes".' },
+                    {
+                        Name = "flags",
+                        Type = "u8",
+                        Doc = "Bit 0: a whole record, every field in order. Otherwise only what changed.",
+                    },
+                    { Name = "fieldCount", Type = "u16" },
+                    {
+                        Name = "fields",
+                        Type = "repeat",
+                        Count = "fieldCount",
+                        Each = {
+                            { Name = "wireId", Type = "u16", Doc = 'See "Wire ids".' },
+                            { Name = "value", Type = "value", Doc = "In the encoding of the field the wire id names." },
+                        },
+                    },
+                },
+            },
+        },
         Doc = "The tick's diff against the peer's last acknowledged baseline, with a checksum over "
             .. "what was applied. **The checksum catches apply bugs and nothing else** -- interest "
             .. "gives a replica a strict subset of the world, so its hash is not the authority's and "
@@ -1431,6 +1584,13 @@ local Messages: { Schema.Message } = {
         Id = 6,
         Channel = "Control",
         Direction = "ToAuthority",
+        Layout = {
+            {
+                Name = "tick",
+                Type = "u64",
+                Doc = "The snapshot tick the replica now holds, and may be diffed against.",
+            },
+        },
         Doc = "Which baseline the replica now holds. Reliable, because a lost acknowledgement makes "
             .. "the authority diff against a baseline the replica has moved past.",
     },
@@ -1439,6 +1599,27 @@ local Messages: { Schema.Message } = {
         Id = 7,
         Channel = "Intent",
         Direction = "ToAuthority",
+        Layout = {
+            { Name = "tick", Type = "u64", Doc = "The replica's tick. Not newer than the last one applied: dropped." },
+            { Name = "count", Type = "u16" },
+            {
+                Name = "intents",
+                Type = "repeat",
+                Count = "count",
+                Each = {
+                    { Name = "action", Type = "text", Doc = "The input action's name." },
+                    {
+                        Name = "type",
+                        Type = "u8",
+                        Doc = "0 Bool, 1 Direction1D, 2 Direction2D, 3 Direction3D, 4 ViewportPosition.",
+                    },
+                    { Name = "x", Type = "f32" },
+                    { Name = "y", Type = "f32" },
+                    { Name = "z", Type = "f32" },
+                    { Name = "pressed", Type = "u8" },
+                },
+            },
+        },
         Doc = "One tick of a client's input, as actions rather than as results. The client says what "
             .. "it did; a client that could assert what happened is a client that always hits.",
     },
@@ -1447,7 +1628,22 @@ local Messages: { Schema.Message } = {
         Id = 8,
         Channel = "Control",
         Direction = "ToReplica",
-        Doc = "Who is taking part: every player's number, sent whole whenever the list changes and "
+        Layout = {
+            { Name = "count", Type = "u32" },
+            {
+                Name = "players",
+                Type = "repeat",
+                Count = "count",
+                Doc = "In join order.",
+                Each = {
+                    { Name = "userId", Type = "u32" },
+                    { Name = "character", Type = "u32", Doc = "The network id of their `Character`, or 0." },
+                    { Name = "team", Type = "u32", Doc = "The network id of their `Team`, or 0." },
+                },
+            },
+        },
+        Doc = "Who is taking part: every player's number, their character's network id and their "
+            .. "team's (protocol 14), zero for none, sent whole whenever any of it changes and "
             .. "once on welcome. Whole rather than as joins and leaves, because a roster is a few "
             .. "numbers and a list a replica can only ever replace cannot drift from the authority's.",
     },
@@ -1456,6 +1652,31 @@ local Messages: { Schema.Message } = {
         Id = 9,
         Channel = "Control",
         Direction = "ToAuthority",
+        Layout = {
+            { Name = "remote", Type = "u32", Doc = "The network id of the `RemoteEvent` or `RemoteFunction`." },
+            {
+                Name = "call",
+                Type = "u32",
+                Doc = "0 for an event; otherwise the call a `RemoteFunction` answer belongs to.",
+            },
+            {
+                Name = "flags",
+                Type = "u8",
+                Doc = "Bit 0: an answer. Bit 1: the answer is an error. Always 0 toward the authority.",
+            },
+            { Name = "refCount", Type = "u16" },
+            {
+                Name = "refs",
+                Type = "repeat",
+                Count = "refCount",
+                Doc = "The instances the arguments name, by position.",
+                Each = {
+                    { Name = "netId", Type = "u32", Doc = "0 for an instance the sender has no id for." },
+                },
+            },
+            { Name = "size", Type = "u32", Doc = "The byte length of what follows, at most 65552." },
+            { Name = "arguments", Type = "arguments", Doc = 'See "Arguments".' },
+        },
         Doc = "`RemoteEvent:FireServer` (protocol 7): the event's network id, a call number and a "
             .. "flags byte (protocol 8), the network ids of the instances the arguments name, and the "
             .. "arguments as the script module encoded them. A call number that is not zero is "
@@ -1467,11 +1688,82 @@ local Messages: { Schema.Message } = {
         Id = 10,
         Channel = "Control",
         Direction = "ToReplica",
+        Layout = {
+            { Name = "remote", Type = "u32", Doc = "The network id of the `RemoteEvent` or `RemoteFunction`." },
+            {
+                Name = "call",
+                Type = "u32",
+                Doc = "0 for an event; otherwise the call a `RemoteFunction` answer belongs to.",
+            },
+            {
+                Name = "flags",
+                Type = "u8",
+                Doc = "Bit 0: an answer to `call`. Bit 1: the answer is an error, one string argument.",
+            },
+            { Name = "refCount", Type = "u16" },
+            {
+                Name = "refs",
+                Type = "repeat",
+                Count = "refCount",
+                Doc = "The instances the arguments name, by position.",
+                Each = {
+                    { Name = "netId", Type = "u32", Doc = "0 for an instance the sender has no id for." },
+                },
+            },
+            { Name = "size", Type = "u32", Doc = "The byte length of what follows, at most 65552." },
+            { Name = "arguments", Type = "arguments", Doc = 'See "Arguments".' },
+        },
         Doc = "`RemoteEvent:FireClient` and `FireAllClients`, laid out as `RemoteToAuthority` is. On "
             .. "the Control channel, after the spawns of the same send, so an event created and fired "
             .. "in one tick is never named before it exists. With the reply flag set it is a "
             .. "`RemoteFunction`'s answer to the call number it carries, and with the failed flag the "
             .. "answer is the error the handler raised.",
+    },
+    {
+        Name = "Ownership",
+        Id = 11,
+        Channel = "Control",
+        Direction = "ToReplica",
+        Layout = {
+            { Name = "count", Type = "u32" },
+            {
+                Name = "parts",
+                Type = "repeat",
+                Count = "count",
+                Doc = "Every part this replica owns, in ascending network id.",
+                Each = {
+                    { Name = "netId", Type = "u32" },
+                },
+            },
+        },
+        Doc = "The network ids of every part this replica owns (ADR 0099, protocol 14), sent whole "
+            .. "whenever the list changes. Whole, as the roster is: a list the replica can only replace "
+            .. "cannot drift from the authority's. Reliable and after the spawns, so it never names a "
+            .. "part the replica has not been sent.",
+    },
+    {
+        Name = "OwnedState",
+        Id = 12,
+        Channel = "Ownership",
+        Direction = "ToAuthority",
+        Layout = {
+            { Name = "tick", Type = "u64", Doc = "The owner's tick. Not newer than the last one taken: dropped." },
+            { Name = "count", Type = "u16" },
+            {
+                Name = "parts",
+                Type = "repeat",
+                Count = "count",
+                Each = {
+                    { Name = "netId", Type = "u32", Doc = "A part the sender owns; any other is skipped." },
+                    { Name = "cframe", Type = "CFrameD" },
+                    { Name = "linearVelocity", Type = "Vector3", Doc = "Metres per second." },
+                    { Name = "angularVelocity", Type = "Vector3", Doc = "Radians per second." },
+                },
+            },
+        },
+        Doc = "One tick of the parts a replica owns: for each, its network id, its transform and its "
+            .. "linear and angular velocity, as the owner's solver left them. The authority takes a state "
+            .. "only for a part the sender owns at the moment it arrives, and moves the part there.",
     },
 }
 

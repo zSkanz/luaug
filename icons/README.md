@@ -1,7 +1,7 @@
 # icons/ — the editor's icon themes
 
-> **Current artwork: Orbit (2026-09-23).** All 150 IDs resolve to 138 geometric
-> drawings, including the lighting IDs from ADR 0096 and three navigation IDs from ADR 0098. See [the style and exact prompt](../art/editor-icons/orbit/STYLE.md)
+> **Current artwork: Orbit (2026-09-23).** All 152 IDs resolve to 140 geometric
+> drawings, including the lighting IDs from ADR 0096, the three navigation IDs from ADR 0098 and Team/TeamService from ADR 0099. See [the style and exact prompt](../art/editor-icons/orbit/STYLE.md)
 > and [the visual gallery](../art/editor-icons/orbit/index.html). The loader,
 > palette and alias contracts below still apply; historical counts and
 > silhouette-review measurements describe the previous artwork.

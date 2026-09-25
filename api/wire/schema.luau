@@ -58,6 +58,75 @@ export type Encoding =
     -- travel as names beside it.
     | "MaterialValues"
 
+--- One encoding as the published protocol describes it (ADR 0100).
+export type EncodingDesc = {
+    Name: Encoding,
+    --- Its size on the wire. Checked against the engine's `wireBytes` by a test,
+    --- so the specification cannot say one size while the code writes another.
+    Bytes: number,
+    --- How the bytes are laid down, for somebody writing a peer.
+    Layout: string,
+}
+
+--- **Every encoding, in its permanent numeric order**: the position is the
+--- value of `generated::Encoding`, so an entry is only ever appended.
+Schema.Encodings = {
+    { Name = "Bool", Bytes = 1, Layout = "u8: 0 is false; anything else reads as true." },
+    { Name = "U8", Bytes = 1, Layout = "u8." },
+    { Name = "U16", Bytes = 2, Layout = "u16." },
+    { Name = "U32", Bytes = 4, Layout = "u32." },
+    { Name = "I32", Bytes = 4, Layout = "i32, two's complement." },
+    { Name = "F32", Bytes = 4, Layout = "IEEE-754 binary32." },
+    { Name = "F64", Bytes = 8, Layout = "IEEE-754 binary64." },
+    { Name = "Vector3", Bytes = 12, Layout = "f32 x, y, z." },
+    { Name = "Position", Bytes = 24, Layout = "f64 x, y, z: a world coordinate." },
+    {
+        Name = "CFrameD",
+        Bytes = 60,
+        Layout = "f64 position x, y, z; then the rotation as nine f32, column by column: the right vector "
+            .. "(x, y, z), the up vector, then the back vector. The look direction is the back vector negated. "
+            .. "Nothing is quantised.",
+    },
+    { Name = "Color3", Bytes = 12, Layout = "f32 r, g, b, linear in [0, 1] by convention and not clamped." },
+    {
+        Name = "NameAtom",
+        Bytes = 4,
+        Layout = "u32: an interned string, numbered in the AUTHORITY's table. The `Snapshot` that carries "
+            .. "it also carries the number's text, and 0 is no name.",
+    },
+    { Name = "InstanceRef", Bytes = 4, Layout = "u32: a network id, 0 for none." },
+    {
+        Name = "MaterialOverrides",
+        Bytes = 48,
+        Layout = "u16 mask of the parameters set, two zero bytes, then eleven f32: colour r, g, b; "
+            .. "transparency; emissive r, g, b; metalness; roughness; normal scale; alpha cutoff. Mask bit n is "
+            .. "parameter n: Color 0, Transparency 1, ColorMap 2, NormalMap 3, MetallicRoughnessMap 4, "
+            .. "Emissive 5, EmissiveMap 6, Metalness 7, Roughness 8, NormalScale 9, AlphaMode 10, "
+            .. "AlphaCutoff 11, DoubleSided 12.",
+    },
+    {
+        Name = "MaterialValues",
+        Bytes = 52,
+        Layout = "The 48 bytes of `MaterialOverrides`, then u8 alpha mode, u8 double-sided, and two zero "
+            .. "bytes. All zero when the part wears no runtime clone.",
+    },
+} :: { EncodingDesc }
+
+--- One part of a message, in the order it is written (ADR 0100).
+---
+--- `Type` is a primitive (`u8`, `u16`, `u32`, `u64`, `f32`, `text`), an
+--- `Encoding`'s name, `value` (a field's value in the encoding its wire id
+--- names), `arguments` (a remote call's encoded arguments, specified on their
+--- own), or `repeat` -- which writes `Each` as many times as the earlier part
+--- `Count` names says.
+export type Part = {
+    Name: string,
+    Type: string,
+    Count: string?,
+    Each: { Part }?,
+    Doc: string?,
+}
+
 --- One replicated field.
 export type Field = {
     Name: string,
@@ -150,6 +219,9 @@ export type Message = {
     --- accepting whatever a client asserted.
     Direction: "ToAuthority" | "ToReplica",
     Doc: string,
+    --- **Its bytes, after the type byte, as the published protocol states
+    --- them** (ADR 0100).
+    Layout: { Part },
 }
 
 export type Definition = {
@@ -166,6 +238,42 @@ export type Definition = {
     Channels: { Channel }?,
     Messages: { Message }?,
 }
+
+local Primitives: { [string]: boolean } = {
+    u8 = true,
+    u16 = true,
+    u32 = true,
+    u64 = true,
+    f32 = true,
+    text = true,
+    value = true,
+    arguments = true,
+}
+
+--- A layout names only types the specification defines, and a repeat names a
+--- count written before it.
+local function checkLayout(where: string, parts: { Part }, fail: (string) -> ())
+    local seen: { [string]: boolean } = {}
+    local encodings: { [string]: boolean } = {}
+    for _, encoding in Schema.Encodings do
+        encodings[encoding.Name] = true
+    end
+    for _, part in parts do
+        if part.Type == "repeat" then
+            if part.Count == nil or not seen[part.Count] then
+                fail(`{where}.{part.Name}: a repeat counts by a part written before it`)
+            end
+            if part.Each == nil or #part.Each == 0 then
+                fail(`{where}.{part.Name}: a repeat says what it repeats`)
+            else
+                checkLayout(`{where}.{part.Name}`, part.Each, fail)
+            end
+        elseif not Primitives[part.Type] and not encodings[part.Type] then
+            fail(`{where}.{part.Name}: {part.Type} is not a type the protocol defines`)
+        end
+        seen[part.Name] = true
+    end
+end
 
 --- What `wirecheck` enforces beyond what the type checker can.
 ---
@@ -273,6 +381,10 @@ function Schema.validate(definition: Definition): { string }
         if not channelNames[message.Channel] then
             fail(`message {message.Name}: channel {message.Channel} is not declared`)
         end
+        if #message.Layout == 0 then
+            fail(`message {message.Name}: a message states its layout (ADR 0100)`)
+        end
+        checkLayout(`message {message.Name}`, message.Layout, fail)
     end
 
     return problems

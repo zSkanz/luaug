@@ -1477,3 +1477,127 @@ TEST_CASE("the world's blur travels under Lighting, and a camera's stays on its 
     CHECK(blurs == 1);
     CHECK(match.replica->checksumFailures() == 0);
 }
+
+// --- ADR 0099 -------------------------------------------------------------------
+
+namespace {
+
+// A `TeamService` on one side, with its teams made by `team`.
+core::InstanceId teamServiceOf(RealSide& side)
+{
+    const core::InstanceId id = side.world.create(side.classes.findId(side.atoms.intern("TeamService")));
+    REQUIRE(id.valid());
+    side.world.setName(id, side.atoms.intern("TeamService"));
+    REQUIRE_FALSE(side.world.setParent(id, side.dataModel).has_value());
+    return id;
+}
+
+core::InstanceId team(RealSide& side, core::InstanceId service, std::string_view name, core::Color3 color)
+{
+    const core::InstanceId id = side.world.create(side.classes.findId(side.atoms.intern("Team")));
+    REQUIRE(id.valid());
+    side.world.setName(id, side.atoms.intern(name));
+    side.world.teams().find(id)->color = color;
+    REQUIRE_FALSE(side.world.setParent(id, service).has_value());
+    return id;
+}
+
+} // namespace
+
+TEST_CASE("a player who joins is put on the open team with the fewest players, and a team gone is none")
+{
+    RealSide side;
+    const core::InstanceId service = teamServiceOf(side);
+    const core::InstanceId red = team(side, service, "Red", {1.0f, 0.0f, 0.0f});
+    const core::InstanceId closed = team(side, service, "Referees", {0.0f, 0.0f, 0.0f});
+    side.world.teams().find(closed)->autoAssign = false;
+    const core::InstanceId blue = team(side, service, "Blue", {0.0f, 0.0f, 1.0f});
+
+    const core::InstanceId first = scene::createPlayer(side.world, side.network, 1, true);
+    const core::InstanceId second = scene::createPlayer(side.world, side.network, 2, false);
+    const core::InstanceId third = scene::createPlayer(side.world, side.network, 3, false);
+    // Ties to the first in child order; never the closed one.
+    CHECK(side.world.players().find(first)->team == red);
+    CHECK(side.world.players().find(second)->team == blue);
+    CHECK(side.world.players().find(third)->team == red);
+
+    REQUIRE(side.world.destroy(red));
+    side.world.retireDestroyed();
+    CHECK_FALSE(side.world.players().find(first)->team.valid());
+}
+
+TEST_CASE("each machine's Player.Team is its own copy of the team the authority named, colour and all")
+{
+    PlayedMatch match;
+    const core::InstanceId serverTeams = teamServiceOf(match.server);
+    const core::InstanceId clientTeams = teamServiceOf(match.client);
+    const core::InstanceId red = team(match.server, serverTeams, "Red", {1.0f, 0.2f, 0.2f});
+    match.server.world.engineState().streamingLoadRadius = 50.0;
+    const core::InstanceId racer = match.part("Racer", core::DVec3{0.0, 1.0, 0.0});
+    match.server.world.players().find(match.remote())->character = racer;
+    match.server.world.players().find(match.remote())->team = red;
+    match.run(4);
+
+    // Whatever the distance -- a team has none -- into the replica's own service.
+    const core::InstanceId redHere = match.copyOf(red);
+    REQUIRE(redHere.valid());
+    CHECK(match.client.world.parentOf(redHere) == clientTeams);
+    CHECK(static_cast<double>(match.client.world.teams().find(redHere)->color.g) == doctest::Approx(0.2));
+    CHECK(match.client.world.players().find(match.me)->team == redHere);
+
+    // A side taken away is taken away everywhere.
+    match.server.world.players().find(match.remote())->team = {};
+    match.run(2);
+    CHECK_FALSE(match.client.world.players().find(match.me)->team.valid());
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a part handed to a replica is simulated there, followed by the authority, and handed back")
+{
+    PlayedMatch match;
+    const core::InstanceId ball = match.part("Ball", core::DVec3{0.0, 1.0, 0.0});
+    match.run(3);
+    const core::InstanceId mine = match.copyOf(ball);
+    REQUIRE(mine.valid());
+
+    match.server.world.rigidBodies().find(ball)->networkOwner = 2;
+    match.run(3);
+    CHECK(match.client.world.rigidBodies().find(mine)->networkOwner == 2);
+
+    // The owner kicks it: the authority takes where it went, and the replica's
+    // own copy is not pulled back by a snapshot a round trip old.
+    match.client.world.parts().find(mine)->cframe.position = core::DVec3{7.0, 1.0, 0.0};
+    match.client.world.rigidBodies().find(mine)->linearVelocity = core::Vec3{3.0f, 0.0f, 0.0f};
+    match.run(3);
+    CHECK(match.server.world.parts().find(ball)->cframe.position.x == doctest::Approx(7.0));
+    CHECK(static_cast<double>(match.server.world.rigidBodies().find(ball)->linearVelocity.x) == doctest::Approx(3.0));
+    match.client.world.parts().find(mine)->cframe.position = core::DVec3{8.0, 1.0, 0.0};
+    match.run(1);
+    CHECK(match.client.world.parts().find(mine)->cframe.position.x == doctest::Approx(8.0));
+
+    // Handed back: the state still in flight -- the 8 -- is dropped, since the
+    // authority takes only what it gave and it has taken this back; the
+    // replica's copy goes back to where the authority has it, not where it had
+    // rolled to since; and what the replica does to it no longer reaches the
+    // authority.
+    match.server.world.rigidBodies().find(ball)->networkOwner = 0;
+    match.client.world.parts().find(mine)->cframe.position = core::DVec3{12.0, 1.0, 0.0};
+    match.run(1);
+    CHECK(match.client.world.rigidBodies().find(mine)->networkOwner == 0);
+    const double settled = match.server.world.parts().find(ball)->cframe.position.x;
+    CHECK(settled == doctest::Approx(7.0));
+    CHECK(match.client.world.parts().find(mine)->cframe.position.x == doctest::Approx(settled));
+    match.client.world.parts().find(mine)->cframe.position = core::DVec3{-40.0, 1.0, 0.0};
+    match.run(8);
+    CHECK(match.server.world.parts().find(ball)->cframe.position.x == doctest::Approx(settled));
+    CHECK(match.replica->checksumFailures() == 0);
+}
+
+TEST_CASE("a player who leaves gives back every part they owned")
+{
+    PlayedMatch match;
+    const core::InstanceId ball = match.part("Ball", core::DVec3{0.0, 1.0, 0.0});
+    match.server.world.rigidBodies().find(ball)->networkOwner = 2;
+    scene::removePlayer(match.server.world, match.server.network, match.remote());
+    CHECK(match.server.world.rigidBodies().find(ball)->networkOwner == 0);
+}

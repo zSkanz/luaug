@@ -156,6 +156,59 @@ enemy.Parent = workspace
 `RemoteEvent`s and `RemoteFunction`s can live in `ReplicatedStorage` as well as
 in `Workspace`. A replica finds them with `WaitForChild` either way.
 
+## Sides: `Team`
+
+A side is a `Team` under `TeamService`, with a `Name` and a `Color`. Every team
+there reaches every replica, however far away, and so does each player's
+`Team`:
+
+```luau
+local TeamService = game:GetService("TeamService")
+
+local red = Instance.new("Team")
+red.Name = "Red"
+red.Color = Color3.fromRGB(220, 60, 60)
+red.Parent = TeamService
+
+NetworkService.PlayerAdded:Connect(function(player)
+    print(player.Name, "plays for", if player.Team then player.Team.Name else "nobody")
+end)
+```
+
+A player who joins is put on the team with the fewest players among those with
+`AutoAssign` on, ties going to the first. Turn it off for a team nobody joins by
+arriving -- referees, spectators -- and set `player.Team` yourself, on the
+authority. `Team:GetPlayers()` answers who is on a side, in the order they
+joined.
+
+## Handing a part over: network ownership
+
+Every loose part is simulated by the authority, so a ball a player kicks moves
+a round trip after the kick. Hand the ball to that player and their machine
+simulates it instead: it moves at once for them, the authority follows what
+they send, and everybody else sees it through the usual snapshots.
+
+```luau
+ball:SetNetworkOwner(player) -- that player's machine simulates it
+ball:SetNetworkOwner(nil)    -- the authority's again
+```
+
+Only the authority hands parts over, and only parts that are not anchored.
+`GetNetworkOwner()` answers the player, or `nil` for the authority; a replica
+knows only about itself, so there it answers its own player or `nil`. A player
+who leaves gives back everything they owned.
+
+**What the owner sends is trusted.** Its machine could put the part anywhere,
+so hand over what a player may move -- their ball, their vehicle -- and check
+anything that matters in the authority's own scripts.
+
+## The protocol
+
+What the machines say to each other is published, byte for byte, in
+`docs/protocol/wire.md` -- generated from the same schema the engine is built
+against, so it is exactly what this build speaks. A peer must speak the same
+protocol version; the CHANGELOG says when a release changes it.
+
 ## What is not here
 
 - unreliable messages;

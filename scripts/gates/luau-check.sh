@@ -191,6 +191,27 @@ lute tools/repo/inertcheck.luau
 echo "== the wire schema decides about every class =="
 lute tools/repo/wirecheck.luau
 
+# The wire's C++ table and the published protocol are both generated from the
+# schema (ADR 0100), and neither was ever checked for freshness: a schema edit
+# without a regeneration compiled a peer against one protocol and documented
+# another.
+echo "== generated wire schema and protocol are fresh =="
+wire_before="$(mktemp -d)"
+cp engine/replication/generated/wire_schema.gen.h "$wire_before/wire_schema.gen.h"
+cp docs/protocol/wire.md "$wire_before/wire.md"
+lute api/generator/gen_wire.luau >/dev/null
+for pair in "wire_schema.gen.h:engine/replication/generated/wire_schema.gen.h" "wire.md:docs/protocol/wire.md"; do
+    if ! diff -q "$wire_before/${pair%%:*}" "${pair#*:}" >/dev/null; then
+        echo "luau-check: ${pair#*:} does not match api/wire." >&2
+        echo "  Either it was hand-edited, or the wire schema changed without" >&2
+        echo "  regenerating. Both are the same fix: commit the regenerated file." >&2
+        diff -u "$wire_before/${pair%%:*}" "${pair#*:}" | head -40 >&2
+        rm -rf "$wire_before"
+        exit 1
+    fi
+done
+rm -rf "$wire_before"
+
 # The API reference is generated from the same IDL and checked in like every
 # other generated artifact (roadmap M8). Compared as a DIRECTORY rather than as a
 # file list, because a class removed from the IDL has to take its page with it --

@@ -805,6 +805,15 @@ declare extern type BasePart extends PVInstance with
     --- Removes this part's override of one parameter, so it draws with the material's value again.
     --- Clearing one that is not overridden does nothing.
     function ClearMaterialParameter(self, name: string): ()
+    --- Hands this part to one player's machine (ADR 0099), which then simulates it and sends where it
+    --- is: what that player pushes moves at once rather than a round trip later. `nil` hands it back to
+    --- the authority. Only the authority may call it, and only on a part that is not anchored; a player
+    --- who leaves gives back everything they owned. **What the owner sends is trusted** -- a game that
+    --- must not trust it checks it, or does not hand the part over.
+    function SetNetworkOwner(self, player: Player?): ()
+    --- The player whose machine simulates this part, or `nil` for the authority. A replica knows only
+    --- about itself: it answers its own `Player` for a part it owns, and `nil` otherwise.
+    function GetNetworkOwner(self): Player?
     --- Adds an instantaneous change of momentum at the part's centre of mass, in kilogram-metres per
     --- second. Applied at the next simulation tick and ignored by an anchored part, which has no
     --- momentum to change.
@@ -1967,6 +1976,7 @@ declare extern type DataModel extends Instance with
     function GetService(self, name: "Workspace"): Workspace
     function GetService(self, name: "Lighting"): Lighting
     function GetService(self, name: "ReplicatedStorage"): ReplicatedStorage
+    function GetService(self, name: "TeamService"): TeamService
     function GetService(self, name: "ServerStorage"): ServerStorage
     function GetService(self, name: "NetworkService"): NetworkService
     function GetService(self, name: "RunService"): RunService
@@ -2100,6 +2110,21 @@ end
 declare extern type ReplicatedStorage extends Instance with
 end
 
+declare extern type TeamService extends Instance with
+    --- Every team under this service, in child order.
+    function GetTeams(self): { Team }
+end
+
+declare extern type Team extends Instance with
+    --- The side's colour, for a game to paint name tags, scoreboards and shirts with.
+    Color: Color3
+    --- Whether a player who joins may be put on this team. The engine picks the `AutoAssign` team with
+    --- the fewest players.
+    AutoAssign: boolean
+    --- Every player on this team, in the order they joined.
+    function GetPlayers(self): { Player }
+end
+
 declare extern type ServerStorage extends Instance with
 end
 
@@ -2167,6 +2192,10 @@ declare extern type Player extends Instance with
     --- up for replicas in the order they joined. Never reused within a session, and not an account: a
     --- reconnect is a new number.
     read UserId: number
+    --- The side this player is on (ADR 0099), or `nil` for none. **The authority's game sets it**, and
+    --- every replica learns it with the roster. A player who joins is put on the `AutoAssign` team with
+    --- the fewest players -- ties to the first -- or on none when there is no such team.
+    Team: Team?
     --- The part that is this player in the world -- a `CharacterBody`, a racer, whatever the game moves
     --- for them. **The authority's game sets it**, and every replica learns it: each machine's `Player`
     --- for someone points at that machine's copy of their part. It is what the engine knows about
@@ -3211,6 +3240,7 @@ declare Instance: {
         & (("NavigationArea") -> NavigationArea)
         & (("NavigationLink") -> NavigationLink)
         & (("NavigationAgent") -> NavigationAgent)
+        & (("Team") -> Team)
         & (("RemoteEvent") -> RemoteEvent)
         & (("RemoteFunction") -> RemoteFunction),
     stamp: (name: string, linked: boolean?) -> Instance,

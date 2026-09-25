@@ -244,6 +244,10 @@ def draw_icon(group, name):
         i.line((4,22),(9,15),(13,19),closed=True)
         for x,y,r in ((6,9,1.4),(13,8,2),(20,4,2),(20,13,1.3),(12,2,1)): i.circle(x,y,r,True)
     elif name == "Player": i.circle(12,7,4).arc(12,21,8,180,360).line((4,21),(20,21))
+    elif name == "Team":
+        i.line((6,21),(6,3)).line((6,4),(19,4),(15.5,8.5),(19,13),(6,13),closed=True)
+    elif name == "TeamService":
+        i.circle(8,8,3).arc(8,20,6,180,360).circle(16,8,3).arc(16,20,6,180,360).line((2,20),(22,20))
     elif name in ("RemoteEvent", "RemoteFunction"):
         i.rect(2,6,6,12,1).rect(16,6,6,12,1).line((8,10),(16,10)).line((12,7),(16,10),(12,13))
         if name == "RemoteFunction": i.line((16,16),(8,16)).line((11,13),(8,16),(11,19))
@@ -416,6 +420,21 @@ def preview(theme, images):
                 sheet.paste(Image.new("RGB",(size,size),color),(x+offset,y+32-size),alpha)
             d.text((x,y+48), name, font=font, fill=fg)
     sheet.save(ART / "navigation-review.png")
+    teams = ("Player", "Team", "TeamService")
+    sheet = Image.new("RGB", (720, 220))
+    d = ImageDraw.Draw(sheet)
+    for row, (mode, bg) in enumerate((("dark", "#191E28"), ("light", "#F4F6FA"))):
+        d.rectangle((0, row * 110, 720, (row + 1) * 110), fill=bg)
+        fg = "#DCE3F1" if mode == "dark" else "#273247"
+        for n, name in enumerate(teams):
+            x, y = 20 + n * 240, row * 110 + 18
+            im = images[f"class/{name}.png"]
+            color = theme["palette"][theme["roles"].get(f"class.{name}", theme["defaultRole"])][mode]
+            for offset, size in ((0,32), (45,24), (82,16), (110,13)):
+                alpha = im.getchannel("A").resize((size,size), Image.Resampling.BOX)
+                sheet.paste(Image.new("RGB",(size,size),color),(x+offset,y+32-size),alpha)
+            d.text((x,y+48), name, font=font, fill=fg)
+    sheet.save(ART / "teams-review.png")
     cards=[]
     for path in images:
         cards.append(f'<figure><div><img src="{path.replace(".png", ".svg")}" width="48"><img src="{path.replace(".png", ".svg")}" width="24"><img src="{path.replace(".png", ".svg")}" width="16"></div><figcaption>{html.escape(path[:-4])}</figcaption></figure>')

@@ -377,6 +377,14 @@ Value getWorkspaceTerrain(const World& world, core::InstanceId id);
 void attachWorkspaceComponents(World& world, core::InstanceId id);
 void detachWorkspaceComponents(World& world, core::InstanceId id);
 
+// Team
+Value getTeamColor(const World& world, core::InstanceId id);
+bool setTeamColor(World& world, core::InstanceId id, const Value& value);
+Value getTeamAutoAssign(const World& world, core::InstanceId id);
+bool setTeamAutoAssign(World& world, core::InstanceId id, const Value& value);
+void attachTeamComponents(World& world, core::InstanceId id);
+void detachTeamComponents(World& world, core::InstanceId id);
+
 // NetworkService
 Value getNetworkServiceAuthority(const World& world, core::InstanceId id);
 Value getNetworkServiceTopology(const World& world, core::InstanceId id);
@@ -386,6 +394,8 @@ Value getNetworkServiceLocalPlayer(const World& world, core::InstanceId id);
 
 // Player
 Value getPlayerUserId(const World& world, core::InstanceId id);
+Value getPlayerTeam(const World& world, core::InstanceId id);
+bool setPlayerTeam(World& world, core::InstanceId id, const Value& value);
 Value getPlayerCharacter(const World& world, core::InstanceId id);
 bool setPlayerCharacter(World& world, core::InstanceId id, const Value& value);
 void attachPlayerComponents(World& world, core::InstanceId id);

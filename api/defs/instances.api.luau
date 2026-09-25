@@ -589,6 +589,27 @@ local Classes: { Schema.Class } = {
                     .. "again. Clearing one that is not overridden does nothing.",
             },
             {
+                Name = "SetNetworkOwner",
+                Parameters = { { Name = "player", Type = "Player?" } },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Hands this part to one player's machine (ADR 0099), which then simulates it and sends "
+                    .. "where it is: what that player pushes moves at once rather than a round trip later. "
+                    .. "`nil` hands it back to the authority. Only the authority may call it, and only on a part "
+                    .. "that is not anchored; a player who leaves gives back everything they owned. **What the "
+                    .. "owner sends is trusted** -- a game that must not trust it checks it, or does not hand "
+                    .. "the part over.",
+            },
+            {
+                Name = "GetNetworkOwner",
+                Parameters = {},
+                Returns = { "Player?" },
+                ThreadSafety = "ReadParallel",
+                Doc = "The player whose machine simulates this part, or `nil` for the authority. A replica "
+                    .. "knows only about itself: it answers its own `Player` for a part it owns, and `nil` "
+                    .. "otherwise.",
+            },
+            {
                 Name = "ApplyImpulse",
                 Parameters = { { Name = "impulse", Type = "vector" } },
                 Returns = {},
