@@ -226,6 +226,16 @@ ${format_block}
             DEPENDS surfacewrap "${surface}"
             COMMENT "Surface ${surface_name} -> wrappers"
             VERBATIM)
+        # The source beside the blobs: the renderer reads its parameters from
+        # it, so the layout it packs is the one the blobs were compiled with.
+        set(surface_copy "${out_dir}/surfaces/${surface_name}.surface.hlsl")
+        add_custom_command(
+            OUTPUT "${surface_copy}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${surface}" "${surface_copy}"
+            DEPENDS "${surface}"
+            COMMENT "Surface ${surface_name} -> content"
+            VERBATIM)
+        list(APPEND outputs "${surface_copy}")
 
         foreach(variant IN LISTS variants)
             set(name "surface_${surface_name}_${variant}")

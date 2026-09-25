@@ -762,6 +762,29 @@ if(LUAUG_BUILD_TESTS)
         SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
         TIMEOUT 120)
 
+    # ADR 0091's proof: the built-in surface, written as a surface shader,
+    # forced onto every static part, draws what the built-in surface draws --
+    # to the bit, on this machine. Two scenes: lights, shadows and fog; and
+    # meshes with their own maps.
+    foreach(scene specular meshes)
+        if(scene STREQUAL "meshes")
+            set(scene_dir "${CMAKE_SOURCE_DIR}/tests/rendercapture/meshes")
+        else()
+            set(scene_dir "${CMAKE_SOURCE_DIR}/tests/screenshots/${scene}")
+        endif()
+        add_test(NAME surface_contract_proof_${scene}
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DIMGCMP=$<TARGET_FILE:imgcmp>
+                -DSCRIPT=${scene_dir}
+                -DFRAMES=30
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface-proof-${scene}
+                -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_surface_proof.cmake)
+        set_tests_properties(surface_contract_proof_${scene} PROPERTIES
+            SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+            TIMEOUT 180)
+    endforeach()
+
     # M8's graphics settings family, as a differential. See the driver for why
     # the claim is "these two must differ" rather than a golden: a preset that
     # is parsed and then reaches nothing renders exactly what it did before.

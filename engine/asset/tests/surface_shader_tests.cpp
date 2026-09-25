@@ -50,21 +50,21 @@ TEST_CASE("a surface's parameters are read with their types, defaults and annota
     CHECK(height.name == "WaveHeight");
     CHECK(height.annotation == SurfaceAnnotation::Range);
     CHECK(static_cast<double>(height.maximum) == doctest::Approx(4.0));
-    CHECK(height.offset == 16);
+    CHECK(height.offset == 32);
     CHECK(height.line == 4);
 
     // A float3 fits after one float in a row of sixteen -- four and twelve.
     const SurfaceParam& deep = *reflection.param("Deep");
-    CHECK(deep.offset == 20);
+    CHECK(deep.offset == 36);
     CHECK(deep.annotation == SurfaceAnnotation::Colour);
     CHECK(static_cast<double>(deep.value[2]) == doctest::Approx(0.2));
     // The row is full, so the next float starts one.
-    CHECK(reflection.param("Speed")->offset == 32);
-    CHECK(reflection.param("Foamy")->offset == 36);
+    CHECK(reflection.param("Speed")->offset == 48);
+    CHECK(reflection.param("Foamy")->offset == 52);
     CHECK(static_cast<double>(reflection.param("Foamy")->value[0]) == doctest::Approx(1.0));
-    // A float4 never straddles: after 40 it goes to 48.
-    CHECK(reflection.param("Tint")->offset == 48);
-    CHECK(reflection.blockBytes == 64);
+    // A float4 never straddles: after 56 it goes to 64.
+    CHECK(reflection.param("Tint")->offset == 64);
+    CHECK(reflection.blockBytes == 80);
 
     REQUIRE(reflection.textures.size() == 2);
     CHECK(reflection.textures[1].fallback == SurfaceTextureDefault::Normal);
@@ -119,7 +119,9 @@ TEST_CASE("a wrapper declares the block and the textures where the renderer bind
     const std::string fragment =
         surfaceWrapper(reflection, SurfaceVariant::Forward, SurfaceStage::Fragment, "ocean.surface.hlsl");
     CHECK(fragment.find("register(b2, space3)") != std::string::npos);
-    CHECK(fragment.find("Texture2D Ripples : register(t14, space2)") != std::string::npos);
+    // The first four take the built-in maps' slots, which a surface does not read.
+    CHECK(fragment.find("Texture2D Ripples : register(t1, space2)") != std::string::npos);
+    CHECK(fragment.find("#define LUAUG_SURFACE_WRAPPER") != std::string::npos);
     CHECK(fragment.find("lightSurface") != std::string::npos);
 
     const std::string depth =
@@ -133,7 +135,9 @@ TEST_CASE("a wrapper declares the block and the textures where the renderer bind
     CHECK(stubbed.find("void surfaceVertex(inout SurfaceVertex vertex, SurfaceInputs inputs)") != std::string::npos);
     CHECK(stubbed.find("void surfaceFragment(SurfaceInputs inputs, inout SurfaceOutput surface)") != std::string::npos);
 
-    CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Forward, SurfaceStage::Fragment).samplers == 15);
+    CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Forward, SurfaceStage::Fragment).samplers == 13);
+    CHECK(surfaceFragmentSlot(4) == 13);
+    CHECK(surfaceFragmentSlot(6) == 15);
     CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Forward, SurfaceStage::Fragment).uniformBuffers == 3);
     CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Depth, SurfaceStage::Vertex).samplers == 2);
 }
@@ -147,10 +151,10 @@ TEST_CASE("a parameter's value is written where its offset says, in its own repr
     const core::f32 off[1] = {0.0f};
     writeSurfaceParam(*reflection.param("Foamy"), off, block);
     core::f32 read[3]{};
-    std::memcpy(read, block.data() + 20, sizeof(read));
+    std::memcpy(read, block.data() + 36, sizeof(read));
     CHECK(read[0] == 0.25f);
     CHECK(read[2] == 0.75f);
     core::u32 flag = 7;
-    std::memcpy(&flag, block.data() + 36, 4);
+    std::memcpy(&flag, block.data() + 52, 4);
     CHECK(flag == 0u);
 }

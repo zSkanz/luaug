@@ -389,7 +389,7 @@ void appendBlock(std::string& out, const SurfaceReflection& reflection, std::str
 {
     out += "cbuffer LuaugSurfaceBlock : register(";
     out += registerName;
-    out += ")\n{\n    float4 LuaugSurfaceClock;\n";
+    out += ")\n{\n    float4 LuaugSurfaceClock;\n    uint4 LuaugSurfaceTextures;\n";
     for (const SurfaceParam& param : reflection.params) {
         out += "    ";
         out += hlslType(param.type);
@@ -400,11 +400,12 @@ void appendBlock(std::string& out, const SurfaceReflection& reflection, std::str
     out += "};\n\n";
 }
 
-void appendTextures(std::string& out, const SurfaceReflection& reflection, u32 first, std::string_view space)
+void appendTextures(std::string& out, const SurfaceReflection& reflection, bool fragment, std::string_view space)
 {
     for (u32 index = 0; index < reflection.textures.size(); ++index) {
-        const std::string slot = std::to_string(first + index);
+        const std::string slot = std::to_string(fragment ? surfaceFragmentSlot(index) : index);
         const std::string& name = reflection.textures[index].name;
+        out += "static const uint " + name + "Bit = " + std::to_string(1u << index) + "u;\n";
         out += "Texture2D " + name + " : register(t" + slot + ", " + std::string(space) + ");\n";
         out += "SamplerState " + name + "Sampler : register(s" + slot + ", " + std::string(space) + ");\n";
     }
@@ -456,7 +457,9 @@ SurfaceInputs luaugVertexInputs(SurfaceVertex vertex, float4x4 model)
     inputs.Time = LuaugSurfaceClock.x;
     inputs.CameraPosition = LuaugSurfaceClock.yzw;
     inputs.ObjectToWorld = model;
-    inputs.WorldPosition = mul(model, float4(vertex.Position, 1.0f)).xyz;
+    // The draw is relative to the camera (the renderer's floating origin); the
+    // world is not.
+    inputs.WorldPosition = mul(model, float4(vertex.Position, 1.0f)).xyz + LuaugSurfaceClock.yzw;
     inputs.WorldNormal = normalize(mul((float3x3)model, vertex.Normal));
     inputs.WorldTangent = float4(mul((float3x3)model, vertex.Tangent.xyz), vertex.Tangent.w);
     inputs.Uv0 = vertex.Uv0;
@@ -533,7 +536,7 @@ constexpr std::string_view ForwardFragment = R"(float4 FragmentMain(Interpolants
     inputs.CameraPosition = LuaugSurfaceClock.yzw;
     inputs.ObjectToWorld = float4x4(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
                                     0.0f, 0.0f, 1.0f);
-    inputs.WorldPosition = input.ShadingPosition;
+    inputs.WorldPosition = input.ShadingPosition + LuaugSurfaceClock.yzw;
     inputs.WorldNormal = geometricNormal;
     inputs.WorldTangent = input.Tangent;
     inputs.Uv0 = input.Uv;
@@ -574,6 +577,7 @@ std::string surfaceWrapper(const SurfaceReflection& reflection, SurfaceVariant v
 {
     std::string out;
     out += "// GENERATED from a surface shader by the engine (ADR 0091). Do not edit.\n";
+    out += "#define LUAUG_SURFACE_WRAPPER\n";
     if (instanced(variant))
         out += "#define LUAUG_SURFACE_INSTANCED\n";
     if (variant == SurfaceVariant::ForwardBlended)
@@ -591,11 +595,11 @@ std::string surfaceWrapper(const SurfaceReflection& reflection, SurfaceVariant v
 
     if (stage == SurfaceStage::Vertex) {
         appendBlock(out, reflection, "b1, space1");
-        appendTextures(out, reflection, 0, "space0");
+        appendTextures(out, reflection, false, "space0");
     }
     else {
         appendBlock(out, reflection, "b2, space3");
-        appendTextures(out, reflection, FirstSurfaceSampler, "space2");
+        appendTextures(out, reflection, true, "space2");
     }
 
     out += "#include \"";
@@ -627,7 +631,7 @@ SurfaceResourceCounts surfaceResourceCounts(const SurfaceReflection& reflection,
         return SurfaceResourceCounts{textures, 2};
     if (depthOnly(variant))
         return SurfaceResourceCounts{0, 0};
-    return SurfaceResourceCounts{FirstSurfaceSampler + textures, 3};
+    return SurfaceResourceCounts{textures > 4 ? surfaceFragmentSlot(textures - 1) + 1 : EngineFragmentSamplers, 3};
 }
 
 void writeSurfaceParam(const SurfaceParam& param, std::span<const f32> value, std::span<core::u8> block) noexcept

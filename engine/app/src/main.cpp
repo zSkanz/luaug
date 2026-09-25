@@ -374,6 +374,12 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
         // then these. Each is an OVERRIDE rather than a value, so that "nobody
         // said anything" and "somebody asked for the default" stay different
         // answers -- see `project_config.h`.
+        // ADR 0091's proof instrument: every static part drawn with a surface
+        // shader the engine ships, in place of the built-in surface.
+        if (arg.starts_with("--force-surface=")) {
+            graphics.forcedSurface = std::string(arg.substr(arg.find('=') + 1));
+            continue;
+        }
         if (arg.starts_with("--quality=")) {
             const std::string_view value = arg.substr(arg.find('=') + 1);
             const std::optional<luaug::render::QualityLevel> level = luaug::render::parseQuality(value);

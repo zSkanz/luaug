@@ -14,11 +14,12 @@
 // both sides read it from here:
 //
 //   * the parameter block is a vertex uniform at slot 1 and a fragment uniform
-//     at slot 2, identical bytes in both. Its first 16 bytes are the engine's
-//     (the clock and the camera); the parameters follow, packed as an HLSL
-//     cbuffer packs them;
-//   * a surface texture is fragment sampler `FirstSurfaceSampler + n`, after the
-//     engine's thirteen, and vertex sampler `n`.
+//     at slot 2, identical bytes in both. Its first 32 bytes are the engine's
+//     -- the clock and the camera, then which textures the material set -- and
+//     the parameters follow, packed as an HLSL cbuffer packs them;
+//   * a surface texture is vertex sampler `n` and fragment sampler
+//     `surfaceFragmentSlot(n)`: the four slots the built-in surface's maps use,
+//     then the three after the engine's thirteen -- SDL_GPU's limit is sixteen.
 
 #include "luaug/core/types.h"
 
@@ -67,7 +68,7 @@ struct SurfaceParam
     SurfaceAnnotation annotation = SurfaceAnnotation::None;
     core::f32 minimum = 0.0f;
     core::f32 maximum = 1.0f;
-    // Byte offset in the parameter block, after the engine's 16.
+    // Byte offset in the parameter block, after the engine's 32.
     core::u32 offset = 0;
     core::u32 line = 0;
 };
@@ -94,7 +95,7 @@ struct SurfaceReflection
     bool hasVertex = false;
     bool hasFragment = false;
     // The whole block, header included, rounded to 16.
-    core::u32 blockBytes = 16;
+    core::u32 blockBytes = 32;
     std::vector<SurfaceDiagnostic> errors;
 
     [[nodiscard]] bool ok() const noexcept { return errors.empty(); }
@@ -102,11 +103,18 @@ struct SurfaceReflection
 };
 
 inline constexpr core::u32 SurfaceContractVersion = 1;
-inline constexpr core::u32 SurfaceBlockHeaderBytes = 16;
+inline constexpr core::u32 SurfaceBlockHeaderBytes = 32;
 inline constexpr core::u32 MaxSurfaceBlockBytes = 1024;
-inline constexpr core::u32 MaxSurfaceTextures = 8;
-// The engine's fragment samplers are t0..t12 (`luaug_forward.hlsli`).
-inline constexpr core::u32 FirstSurfaceSampler = 13;
+inline constexpr core::u32 MaxSurfaceTextures = 7;
+// The engine's fragment samplers end at t12 (`luaug_forward.hlsli`); a stage
+// has sixteen.
+inline constexpr core::u32 EngineFragmentSamplers = 13;
+
+// Where surface texture `index` binds in the fragment stage.
+[[nodiscard]] constexpr core::u32 surfaceFragmentSlot(core::u32 index) noexcept
+{
+    return index < 4 ? index : EngineFragmentSamplers + (index - 4);
+}
 
 // Reads the source. Never throws: every problem is a diagnostic.
 [[nodiscard]] SurfaceReflection reflectSurface(std::string_view source);

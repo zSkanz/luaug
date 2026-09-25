@@ -31,6 +31,9 @@ void surfaceFragment(SurfaceInputs inputs, inout SurfaceOutput surface)
     const float3 metallicRoughness = LUAUG_SAMPLE(MetallicRoughnessMap, inputs.Uv0).rgb;
     surface.Roughness = Roughness * metallicRoughness.g;
     surface.Metallic = Metalness * metallicRoughness.b;
-    surface.Normal = surfaceNormalFromMap(LUAUG_SAMPLE(NormalMap, inputs.Uv0).rgb, NormalScale, inputs);
+    // No map is the mesh's own normal, exactly -- not a flat texel's, which is
+    // 128/255 and tilts it by a hair (what the proof caught on shadow edges).
+    if (LUAUG_TEXTURE_SET(NormalMap))
+        surface.Normal = surfaceNormalFromMap(LUAUG_SAMPLE(NormalMap, inputs.Uv0).rgb, NormalScale, inputs);
     surface.Emissive = Emissive * LUAUG_SAMPLE(EmissiveMap, inputs.Uv0).rgb;
 }

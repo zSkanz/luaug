@@ -87,7 +87,7 @@ run at any time.
 
 ## Stage 2 — The contract
 
-- [ ] `shaders/include/luaug/surface.hlsli`: `SurfaceVertex`, `SurfaceInputs`,
+- [x] `shaders/include/luaug/surface.hlsli`: `SurfaceVertex`, `SurfaceInputs`,
       `SurfaceOutput`, `LUAUG_PARAM`, `LUAUG_TEXTURE`, and a contract version
       constant. Everything ADR 0091 lists as an input is present:
       - the simulation time interpolated to the frame;
@@ -97,10 +97,10 @@ run at any time.
       - screen position;
       - scene depth, for blended surfaces;
       - scene colour, when the material asks for it.
-- [ ] The wrapper that turns the two user functions into every pass variant:
+- [x] The wrapper that turns the two user functions into every pass variant:
       forward, instanced forward, shadow, depth and blended. A displaced vertex
       casts a displaced shadow.
-- [ ] **The proof that the contract is complete enough**: the built-in PBR
+- [x] **The proof that the contract is complete enough**: the built-in PBR
       surface, written as a surface shader and forced onto the screenshot
       scenes, matches the existing goldens. This is a test. The built-in path
       stays as it is.
@@ -141,14 +141,14 @@ run at any time.
 
 ## Stage 5 — The renderer
 
-- [ ] A pipeline cache keyed by (shader, pass variant). Record pipeline creation
+- [~] A pipeline cache keyed by (shader, pass variant). Record pipeline creation
       time and pack size per shader in `docs/perf-baselines.md`.
 - [ ] Scene depth bound for blended surfaces, which is what intersection foam
       needs.
 - [ ] Scene colour: a copy of the HDR target after the opaque pass, made by a
       full-screen draw (the ADR 0072 pattern, so the RHI does not change), made
       only in a frame where a visible material asks for it, and once per frame.
-- [ ] The simulation time handed to `SurfaceInputs` is the same interpolated
+- [x] The simulation time handed to `SurfaceInputs` is the same interpolated
       clock the transforms are drawn at (`transform_history.h`), so a GPU wave
       and a Luau wave agree on screen.
 
@@ -215,6 +215,22 @@ shaders, and mobile -- ADR 0091, *Not decided here*.
   on Windows x64 at `-j14`, 295 s on Linux x64 in the Tier-2 image; the whole
   build tree is 4 GB, what ships is `dxcompiler` (21 MB on Windows, 37.5 MB on
   Linux) and a 1 MB `dxc`. That is why CI caches only what ships.
+- **Stage 2 and 5, 2026-09-25 -- the proof found a hole, and then drew to the
+  bit.** The built-in surface written as a surface shader, forced onto every
+  static part (`--force-surface=pbr`), first differed on 234 pixels, all on
+  shadow edges: a surface could not tell a normal map that was not set from a
+  flat one, and a 1x1 flat texel is 128/255, which tilts the normal the shadow
+  bias reads. The contract gained `LUAUG_TEXTURE_SET`; after it, `contact`,
+  `specular`, `localshadow`, `meshes` and `daystrip` draw identically, maximum
+  channel delta 0, and two of them are now ctest gates.
+- **SDL_GPU allows sixteen samplers a stage, not "enough".** The lighting takes
+  nine and the built-in maps four; a surface's textures reuse the built-in
+  maps' four slots, which a surface never reads, and then the last three. So a
+  surface has seven textures, not the eight the plan said.
+- **The render snapshot is relative to the camera** (the floating origin), so
+  `WorldPosition` is the draw's position plus the camera's, carried in the
+  block's header; without it a wave laid out in world space would slide with
+  the camera.
 - **SDL_shadercross links `dxcompiler` at load time** (`DxcCreateInstance` is
   an import, not a `LoadLibrary`), so whatever links it needs the library
   beside it. The player never links it; the editor and `assetc` will.

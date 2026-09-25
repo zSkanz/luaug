@@ -61,8 +61,11 @@ struct SurfaceInputs
     // wave computed in Luau agree on screen.
     float Time;
     float3 CameraPosition;
-    // The object's transform: object space to world space.
+    // The object's transform, into the space the draw is in: the world, moved
+    // so the camera is at the origin. In the fragment stage, the identity.
     float4x4 ObjectToWorld;
+    // In the world's own coordinates -- what a script reads off `CFrame` -- so a
+    // pattern laid out in world space stays put as the camera moves.
     float3 WorldPosition;
     // Unit length, facing out of the surface.
     float3 WorldNormal;
@@ -105,9 +108,12 @@ struct SurfaceOutput
 #define LUAUG_PARAM(type, name, ...)
 // A texture of the material, sampled with `LUAUG_SAMPLE(Name, uv)`:
 // `LUAUG_TEXTURE(Name[, white | black | normal])`, the second saying what it
-// reads as when the material sets none -- white unless said. At most eight.
+// reads as when the material sets none -- white unless said. At most seven.
 #define LUAUG_TEXTURE(name, ...)
 #define LUAUG_SAMPLE(name, uv) name.Sample(name##Sampler, (uv))
+// Whether the material set this texture, rather than leaving it to its
+// fallback: a normal map that is not there is no normal map, not a flat one.
+#define LUAUG_TEXTURE_SET(name) ((LuaugSurfaceTextures.x & name##Bit) != 0u)
 #define LUAUG_SAMPLE_LEVEL(name, uv, level) name.SampleLevel(name##Sampler, (uv), (level))
 
 // A normal map's texel -- sampled, in [0, 1] -- as a world-space normal on this

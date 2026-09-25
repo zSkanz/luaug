@@ -28,7 +28,9 @@
 #include "luaug/render/transform_history.h"
 #include "luaug/rhi/types.h"
 
+#include <array>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace luaug::scene {
@@ -160,6 +162,24 @@ struct RenderEnvironment
     // the clouds (ADR 0096). Never a wall clock (R10): a paused game's clouds
     // stand still and a replay's move the same way.
     core::f64 simTime = 0.0;
+    // The same clock interpolated to the frame being drawn -- `simTime` plus
+    // the tick fraction the transforms are drawn at -- which is what a surface
+    // shader's `Time` is (ADR 0091), so a GPU wave and a Luau wave agree.
+    core::f64 surfaceTime = 0.0;
+};
+
+// One value a surface shader reads (ADR 0091), by the name it declares: a
+// number or vector, or a texture. Built-in fields travel under their own names
+// (`Color`, `Roughness`, `ColorMap`...), which is how a shader that names one
+// gets it.
+struct SurfaceValue
+{
+    std::string name;
+    std::array<f32, 4> value{};
+    rhi::TextureHandle texture{};
+    bool isTexture = false;
+
+    [[nodiscard]] bool operator==(const SurfaceValue&) const noexcept = default;
 };
 
 // A material, resolved into what the GPU binds.
@@ -175,6 +195,13 @@ struct RenderMaterial
     rhi::TextureHandle normal{};
     rhi::TextureHandle metallicRoughness{};
     rhi::TextureHandle emissive{};
+
+    // **The surface shader it names** (ADR 0091), or empty for the built-in
+    // surface; and every value that shader may read, by name. The renderer
+    // packs them into the shader's block, since only it holds the shader's
+    // layout.
+    std::string surface;
+    std::vector<SurfaceValue> surfaceValues;
 
     // The four maps, and the four flags that say they are there.
     //

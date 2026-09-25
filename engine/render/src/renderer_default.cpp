@@ -1,3 +1,4 @@
+#include "luaug/asset/surface_shader.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
@@ -14,7 +15,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace luaug::render {
@@ -451,6 +457,37 @@ private:
     // Groups the sorted draw list into instanced runs and fills the staging
     // buffer. Runs before any render pass, because the upload has to.
     void buildInstanceBatches(const RenderWorld& world, const MeshCache& meshes);
+
+    // --- Surface shaders (ADR 0091) -------------------------------------------
+    //
+    // **Built the first time a frame names one, and never before** -- the
+    // terrain's rule, for the terrain's reason: a renderer that made them in
+    // `create` would change the command stream, and every capture golden, of
+    // every scene that has none. A surface that cannot be built is tried once,
+    // reported once, and drawn as the built-in surface.
+    struct SurfaceSet
+    {
+        std::string name;
+        bool ready = false;
+        asset::SurfaceReflection reflection;
+        std::array<rhi::ShaderHandle, 10> shaders{};
+        rhi::PipelineHandle forward{};
+        rhi::PipelineHandle blended{};
+        rhi::PipelineHandle instanced{};
+        rhi::PipelineHandle shadow{};
+        rhi::PipelineHandle shadowInstanced{};
+        rhi::PipelineHandle prepass{};
+        rhi::PipelineHandle prepassInstanced{};
+    };
+    std::vector<SurfaceSet> surfaces_;
+    // Per material of the frame: its surface (index + 1, 0 for the built-in),
+    // its packed block, and its surface textures in declaration order.
+    std::vector<u32> materialSurface_;
+    std::vector<std::vector<core::u8>> materialBlock_;
+    std::vector<std::array<rhi::TextureBinding, asset::MaxSurfaceTextures>> materialSurfaceTextures_;
+    [[nodiscard]] u32 surfaceFor(rhi::IDevice& device, std::string_view name);
+    void prepareSurfaces(rhi::IDevice& device, const RenderWorld& world);
+    void bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment) const;
 
     // --- Terrain (ADR 0082) --------------------------------------------------
     //
@@ -1535,6 +1572,19 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
         device.destroy(shaders_[index]);
     shaderCount_ = 0;
 
+    for (SurfaceSet& surface : surfaces_) {
+        for (rhi::PipelineHandle pipeline : {surface.forward, surface.blended, surface.instanced, surface.shadow,
+                                             surface.shadowInstanced, surface.prepass, surface.prepassInstanced}) {
+            if (pipeline.valid())
+                device.destroy(pipeline);
+        }
+        for (rhi::ShaderHandle shader : surface.shaders) {
+            if (shader.valid())
+                device.destroy(shader);
+        }
+    }
+    surfaces_.clear();
+
     for (rhi::PipelineHandle* pipeline : {&shadowPipeline_,
                                           &pbrPipeline_,
                                           &pbrBlendPipeline_,
@@ -1651,6 +1701,268 @@ void DefaultRenderer::destroy(rhi::IDevice& device)
     valid_ = false;
 }
 
+u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name)
+{
+    for (core::usize index = 0; index < surfaces_.size(); ++index) {
+        if (surfaces_[index].name == name)
+            return surfaces_[index].ready ? static_cast<u32>(index) + 1u : 0u;
+    }
+    SurfaceSet& set = surfaces_.emplace_back();
+    set.name = std::string(name);
+
+    const std::optional<std::string> source =
+        shaderLibrary_ != nullptr ? shaderLibrary_->surfaceSource(name) : std::nullopt;
+    if (!source.has_value()) {
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"name", name}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_unavailable"), args);
+        return 0;
+    }
+    set.reflection = asset::reflectSurface(*source);
+    if (!set.reflection.ok()) {
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"name", name}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_unavailable"), args);
+        return 0;
+    }
+
+    // Every variant's two stages, with the counts the layout decides.
+    constexpr std::array<std::pair<asset::SurfaceVariant, std::string_view>, 5> variants{
+        std::pair{asset::SurfaceVariant::Forward, std::string_view{"forward"}},
+        std::pair{asset::SurfaceVariant::ForwardInstanced, std::string_view{"forward_instanced"}},
+        std::pair{asset::SurfaceVariant::ForwardBlended, std::string_view{"forward_blended"}},
+        std::pair{asset::SurfaceVariant::Depth, std::string_view{"depth"}},
+        std::pair{asset::SurfaceVariant::DepthInstanced, std::string_view{"depth_instanced"}},
+    };
+    for (core::usize index = 0; index < variants.size(); ++index) {
+        const std::string shaderName = "surface_" + set.name + "_" + std::string(variants[index].second);
+        for (const auto& [stage, rhiStage] : {std::pair{asset::SurfaceStage::Vertex, rhi::ShaderStage::Vertex},
+                                              std::pair{asset::SurfaceStage::Fragment, rhi::ShaderStage::Fragment}}) {
+            const asset::SurfaceResourceCounts counts =
+                asset::surfaceResourceCounts(set.reflection, variants[index].first, stage);
+            set.shaders[index * 2 + (stage == asset::SurfaceStage::Vertex ? 0 : 1)] =
+                shaderLibrary_->createCounted(device, shaderName, rhiStage, counts.samplers, counts.uniformBuffers);
+        }
+    }
+    if (!std::all_of(set.shaders.begin(), set.shaders.end(), [](rhi::ShaderHandle shader) { return shader.valid(); })) {
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"name", name}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_unavailable"), args);
+        return 0;
+    }
+
+    // The built-in surface's states, with the full vertex layout in every pass:
+    // a displaced vertex casts a displaced shadow, and it may displace by its
+    // normal or its uv.
+    const std::array<rhi::VertexAttribute, 4> attributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 12},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 24},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 0, .format = rhi::VertexFormat::Float2, .offsetBytes = 40},
+    };
+    const std::array<rhi::VertexBufferLayout, 1> buffers{rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48}};
+    const std::array<rhi::VertexBufferLayout, 2> instancedBuffers{
+        rhi::VertexBufferLayout{.slot = 0, .strideBytes = 48},
+        rhi::VertexBufferLayout{.slot = 1, .strideBytes = sizeof(GpuInstance), .perInstance = true},
+    };
+    const std::array<rhi::VertexAttribute, 9> instancedAttributes{
+        rhi::VertexAttribute{.location = 0, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 1, .bufferSlot = 0, .format = rhi::VertexFormat::Float3, .offsetBytes = 12},
+        rhi::VertexAttribute{.location = 2, .bufferSlot = 0, .format = rhi::VertexFormat::Float4, .offsetBytes = 24},
+        rhi::VertexAttribute{.location = 3, .bufferSlot = 0, .format = rhi::VertexFormat::Float2, .offsetBytes = 40},
+        rhi::VertexAttribute{.location = 4, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 0},
+        rhi::VertexAttribute{.location = 5, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 16},
+        rhi::VertexAttribute{.location = 6, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 32},
+        rhi::VertexAttribute{.location = 7, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 48},
+        rhi::VertexAttribute{.location = 8, .bufferSlot = 1, .format = rhi::VertexFormat::Float4, .offsetBytes = 64},
+    };
+    const std::array<rhi::ColorTargetDesc, 1> hdrTarget{rhi::ColorTargetDesc{.format = kHdrFormat}};
+    const std::array<rhi::ColorTargetDesc, 1> hdrBlendTarget{
+        rhi::ColorTargetDesc{.format = kHdrFormat, .blend = {.enabled = true}}};
+    const rhi::DepthStencilState depthWriting{
+        .depthTest = true, .depthWrite = true, .depthCompare = rhi::CompareOp::LessOrEqual};
+    const auto shader = [&](core::usize variant, bool fragment) {
+        return set.shaders[variant * 2 + (fragment ? 1 : 0)];
+    };
+
+    set.forward = device.createGraphicsPipeline({
+        .vertexShader = shader(0, false),
+        .fragmentShader = shader(0, true),
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = depthWriting,
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "surface_forward",
+    });
+    set.instanced = device.createGraphicsPipeline({
+        .vertexShader = shader(1, false),
+        .fragmentShader = shader(1, true),
+        .vertexBuffers = instancedBuffers,
+        .vertexAttributes = instancedAttributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = depthWriting,
+        .colorTargets = hdrTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "surface_forward_instanced",
+    });
+    set.blended = device.createGraphicsPipeline({
+        .vertexShader = shader(2, false),
+        .fragmentShader = shader(2, true),
+        .vertexBuffers = buffers,
+        .vertexAttributes = attributes,
+        .rasterizer = {.cullMode = rhi::CullMode::Back},
+        .depthStencil = {.depthTest = true, .depthWrite = false, .depthCompare = rhi::CompareOp::LessOrEqual},
+        .colorTargets = hdrBlendTarget,
+        .depthStencilFormat = kDepthFormat,
+        .debugName = "surface_forward_blended",
+    });
+    const auto depthPipeline = [&](core::usize variant, bool instanced, rhi::CullMode cull, rhi::TextureFormat format,
+                                   const char* debugName) {
+        return device.createGraphicsPipeline({
+            .vertexShader = shader(variant, false),
+            .fragmentShader = shader(variant, true),
+            .vertexBuffers = instanced ? std::span<const rhi::VertexBufferLayout>(instancedBuffers)
+                                       : std::span<const rhi::VertexBufferLayout>(buffers),
+            .vertexAttributes = instanced ? std::span<const rhi::VertexAttribute>(instancedAttributes)
+                                          : std::span<const rhi::VertexAttribute>(attributes),
+            .rasterizer = {.cullMode = cull},
+            .depthStencil = depthWriting,
+            .colorTargets = {},
+            .depthStencilFormat = format,
+            .debugName = debugName,
+        });
+    };
+    set.shadow = depthPipeline(3, false, rhi::CullMode::Front, kShadowFormat, "surface_shadow");
+    set.shadowInstanced = depthPipeline(4, true, rhi::CullMode::Front, kShadowFormat, "surface_shadow_instanced");
+    set.prepass = depthPipeline(3, false, rhi::CullMode::Back, kDepthFormat, "surface_prepass");
+    set.prepassInstanced = depthPipeline(4, true, rhi::CullMode::Back, kDepthFormat, "surface_prepass_instanced");
+
+    set.ready = set.forward.valid() && set.instanced.valid() && set.blended.valid() && set.shadow.valid() &&
+                set.shadowInstanced.valid() && set.prepass.valid() && set.prepassInstanced.valid();
+    if (!set.ready) {
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"name", name}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_unavailable"), args);
+        return 0;
+    }
+    return static_cast<u32>(surfaces_.size());
+}
+
+void DefaultRenderer::prepareSurfaces(rhi::IDevice& device, const RenderWorld& world)
+{
+    materialSurface_.assign(world.materials.size(), 0u);
+    materialBlock_.resize(world.materials.size());
+    materialSurfaceTextures_.resize(world.materials.size());
+
+    // The clock and the camera, the same for every surface this frame. An f32
+    // of seconds keeps a millisecond for about four and a half hours of play.
+    const f32 clock[4] = {static_cast<f32>(world.environment.surfaceTime), static_cast<f32>(world.camera.origin.x),
+                          static_cast<f32>(world.camera.origin.y), static_cast<f32>(world.camera.origin.z)};
+
+    for (core::usize index = 0; index < world.materials.size(); ++index) {
+        const RenderMaterial& material = world.materials[index];
+        const std::string_view name =
+            material.surface.empty() ? std::string_view{settings_.forcedSurface} : std::string_view{material.surface};
+        if (name.empty())
+            continue;
+        const u32 surface = surfaceFor(device, name);
+        if (surface == 0)
+            continue;
+        materialSurface_[index] = surface;
+        const asset::SurfaceReflection& reflection = surfaces_[surface - 1].reflection;
+
+        // **The built-in fields first, under their own names**, then what the
+        // material says for its shader: a surface that declares `Color` gets
+        // the part's colour, and one that declares its own `Color` default
+        // gets it only when nothing set one.
+        const auto builtIn = [&](std::string_view field) -> std::optional<std::array<f32, 4>> {
+            const GpuMaterialUniforms& u = material.uniforms;
+            if (field == "Color")
+                return std::array<f32, 4>{u.baseColor[0], u.baseColor[1], u.baseColor[2], u.baseColor[3]};
+            if (field == "Metalness")
+                return std::array<f32, 4>{u.metallicRoughnessNormalCutoff[0], 0.0f, 0.0f, 0.0f};
+            if (field == "Roughness")
+                return std::array<f32, 4>{u.metallicRoughnessNormalCutoff[1], 0.0f, 0.0f, 0.0f};
+            if (field == "NormalScale")
+                return std::array<f32, 4>{u.metallicRoughnessNormalCutoff[2], 0.0f, 0.0f, 0.0f};
+            if (field == "AlphaCutoff")
+                return std::array<f32, 4>{u.metallicRoughnessNormalCutoff[3], 0.0f, 0.0f, 0.0f};
+            if (field == "Emissive")
+                return std::array<f32, 4>{u.emissive[0], u.emissive[1], u.emissive[2], 0.0f};
+            return std::nullopt;
+        };
+        const auto valueOf = [&](std::string_view field) -> const SurfaceValue* {
+            for (const SurfaceValue& value : material.surfaceValues) {
+                if (value.name == field)
+                    return &value;
+            }
+            return nullptr;
+        };
+
+        std::vector<core::u8>& block = materialBlock_[index];
+        block.assign(reflection.blockBytes, 0);
+        std::memcpy(block.data(), clock, sizeof(clock));
+        for (const asset::SurfaceParam& param : reflection.params) {
+            if (const SurfaceValue* value = valueOf(param.name); value != nullptr && !value->isTexture) {
+                asset::writeSurfaceParam(param, value->value, block);
+            }
+            else if (const std::optional<std::array<f32, 4>> fixed = builtIn(param.name); fixed.has_value()) {
+                asset::writeSurfaceParam(param, *fixed, block);
+            }
+            else {
+                asset::writeSurfaceParam(param, {}, block);
+            }
+        }
+
+        core::u32 textureMask = 0;
+        const auto builtInMap = [&](std::string_view field) -> rhi::TextureHandle {
+            if (field == "ColorMap")
+                return material.baseColor;
+            if (field == "NormalMap")
+                return material.normal;
+            if (field == "MetallicRoughnessMap")
+                return material.metallicRoughness;
+            if (field == "EmissiveMap")
+                return material.emissive;
+            return rhi::TextureHandle{};
+        };
+        for (core::usize slot = 0; slot < reflection.textures.size(); ++slot) {
+            const asset::SurfaceTexture& texture = reflection.textures[slot];
+            rhi::TextureHandle handle{};
+            if (const SurfaceValue* value = valueOf(texture.name); value != nullptr && value->isTexture)
+                handle = value->texture;
+            if (!handle.valid())
+                handle = builtInMap(texture.name);
+            if (handle.valid())
+                textureMask |= 1u << slot;
+            if (!handle.valid()) {
+                handle = texture.fallback == asset::SurfaceTextureDefault::Black    ? blackPixel_
+                         : texture.fallback == asset::SurfaceTextureDefault::Normal ? flatNormalPixel_
+                                                                                    : whitePixel_;
+            }
+            materialSurfaceTextures_[index][slot] = rhi::TextureBinding{handle, linearSampler_};
+        }
+        std::memcpy(block.data() + 16, &textureMask, sizeof(textureMask));
+    }
+}
+
+void DefaultRenderer::bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment) const
+{
+    const std::vector<core::u8>& block = materialBlock_[material];
+    const asset::SurfaceReflection& reflection = surfaces_[materialSurface_[material] - 1].reflection;
+    const std::span<const rhi::TextureBinding> textures(materialSurfaceTextures_[material].data(),
+                                                        reflection.textures.size());
+    cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, std::as_bytes(std::span(block)));
+    if (!textures.empty())
+        cmd.bindTextures(rhi::ShaderStage::Vertex, 0, textures);
+    if (fragment) {
+        cmd.bindUniforms(rhi::ShaderStage::Fragment, 2, std::as_bytes(std::span(block)));
+        const std::size_t low = std::min<std::size_t>(textures.size(), 4);
+        if (low > 0)
+            cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures.first(low));
+        if (textures.size() > low)
+            cmd.bindTextures(rhi::ShaderStage::Fragment, asset::EngineFragmentSamplers, textures.subspan(low));
+    }
+}
+
 void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshCache& meshes)
 {
     batches_.clear();
@@ -1702,6 +2014,11 @@ void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshC
             // colour is one call, each colour in its instance (D184).
             if (!instanceable(next) || !(next.mesh == first.mesh) || next.section != first.section ||
                 world.familyOf(next.material) != world.familyOf(first.material))
+                break;
+            // A surface's colour is in its block, not in the instance's tint:
+            // one material per run.
+            const bool surfaced = first.material < materialSurface_.size() && materialSurface_[first.material] != 0;
+            if (surfaced && next.material != first.material)
                 break;
             if (selectMeshLod(*resolved, next.transform, pixelsPerUnit) != lod)
                 break;
@@ -1966,14 +2283,29 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
         // the hole test rather than as the solid squares their mesh is.
         const bool leafShadow = selection == Selection::Shadow && batch == nullptr && draw.voxelBlock && draw.cutout &&
                                 voxelShadowPipeline_.valid();
+        // A surface shader's own pipelines, for a plain or instanced mesh (ADR
+        // 0091). Skinned, terrain and voxel geometry keep the built-in surface,
+        // and so does the outline mask, which wants a position and nothing else.
+        const u32 surfaceId = selection != Selection::Outline && !skinnedDraw && !draw.terrain && !draw.voxelBlock &&
+                                      draw.material < materialSurface_.size()
+                                  ? materialSurface_[draw.material]
+                                  : 0u;
+        const SurfaceSet* surface = surfaceId != 0 ? &surfaces_[surfaceId - 1] : nullptr;
+        const rhi::PipelineHandle surfacePipeline =
+            surface == nullptr                    ? rhi::PipelineHandle{}
+            : selection == Selection::Shadow      ? (batch != nullptr ? surface->shadowInstanced : surface->shadow)
+            : selection == Selection::Prepass     ? (batch != nullptr ? surface->prepassInstanced : surface->prepass)
+            : selection == Selection::Transparent ? surface->blended
+                                                  : (batch != nullptr ? surface->instanced : surface->forward);
         const rhi::PipelineHandle wanted =
-            batch != nullptr ? instancedPipeline
-            : skinnedDraw    ? skinnedPipeline
-            : terrainDraw    ? terrainPipeline_
-            : terrainShadow  ? terrainShadowPipeline_
-            : voxelDraw      ? (selection == Selection::Transparent ? voxelBlendPipeline_ : voxelPipeline_)
-            : leafShadow     ? voxelShadowPipeline_
-                             : staticPipeline;
+            surfacePipeline.valid() ? surfacePipeline
+            : batch != nullptr      ? instancedPipeline
+            : skinnedDraw           ? skinnedPipeline
+            : terrainDraw           ? terrainPipeline_
+            : terrainShadow         ? terrainShadowPipeline_
+            : voxelDraw             ? (selection == Selection::Transparent ? voxelBlendPipeline_ : voxelPipeline_)
+            : leafShadow            ? voxelShadowPipeline_
+                                    : staticPipeline;
         if (!(wanted == currentPipeline)) {
             cmd.setPipeline(wanted);
             currentPipeline = wanted;
@@ -1986,6 +2318,8 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             // two batches overwrites the same slot.
             const GpuShadowUniforms uniforms{viewProjection, batch != nullptr ? Mat4{} : draw.transform};
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
+            if (surfacePipeline.valid())
+                bindSurface(cmd, draw.material, false);
             if (terrainShadow) {
                 const f32 push[4] = {terrainShadowPush_, 0.0f, 0.0f, 0.0f};
                 cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(push, sizeof(push)));
@@ -2086,6 +2420,14 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                 };
                 cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures);
                 boundMaterial = draw.material;
+            }
+            // Every draw rather than on a change of material: vertex slot 1 is
+            // also where a skinned draw's joints and the terrain's block go.
+            if (surfacePipeline.valid()) {
+                bindSurface(cmd, draw.material, true);
+                // Its textures took the built-in maps' slots: whatever draws
+                // next with this material binds them again.
+                boundMaterial = 0xFFFFFFFFu;
             }
         }
 
@@ -2923,6 +3265,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         air && world.camera.valid && ensureLookPipeline(device, air_, "look_air", kHdrFormat, LookBlend::Air);
     // And the governed sky's, for the same reason.
     const bool skyGoverned = skyLook.present && world.camera.valid && ensureSkyLook(device);
+    prepareSurfaces(device, world);
     buildInstanceBatches(world, meshes);
     if (!instanceStaging_.empty()) {
         cmd.upload(instanceBuffer_, asBytes(instanceStaging_.data(), instanceStaging_.size() * sizeof(GpuInstance)), 0);

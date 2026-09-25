@@ -27,6 +27,12 @@
 // Slot order is `MaterialDef`'s own field order -- base colour, normal,
 // metallic-roughness, emissive -- which is also `TextureFlags`' xyzw order, with
 // the shadow map and then the two image-based-lighting tables appended.
+//
+// **A surface shader's wrapper leaves these four out** (ADR 0091): its surface
+// is the user's, so the built-in maps are not read, and the slots are the
+// user's first four textures instead -- SDL_GPU allows sixteen samplers a
+// stage, and the lighting below takes nine of them.
+#if !defined(LUAUG_SURFACE_WRAPPER)
 Texture2D BaseColorTexture : register(t0, space2);
 SamplerState BaseColorSampler : register(s0, space2);
 Texture2D NormalTexture : register(t1, space2);
@@ -35,6 +41,7 @@ Texture2D MetallicRoughnessTexture : register(t2, space2);
 SamplerState MetallicRoughnessSampler : register(s2, space2);
 Texture2D EmissiveTexture : register(t3, space2);
 SamplerState EmissiveSampler : register(s3, space2);
+#endif
 // The four cascades, as a 2x2 atlas (shadow.h says why). Sampled with `Gather`
 // and an explicit bilinear comparison rather than through a comparison sampler,
 // so the sampler here is a plain point one.
@@ -335,7 +342,7 @@ float3 lightSurface(Surface surface, float3 shadingPosition, float3 normal, floa
     return lightSurface(surface, shadingPosition, normal, viewDepth, pixel, 1.0f);
 }
 
-#if defined(LUAUG_UNIFORMS_MATERIAL)
+#if defined(LUAUG_UNIFORMS_MATERIAL) && !defined(LUAUG_SURFACE_WRAPPER)
 // Linear HDR into an `Rgba16Float` target. Nothing here tonemaps and nothing
 // here encodes sRGB -- `tonemap.hlsl` does both, once, on the way out.
 float4 shadeForward(Interpolants input)

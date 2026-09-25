@@ -42,6 +42,17 @@ public:
     [[nodiscard]] rhi::ShaderHandle create(rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage,
                                            core::EngineError* outError = nullptr) const;
 
+    // The same, with the resource counts given rather than reflected: a
+    // surface shader's counts are the layout's (ADR 0091), and a compiler that
+    // stripped an unused sampler would otherwise shift every slot after it.
+    [[nodiscard]] rhi::ShaderHandle createCounted(rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage,
+                                                  u32 samplers, u32 uniformBuffers,
+                                                  core::EngineError* outError = nullptr) const;
+
+    // The source of a surface shader the engine ships, beside the blobs
+    // (`content/shaders/surfaces/<name>.surface.hlsl`), or nothing.
+    [[nodiscard]] std::optional<std::string> surfaceSource(std::string_view name) const;
+
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
     [[nodiscard]] rhi::ShaderFormat format() const noexcept { return format_; }
 
@@ -61,6 +72,7 @@ private:
     [[nodiscard]] const Entry* find(std::string_view name, rhi::ShaderStage stage) const noexcept;
 
     std::vector<Entry> entries_;
+    std::filesystem::path contentDir_;
     rhi::ShaderFormat format_ = rhi::ShaderFormat::Unknown;
 };
 

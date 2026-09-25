@@ -600,6 +600,8 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.environment.autoExposure = lighting->autoExposure;
         out.environment.simTime = world.engineState().simTime;
     }
+    out.environment.surfaceTime =
+        world.engineState().simTime + static_cast<core::f64>(alpha) * world.engineState().fixedTimestep;
 
     // The look (ADR 0096): `Lighting`'s children and the current camera's. The
     // WORLD's camera, not an editor's view override -- a viewer's effects belong

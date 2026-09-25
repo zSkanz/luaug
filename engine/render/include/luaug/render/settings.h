@@ -20,6 +20,7 @@
 #include "luaug/core/types.h"
 
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace luaug::render {
@@ -93,6 +94,13 @@ struct GraphicsSettings
     // frame. The scene still tonemaps and `ExposureCompensation` still applies;
     // what stops is the three-pass reduction and the frame-to-frame adaptation.
     bool autoExposure = true;
+
+    // **A test instrument, not a setting** (ADR 0091): the name of a surface
+    // shader the engine ships, drawn in place of the built-in surface on every
+    // static part that has no surface of its own. `--force-surface=pbr` over
+    // the screenshot scenes is the proof that the contract can say everything
+    // the built-in surface says. Empty for everybody else.
+    std::string forcedSurface;
 };
 
 // The named set every preset is. `High` is exactly what the engine shipped

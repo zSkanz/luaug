@@ -63,6 +63,7 @@ std::optional<core::EngineError> ShaderLibrary::load(const std::filesystem::path
         return core::makeError(LUAUG_TR("render.err.shader_manifest_invalid"), {}, parsed.diagnostic);
 
     const std::filesystem::path root = manifestPath.parent_path();
+    contentDir_ = contentDir;
     const core::JsonValue shaders = document.root()["shaders"];
 
     for (core::usize i = 0; i < shaders.size(); ++i) {
@@ -127,6 +128,24 @@ rhi::ShaderHandle ShaderLibrary::create(rhi::IDevice& device, std::string_view n
                                         core::EngineError* outError) const
 {
     const Entry* entry = find(name, stage);
+    return entry == nullptr
+               ? createCounted(device, name, stage, 0, 0, outError)
+               : createCounted(device, name, stage, entry->samplerCount, entry->uniformBufferCount, outError);
+}
+
+std::optional<std::string> ShaderLibrary::surfaceSource(std::string_view name) const
+{
+    std::vector<std::byte> bytes;
+    const std::filesystem::path file = contentDir_ / "shaders" / "surfaces" / (std::string(name) + ".surface.hlsl");
+    if (contentDir_.empty() || !platform::readFile(file, bytes))
+        return std::nullopt;
+    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+rhi::ShaderHandle ShaderLibrary::createCounted(rhi::IDevice& device, std::string_view name, rhi::ShaderStage stage,
+                                               u32 samplers, u32 uniformBuffers, core::EngineError* outError) const
+{
+    const Entry* entry = find(name, stage);
     if (entry == nullptr) {
         if (outError != nullptr) {
             const std::array<I18nArg, 1> args{I18nArg{"name", name}};
@@ -149,8 +168,8 @@ rhi::ShaderHandle ShaderLibrary::create(rhi::IDevice& device, std::string_view n
         .format = format_,
         .code = code,
         .entryPoint = entry->entryPoint,
-        .samplerCount = entry->samplerCount,
-        .uniformBufferCount = entry->uniformBufferCount,
+        .samplerCount = samplers,
+        .uniformBufferCount = uniformBuffers,
         .debugName = entry->name,
     });
 }

@@ -78,6 +78,8 @@ void applyOverrides(const GraphicsOverrides& overrides, GraphicsSettings& settin
         settings.antiAliasing = *overrides.antiAliasing;
     if (overrides.autoExposure)
         settings.autoExposure = *overrides.autoExposure;
+    if (overrides.forcedSurface)
+        settings.forcedSurface = *overrides.forcedSurface;
 }
 
 } // namespace
