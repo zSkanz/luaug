@@ -121,6 +121,30 @@ struct MinimapView
 [[nodiscard]] float minimapJump(const MinimapView& view, float y, float lineHeight, float lineStep, float viewHeight,
                                 float scrollMax) noexcept;
 
+// **Which document line is on which row of the pane**, once blocks are
+// folded (see `ScriptDocument::FoldRange`). A folded block keeps its first and
+// last lines and hides the rest, so every other line moves up by what it
+// hides. Pure, so the arithmetic every drawing and every click depends on is
+// tested without a window.
+struct FoldView
+{
+    // Row to line, one entry per row the pane draws.
+    std::vector<core::u32> rowLine;
+    // Line to row; a hidden line maps to the row of the line that folded it.
+    std::vector<core::u32> lineRow;
+
+    [[nodiscard]] core::u32 rows() const noexcept { return static_cast<core::u32>(rowLine.size()); }
+    [[nodiscard]] bool hidden(core::u32 line) const noexcept
+    {
+        return line < lineRow.size() && rowLine[lineRow[line]] != line;
+    }
+};
+
+// `folded` holds the `first` line of every folded range; a fold inside a
+// folded one is hidden with it.
+[[nodiscard]] FoldView foldView(core::u32 lineCount, std::span<const ScriptDocument::FoldRange> ranges,
+                                std::span<const core::u32> folded);
+
 struct OpenScript
 {
     core::InstanceId instance;
@@ -203,6 +227,14 @@ struct OpenScript
     Range lastMatch;
 
     // --- The view ------------------------------------------------------------
+    //
+    // **The folded blocks**, by their first line, and the ranges they are
+    // chosen from -- worked out again only when the text changed. Edits above
+    // a fold move it with its lines (see `drawPane`).
+    std::vector<core::u32> folded;
+    std::vector<ScriptDocument::FoldRange> foldRanges;
+    core::u64 foldRevision = ~0ull;
+    core::u32 foldLineCount = 0;
     //
     // **The widest line, in cells**, which is how far the pane scrolls
     // sideways. Measured once per revision: a fixed two hundred columns hid

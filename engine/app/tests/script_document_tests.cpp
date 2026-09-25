@@ -785,6 +785,23 @@ TEST_CASE("Enter after a line that opens a block writes its end, once")
     CHECK(done.opens);
     CHECK(done.closer.empty());
 
+    // **Closed below, whatever else the file holds** (the owner: Enter after
+    // the `then` of an `if` that had its `end` wrote a second one).
+    CHECK(closed("if ready then\n\tgo()\nelse\n\tstay()\nend").closer.empty());
+    CHECK(closed("if a then\n\tif b then\n\t\tgo()\n\tend\nend").closer.empty());
+    CHECK(closed("for i = 1, 3 do\n\tprint(i)\nend\nlocal function open()").closer.empty());
+    CHECK(closed("local f = function()\n\treturn 1\nend").closer.empty());
+    // An `if` expression has no `end`, and does not make the file look open.
+    CHECK(closed("if a then\n\tlocal x = if b then 1 else 2\nend").closer.empty());
+    // An `end` indented less is an OUTER block's: this one is still open.
+    const auto inner = [](std::string_view text, core::u32 line) {
+        const std::string source(text);
+        ScriptDocument document(source);
+        return document.blockBreakAt(Position{line, document.lineLength(line)});
+    };
+    CHECK(inner("local function spin()\n\tif ready then\nend", 1).closer == "end");
+    CHECK(inner("local function spin()\n\tif ready then\n\t\tgo()\n\tend\nend", 1).closer.empty());
+
     // `else` and `elseif` go one step deeper and close nothing of their own.
     CHECK(at("if a then\nelse").opens);
     CHECK(at("if a then\nelse").closer.empty());

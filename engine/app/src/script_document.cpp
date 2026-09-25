@@ -1039,20 +1039,125 @@ ScriptDocument::BlockBreak ScriptDocument::blockBreakAt(Position caret) const
     if (first != nullptr && first->kind == TokenKind::Keyword && word(*first) == "elseif")
         return out;
 
-    int balance = 0;
-    for (const Line& line : m_lines) {
+    // **Is THIS block closed already?** (the owner: Enter after the `then` of
+    // an `if` that already had its `end` wrote a second one, and `else` has to
+    // be respected too.) Asked of the block itself rather than of the file:
+    // a count over the whole document said "open" whenever ANY block anywhere
+    // was -- a function still being written, or an `if` expression, which has
+    // no `end` at all. So the scan starts at the caret, nests, and stops at the
+    // closer that matches this line's opener. That closer settles it when it
+    // is indented at least as far as this line: less, and it is an OUTER
+    // block's, reached because this one was never closed.
+    const auto keywordAt = [&](const Line& line, const Token& token) {
+        return token.kind == TokenKind::Keyword ? std::string_view(line.text).substr(token.column, token.length)
+                                                : std::string_view{};
+    };
+    // `if` in an expression -- `local x = if a then b else c` -- opens nothing.
+    const auto expressionIf = [&](const Line& line, const Token* before) {
+        if (before == nullptr)
+            return false;
+        const std::string_view w = std::string_view(line.text).substr(before->column, before->length);
+        if (before->kind == TokenKind::Operator)
+            return w != ")" && w != "]" && w != "}";
+        return before->kind == TokenKind::Keyword &&
+               (w == "return" || w == "and" || w == "or" || w == "not" || w == "in" || w == "until");
+    };
+    const u32 indent = cellOf(caret.line, indentOf(caret.line));
+    int nesting = 1;
+    const Token* before = last;
+    const Line* beforeLine = &m_lines[caret.line];
+    for (u32 index = caret.line; index < m_lines.size(); ++index) {
+        const Line& line = m_lines[index];
+        bool firstOnLine = true;
         for (const Token& token : line.tokens) {
-            if (token.kind != TokenKind::Keyword)
+            if (index == caret.line && token.column < caret.column)
                 continue;
-            const std::string_view w = std::string_view(line.text).substr(token.column, token.length);
-            if (w == "function" || w == "if" || w == "do" || w == "repeat")
-                ++balance;
-            else if (w == "end" || w == "until")
-                --balance;
+            if (token.kind == TokenKind::Text || token.kind == TokenKind::Comment)
+                continue;
+            const std::string_view w = keywordAt(line, token);
+            const bool opener =
+                w == "function" || w == "do" || w == "repeat" || (w == "if" && !expressionIf(*beforeLine, before));
+            if (opener) {
+                ++nesting;
+            }
+            else if (w == "end" || w == "until") {
+                if (--nesting == 0) {
+                    // A closer that starts its line is judged by where it
+                    // stands; one after code on the same line closes where it
+                    // is written.
+                    const bool closes = !firstOnLine || index == caret.line || cellOf(index, token.column) >= indent;
+                    if (!closes)
+                        out.closer = std::move(closer);
+                    return out;
+                }
+            }
+            before = &token;
+            beforeLine = &line;
+            firstOnLine = false;
         }
     }
-    if (balance > 0)
-        out.closer = std::move(closer);
+    out.closer = std::move(closer);
+    return out;
+}
+
+std::vector<ScriptDocument::FoldRange> ScriptDocument::foldRanges() const
+{
+    struct Open
+    {
+        u32 line = 0;
+        bool brace = false;
+    };
+    std::vector<Open> open;
+    std::vector<FoldRange> out;
+    const Token* before = nullptr;
+    const Line* beforeLine = nullptr;
+    const auto close = [&](u32 line, bool brace) {
+        // A closer pops to its own kind: an `end` does not close a table left
+        // open inside the block, and a stray one closes nothing.
+        while (!open.empty()) {
+            const Open top = open.back();
+            open.pop_back();
+            if (top.brace == brace) {
+                if (line > top.line + 1)
+                    out.push_back(FoldRange{top.line, line});
+                return;
+            }
+        }
+    };
+    for (u32 index = 0; index < m_lines.size(); ++index) {
+        const Line& line = m_lines[index];
+        for (const Token& token : line.tokens) {
+            if (token.kind == TokenKind::Text || token.kind == TokenKind::Comment)
+                continue;
+            const std::string_view w = std::string_view(line.text).substr(token.column, token.length);
+            if (token.kind == TokenKind::Keyword) {
+                bool expression = false;
+                if (w == "if" && before != nullptr) {
+                    const std::string_view b =
+                        std::string_view(beforeLine->text).substr(before->column, before->length);
+                    expression = (before->kind == TokenKind::Operator && b != ")" && b != "]" && b != "}") ||
+                                 (before->kind == TokenKind::Keyword && (b == "return" || b == "and" || b == "or" ||
+                                                                         b == "not" || b == "in" || b == "until"));
+                }
+                if (w == "function" || w == "do" || w == "repeat" || (w == "if" && !expression))
+                    open.push_back(Open{index, false});
+                else if (w == "end" || w == "until")
+                    close(index, false);
+            }
+            else if (token.kind == TokenKind::Operator && w == "{") {
+                open.push_back(Open{index, true});
+            }
+            else if (token.kind == TokenKind::Operator && w == "}") {
+                close(index, true);
+            }
+            before = &token;
+            beforeLine = &line;
+        }
+    }
+    // Outer before inner, as a reader meets them.
+    std::sort(out.begin(), out.end(), [](const FoldRange& a, const FoldRange& b) {
+        return a.first != b.first ? a.first < b.first : a.last > b.last;
+    });
     return out;
 }
 

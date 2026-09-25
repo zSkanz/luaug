@@ -238,4 +238,34 @@ float minimapJump(const MinimapView& view, float y, float lineHeight, float line
     return std::clamp(line * lineHeight - viewHeight * 0.5f, 0.0f, std::max(0.0f, scrollMax));
 }
 
+FoldView foldView(core::u32 lineCount, std::span<const ScriptDocument::FoldRange> ranges,
+                  std::span<const core::u32> folded)
+{
+    FoldView view;
+    view.lineRow.resize(lineCount);
+    // The first line that is visible again, for each line a fold hides from.
+    std::vector<core::u32> resume(lineCount, 0);
+    for (const ScriptDocument::FoldRange& range : ranges) {
+        if (range.last >= lineCount || range.last <= range.first + 1)
+            continue;
+        if (std::find(folded.begin(), folded.end(), range.first) == folded.end())
+            continue;
+        resume[range.first + 1] = std::max(resume[range.first + 1], range.last);
+    }
+    core::u32 row = 0;
+    for (core::u32 line = 0; line < lineCount;) {
+        if (line > 0 && resume[line] > line) {
+            // Hidden: every line up to the closer maps to the row above.
+            const core::u32 until = resume[line];
+            for (; line < until; ++line)
+                view.lineRow[line] = row - 1;
+            continue;
+        }
+        view.rowLine.push_back(line);
+        view.lineRow[line] = row++;
+        ++line;
+    }
+    return view;
+}
+
 } // namespace luaug::app

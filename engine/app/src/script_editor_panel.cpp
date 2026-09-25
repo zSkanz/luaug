@@ -165,7 +165,34 @@ struct PaneMetrics
     // that must be kept in step.
     float advance = 0.0f;
     float gutter = 0.0f;
+    // **Which line is on which row** once blocks are folded (see `FoldView`).
+    // Null is every line on its own row. Everything that places a line goes
+    // through `topOf` and everything that finds one through `lineOfRow`, so a
+    // fold moves the caret, the selection, the marks and the clicks together.
+    const FoldView* view = nullptr;
 };
+
+[[nodiscard]] u32 rowOf(const PaneMetrics& m, u32 line) noexcept
+{
+    return m.view != nullptr && line < m.view->lineRow.size() ? m.view->lineRow[line] : line;
+}
+
+[[nodiscard]] float topOf(const PaneMetrics& m, u32 line) noexcept
+{
+    return static_cast<float>(rowOf(m, line)) * m.lineHeight;
+}
+
+[[nodiscard]] bool hiddenLine(const PaneMetrics& m, u32 line) noexcept
+{
+    return m.view != nullptr && m.view->hidden(line);
+}
+
+[[nodiscard]] u32 lineOfRow(const PaneMetrics& m, u32 row) noexcept
+{
+    if (m.view == nullptr || m.view->rowLine.empty())
+        return row;
+    return m.view->rowLine[std::min<std::size_t>(row, m.view->rowLine.size() - 1)];
+}
 
 [[nodiscard]] PaneMetrics metricsFor(const ScriptDocument& document, float zoom)
 {
@@ -292,7 +319,7 @@ CodeColourEdit g_colourEdit;
     const float side = std::floor(m.lineHeight * 0.7f);
     const float left = textOrigin.x + static_cast<float>(document.cellOf(line, literal.call.end.column)) * m.advance +
                        m.advance * 0.4f;
-    const float centreY = textOrigin.y + (static_cast<float>(line) + 0.5f) * m.lineHeight;
+    const float centreY = textOrigin.y + topOf(m, line) + 0.5f * m.lineHeight;
     return ImRect(ImVec2(left, centreY - side * 0.5f), ImVec2(left + side, centreY + side * 0.5f));
 }
 
@@ -301,7 +328,7 @@ CodeColourEdit g_colourEdit;
                               const ColorLiteral& literal)
 {
     const u32 line = literal.call.begin.line;
-    const float top = textOrigin.y + static_cast<float>(line) * m.lineHeight;
+    const float top = textOrigin.y + topOf(m, line);
     return ImRect(
         ImVec2(textOrigin.x + static_cast<float>(document.cellOf(line, literal.call.begin.column)) * m.advance, top),
         ImVec2(textOrigin.x + static_cast<float>(document.cellOf(line, literal.call.end.column)) * m.advance,
@@ -332,13 +359,23 @@ void placeCaret(OpenScript& tab, Position to, bool select)
 
 // Vertical movement keeps the column somebody was aiming for, so passing through
 // a short line and coming back lands where they left.
-void moveVertically(OpenScript& tab, int delta, bool select)
+void moveVertically(OpenScript& tab, int delta, bool select, const FoldView* view = nullptr)
 {
     // The CELL, not the byte: moving down a line whose accents sit elsewhere
     // should keep the caret under the same glyph, not the same byte offset.
     const u32 wantedCell = tab.caret.desiredColumn;
-    const auto line = static_cast<std::int64_t>(tab.caret.head.line) + delta;
-    const auto clamped = static_cast<u32>(std::clamp<std::int64_t>(line, 0, tab.document.lineCount() - 1));
+    u32 clamped = 0;
+    if (view != nullptr && !view->rowLine.empty() && tab.caret.head.line < view->lineRow.size()) {
+        // **In rows**, so a folded block is one step over rather than a walk
+        // into lines nobody can see.
+        const auto row = static_cast<std::int64_t>(view->lineRow[tab.caret.head.line]) + delta;
+        clamped = view->rowLine[static_cast<std::size_t>(
+            std::clamp<std::int64_t>(row, 0, static_cast<std::int64_t>(view->rowLine.size()) - 1))];
+    }
+    else {
+        const auto line = static_cast<std::int64_t>(tab.caret.head.line) + delta;
+        clamped = static_cast<u32>(std::clamp<std::int64_t>(line, 0, tab.document.lineCount() - 1));
+    }
     tab.caret.head = tab.document.clamp(Position{clamped, tab.document.columnOfCell(clamped, wantedCell)});
     if (!select)
         tab.caret.anchor = tab.caret.head;
@@ -381,8 +418,10 @@ void insertText(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, s
 
 [[nodiscard]] Position hitTest(const ScriptDocument& document, const PaneMetrics& m, ImVec2 textOrigin, ImVec2 point)
 {
+    const float rows =
+        m.view != nullptr ? static_cast<float>(m.view->rows()) : static_cast<float>(document.lineCount());
     const float row = (point.y - textOrigin.y) / m.lineHeight;
-    const auto line = static_cast<u32>(std::clamp(std::floor(row), 0.0f, static_cast<float>(document.lineCount() - 1)));
+    const auto line = lineOfRow(m, static_cast<u32>(std::clamp(std::floor(row), 0.0f, rows - 1.0f)));
     // Rounded rather than floored, so clicking the right half of a glyph puts
     // the caret after it -- which is what every editor does and what makes a
     // click at the end of a line land at the end of the line.
@@ -667,7 +706,7 @@ void drawSignature(const OpenScript& tab, const PaneMetrics& m, ImVec2 textOrigi
 
     const float caretX =
         textOrigin.x + static_cast<float>(tab.document.cellOf(tab.caret.head.line, tab.caret.head.column)) * m.advance;
-    const float lineTop = textOrigin.y + static_cast<float>(tab.caret.head.line) * m.lineHeight;
+    const float lineTop = textOrigin.y + topOf(m, tab.caret.head.line);
     const float padding = m.advance;
     const float labelWidth = m.font->CalcTextSizeA(m.size, FLT_MAX, 0.0f, help.label.c_str()).x;
     // The doc's first paragraph: the rest is for the Properties grid.
@@ -815,7 +854,7 @@ struct CompletionLayout
     const float x = textOrigin.x + static_cast<float>(tab.document.cellOf(tab.completionReplace.begin.line,
                                                                           tab.completionReplace.begin.column)) *
                                        m.advance;
-    const float y = textOrigin.y + static_cast<float>(tab.caret.head.line + 1) * m.lineHeight;
+    const float y = textOrigin.y + topOf(m, tab.caret.head.line) + m.lineHeight;
 
     layout.rows = std::min<std::size_t>(tab.completions.size(), kMaxCompletionRows);
     // The first row shown, so an index past the eighth scrolls the window rather
@@ -1109,11 +1148,20 @@ void handleKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t index, c
             tab.completing = false;
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+        // **A bare arrow moves through the list; an arrow with a modifier is a
+        // command** (the owner: Alt+Up moved the highlight instead of the
+        // line). The list steps aside for it, and the chord runs below.
+        const ImGuiIO& keys = ImGui::GetIO();
+        const bool bare = !keys.KeyCtrl && !keys.KeyAlt && !keys.KeyShift && !keys.KeySuper;
+        const bool arrow = ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) || ImGui::IsKeyPressed(ImGuiKey_UpArrow, true);
+        if (arrow && !bare) {
+            tab.completing = false;
+        }
+        else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
             tab.completionIndex = (tab.completionIndex + 1) % tab.completions.size();
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+        else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
             tab.completionIndex = tab.completionIndex == 0 ? tab.completions.size() - 1 : tab.completionIndex - 1;
             return;
         }
@@ -1201,15 +1249,15 @@ void handleCaretKeys(OpenScript& tab, ScriptEditorCommands& out, std::size_t ind
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
         placeCaret(tab, ctrl ? wordRight(doc, tab.caret.head) : doc.nextColumn(tab.caret.head), shift);
     if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
-        moveVertically(tab, -1, shift);
+        moveVertically(tab, -1, shift, m.view);
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
-        moveVertically(tab, 1, shift);
+        moveVertically(tab, 1, shift, m.view);
 
     const auto page = static_cast<int>(std::max(1.0f, std::floor(paneHeight / m.lineHeight)) - 1.0f);
     if (ImGui::IsKeyPressed(ImGuiKey_PageUp, true))
-        moveVertically(tab, -page, shift);
+        moveVertically(tab, -page, shift, m.view);
     if (ImGui::IsKeyPressed(ImGuiKey_PageDown, true))
-        moveVertically(tab, page, shift);
+        moveVertically(tab, page, shift, m.view);
 
     if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) {
         // The first non-blank column before column zero, which is the one
@@ -1730,11 +1778,34 @@ void handleMultiClipboard(OpenScript& tab, ScriptEditorCommands& out, std::size_
 
 // --- Drawing -----------------------------------------------------------------
 
+// The outermost block that opens on `line`, if one does -- what its arrow
+// folds.
+[[nodiscard]] const ScriptDocument::FoldRange* foldAt(const OpenScript& tab, u32 line) noexcept
+{
+    const auto found =
+        std::lower_bound(tab.foldRanges.begin(), tab.foldRanges.end(), line,
+                         [](const ScriptDocument::FoldRange& range, u32 wanted) { return range.first < wanted; });
+    return found != tab.foldRanges.end() && found->first == line ? &*found : nullptr;
+}
+
+[[nodiscard]] bool isFolded(const OpenScript& tab, u32 line) noexcept
+{
+    return std::find(tab.folded.begin(), tab.folded.end(), line) != tab.folded.end();
+}
+
+// **Where the fold arrow is**: the gap between the number and the code, which
+// is two and a half cells wide (see `metricsFor`). A click there folds; the
+// rest of the gutter still arms a breakpoint.
+[[nodiscard]] float foldZoneLeft(const PaneMetrics& m) noexcept
+{
+    return m.gutter - m.advance * 2.4f;
+}
+
 void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugView& debug, const PaneMetrics& m,
                 ImDrawList* draw, ImVec2 origin, u32 line, bool current)
 {
     const ThemePalette& p = currentTheme().palette;
-    const float y = origin.y + static_cast<float>(line) * m.lineHeight;
+    const float y = origin.y + topOf(m, line);
 
     // **Where execution is stopped**, drawn as a band rather than a marker in
     // the margin: a person looking for it is looking at the code, not at the
@@ -1752,6 +1823,24 @@ void drawGutter(const OpenScript& tab, const ScriptEditor& editor, const DebugVi
     draw->AddText(m.font, m.size, ImVec2(origin.x + m.gutter - m.advance * 2.5f - width, y),
                   current ? ecol(ScriptColor::Text) : ecol(ScriptColor::LineNumber), number);
 
+    // **The fold arrow** (the owner: "a button to open and close a block"):
+    // pointing down on a block that is open, right on one that is folded --
+    // and the folded one louder, because it is hiding something.
+    if (foldAt(tab, line) != nullptr) {
+        const bool folded = isFolded(tab, line);
+        const float size = std::min(m.lineHeight * 0.28f, m.advance * 0.7f);
+        const ImVec2 centre(origin.x + foldZoneLeft(m) + m.advance * 1.1f, y + m.lineHeight * 0.5f);
+        const ImU32 colour = folded ? ecol(ScriptColor::Text) : ecol(ScriptColor::LineNumber, 0.8f);
+        if (folded)
+            draw->AddTriangleFilled(ImVec2(centre.x - size * 0.6f, centre.y - size),
+                                    ImVec2(centre.x + size * 0.8f, centre.y),
+                                    ImVec2(centre.x - size * 0.6f, centre.y + size), colour);
+        else
+            draw->AddTriangleFilled(ImVec2(centre.x - size, centre.y - size * 0.6f),
+                                    ImVec2(centre.x + size, centre.y - size * 0.6f),
+                                    ImVec2(centre.x, centre.y + size * 0.8f), colour);
+    }
+
     if (editor.hasBreakpoint(tab.chunk, line)) {
         // A filled dot on the left of the number, at the line's own height so it
         // scales with the interface rather than being a fixed number of pixels.
@@ -1767,7 +1856,7 @@ void drawLine(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, ImV
     if (text.empty())
         return;
 
-    const float y = textOrigin.y + static_cast<float>(line) * m.lineHeight;
+    const float y = textOrigin.y + topOf(m, line);
     // **Only the columns that can be seen.** A minified line of a hundred
     // thousand bytes is one `AddText` of a hundred thousand glyphs otherwise,
     // and the clip rectangle would throw away the work after it was done.
@@ -1829,12 +1918,14 @@ void drawSelection(const OpenScript& tab, const Caret& caret, const PaneMetrics&
     const Range span = caret.selection();
     const ImU32 colour = ecol(ScriptColor::Selection);
     for (u32 line = std::max(first, span.begin.line); line <= std::min(last, span.end.line); ++line) {
+        if (hiddenLine(m, line))
+            continue;
         const u32 from = tab.document.cellOf(line, line == span.begin.line ? span.begin.column : 0u);
         // A line in the middle of a selection is highlighted one cell past its
         // end, so a multi-line selection reads as covering the newline it holds.
         const u32 to =
             line == span.end.line ? tab.document.cellOf(line, span.end.column) : tab.document.cellCount(line) + 1u;
-        const float y = textOrigin.y + static_cast<float>(line) * m.lineHeight;
+        const float y = textOrigin.y + topOf(m, line);
         draw->AddRectFilled(ImVec2(textOrigin.x + static_cast<float>(from) * m.advance, y),
                             ImVec2(textOrigin.x + static_cast<float>(to) * m.advance, y + m.lineHeight), colour);
     }
@@ -1890,10 +1981,10 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
         const bool repeated = std::any_of(all.data(), &diagnostic, [&diagnostic](const Diagnostic& earlier) {
             return earlier.at == diagnostic.at && earlier.length == diagnostic.length;
         });
-        if (repeated)
+        if (repeated || hiddenLine(m, diagnostic.at.line))
             continue;
 
-        const float y = textOrigin.y + static_cast<float>(diagnostic.at.line + 1) * m.lineHeight - 2.0f;
+        const float y = textOrigin.y + topOf(m, diagnostic.at.line) + m.lineHeight - 2.0f;
         const float x0 = textOrigin.x +
                          static_cast<float>(tab.document.cellOf(diagnostic.at.line, diagnostic.at.column)) * m.advance;
         // **The extent the diagnostic knows about**, which for a lint is the
@@ -1929,7 +2020,7 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
 
         // And the whole message under the pointer, wrapped, for one too long
         // to fit beside the code.
-        const float lineTop = textOrigin.y + static_cast<float>(diagnostic.at.line) * m.lineHeight;
+        const float lineTop = textOrigin.y + topOf(m, diagnostic.at.line);
         const ImVec2 mouse = ImGui::GetIO().MousePos;
         if (ImGui::IsWindowHovered() && mouse.x >= x0 && mouse.x <= x1 && mouse.y >= lineTop &&
             mouse.y <= lineTop + m.lineHeight) {
@@ -1945,7 +2036,7 @@ void drawDiagnostics(const OpenScript& tab, const PaneMetrics& m, ImDrawList* dr
     // underlines in red and does not say why"): three cells past the code,
     // quieter than the code.
     for (const Spoken& line : spoken) {
-        const float lineTop = textOrigin.y + static_cast<float>(line.line) * m.lineHeight;
+        const float lineTop = textOrigin.y + topOf(m, line.line);
         const float after = textOrigin.x + static_cast<float>(tab.document.cellCount(line.line) + 3u) * m.advance;
         std::string text = line.worst->message;
         if (line.count > 1)
@@ -2214,9 +2305,9 @@ void drawMatches(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, 
     const ThemePalette& p = currentTheme().palette;
     const Range selected = tab.caret.selection();
     for (const Range& match : tab.matches) {
-        if (match.begin.line < first || match.begin.line > last)
+        if (match.begin.line < first || match.begin.line > last || hiddenLine(m, match.begin.line))
             continue;
-        const float y = textOrigin.y + static_cast<float>(match.begin.line) * m.lineHeight;
+        const float y = textOrigin.y + topOf(m, match.begin.line);
         const float x0 =
             textOrigin.x + static_cast<float>(tab.document.cellOf(match.begin.line, match.begin.column)) * m.advance;
         const float x1 =
@@ -2265,20 +2356,23 @@ void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const 
     const u32 lineCount = tab.document.lineCount();
     if (lineCount == 0)
         return;
+    // **In rows, as the pane scrolls**: a folded block is one row here too,
+    // or the slider would drift from the code it stands for.
+    const u32 rowCount = m.view != nullptr ? std::max(1u, m.view->rows()) : lineCount;
     const float lineStep = kMinimapLineStep * unit;
     const float block = kMinimapBlock * unit;
     const float ruler = kMinimapRuler * unit;
     const ImRect map(rect.Min, ImVec2(rect.Max.x - ruler, rect.Max.y));
     const MinimapView view =
-        minimapView(lineCount, m.lineHeight, lineStep, rect.GetHeight(), viewHeight, scroll, scrollMax);
+        minimapView(rowCount, m.lineHeight, lineStep, rect.GetHeight(), viewHeight, scroll, scrollMax);
 
     const ImGuiIO& io = ImGui::GetIO();
     if (overMap && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const float y = io.MousePos.y - rect.Min.y;
         if (io.MousePos.x >= map.Max.x) {
             // The ruler is the whole file, top to bottom.
-            const float line = std::floor(y / rect.GetHeight() * static_cast<float>(lineCount));
-            ImGui::SetScrollY(std::clamp(line * m.lineHeight - viewHeight * 0.5f, 0.0f, scrollMax));
+            const float row = std::floor(y / rect.GetHeight() * static_cast<float>(rowCount));
+            ImGui::SetScrollY(std::clamp(row * m.lineHeight - viewHeight * 0.5f, 0.0f, scrollMax));
         }
         else {
             float from = scroll;
@@ -2305,12 +2399,16 @@ void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const 
     draw->AddRectFilled(rect.Min, rect.Max, ecol(ScriptColor::Background));
     draw->AddLine(rect.Min, ImVec2(rect.Min.x, rect.Max.y), ecol(ScriptColor::LineNumber, 0.2f));
 
-    const auto top = [&](u32 line) { return rect.Min.y + static_cast<float>(line) * lineStep - view.offset; };
+    const auto top = [&](u32 line) { return rect.Min.y + static_cast<float>(rowOf(m, line)) * lineStep - view.offset; };
+    const auto shown = [&](u32 line) {
+        const u32 row = rowOf(m, line);
+        return !hiddenLine(m, line) && row >= view.first && row <= view.last;
+    };
     const auto xOf = [&](u32 cell) {
         return map.Min.x + unit + std::min(static_cast<float>(cell), kMinimapColumns) * unit;
     };
 
-    if (tab.caret.head.line >= view.first && tab.caret.head.line <= view.last) {
+    if (shown(tab.caret.head.line)) {
         const float y = top(tab.caret.head.line);
         draw->AddRectFilled(ImVec2(map.Min.x, y), ImVec2(map.Max.x, y + lineStep), ecol(ScriptColor::CurrentLine));
     }
@@ -2319,7 +2417,7 @@ void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const 
     const std::span<const Diagnostic> all = tab.document.diagnostics();
     for (const Diagnostic& diagnostic : all) {
         const u32 line = diagnostic.at.line;
-        if (line < view.first || line > view.last || line >= lineCount || settling(tab, diagnostic))
+        if (line >= lineCount || !shown(line) || settling(tab, diagnostic))
             continue;
         const u32 from = tab.document.cellOf(line, diagnostic.at.column);
         const u32 to = diagnostic.length > 0 ? tab.document.cellOf(line, diagnostic.at.column + diagnostic.length)
@@ -2332,7 +2430,10 @@ void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const 
 
     // The code: each run of non-blank characters a block in its token's colour.
     static std::vector<StyledRun> styled;
-    for (u32 line = view.first; line <= view.last; ++line) {
+    for (u32 row = view.first; row <= view.last; ++row) {
+        const u32 line = lineOfRow(m, row);
+        if (line >= lineCount)
+            break;
         const std::string_view text = tab.document.line(line);
         if (text.empty())
             continue;
@@ -2377,9 +2478,9 @@ void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const 
     // **The ruler: the whole file's problems at their share of its height**,
     // warnings first so an error on the same line is the one seen.
     draw->AddRectFilled(ImVec2(map.Max.x, rect.Min.y), rect.Max, ecol(ScriptColor::LineNumber, 0.08f));
-    const float perLine = rect.GetHeight() / static_cast<float>(lineCount);
+    const float perLine = rect.GetHeight() / static_cast<float>(rowCount);
     const auto tick = [&](u32 line, ImU32 colour, float height) {
-        const float y = rect.Min.y + static_cast<float>(line) * perLine;
+        const float y = rect.Min.y + static_cast<float>(rowOf(m, line)) * perLine;
         draw->AddRectFilled(ImVec2(map.Max.x + unit, y), ImVec2(rect.Max.x, y + std::max(height, perLine)), colour);
     };
     for (const Severity severity : {Severity::Warning, Severity::Error}) {
@@ -2396,12 +2497,48 @@ void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const 
     tick(tab.caret.head.line, ecol(ScriptColor::Caret, 0.7f), unit);
 }
 
+// **Folds follow their lines through an edit**, and the ranges are worked
+// out again when the text changed. Lines inserted or removed above a fold move
+// it by as many; a fold whose block is gone is dropped. And a caret that lands
+// inside a folded block -- typed into, searched to, jumped to -- opens it,
+// because a caret nobody can see is a caret nobody can use.
+void refreshFolds(OpenScript& tab)
+{
+    const core::u64 revision = tab.document.revision();
+    if (tab.foldRevision != revision) {
+        const u32 count = tab.document.lineCount();
+        if (tab.foldRevision != ~0ull && !tab.folded.empty() && count != tab.foldLineCount) {
+            const long long delta = static_cast<long long>(count) - static_cast<long long>(tab.foldLineCount);
+            const long long pivot = static_cast<long long>(tab.caret.head.line) - std::max(0LL, delta);
+            for (u32& first : tab.folded) {
+                if (static_cast<long long>(first) > pivot)
+                    first = static_cast<u32>(std::max(0LL, static_cast<long long>(first) + delta));
+            }
+        }
+        tab.foldRanges = tab.document.foldRanges();
+        std::erase_if(tab.folded, [&tab](u32 first) {
+            return std::none_of(tab.foldRanges.begin(), tab.foldRanges.end(),
+                                [first](const ScriptDocument::FoldRange& range) { return range.first == first; });
+        });
+        tab.foldRevision = revision;
+        tab.foldLineCount = count;
+    }
+    const u32 caretLine = tab.caret.head.line;
+    std::erase_if(tab.folded, [&tab, caretLine](u32 first) {
+        const ScriptDocument::FoldRange* range = foldAt(tab, first);
+        return range != nullptr && caretLine > range->first && caretLine < range->last;
+    });
+}
+
 void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
               core::InstanceId root, ScriptEditorCommands& out, std::size_t index,
               const ScriptActionButton& actionButton)
 {
     const ThemePalette& p = currentTheme().palette;
-    const PaneMetrics m = metricsFor(tab.document, editor.zoom());
+    PaneMetrics m = metricsFor(tab.document, editor.zoom());
+    refreshFolds(tab);
+    const FoldView view = foldView(tab.document.lineCount(), tab.foldRanges, tab.folded);
+    m.view = &view;
 
     // A tab whose indentation was made tabs on opening hands the text to the
     // instance now, the way an edit would (see `OpenScript::convertedIndent`).
@@ -2477,7 +2614,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // line can come out from under it.
     const ImVec2 extent(
         std::max(paneWidth, m.gutter + static_cast<float>(widestCells(tab) + 4u) * m.advance + mapWidth),
-        static_cast<float>(lineCount) * m.lineHeight + m.lineHeight);
+        static_cast<float>(view.rows()) * m.lineHeight + m.lineHeight);
     const ImGuiID id = ImGui::GetID("##surface");
     const ImRect bounds(origin, ImVec2(origin.x + extent.x, origin.y + extent.y));
     ImGui::ItemSize(extent);
@@ -2755,7 +2892,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         ime.WantVisible = true;
         ime.WantTextInput = true;
         ime.InputPos = ImVec2(textOrigin.x + static_cast<float>(tab.caret.head.column) * m.advance,
-                              textOrigin.y + static_cast<float>(tab.caret.head.line) * m.lineHeight);
+                              textOrigin.y + topOf(m, tab.caret.head.line));
         ime.InputLineHeight = m.lineHeight;
         ime.ViewportId = window->Viewport->ID;
 
@@ -2790,7 +2927,12 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         const bool ctrlSpace = pressed(ScriptAction::TriggerCompletion);
         // Not for the edit an accept just made (see `OpenScript::justAccepted`).
         const bool accepted = std::exchange(tab.justAccepted, false);
-        if (((tab.document.revision() != before && !accepted) || ctrlSpace) && tab.extraCarets.empty())
+        // **An edit made by a chord is a command, not typing** (the owner:
+        // Alt+Up moved the line and the list came back over it). AltGr arrives
+        // as Ctrl and Alt together and types characters, so it still counts.
+        const ImGuiIO& held = ImGui::GetIO();
+        const bool chord = held.KeyCtrl != held.KeyAlt;
+        if (((tab.document.revision() != before && !accepted && !chord) || ctrlSpace) && tab.extraCarets.empty())
             refreshCompletions(tab, world, root);
         // **Escape lets go of the pane rather than clearing the selection.** One
         // press to leave the code, and the second means what the shell says.
@@ -2817,8 +2959,12 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // Which lines can be seen: the same arithmetic `ImGuiListClipper` does, done
     // by hand because the pane already owns its extent and its scroll.
     const float scroll = ImGui::GetScrollY();
-    const auto first = static_cast<u32>(std::max(0.0f, std::floor(scroll / m.lineHeight)));
-    const auto last = std::min(lineCount - 1, first + static_cast<u32>(paneHeight / m.lineHeight) + 1u);
+    // In ROWS, then the lines they show: a folded block is one row.
+    const u32 rowCount = std::max(1u, view.rows());
+    const auto firstRow = std::min(rowCount - 1, static_cast<u32>(std::max(0.0f, std::floor(scroll / m.lineHeight))));
+    const auto lastRow = std::min(rowCount - 1, firstRow + static_cast<u32>(paneHeight / m.lineHeight) + 1u);
+    const u32 first = lineOfRow(m, firstRow);
+    const u32 last = lineOfRow(m, lastRow);
 
     ImDrawList* draw = ImGui::GetWindowDrawList();
 
@@ -2835,7 +2981,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
 
     // The line the caret is on, marked quietly. Loudly enough to find and not so
     // loudly that it competes with a selection.
-    const float caretY = textOrigin.y + static_cast<float>(tab.caret.head.line) * m.lineHeight;
+    const float caretY = textOrigin.y + topOf(m, tab.caret.head.line);
     if (active) {
         draw->AddRectFilled(
             ImVec2(origin.x + m.gutter, caretY),
@@ -2844,7 +2990,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     }
 
     if (debug.parked && debug.chunk == tab.chunk && debug.line > 0) {
-        const float stopY = textOrigin.y + static_cast<float>(debug.line - 1) * m.lineHeight;
+        const float stopY = textOrigin.y + topOf(m, debug.line - 1);
         draw->AddRectFilled(
             ImVec2(origin.x + m.gutter, stopY),
             ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x), stopY + m.lineHeight),
@@ -2854,7 +3000,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // the script: where it went wrong, marked the way a stopped debugger marks
     // where it is.
     if (tab.errorLine.has_value() && *tab.errorLine < lineCount) {
-        const float errorY = textOrigin.y + static_cast<float>(*tab.errorLine) * m.lineHeight;
+        const float errorY = textOrigin.y + topOf(m, *tab.errorLine);
         draw->AddRectFilled(
             ImVec2(origin.x + m.gutter, errorY),
             ImVec2(origin.x + ImGui::GetScrollX() + std::max(paneWidth, extent.x), errorY + m.lineHeight),
@@ -2865,10 +3011,24 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     drawSelection(tab, tab.caret, m, draw, textOrigin, first, last);
     for (const Caret& extra : tab.extraCarets)
         drawSelection(tab, extra, m, draw, textOrigin, first, last);
-    for (u32 line = first; line <= last && line < lineCount; ++line) {
+    for (u32 row = firstRow; row <= lastRow; ++row) {
+        const u32 line = lineOfRow(m, row);
+        if (line >= lineCount)
+            break;
         drawGutter(tab, editor, debug, m, draw, ImVec2(origin.x + ImGui::GetScrollX(), origin.y), line,
                    line == tab.caret.head.line);
         drawLine(tab, m, draw, textOrigin, line, paneWidth + ImGui::GetScrollX());
+        // **What a fold hides is marked where it hides it**: a quiet pill
+        // after the line's code, which is the reference editor's "...".
+        if (isFolded(tab, line)) {
+            const float x = textOrigin.x + static_cast<float>(tab.document.cellCount(line) + 1u) * m.advance;
+            const float y = textOrigin.y + topOf(m, line);
+            draw->AddRectFilled(ImVec2(x, y + m.lineHeight * 0.15f),
+                                ImVec2(x + m.advance * 3.0f, y + m.lineHeight * 0.85f),
+                                ecol(ScriptColor::Selection, 0.7f), m.lineHeight * 0.2f);
+            draw->AddText(m.font, m.size, ImVec2(x + m.advance * 0.5f, y - m.lineHeight * 0.12f),
+                          ecol(ScriptColor::LineNumber), "...");
+        }
     }
     drawDiagnostics(tab, m, draw, textOrigin, first, last);
 
@@ -2880,7 +3040,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             const auto bar = [&](const Caret& caret) {
                 const float x = textOrigin.x +
                                 static_cast<float>(tab.document.cellOf(caret.head.line, caret.head.column)) * m.advance;
-                const float y = textOrigin.y + static_cast<float>(caret.head.line) * m.lineHeight;
+                const float y = textOrigin.y + topOf(m, caret.head.line);
                 draw->AddLine(ImVec2(x, y), ImVec2(x, y + m.lineHeight), ecol(ScriptColor::Caret), 1.5f);
             };
             bar(tab.caret);
@@ -2897,7 +3057,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     // showing its first page.
     if (!(tab.caret.head == tab.shownCaret)) {
         tab.shownCaret = tab.caret.head;
-        const float caretTop = static_cast<float>(tab.caret.head.line) * m.lineHeight;
+        const float caretTop = topOf(m, tab.caret.head.line);
         if (caretTop < scroll)
             ImGui::SetScrollY(caretTop);
         else if (caretTop + m.lineHeight > scroll + paneHeight)
@@ -2961,8 +3121,19 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
 
     // A gutter click arms or disarms a breakpoint. Recorded rather than acted
     // on: the debugger has to be told, and it lives a frame away.
-    if (overGutter && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        out.toggleBreakpointLine = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
+    if (overGutter && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        const u32 clicked = hitTest(tab.document, m, textOrigin, ImGui::GetIO().MousePos).line;
+        const bool onArrow = ImGui::GetIO().MousePos.x >= origin.x + ImGui::GetScrollX() + foldZoneLeft(m);
+        if (onArrow && foldAt(tab, clicked) != nullptr) {
+            if (const auto at = std::find(tab.folded.begin(), tab.folded.end(), clicked); at != tab.folded.end())
+                tab.folded.erase(at);
+            else
+                tab.folded.push_back(clicked);
+        }
+        else {
+            out.toggleBreakpointLine = clicked;
+        }
+    }
 
     ImGui::EndChild();
     drawFindBox(tab, out, index, paneTopLeft, paneOuterWidth, actionButton);

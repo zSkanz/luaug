@@ -421,3 +421,49 @@ TEST_CASE("the minimap shows a short file whole and a long one scrolling with th
     const app::MinimapView empty = app::minimapView(0, 20.0f, 3.0f, 600.0f, 400.0f, 0.0f, 0.0f);
     CHECK(empty.last == 0);
 }
+
+TEST_CASE("a block folds to its first and last lines, and the rows close up")
+{
+    // **The owner**: "a button to open and close a block". Blocks and tables
+    // over several lines fold; an `if` expression is not a block.
+    app::ScriptDocument document("local function spin()\n"
+                                 "\tif ready then\n"
+                                 "\t\tgo()\n"
+                                 "\tend\n"
+                                 "end\n"
+                                 "local t = {\n"
+                                 "\t1,\n"
+                                 "}\n"
+                                 "local x = if ready then 1 else 2\n");
+    const std::vector<app::ScriptDocument::FoldRange> ranges = document.foldRanges();
+    REQUIRE(ranges.size() == 3);
+    CHECK(ranges[0].first == 0);
+    CHECK(ranges[0].last == 4);
+    CHECK(ranges[1].first == 1);
+    CHECK(ranges[1].last == 3);
+    CHECK(ranges[2].first == 5);
+    CHECK(ranges[2].last == 7);
+
+    // Nothing folded: every line its own row.
+    const app::FoldView open = app::foldView(document.lineCount(), ranges, {});
+    CHECK(open.rows() == document.lineCount());
+    CHECK_FALSE(open.hidden(2));
+
+    // The function folded: its opener and its `end` stay, the three inside go.
+    const std::vector<core::u32> outer{0};
+    const app::FoldView folded = app::foldView(document.lineCount(), ranges, outer);
+    CHECK(folded.rows() == document.lineCount() - 3);
+    CHECK(folded.hidden(1));
+    CHECK(folded.hidden(3));
+    CHECK_FALSE(folded.hidden(4));
+    CHECK(folded.lineRow[2] == 0);
+    CHECK(folded.lineRow[4] == 1);
+    CHECK(folded.rowLine[2] == 5);
+
+    // The inner one alone hides only its own body.
+    const std::vector<core::u32> inner{1};
+    const app::FoldView partly = app::foldView(document.lineCount(), ranges, inner);
+    CHECK(partly.hidden(2));
+    CHECK_FALSE(partly.hidden(3));
+    CHECK(partly.rows() == document.lineCount() - 1);
+}

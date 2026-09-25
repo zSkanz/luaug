@@ -414,12 +414,30 @@ public:
         // continues a block (`elseif`, `else`).
         std::string closer;
     };
-    // **The keyword balance of the whole document** decides "not closed yet":
-    // `function`, `if`, `do` and `repeat` open, `end` and `until` close, and
-    // the lexer has already set comments and strings aside. An Enter that
-    // wrote a second `end` under one somebody already typed is worse than
-    // none, so a balanced document gets no closer.
+    // **Whether THIS block is closed below** decides "not closed yet": from
+    // the caret, `function`, `if`, `do` and `repeat` open and `end` and
+    // `until` close, the lexer having set comments and strings aside, until
+    // the closer that matches this line's opener. Closed when that closer
+    // stands at least as deep as this line; one indented less is an outer
+    // block's. An Enter that wrote a second `end` under one somebody already
+    // typed is worse than none. An `if` expression opens nothing.
     [[nodiscard]] BlockBreak blockBreakAt(Position caret) const;
+
+    // --- Folding ---------------------------------------------------------------
+
+    // **A block that can be folded away** (the owner: "a button to open and
+    // close a block"): `first` is the line its opener is on and `last` the
+    // line its closer is on, and folding hides the lines between -- the
+    // opener's line and the `end` stay, so a folded block still reads as one.
+    // Blocks, as `blockBreakAt` reads them, and tables written over several
+    // lines. Only a block with at least one line inside it is a fold.
+    struct FoldRange
+    {
+        core::u32 first = 0;
+        core::u32 last = 0;
+    };
+    // In order of `first`, outer before inner.
+    [[nodiscard]] std::vector<FoldRange> foldRanges() const;
 
     // --- Searching -----------------------------------------------------------
 
