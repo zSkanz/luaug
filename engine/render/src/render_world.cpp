@@ -8,6 +8,7 @@
 #include "luaug/scene/world.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -596,10 +597,36 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
     // much of it as its own bounds reach. When the mesh has NOT loaded it is
     // the opposite: the only sign the part exists at all, which is exactly what
     // the debug path is for.
+    // **The five primitives' meshes, resolved once for the frame.** Asking
+    // `primitiveEntry` per part hashes the shape's name into the atom table and
+    // searches the library, twice a part across the two loops over the pool --
+    // ten thousand string lookups a frame for a city of five thousand parts, for
+    // an answer that has five possible values. Nothing below may call
+    // `primitiveEntry` directly.
+    constexpr core::i32 kPrimitiveShapes = 5;
+    std::array<const MeshLibrary::Entry*, kPrimitiveShapes> primitives{};
+    bool primitivesReady = true;
+    for (core::i32 shape = 0; shape < kPrimitiveShapes; ++shape) {
+        primitives[static_cast<usize>(shape)] = primitiveEntry(world, meshes, shape);
+        primitivesReady = primitivesReady && primitives[static_cast<usize>(shape)] != nullptr;
+    }
+    const auto primitiveOf = [&primitives](core::i32 shape) -> const MeshLibrary::Entry* {
+        return shape >= 0 && shape < kPrimitiveShapes ? primitives[static_cast<usize>(shape)] : nullptr;
+    };
+
     world.parts().forEach([&](core::InstanceId id, const scene::PartComponent& part) {
+        // **The common case leaves before any other lookup.** A plain part, with
+        // a camera to draw it through and every primitive uploaded, is drawn by
+        // the solid path below and never by this one -- which is where the
+        // branches further down would have sent it too, after an ancestry walk
+        // and three searches. The result is the same part skipped; only the
+        // order of the tests moved, and each of them only returns.
+        const scene::MeshPartComponent* mesh = world.meshParts().find(id);
+        if (mesh == nullptr && out.camera.valid && primitivesReady && part.shape >= 0 && part.shape < kPrimitiveShapes)
+            return;
         if (!inWorld(world, id, root))
             return;
-        if (const scene::MeshPartComponent* mesh = world.meshParts().find(id); mesh != nullptr) {
+        if (mesh != nullptr) {
             const MeshLibrary::Entry* loaded = meshes.find(mesh->meshContent);
             if (loaded != nullptr && loaded->mesh.valid())
                 return;
@@ -611,7 +638,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // host draws with the debug path instead of with the renderer
         // (`engine.cpp`'s `useRenderer`). Without that guard `examples/00-clear`
         // went from three wire cubes to an empty screen.
-        else if (out.camera.valid && primitiveEntry(world, meshes, drawnShape(world, id, part)) != nullptr) {
+        else if (out.camera.valid && primitiveOf(drawnShape(world, id, part)) != nullptr) {
             return;
         }
         // The debug path draws the surface's colour and see-through and
@@ -1249,7 +1276,9 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (world.meshParts().find(id) != nullptr)
             return;
 
-        const MeshLibrary::Entry* entry = primitiveEntry(world, meshes, drawnShape(world, id, part));
+        // Once per part: it is a pool search, and it was asked twice here.
+        const core::i32 shape = drawnShape(world, id, part);
+        const MeshLibrary::Entry* entry = primitiveOf(shape);
         if (entry == nullptr)
             return;
 
@@ -1259,7 +1288,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
             return;
 
         const Mat4 transform = core::toRenderMatrix(at(id, part.cframe, teleportReach(part.size)), origin) *
-                               core::scaling(primitiveScale(drawnShape(world, id, part), part.size));
+                               core::scaling(primitiveScale(shape, part.size));
         const AABB worldBounds = core::transformed(transform, entry->bounds);
 
         ++out.candidateDraws;
