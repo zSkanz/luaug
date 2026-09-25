@@ -377,3 +377,47 @@ TEST_CASE("saving the scene saves every script the scene carries, and not a file
     // Its own file under src/scripts is not in the scene, so it is not saved.
     CHECK(editor.at(1)->dirty());
 }
+
+TEST_CASE("the minimap shows a short file whole and a long one scrolling with the code")
+{
+    // Twenty-pixel lines in the pane, three in the map, a 600-pixel map over
+    // a 400-pixel view. `scrollMax` is what the pane's extent gives: one
+    // line of air under the last.
+    const auto scrollMax = [](core::u32 lines) { return static_cast<float>(lines + 1) * 20.0f - 400.0f; };
+
+    // Fifty lines are 150 pixels of map: all of it shows, nothing scrolls, and
+    // the slider is the view's share at a line's scale.
+    const app::MinimapView shortFile = app::minimapView(50, 20.0f, 3.0f, 600.0f, 400.0f, 200.0f, scrollMax(50));
+    CHECK(static_cast<double>(shortFile.offset) == doctest::Approx(0.0));
+    CHECK(shortFile.first == 0);
+    CHECK(shortFile.last == 49);
+    CHECK(static_cast<double>(shortFile.sliderHeight) == doctest::Approx(60.0));
+    CHECK(static_cast<double>(shortFile.sliderTop) == doctest::Approx(30.0));
+    CHECK(static_cast<double>(shortFile.dragRatio) == doctest::Approx(20.0 / 3.0));
+
+    // A thousand lines are 3000 pixels of map. At the top the map is at its
+    // top; at the bottom its last line is at the map's bottom, and so is the
+    // slider -- they arrive together, which is what "proportional" means.
+    const app::MinimapView atTop = app::minimapView(1000, 20.0f, 3.0f, 600.0f, 400.0f, 0.0f, scrollMax(1000));
+    CHECK(static_cast<double>(atTop.offset) == doctest::Approx(0.0));
+    CHECK(static_cast<double>(atTop.sliderTop) == doctest::Approx(0.0));
+    const app::MinimapView atEnd =
+        app::minimapView(1000, 20.0f, 3.0f, 600.0f, 400.0f, scrollMax(1000), scrollMax(1000));
+    CHECK(static_cast<double>(atEnd.offset) == doctest::Approx(2400.0));
+    CHECK(atEnd.last == 999);
+    CHECK(static_cast<double>(atEnd.sliderTop + atEnd.sliderHeight) == doctest::Approx(600.0));
+    // Dragging the slider across the map's free height covers the whole file.
+    CHECK(static_cast<double>(atTop.dragRatio * (600.0f - atTop.sliderHeight)) ==
+          doctest::Approx(static_cast<double>(scrollMax(1000))));
+
+    // A click outside the slider puts that line in the middle of the view.
+    CHECK(static_cast<double>(app::minimapJump(atTop, 300.0f, 20.0f, 3.0f, 400.0f, scrollMax(1000))) ==
+          doctest::Approx(1800.0));
+    // And never past either end.
+    CHECK(static_cast<double>(app::minimapJump(atTop, 1.0f, 20.0f, 3.0f, 400.0f, scrollMax(1000))) ==
+          doctest::Approx(0.0));
+
+    // Nothing to show is nothing, not a division by zero.
+    const app::MinimapView empty = app::minimapView(0, 20.0f, 3.0f, 600.0f, 400.0f, 0.0f, 0.0f);
+    CHECK(empty.last == 0);
+}

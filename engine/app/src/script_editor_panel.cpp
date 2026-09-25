@@ -2225,6 +2225,173 @@ void drawMatches(const OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, 
     }
 }
 
+// How far the pane scrolls sideways: the widest line, measured again only
+// when the text changed (see `OpenScript::widestCells`).
+[[nodiscard]] u32 widestCells(OpenScript& tab)
+{
+    if (tab.widestRevision != tab.document.revision()) {
+        u32 widest = 0;
+        for (u32 line = 0; line < tab.document.lineCount(); ++line)
+            widest = std::max(widest, tab.document.cellCount(line));
+        tab.widestCells = widest;
+        tab.widestRevision = tab.document.revision();
+    }
+    return tab.widestCells;
+}
+
+// **The minimap**, in the reference editor's proportions: a line is three
+// units tall and a character one wide, drawn as a block in its own colour,
+// up to this many columns -- the shape of the code rather than its letters.
+constexpr float kMinimapColumns = 100.0f;
+constexpr float kMinimapLineStep = 3.0f;
+constexpr float kMinimapBlock = 2.0f;
+// The strip down its right edge that marks the WHOLE file's problems, which
+// the map itself stops showing once the file is taller than the pane.
+constexpr float kMinimapRuler = 5.0f;
+// Below this the pane is for the code alone.
+constexpr float kMinimapShownFrom = 480.0f;
+
+// Drawn over the right of the code pane, and it moves the pane's scroll: a
+// click jumps there, the slider drags, and a click in the ruler goes to that
+// share of the file. The wheel over it scrolls the code, which the pane
+// already does because the map is inside it.
+void drawMinimap(OpenScript& tab, const PaneMetrics& m, ImDrawList* draw, const ImRect& rect, float unit, float scroll,
+                 float scrollMax, float viewHeight, bool overMap)
+{
+    const u32 lineCount = tab.document.lineCount();
+    if (lineCount == 0)
+        return;
+    const float lineStep = kMinimapLineStep * unit;
+    const float block = kMinimapBlock * unit;
+    const float ruler = kMinimapRuler * unit;
+    const ImRect map(rect.Min, ImVec2(rect.Max.x - ruler, rect.Max.y));
+    const MinimapView view =
+        minimapView(lineCount, m.lineHeight, lineStep, rect.GetHeight(), viewHeight, scroll, scrollMax);
+
+    const ImGuiIO& io = ImGui::GetIO();
+    if (overMap && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        const float y = io.MousePos.y - rect.Min.y;
+        if (io.MousePos.x >= map.Max.x) {
+            // The ruler is the whole file, top to bottom.
+            const float line = std::floor(y / rect.GetHeight() * static_cast<float>(lineCount));
+            ImGui::SetScrollY(std::clamp(line * m.lineHeight - viewHeight * 0.5f, 0.0f, scrollMax));
+        }
+        else {
+            float from = scroll;
+            if (y < view.sliderTop || y >= view.sliderTop + view.sliderHeight) {
+                from = minimapJump(view, y, m.lineHeight, lineStep, viewHeight, scrollMax);
+                ImGui::SetScrollY(from);
+            }
+            tab.mapDragging = true;
+            tab.mapGrabScroll = from;
+            tab.mapGrabY = io.MousePos.y;
+        }
+    }
+    if (tab.mapDragging) {
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            tab.mapDragging = false;
+        else if (io.MousePos.y != tab.mapGrabY)
+            ImGui::SetScrollY(
+                std::clamp(tab.mapGrabScroll + (io.MousePos.y - tab.mapGrabY) * view.dragRatio, 0.0f, scrollMax));
+    }
+    if (overMap || tab.mapDragging)
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+
+    // Its own ground, over the code that scrolled under it.
+    draw->AddRectFilled(rect.Min, rect.Max, ecol(ScriptColor::Background));
+    draw->AddLine(rect.Min, ImVec2(rect.Min.x, rect.Max.y), ecol(ScriptColor::LineNumber, 0.2f));
+
+    const auto top = [&](u32 line) { return rect.Min.y + static_cast<float>(line) * lineStep - view.offset; };
+    const auto xOf = [&](u32 cell) {
+        return map.Min.x + unit + std::min(static_cast<float>(cell), kMinimapColumns) * unit;
+    };
+
+    if (tab.caret.head.line >= view.first && tab.caret.head.line <= view.last) {
+        const float y = top(tab.caret.head.line);
+        draw->AddRectFilled(ImVec2(map.Min.x, y), ImVec2(map.Max.x, y + lineStep), ecol(ScriptColor::CurrentLine));
+    }
+
+    // **The problems, under the code**, where the pane underlines them.
+    const std::span<const Diagnostic> all = tab.document.diagnostics();
+    for (const Diagnostic& diagnostic : all) {
+        const u32 line = diagnostic.at.line;
+        if (line < view.first || line > view.last || line >= lineCount || settling(tab, diagnostic))
+            continue;
+        const u32 from = tab.document.cellOf(line, diagnostic.at.column);
+        const u32 to = diagnostic.length > 0 ? tab.document.cellOf(line, diagnostic.at.column + diagnostic.length)
+                                             : tab.document.cellCount(line);
+        const float y = top(line);
+        draw->AddRectFilled(ImVec2(xOf(from), y), ImVec2(std::max(xOf(to), xOf(from) + 2.0f * unit), y + lineStep),
+                            diagnostic.severity == Severity::Error ? ecol(ScriptColor::ErrorUnderline, 0.55f)
+                                                                   : ecol(ScriptColor::WarningUnderline, 0.45f));
+    }
+
+    // The code: each run of non-blank characters a block in its token's colour.
+    static std::vector<StyledRun> styled;
+    for (u32 line = view.first; line <= view.last; ++line) {
+        const std::string_view text = tab.document.line(line);
+        if (text.empty())
+            continue;
+        const float y = top(line);
+        const auto blocks = [&](u32 from, u32 to, ImU32 colour) {
+            while (from < to) {
+                while (from < to && (text[from] == ' ' || text[from] == '\t'))
+                    ++from;
+                u32 end = from;
+                while (end < to && text[end] != ' ' && text[end] != '\t')
+                    ++end;
+                if (end > from) {
+                    const u32 cell = tab.document.cellOf(line, from);
+                    if (static_cast<float>(cell) >= kMinimapColumns)
+                        return;
+                    draw->AddRectFilled(ImVec2(xOf(cell), y), ImVec2(xOf(tab.document.cellOf(line, end)), y + block),
+                                        colour);
+                }
+                from = end;
+            }
+        };
+        styleLine(text, tab.document.tokens(line), styled);
+        const ImU32 plain = ecol(ScriptColor::Text, 0.7f);
+        u32 column = 0;
+        for (const StyledRun& piece : styled) {
+            blocks(column, piece.column, plain);
+            blocks(piece.column, piece.column + piece.length, ecol(piece.color, 0.8f));
+            column = std::max(column, piece.column + piece.length);
+        }
+        blocks(column, static_cast<u32>(text.size()), plain);
+    }
+
+    // The slider -- what the pane shows -- when the pointer is over the map,
+    // as the reference editor shows it.
+    if (overMap || tab.mapDragging) {
+        draw->AddRectFilled(
+            ImVec2(map.Min.x, rect.Min.y + view.sliderTop),
+            ImVec2(map.Max.x, rect.Min.y + view.sliderTop + view.sliderHeight),
+            ImGui::GetColorU32(tab.mapDragging ? ImGuiCol_ScrollbarGrabActive : ImGuiCol_ScrollbarGrabHovered, 0.35f));
+    }
+
+    // **The ruler: the whole file's problems at their share of its height**,
+    // warnings first so an error on the same line is the one seen.
+    draw->AddRectFilled(ImVec2(map.Max.x, rect.Min.y), rect.Max, ecol(ScriptColor::LineNumber, 0.08f));
+    const float perLine = rect.GetHeight() / static_cast<float>(lineCount);
+    const auto tick = [&](u32 line, ImU32 colour, float height) {
+        const float y = rect.Min.y + static_cast<float>(line) * perLine;
+        draw->AddRectFilled(ImVec2(map.Max.x + unit, y), ImVec2(rect.Max.x, y + std::max(height, perLine)), colour);
+    };
+    for (const Severity severity : {Severity::Warning, Severity::Error}) {
+        for (const Diagnostic& diagnostic : all) {
+            if (diagnostic.severity != severity || diagnostic.at.line >= lineCount || settling(tab, diagnostic))
+                continue;
+            tick(diagnostic.at.line,
+                 severity == Severity::Error ? ecol(ScriptColor::ErrorUnderline) : ecol(ScriptColor::WarningUnderline),
+                 2.0f * unit);
+        }
+    }
+    if (tab.errorLine.has_value() && *tab.errorLine < lineCount)
+        tick(*tab.errorLine, ecol(ScriptColor::ErrorUnderline), 3.0f * unit);
+    tick(tab.caret.head.line, ecol(ScriptColor::Caret, 0.7f), unit);
+}
+
 void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
               core::InstanceId root, ScriptEditorCommands& out, std::size_t index,
               const ScriptActionButton& actionButton)
@@ -2286,12 +2453,27 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     const float paneHeight = ImGui::GetWindowHeight();
     const auto lineCount = tab.document.lineCount();
 
+    // **The minimap's place**: the right of what the pane shows, beside the
+    // scrollbar and not under it, and fixed while the code scrolls under it.
+    const ImRect inner = ImGui::GetCurrentWindow()->InnerRect;
+    const float unit = std::max(1.0f, ImGui::GetFontSize() / 15.0f);
+    const float mapWidth =
+        inner.GetWidth() >= kMinimapShownFrom * unit ? (kMinimapColumns + 2.0f + kMinimapRuler) * unit : 0.0f;
+    const ImRect mapRect(ImVec2(inner.Max.x - mapWidth, inner.Min.y), inner.Max);
+    const bool overMap = mapWidth > 0.0f && ImGui::IsWindowHovered() && mapRect.Contains(ImGui::GetIO().MousePos);
+    // What the code has of the pane once the map has its share.
+    const float textWidth = paneWidth - mapWidth;
+
     // The extent, which is also the click target. An `InvisibleButton` would
     // reset the active id on release; this claims it and keeps it, which is what
     // a caret needs and what makes `IsAnyItemActive()` true for the shell's own
     // guards.
-    const ImVec2 extent(std::max(paneWidth, m.gutter + 200.0f * m.advance),
-                        static_cast<float>(lineCount) * m.lineHeight + m.lineHeight);
+    //
+    // **As wide as the widest line**, plus the map's width so the end of that
+    // line can come out from under it.
+    const ImVec2 extent(
+        std::max(paneWidth, m.gutter + static_cast<float>(widestCells(tab) + 4u) * m.advance + mapWidth),
+        static_cast<float>(lineCount) * m.lineHeight + m.lineHeight);
     const ImGuiID id = ImGui::GetID("##surface");
     const ImRect bounds(origin, ImVec2(origin.x + extent.x, origin.y + extent.y));
     ImGui::ItemSize(extent);
@@ -2303,7 +2485,8 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
     const bool visible = ImGui::ItemAdd(bounds, id);
 
     ImGuiWindow* window = ImGui::GetCurrentWindow();
-    const bool hovered = ImGui::ItemHoverable(bounds, id, 0);
+    // Over the map the pointer is the map's, not the text's.
+    const bool hovered = ImGui::ItemHoverable(bounds, id, 0) && !overMap;
     bool active = ImGui::GetActiveID() == id;
 
     // A tab just opened or focused takes the caret (see `OpenScript::claimCaret`).
@@ -2617,7 +2800,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             ImGui::ClearActiveID();
             active = false;
         }
-        else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hovered && !popupClick) {
+        else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hovered && !popupClick && !overMap) {
             ImGui::ClearActiveID();
             active = false;
         }
@@ -2702,6 +2885,9 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         }
     }
 
+    if (mapWidth > 0.0f)
+        drawMinimap(tab, m, draw, mapRect, unit, scroll, ImGui::GetScrollMaxY(), inner.GetHeight(), overMap);
+
     // **The view follows the caret, and only when the caret moved.** Ctrl+End in
     // a long file otherwise put the caret at the bottom of a document still
     // showing its first page.
@@ -2718,8 +2904,8 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
         const float scrollX = ImGui::GetScrollX();
         if (caretX < scrollX)
             ImGui::SetScrollX(std::max(0.0f, caretX - m.advance * 4.0f));
-        else if (caretX + m.gutter + m.advance > scrollX + paneWidth)
-            ImGui::SetScrollX(caretX + m.gutter + m.advance - paneWidth);
+        else if (caretX + m.gutter + m.advance > scrollX + textWidth)
+            ImGui::SetScrollX(caretX + m.gutter + m.advance - textWidth);
     }
 
     drawZoomReadout(editor, m);

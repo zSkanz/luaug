@@ -207,4 +207,35 @@ void ScriptEditor::setBoundLine(std::string_view chunk, core::u32 line, core::u3
     }
 }
 
+MinimapView minimapView(core::u32 lineCount, float lineHeight, float lineStep, float mapHeight, float viewHeight,
+                        float scroll, float scrollMax) noexcept
+{
+    MinimapView view;
+    if (lineCount == 0 || lineHeight <= 0.0f || lineStep <= 0.0f || mapHeight <= 0.0f)
+        return view;
+
+    const float content = static_cast<float>(lineCount) * lineStep;
+    const float overflow = std::max(0.0f, content - mapHeight);
+    view.offset = scrollMax > 0.0f ? std::clamp(scroll / scrollMax, 0.0f, 1.0f) * overflow : 0.0f;
+    view.first = std::min(lineCount - 1, static_cast<core::u32>(view.offset / lineStep));
+    view.last = std::min(lineCount - 1, view.first + static_cast<core::u32>(std::ceil(mapHeight / lineStep)) + 1u);
+
+    const float perPixel = lineStep / lineHeight;
+    view.sliderHeight = std::min(mapHeight, viewHeight * perPixel);
+    view.sliderTop = std::clamp(scroll * perPixel - view.offset, 0.0f, mapHeight - view.sliderHeight);
+    // With the map scrolling too, the slider covers the map's free height
+    // while the code covers its whole scroll; without, a map pixel is a line's
+    // share of the code.
+    view.dragRatio =
+        overflow > 0.0f ? scrollMax / std::max(1.0f, mapHeight - view.sliderHeight) : lineHeight / lineStep;
+    return view;
+}
+
+float minimapJump(const MinimapView& view, float y, float lineHeight, float lineStep, float viewHeight,
+                  float scrollMax) noexcept
+{
+    const float line = std::floor((y + view.offset) / lineStep);
+    return std::clamp(line * lineHeight - viewHeight * 0.5f, 0.0f, std::max(0.0f, scrollMax));
+}
+
 } // namespace luaug::app

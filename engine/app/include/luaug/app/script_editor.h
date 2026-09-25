@@ -91,6 +91,36 @@ enum class ScriptOrigin : core::u8
 };
 
 // One tab.
+// **The minimap's arithmetic** (the owner: "the thing our VS Code has, the
+// whole code small on the right, with the errors"), apart from its drawing so
+// it can be tested. Everything is in pixels, and `scroll` is the code pane's.
+//
+// Proportional, as the reference editor's default is: a line is `lineStep`
+// tall in the map, and when the map is taller than its pane it scrolls with
+// the code, so its top and bottom meet the file's at the same moment the
+// code's do.
+struct MinimapView
+{
+    // How far the map's content is scrolled, and which lines can be seen.
+    float offset = 0.0f;
+    core::u32 first = 0;
+    core::u32 last = 0;
+    // The slider -- the part of the file the code pane shows -- relative to
+    // the map's top.
+    float sliderTop = 0.0f;
+    float sliderHeight = 0.0f;
+    // Pixels of code scroll per pixel the slider is dragged.
+    float dragRatio = 1.0f;
+};
+
+[[nodiscard]] MinimapView minimapView(core::u32 lineCount, float lineHeight, float lineStep, float mapHeight,
+                                      float viewHeight, float scroll, float scrollMax) noexcept;
+
+// Where the code scrolls to for a click at `y` (relative to the map's top)
+// outside the slider: that line in the middle of the pane.
+[[nodiscard]] float minimapJump(const MinimapView& view, float y, float lineHeight, float lineStep, float viewHeight,
+                                float scrollMax) noexcept;
+
 struct OpenScript
 {
     core::InstanceId instance;
@@ -171,6 +201,20 @@ struct OpenScript
     // What the last search matched, so the pane can highlight it and Enter can
     // step from it rather than from the caret.
     Range lastMatch;
+
+    // --- The view ------------------------------------------------------------
+    //
+    // **The widest line, in cells**, which is how far the pane scrolls
+    // sideways. Measured once per revision: a fixed two hundred columns hid
+    // whatever a longer line held past them (the owner's friend: `1 :: string`
+    // after two hundred spaces, which no scrollbar could reach).
+    core::u64 widestRevision = ~0ull;
+    core::u32 widestCells = 0;
+    // The minimap's slider, while it is dragged: the scroll and the pointer
+    // the drag started from.
+    bool mapDragging = false;
+    float mapGrabScroll = 0.0f;
+    float mapGrabY = 0.0f;
 
     // --- Completion ----------------------------------------------------------
     //
