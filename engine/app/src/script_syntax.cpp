@@ -234,6 +234,25 @@ void markTypes(std::string_view text, std::vector<Token>& tokens)
         tokens[0].kind = TokenKind::Keyword;
         start = 1;
     }
+    // `const`, the local that cannot be reassigned (the owner: "we have const
+    // in the code and it has no colour"). A keyword where it opens a
+    // declaration -- followed by the name it declares or by `function` --
+    // wherever that stands on the line, and after `export`. Not after `.`,
+    // `:` or `local`, where it is somebody's name.
+    for (std::size_t at = 0; at < tokens.size(); ++at) {
+        if (!isName(at, "const"))
+            continue;
+        const bool declares = isName(at + 1) || (at + 1 < tokens.size() && tokens[at + 1].kind == TokenKind::Keyword &&
+                                                 textOf(text, tokens[at + 1]) == "function");
+        const bool named =
+            at > 0 && (isOp(at - 1, ".") || isOp(at - 1, ":") ||
+                       (tokens[at - 1].kind == TokenKind::Keyword && textOf(text, tokens[at - 1]) == "local"));
+        if (declares && !named) {
+            tokens[at].kind = TokenKind::Keyword;
+            if (at == 1 && isName(0, "export"))
+                tokens[0].kind = TokenKind::Keyword;
+        }
+    }
     bool typeStatement = false;
     if (isName(start, "type") && isName(start + 1)) {
         tokens[start].kind = TokenKind::Keyword;
@@ -454,7 +473,7 @@ void styleLine(std::string_view text, std::span<const Token> tokens, std::vector
         case TokenKind::Keyword:
             if (here == "function")
                 color = ScriptColor::FunctionKeyword;
-            else if (here == "local")
+            else if (here == "local" || here == "const")
                 color = ScriptColor::LocalKeyword;
             else if (here == "nil")
                 color = ScriptColor::Nil;

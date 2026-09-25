@@ -717,6 +717,31 @@ TEST_CASE("return and continue colour as keywords wherever a statement can be")
     CHECK(kindAt(variable, 0, 6) == TokenKind::Identifier);
 }
 
+TEST_CASE("const colours as a keyword where it declares something")
+{
+    // **The owner**: "we have const in the code and it has no colour". Luau
+    // reads it as a name everywhere but at the start of a declaration.
+    //           0         1         2
+    //           012345678901234567890123
+    ScriptDocument value("const Speed = 4");
+    CHECK(kindAt(value, 0, 0) == TokenKind::Keyword);
+    CHECK(kindAt(value, 0, 6) == TokenKind::Identifier);
+    ScriptDocument function("const function spin() end");
+    CHECK(kindAt(function, 0, 0) == TokenKind::Keyword);
+    ScriptDocument exported("export const Limit = 10");
+    CHECK(kindAt(exported, 0, 0) == TokenKind::Keyword);
+    CHECK(kindAt(exported, 0, 7) == TokenKind::Keyword);
+    ScriptDocument indented("	const x = 1");
+    CHECK(kindAt(indented, 0, 1) == TokenKind::Keyword);
+    // Somebody's name is a name.
+    ScriptDocument field("config.const = 1");
+    CHECK(kindAt(field, 0, 7) == TokenKind::Identifier);
+    ScriptDocument variable("local const = 1");
+    CHECK(kindAt(variable, 0, 6) == TokenKind::Identifier);
+    ScriptDocument read("print(const)");
+    CHECK(kindAt(read, 0, 6) == TokenKind::Identifier);
+}
+
 TEST_CASE("Enter after a line that opens a block writes its end, once")
 {
     // **The owner: "the automatic end, as other editors do".** A closer only
