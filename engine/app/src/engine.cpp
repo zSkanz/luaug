@@ -1833,10 +1833,20 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                                 scripts.markSavedWhere(ScriptOrigin::Stamp);
                         }
                         else if (tab->file.empty()) {
-                            // It lives in the scene, so saving it is saving the
-                            // scene -- the `Source` is already in the world.
-                            if (editor.saveOpenScene(host->world()))
+                            // It lives in the scene, and ONLY it is saved
+                            // there (see `Editor::saveSceneScript`) -- unless
+                            // that cannot be done, and then the whole scene
+                            // is, and every scene tab with it.
+                            switch (editor.saveSceneScript(host->world(), tab->instance)) {
+                            case Editor::ScriptSave::Script:
+                                scripts.markSaved(index);
+                                break;
+                            case Editor::ScriptSave::Scene:
                                 scripts.markSavedWhere(ScriptOrigin::Scene);
+                                break;
+                            case Editor::ScriptSave::Failed:
+                                break;
+                            }
                         }
                         else if (platform::writeTextFile(options.scriptPath / tab->file, tab->document.text())) {
                             scripts.markSaved(index);

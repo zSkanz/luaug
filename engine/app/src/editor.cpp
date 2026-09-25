@@ -2783,6 +2783,144 @@ bool Editor::saveOpenScene(scene::World& world)
     return save(world, m_content.root() / std::filesystem::path(m_openScene));
 }
 
+namespace {
+
+// One step down a tree: a class, a name, and which of the siblings with both
+// it is -- a scene full of `Ground` is legal, and the third `Ground` is the
+// third in any world built from the same file.
+struct PathStep
+{
+    scene::ClassId classId = scene::InvalidClass;
+    core::NameAtom name;
+    core::u32 ordinal = 0;
+};
+
+[[nodiscard]] core::InstanceId topOf(const scene::World& world, core::InstanceId id)
+{
+    while (world.parentOf(id).valid())
+        id = world.parentOf(id);
+    return id;
+}
+
+[[nodiscard]] std::vector<PathStep> pathOf(const scene::World& world, core::InstanceId id)
+{
+    std::vector<PathStep> path;
+    for (core::InstanceId at = id; world.parentOf(at).valid(); at = world.parentOf(at)) {
+        PathStep step{world.classOf(at), world.name(at), 0};
+        for (core::InstanceId sibling = world.firstChild(world.parentOf(at)); sibling != at;
+             sibling = world.nextSibling(sibling)) {
+            if (world.classOf(sibling) == step.classId && world.name(sibling) == step.name)
+                ++step.ordinal;
+        }
+        path.push_back(step);
+    }
+    std::reverse(path.begin(), path.end());
+    return path;
+}
+
+[[nodiscard]] core::InstanceId follow(const scene::World& world, core::InstanceId top,
+                                      const std::vector<PathStep>& path)
+{
+    core::InstanceId at = top;
+    for (const PathStep& step : path) {
+        core::u32 seen = 0;
+        core::InstanceId found;
+        for (core::InstanceId child = world.firstChild(at); child.valid(); child = world.nextSibling(child)) {
+            if (world.classOf(child) != step.classId || world.name(child) != step.name)
+                continue;
+            if (seen++ == step.ordinal) {
+                found = child;
+                break;
+            }
+        }
+        if (!found.valid())
+            return {};
+        at = found;
+    }
+    return at;
+}
+
+} // namespace
+
+Editor::ScriptSave Editor::saveSceneScript(scene::World& world, core::InstanceId script)
+{
+    // **The whole scene, and why**, whenever saving one script cannot be done
+    // honestly. Said, because "Ctrl+S saved everything" is what was reported.
+    const auto whole = [&](const std::string& why) {
+        if (!saveOpenScene(world))
+            return ScriptSave::Failed;
+        m_status = EditorStatus{"saved the whole scene: " + why, false};
+        return ScriptSave::Scene;
+    };
+
+    if (m_openScene.empty() || !world.alive(script))
+        return saveOpenScene(world) ? ScriptSave::Scene : ScriptSave::Failed;
+
+    const core::NameAtom sourceKey = world.atoms().intern("Source");
+    const std::optional<scene::Value> source = world.getProperty(script, sourceKey);
+    const std::string* text = source.has_value() ? std::get_if<std::string>(&*source) : nullptr;
+    if (text == nullptr)
+        return whole("this script has no source to save on its own");
+
+    const std::filesystem::path path = m_content.root() / std::filesystem::path(m_openScene);
+    std::string saved;
+    if (!platform::readTextFile(path, saved))
+        return whole("the scene has not been saved before");
+
+    // **The saved file, in a world of its own**, with the same registries and
+    // the same services at the top, so every name and class means the same.
+    scene::World disk(world.classes(), world.enums(), world.atoms(), 1u);
+    const core::InstanceId top = topOf(world, script);
+    const core::InstanceId diskTop = disk.create(world.classOf(top));
+    disk.setName(diskTop, world.name(top));
+    const auto mirror = [&](core::InstanceId from, core::InstanceId to) {
+        // `readScene` finds the workspace by what it IS, not by its name.
+        if (world.workspaces().find(from) != nullptr && disk.workspaces().find(to) == nullptr)
+            disk.workspaces().add(to, scene::WorkspaceComponent{});
+    };
+    mirror(top, diskTop);
+    for (core::InstanceId child = world.firstChild(top); child.valid(); child = world.nextSibling(child)) {
+        const scene::ClassDescriptor* descriptor = world.classes().find(world.classOf(child));
+        const bool service = descriptor != nullptr && scene::hasFlag(descriptor->flags, scene::ClassFlags::Service);
+        if (!service && world.workspaces().find(child) == nullptr)
+            continue;
+        const core::InstanceId copy = disk.create(world.classOf(child));
+        disk.setName(copy, world.name(child));
+        (void)disk.setParent(copy, diskTop);
+        mirror(child, copy);
+    }
+
+    if (scene::readScene(disk, saved, nullptr, stampSource()).has_value())
+        return whole("the saved scene could not be read back");
+    scene::StampLibrary stamps(disk, stampSource());
+    if (scene::writeScene(disk, nullptr, &stamps) != saved)
+        return whole("the saved file does not come back unchanged through a read and a write");
+
+    const core::InstanceId target = follow(disk, diskTop, pathOf(world, script));
+    if (!target.valid() || disk.classOf(target) != world.classOf(script))
+        return whole("this script is not in the saved scene yet (new, renamed or moved since)");
+
+    (void)disk.setProperty(target, sourceKey, scene::Value{*text});
+    scene::SceneIoReport report;
+    const std::string patched = scene::writeScene(disk, &report, &stamps);
+    if (!platform::writeTextFile(path, patched)) {
+        m_status = EditorStatus{"could not write " + path.string(), true};
+        return ScriptSave::Failed;
+    }
+
+    // **Nothing else unsaved is left** when the world now writes exactly this
+    // file -- then the scene is clean, and closing will not ask about it.
+    {
+        scene::StampLibrary live(world, stampSource());
+        if (scene::writeScene(world, nullptr, &live) == patched)
+            m_sceneDirty = false;
+    }
+    m_status = EditorStatus{"saved " + std::string(world.atoms().text(world.name(script))) + " into " +
+                                path.filename().string() + " -- nothing else in the scene was written",
+                            false};
+    return ScriptSave::Script;
+}
+
 void Editor::reportImport(const ContentTree::ImportReport& report) noexcept
 {
     if (report.imported.empty() && report.skipped.empty() && report.failed.empty() && report.companions.empty() &&

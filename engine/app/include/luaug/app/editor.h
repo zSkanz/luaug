@@ -919,6 +919,25 @@ public:
     // those reference trees needs the world's registries.
     bool saveOpenScene(scene::World& world);
 
+    // **Ctrl+S in a script's tab saves THAT script** (the owner, on a friend
+    // saving one script and finding every open one saved with it). A scene's
+    // script lives in the scene file, so this reads the file as saved, puts
+    // this one `Source` into it and writes it back -- every other unsaved
+    // script, and every part moved since, stays unsaved.
+    //
+    // It proves itself first: the saved file, read into a world of its own and
+    // written again, must come back byte for byte, or the file holds something
+    // a round trip would change and patching it is not safe. Then, and when
+    // the script is not in the saved file at all -- new, renamed or moved since
+    // -- it saves the whole scene instead, and the status says so.
+    enum class ScriptSave : core::u8
+    {
+        Script,
+        Scene,
+        Failed,
+    };
+    ScriptSave saveSceneScript(scene::World& world, core::InstanceId script);
+
     // --- Remembering, across a restart ---------------------------------------
     //
     // **Which scene was open is state that belongs to a PERSON, not to a

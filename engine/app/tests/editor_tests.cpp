@@ -5799,3 +5799,73 @@ TEST_CASE("a sky picture's face is read off its name (ADR 0096)")
     CHECK(app::skyFaceOfName("mountains.png").empty());
     CHECK(app::skyFaceOfName("").empty());
 }
+
+// --- Saving one script ---------------------------------------------------------
+
+TEST_CASE("Ctrl+S in a script's tab writes that script into the scene, and nothing else")
+{
+    // **The owner, on a friend's Ctrl+S saving every open script.** A scene's
+    // script lives in the scene file; saving it now writes its `Source` into
+    // the file as saved, and another script's unsaved text stays unsaved.
+    core::AtomTable atoms;
+    scene::ClassRegistry classes;
+    scene::EnumRegistry enums;
+    scene::generated::registerClasses(classes, atoms);
+    scene::generated::registerEnums(enums, atoms);
+    scene::World world(classes, enums, atoms, 1234u);
+
+    const auto make = [&](std::string_view className, std::string_view name, core::InstanceId parent) {
+        const core::InstanceId id = world.create(classes.findId(atoms.intern(className)));
+        world.setName(id, atoms.intern(name));
+        if (parent.valid())
+            REQUIRE_FALSE(world.setParent(id, parent).has_value());
+        return id;
+    };
+    const core::NameAtom source = atoms.intern("Source");
+    const auto write = [&](core::InstanceId id, std::string_view text) {
+        (void)world.setProperty(id, source, scene::Value{std::string(text)});
+    };
+
+    const core::InstanceId game = make("DataModel", "game", {});
+    const core::InstanceId workspace = make("Workspace", "Workspace", game);
+    if (world.workspaces().find(workspace) == nullptr)
+        world.workspaces().add(workspace, scene::WorkspaceComponent{});
+    const core::InstanceId alpha = make("Script", "Alpha", workspace);
+    const core::InstanceId beta = make("Script", "Beta", workspace);
+    write(alpha, "print('alpha, saved')");
+    write(beta, "print('beta, saved')");
+
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path() / "luaug-editor-tests" / "save-one-script";
+    std::error_code ec;
+    std::filesystem::remove_all(scratch, ec);
+    std::filesystem::create_directories(scratch, ec);
+
+    Editor editor;
+    editor.openContent(scratch);
+    REQUIRE(editor.saveSceneAs(world, "scenes/main.scene.json"));
+    const std::filesystem::path file = scratch / "scenes" / "main.scene.json";
+
+    // Both edited; only Alpha saved.
+    write(alpha, "print('alpha, edited')");
+    write(beta, "print('beta, edited')");
+    CHECK(editor.saveSceneScript(world, alpha) == Editor::ScriptSave::Script);
+
+    std::string text;
+    REQUIRE(platform::readTextFile(file, text));
+    CHECK(text.find("alpha, edited") != std::string::npos);
+    CHECK(text.find("beta, saved") != std::string::npos);
+    CHECK(text.find("beta, edited") == std::string::npos);
+
+    // **A script the saved file does not have** cannot be put in it on its
+    // own: its place in the tree is unsaved too. The whole scene, said.
+    const core::InstanceId gamma = make("Script", "Gamma", workspace);
+    write(gamma, "print('gamma')");
+    CHECK(editor.saveSceneScript(world, gamma) == Editor::ScriptSave::Scene);
+    REQUIRE(platform::readTextFile(file, text));
+    CHECK(text.find("gamma") != std::string::npos);
+    CHECK(text.find("beta, edited") != std::string::npos);
+    CHECK(editor.status().message.find("whole scene") != std::string::npos);
+
+    std::filesystem::remove_all(scratch, ec);
+}
