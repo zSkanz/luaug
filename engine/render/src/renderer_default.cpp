@@ -2627,7 +2627,8 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
     // read out of it.
     const Mat4 cameraFrame = core::inverse(world.camera.view);
     ShadowFit fit;
-    fit.sunDirection = world.environment.sunDirection;
+    // From where the light comes: the moon's shadows at night (see `SkyParams`).
+    fit.sunDirection = sky.lightDirection;
     fit.right = Vec3{cameraFrame.m[0][0], cameraFrame.m[0][1], cameraFrame.m[0][2]};
     fit.up = Vec3{cameraFrame.m[1][0], cameraFrame.m[1][1], cameraFrame.m[1][2]};
     // The camera looks down -Z, so its forward is the negated third axis.
@@ -2875,7 +2876,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         contact.projection[3] = world.camera.farPlane;
         // Towards the sun, turned into the camera's view space: the view
         // matrix's rotation, applied to a direction.
-        const Vec3 sun = world.environment.sunDirection;
+        const Vec3 sun = sky.lightDirection;
         const Mat4& view = world.camera.view;
         const Vec3 viewSun{view.m[0][0] * sun.x + view.m[1][0] * sun.y + view.m[2][0] * sun.z,
                            view.m[0][1] * sun.x + view.m[1][1] * sun.y + view.m[2][1] * sun.z,
@@ -2886,8 +2887,9 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         contact.sun[2] = sunLength > 0.0f ? viewSun.z / sunLength : 0.0f;
         contact.sun[3] = kContactRayMetres;
         contact.params[0] = kContactThicknessMetres;
-        // A sun below the horizon lights nothing, so it shadows nothing.
-        contact.params[1] = sky.dayFactor;
+        // A light that lights nothing shadows nothing: a sun below the horizon
+        // before the moon has come up.
+        contact.params[1] = sky.lightPresence;
         contact.params[2] = kContactFadeDistance;
         contact.params[3] = 1.0f;
         const std::array<rhi::TextureBinding, 1> depthBinding{rhi::TextureBinding{depth_, pointSampler_}};
@@ -2944,16 +2946,17 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         cmd.draw(3, 1, 0, 0);
 
         GpuFrameUniforms frame;
-        frame.sunDirectionBrightness[0] = world.environment.sunDirection.x;
-        frame.sunDirectionBrightness[1] = world.environment.sunDirection.y;
-        frame.sunDirectionBrightness[2] = world.environment.sunDirection.z;
+        frame.sunDirectionBrightness[0] = sky.lightDirection.x;
+        frame.sunDirectionBrightness[1] = sky.lightDirection.y;
+        frame.sunDirectionBrightness[2] = sky.lightDirection.z;
         // The day factor is folded in here rather than tested in the shader: a
         // sun below the horizon is a sun that lights nothing, and before M7.5 it
         // went on lighting every upward-facing surface from underneath.
-        frame.sunDirectionBrightness[3] = world.environment.sunBrightness * sky.dayFactor;
-        frame.sunColorUnused[0] = sky.sunColor.r;
-        frame.sunColorUnused[1] = sky.sunColor.g;
-        frame.sunColorUnused[2] = sky.sunColor.b;
+        // The moon by night, at its own small fraction (see `SkyParams`).
+        frame.sunDirectionBrightness[3] = world.environment.sunBrightness * sky.lightFactor;
+        frame.sunColorUnused[0] = sky.lightColor.r;
+        frame.sunColorUnused[1] = sky.lightColor.g;
+        frame.sunColorUnused[2] = sky.lightColor.b;
         frame.ambient[0] = world.environment.ambient.r;
         frame.ambient[1] = world.environment.ambient.g;
         frame.ambient[2] = world.environment.ambient.b;
@@ -3163,10 +3166,10 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
             lighting.ambient[0] = world.environment.outdoorAmbient.r;
             lighting.ambient[1] = world.environment.outdoorAmbient.g;
             lighting.ambient[2] = world.environment.outdoorAmbient.b;
-            const f32 sun = world.environment.sunBrightness * sky.dayFactor;
-            lighting.sunLight[0] = sky.sunColor.r * sun;
-            lighting.sunLight[1] = sky.sunColor.g * sun;
-            lighting.sunLight[2] = sky.sunColor.b * sun;
+            const f32 sun = world.environment.sunBrightness * sky.lightFactor;
+            lighting.sunLight[0] = sky.lightColor.r * sun;
+            lighting.sunLight[1] = sky.lightColor.g * sun;
+            lighting.sunLight[2] = sky.lightColor.b * sun;
             lighting.fogColor[0] = world.environment.fogColor.r;
             lighting.fogColor[1] = world.environment.fogColor.g;
             lighting.fogColor[2] = world.environment.fogColor.b;

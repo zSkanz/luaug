@@ -285,21 +285,59 @@ SkyParams skyParamsFor(Vec3 sunDirection, Color3 fogColor) noexcept
     // colour. sin(17.5 degrees) is where the reddening is spent.
     const f32 height = smoothstep(0.0f, 0.30f, elevation);
 
+    // **How far into the night**: nothing at the horizon, all of it at
+    // nautical twilight (the sun twelve degrees down, sin = 0.2079). This is
+    // what the warmth below the horizon fades by. Without it the sunset's
+    // orange was the colour of every hour the sun was down -- reported as "set
+    // it to the small hours and everything went orange", and auto-exposure
+    // lifting a dim orange sky made it worse.
+    const f32 night = smoothstep(0.0f, 0.2079f, -elevation);
+
     // Rayleigh's consequence rather than Rayleigh: a low sun's light has crossed
     // enough atmosphere to have lost most of its blue.
     const Color3 lowSun{1.0f, 0.42f, 0.16f};
     const Color3 highSun{1.0f, 0.96f, 0.90f};
-    params.sunColor = core::lerp(lowSun, highSun, height);
+    const Color3 sunLight = core::lerp(lowSun, highSun, height);
+    // The disc and its glow fade out through twilight: past it there is no
+    // sun in the sky to glow.
+    params.sunColor = scale(sunLight, 1.0f - night);
 
     const Color3 duskZenith{0.18f, 0.16f, 0.34f};
     const Color3 dayZenith{0.10f, 0.26f, 0.62f};
+    const Color3 nightZenith{0.10f, 0.14f, 0.32f};
     const f32 nightScale = 0.04f + 0.96f * params.dayFactor;
-    params.zenithColor = scale(core::lerp(duskZenith, dayZenith, height), nightScale);
+    params.zenithColor = scale(core::lerp(core::lerp(duskZenith, dayZenith, height), nightZenith, night), nightScale);
 
     // `Lighting.FogColor` keeps its meaning exactly at midday -- the tint is
-    // white there -- and warms as the sun drops, which is what a horizon does.
-    const Color3 tint = core::lerp(params.sunColor, Color3{1.0f, 1.0f, 1.0f}, height);
+    // white there -- warms as the sun drops, which is what a horizon does, and
+    // cools into the night's blue once it is down.
+    const Color3 nightTint{0.32f, 0.42f, 0.78f};
+    const Color3 tint = core::lerp(core::lerp(sunLight, Color3{1.0f, 1.0f, 1.0f}, height), nightTint, night);
     params.horizonColor = scale(modulate(fogColor, tint), 0.05f + 0.95f * params.dayFactor);
+
+    // **The light**: the sun while it lights anything, the moon after. The
+    // moon comes in from civil twilight (six degrees down, where the day
+    // factor has reached zero) to nautical, so neither is lit when the light
+    // changes hands. Cold, and a small fraction of the sun: enough to see by
+    // and to cast a shadow, not enough to read as day.
+    constexpr f32 kMoonStrength = 0.08f;
+    const Color3 moonColor{0.62f, 0.72f, 1.0f};
+    const f32 moon = smoothstep(0.1045f, 0.2079f, -elevation);
+    if (params.dayFactor > 0.0f || moon <= 0.0f) {
+        // The direction exactly as it came, not the normalised copy the sky
+        // reads: a day is lit to the bit as it was before the moon existed,
+        // and the goldens hold that to zero tolerance.
+        params.lightDirection = sunDirection;
+        params.lightColor = sunLight;
+        params.lightFactor = params.dayFactor;
+        params.lightPresence = params.dayFactor;
+    }
+    else {
+        params.lightDirection = sunDirection * -1.0f;
+        params.lightColor = moonColor;
+        params.lightFactor = kMoonStrength * moon;
+        params.lightPresence = moon;
+    }
 
     // Two cosines of a constant, hoisted out of the quarter-million calls to
     // `evaluateSky` that a full prefilter makes.

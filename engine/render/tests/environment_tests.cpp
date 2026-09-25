@@ -1,5 +1,6 @@
 #include "luaug/jobs/jobs.h"
 #include "luaug/render/environment.h"
+#include "luaug/render/lighting.h"
 
 #include <cmath>
 #include <doctest/doctest.h>
@@ -301,4 +302,44 @@ TEST_CASE("the BRDF table is the same bytes however many workers baked it")
     for (const u16 value : serial)
         anyNonZero = anyNonZero || value != 0;
     CHECK(anyNonZero);
+}
+
+TEST_CASE("the night sky is blue and moonlit, and only twilight is warm")
+{
+    // **Reported as "set it to the small hours and everything went orange".**
+    // Below the horizon the sunset's colour was every night hour's colour: the
+    // horizon, the glow, and -- lifted by the exposure -- the whole scene. The
+    // reference is warm at sunrise and sunset only, then a blue hour, then a
+    // dark blue night lit by a cold moon.
+    using luaug::render::sunDirection;
+    const Color3 fog{0.75f, 0.8f, 0.9f};
+    const auto at = [&](f32 hour) { return luaug::render::skyParamsFor(sunDirection(hour, 0.0f), fog); };
+
+    // Midnight and the small hours: no sun left to glow, a blue horizon, and
+    // the moon -- opposite the sun, so overhead at midnight -- is the light.
+    for (const f32 hour : {0.0f, 3.0f, 23.0f}) {
+        const luaug::render::SkyParams night = at(hour);
+        INFO("hour " << static_cast<double>(hour));
+        CHECK(static_cast<double>(night.sunColor.r) < 0.01);
+        CHECK(night.horizonColor.b > night.horizonColor.r);
+        CHECK(night.lightDirection.y > 0.0f);
+        CHECK(night.lightColor.b > night.lightColor.r);
+        CHECK(night.lightFactor > 0.0f);
+        CHECK(static_cast<double>(night.lightFactor) < 0.1);
+    }
+
+    // Sunrise and sunset stay warm, lit by the sun itself.
+    for (const f32 hour : {6.2f, 17.8f}) {
+        const luaug::render::SkyParams dusk = at(hour);
+        INFO("hour " << static_cast<double>(hour));
+        CHECK(dusk.sunColor.r > dusk.sunColor.b);
+        CHECK(dusk.horizonColor.r > dusk.horizonColor.b);
+        CHECK(dusk.lightDirection.y > 0.0f);
+        CHECK(dusk.lightColor.r > dusk.lightColor.b);
+    }
+
+    // Noon is unchanged: the sun, white, at full strength.
+    const luaug::render::SkyParams noon = at(12.0f);
+    CHECK(static_cast<double>(noon.lightFactor) == doctest::Approx(1.0));
+    CHECK(noon.lightDirection.y > 0.9f);
 }

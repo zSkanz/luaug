@@ -66,8 +66,9 @@ struct SkyParams
     Color3 horizonColor{0.6f, 0.7f, 0.85f};
     // Straight up. Derived: deep blue by day, near black at night.
     Color3 zenithColor{0.15f, 0.3f, 0.7f};
-    // The disc, and now also the colour of the light the sun casts. Derived:
-    // warm within a few degrees of the horizon, white above.
+    // The disc and the glow around it. Derived: warm within a few degrees of
+    // the horizon, white above -- and gone once the sun is well below it, so a
+    // night sky has no sunset left in it.
     Color3 sunColor{1.0f, 0.95f, 0.85f};
     // The disc's angular radius in radians. 0.0047 is the real sun's; 0.02 is
     // what M4 shipped, and it stays, because a disc four times too large is what
@@ -77,6 +78,22 @@ struct SkyParams
     // scene at midnight is lit by its ambient and its lamps rather than by a sun
     // below the horizon.
     f32 dayFactor = 1.0f;
+
+    // **The light the world is lit by: the sun by day, the moon by night.**
+    // Apart from the sun above because the sky is drawn from where the sun IS,
+    // and the shadows are cast from where the light COMES from. The moon
+    // stands opposite the sun, so it is highest at midnight and rises as the
+    // sun sets; it takes over below civil twilight, when the sun has stopped
+    // lighting anything, so the switch from one to the other happens with
+    // both at zero.
+    Vec3 lightDirection{0.0f, 1.0f, 0.0f};
+    Color3 lightColor{1.0f, 0.95f, 0.85f};
+    // What the light's brightness is multiplied by: the day factor for the
+    // sun, a small fraction of it for the moon.
+    f32 lightFactor = 1.0f;
+    // How present the light is, 0 to 1, for what fades with it rather than
+    // scaling by its brightness: the strength of its shadows.
+    f32 lightPresence = 1.0f;
     // The disc's two edges, precomputed. Derived from `sunAngularRadius` and
     // held here because a full prefilter calls `evaluateSky` a quarter of a
     // million times and two cosines of a constant is two cosines too many.
@@ -89,8 +106,9 @@ struct SkyParams
 // `fogColor` is `Lighting.FogColor` and keeps its documented meaning -- it is
 // what distance fades towards, and the sky borrows it for the horizon band, as
 // M4's sky pass already did. What is added here is elevation: everything in the
-// sky scales by a day factor, the zenith darkens, and the sun reddens as it
-// approaches the horizon. None of that touches a script-authored value.
+// sky scales by a day factor, the zenith darkens, the sun reddens as it
+// approaches the horizon, and below it the warmth cools through twilight into
+// a night blue. None of that touches a script-authored value.
 [[nodiscard]] SkyParams skyParamsFor(Vec3 sunDirection, Color3 fogColor) noexcept;
 
 // Linear HDR radiance arriving from `direction`, which need not be normalised.

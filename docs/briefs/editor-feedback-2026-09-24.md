@@ -104,11 +104,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] **A colour's swatch appears beside the colour under the pointer**, after
       its closing parenthesis, and a click on it opens the picker.
 - [x] **`continue` is coloured as a keyword**, as `if` and `return` are.
-- [ ] **Signature help**: the parameters of the function being called, with the
-      one being typed highlighted, and its doc.
-- [ ] **Types across `require`**: a `ModuleScript` that defines `Snake` gives
-      its type to the script that requires it.
-- [ ] **`Signal` is typed** in completion and hover.
+- [x] **Signature help**: the parameters of the function being called, with the
+      one being typed highlighted, and its doc (ADR 0093).
+- [x] **Types across `require`**: a `ModuleScript` that defines `Snake` gives
+      its type to the script that requires it, through `script.Parent`,
+      `GetService` and `WaitForChild` walks and the locals holding them.
+- [x] **`Signal` is typed** in completion, made by a script or an event.
+- [x] **After `::` a module's name offers its types**, not its functions.
+- [x] **Type errors are underlined**, beside the parse errors -- an undeclared
+      type in an annotation included.
+- [x] **An unsaved script's tab shows a floppy**, not a dot.
+- [ ] **Ctrl+F is a find and replace box** at the pane's corner: replace one
+      or all, match case, whole word, regular expression.
+- [ ] **`Signal`, `Collector` and `Promise` are native**, modelled on the
+      community libraries the owner named.
 
 ## Console
 
@@ -129,6 +138,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       `Loader` keeps its modules.
 - [x] **An interface element starts 50 by 50 pixels.**
 - [ ] **A selected interface element has handles** to move and resize it.
+- [x] **The starter is a scene with its scripts in it**: a script inside the
+      part it turns, a module in `ReplicatedStorage`, one in `ScriptService`;
+      the external-tooling files it carried and never used are gone.
+- [x] **Left Shift slows the viewport's camera** to a quarter, for precision.
+
+## Lighting
+
+- [x] **Night is night.** From 06:00 to 18:00 the sun as before; warm at
+      sunrise and sunset only, cooling through the blue hour, and a dark blue
+      night lit by a cold moon opposite the sun, which casts the shadows.
 
 ## Sound
 
@@ -246,3 +265,24 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
     ended on its first tick. The audio soak's own comment described the
     workaround -- rewind first -- as how a game has to write it. `Play` now
     starts from the start and a sound that ends rewinds.
+22. **Completion stopped at patterns.** The file-local AST reader could not
+    follow a `require`, a generic or a function's return, and every case the
+    owner raised was one of those. Luau's own checker does all of it (ADR
+    0093). Its new solver at this pin cannot generalize the definitions'
+    `Instance.new` -- measured, not a budget and not a flag -- so the editor
+    uses the old solver until the pin moves.
+23. **The world is a keystroke behind the buffer.** The pane's writes to
+    `Source` land at the next frame's safe point, so a checker handed the
+    world's text never saw the call being typed. The asking tab's snapshot
+    carries its buffer.
+24. **Every night hour was a sunset.** Below the horizon the sun's colour
+    stopped at its lowest-sun orange, and the horizon and the glow were tinted
+    with it; auto-exposure lifted that dim orange until the scene was orange.
+    The day strip (`scripts/daystrip.ps1`) showed it at 21:00, 00:00 and
+    03:00. The warmth now fades from the horizon to nautical twilight, and the
+    light hands over to a moon at eight percent of the sun from civil
+    twilight, where neither is lighting anything.
+25. **A built game lost its scene.** `luaug build` ships `content/` as a pack,
+    and the host found the boot scene only as a loose file -- harmless while
+    the scripts lived in `src/scripts`, fatal once they live in the scene. The
+    scene and stamps are read from the pack when there is no file.
