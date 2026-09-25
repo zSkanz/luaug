@@ -1,6 +1,11 @@
 # HLSL -> SPIR-V / DXIL / MSL at build time (ADR 0006, architecture.md §8).
 #
-#     luaug_add_shaders(<target> GLOB <pattern>...)
+#     luaug_add_shaders(<target> GLOB <pattern>... [SURFACES <pattern>...])
+#
+# `SURFACES` names surface shaders the engine ships (ADR 0091): each is wrapped
+# by `surfacewrap` into every pass variant and compiled per stage, and lands in
+# the manifest as `surface_<name>_<variant>` -- so a contract that stops
+# compiling stops the build, on every backend.
 #
 # Attaches the shader build to an existing target: every matched `.hlsl` file is
 # compiled once per backend format by the SDL_shadercross host tool, and the
@@ -25,7 +30,7 @@
 # recompiles of a handful of files.
 
 function(luaug_add_shaders target)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "GLOB")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "GLOB;SURFACES")
 
     set(stages "vertex" "fragment")
     set(entry_vertex "VertexMain")
@@ -82,7 +87,7 @@ function(luaug_add_shaders target)
     set(headers "")
     if(IS_DIRECTORY "${include_dir}")
         set(include_args -I "${include_dir}")
-        file(GLOB headers CONFIGURE_DEPENDS "${include_dir}/*.hlsli")
+        file(GLOB_RECURSE headers CONFIGURE_DEPENDS "${include_dir}/*.hlsli")
         list(SORT headers)
     endif()
 
@@ -194,6 +199,81 @@ function(luaug_add_shaders target)
 ${format_block}
       }
     }")
+        endforeach()
+    endforeach()
+
+    # --- Surface shaders the engine ships (ADR 0091) -------------------------
+    set(surfaces "")
+    foreach(pattern IN LISTS arg_SURFACES)
+        file(GLOB matched CONFIGURE_DEPENDS "${pattern}")
+        list(APPEND surfaces ${matched})
+    endforeach()
+    list(SORT surfaces)
+    set(variants "forward" "forward_instanced" "forward_blended" "depth" "depth_instanced")
+    foreach(surface IN LISTS surfaces)
+        get_filename_component(file_name "${surface}" NAME)
+        string(REGEX REPLACE "\\.surface\\.hlsl$" "" surface_name "${file_name}")
+        set(wrap_dir "${LUAUG_GENERATED_DIR}/surfaces/${surface_name}")
+        set(wrapped "")
+        foreach(variant IN LISTS variants)
+            foreach(stage IN LISTS stages)
+                list(APPEND wrapped "${wrap_dir}/${variant}.${stage}.hlsl")
+            endforeach()
+        endforeach()
+        add_custom_command(
+            OUTPUT ${wrapped}
+            COMMAND surfacewrap "${surface}" "${wrap_dir}"
+            DEPENDS surfacewrap "${surface}"
+            COMMENT "Surface ${surface_name} -> wrappers"
+            VERBATIM)
+
+        foreach(variant IN LISTS variants)
+            set(name "surface_${surface_name}_${variant}")
+            if(name IN_LIST seen_names)
+                message(FATAL_ERROR "luaug_add_shaders(${target}): two shaders are both named '${name}'.")
+            endif()
+            list(APPEND seen_names "${name}")
+            foreach(stage IN LISTS stages)
+                set(source "${wrap_dir}/${variant}.${stage}.hlsl")
+                set(entrypoint "${entry_${stage}}")
+                set(format_lines "")
+                foreach(format IN LISTS formats)
+                    set(relative "${format}/${name}.${stage}.${ext_${format}}")
+                    set(output "${out_dir}/${relative}")
+                    add_custom_command(
+                        OUTPUT "${output}"
+                        COMMAND shadercross "${source}" -s HLSL -d ${dest_${format}} -t ${stage} -e ${entrypoint}
+                                ${include_args} -o "${output}"
+                        DEPENDS shadercross "${source}" "${surface}" ${headers}
+                        COMMENT "Shader ${name}.${stage} -> ${format}"
+                        VERBATIM)
+                    list(APPEND outputs "${output}")
+                    list(APPEND format_lines "        \"${format}\": \"${relative}\"")
+                endforeach()
+                set(reflect_relative "reflect/${name}.${stage}.json")
+                set(reflect_output "${out_dir}/${reflect_relative}")
+                add_custom_command(
+                    OUTPUT "${reflect_output}"
+                    COMMAND shadercross "${source}" -s HLSL -d JSON -t ${stage} -e ${entrypoint}
+                            ${include_args} -o "${reflect_output}"
+                    DEPENDS shadercross "${source}" "${surface}" ${headers}
+                    COMMENT "Shader ${name}.${stage} -> reflection"
+                    VERBATIM)
+                list(APPEND outputs "${reflect_output}")
+                file(RELATIVE_PATH source_relative "${CMAKE_SOURCE_DIR}" "${surface}")
+                string(JOIN ",\n" format_block ${format_lines})
+                list(APPEND entries
+"    {
+      \"name\": \"${name}\",
+      \"stage\": \"${stage}\",
+      \"entrypoint\": \"${entrypoint}\",
+      \"source\": \"${source_relative}\",
+      \"reflect\": \"${reflect_relative}\",
+      \"formats\": {
+${format_block}
+      }
+    }")
+            endforeach()
         endforeach()
     endforeach()
 

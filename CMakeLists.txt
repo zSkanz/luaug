@@ -108,6 +108,9 @@ add_subdirectory(tools/assetc)
 # for why a Windows icon has no portable writer.
 add_subdirectory(tools/iconpatch)
 
+# The surface shaders the engine ships, wrapped at build time (ADR 0091).
+add_subdirectory(tools/surfacewrap)
+
 # Standalone native samples, after every module they may link. They consume the
 # engine and nothing in the engine consumes them, so they come last.
 add_subdirectory(samples)
@@ -116,4 +119,5 @@ add_subdirectory(samples)
 # shader build belongs to the content pipeline, not to the host module's source
 # list -- `luaug_host` is simply the target that must not be considered built
 # until its shaders exist.
-luaug_add_shaders(luaug_host GLOB "${CMAKE_CURRENT_SOURCE_DIR}/shaders/src/*.hlsl")
+luaug_add_shaders(luaug_host GLOB "${CMAKE_CURRENT_SOURCE_DIR}/shaders/src/*.hlsl"
+    SURFACES "${CMAKE_CURRENT_SOURCE_DIR}/shaders/surface/*.surface.hlsl")

@@ -31,6 +31,7 @@ luaug_add_module(asset
         src/pack.cpp
         src/primitives.cpp
         src/streaming.cpp
+        src/surface_shader.cpp
         src/texture.cpp
     DEPS
         core
@@ -80,6 +81,7 @@ luaug_add_module_tests(asset
         tests/pack_tests.cpp
         tests/primitive_tests.cpp
         tests/streaming_tests.cpp
+        tests/surface_shader_tests.cpp
         tests/texture_tests.cpp
 )
 
