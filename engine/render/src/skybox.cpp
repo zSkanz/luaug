@@ -164,12 +164,17 @@ void skyRadianceOf(std::span<const std::byte> octahedral, u32 size, u32 radiance
     const u32 step = size / radianceSize;
     if (step == 0)
         return;
-    const f32 weight = 1.0f / static_cast<f32>(step * step);
+    // **One texel in four each way**, not every one: the prefilter this feeds
+    // blurs it by a mirror's width at the least, and reading all sixteen
+    // million bytes of a 2048-texel picture was a fifth of the whole bake.
+    const u32 skip = step >= 4 ? 4 : 1;
+    const u32 taps = step / skip;
+    const f32 weight = 1.0f / static_cast<f32>(taps * taps);
     for (u32 row = 0; row < radianceSize; ++row) {
         for (u32 column = 0; column < radianceSize; ++column) {
             Vec3 sum{};
-            for (u32 dy = 0; dy < step; ++dy) {
-                for (u32 dx = 0; dx < step; ++dx) {
+            for (u32 dy = skip / 2; dy < step; dy += skip) {
+                for (u32 dx = skip / 2; dx < step; dx += skip) {
                     const std::size_t at = (static_cast<std::size_t>(row * step + dy) * size + column * step + dx) * 4;
                     sum = sum + Vec3{decode[static_cast<u32>(octahedral[at])],
                                      decode[static_cast<u32>(octahedral[at + 1])],

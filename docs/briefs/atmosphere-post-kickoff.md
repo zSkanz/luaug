@@ -145,7 +145,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
       `examples/` with a licence that R6 allows, recorded in
       `THIRD_PARTY_NOTICES.md`, or drawn procedurally by a script in
       `tools/repo`.
-- [x] Bake ≤ 50 ms, off the frame thread: 39.5 to 48.8 ms on the packaged build, 79 ms on `dev`. A frame never waits for it.
+- [x] Bake ≤ 50 ms, off the frame thread: 24.5 to 30.4 ms on the packaged build (39.5 to 48.8 before sixteen bands and a subsampled radiance picture), 53 to 72 ms on `dev`. A frame never waits for it.
       Captures for the owner.
 
 ## Stage 9 — Clouds
@@ -317,8 +317,11 @@ here*.
    subtree with it, so a viewer's effects never cross -- a session test holds
    both. Protocol 13.
 21. **The sky's bake is inside its budget where it ships, and only there**
-   (Stage 10): 39.5 to 48.8 ms on the packaged build against 50, and 79 ms on
-   the `dev` build. It is off the frame thread either way.
+   (Stage 10): 39.5 to 48.8 ms on the packaged build against 50 at first, and
+   79 ms on the `dev` build -- no room. Sixteen bands instead of eight, and a
+   radiance picture that reads one source texel in four each way (a 32-texel
+   average is the same average), brought it to 24.5 to 30.4 ms packaged, under
+   load. It is off the frame thread either way.
 22. **A headless frame's time is the CPU's, not the GPU's** (Stage 10). Every
    effect measured 0.16 ms a frame with `--frame-stats` whatever it was,
    because a headless frame does not wait for the GPU. The costs in the

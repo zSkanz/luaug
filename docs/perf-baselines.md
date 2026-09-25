@@ -952,13 +952,19 @@ around a whole run resolves. A small blur costing more than a wide one is that
 floor, and it is also true to the design: a blur of 4 runs its Gaussian at
 full resolution, and one of 80 a thirty-second of the frame down.
 
-| `Sky` bake | 1024-texel faces into a 2048-texel picture, eight bands | Budget |
+| `Sky` bake | 1024-texel faces into a 2048-texel picture, sixteen bands | Budget |
 |---|---|---|
-| Packaged build, three runs | 39.5, 45.4 and 48.8 ms, **off the frame thread** | 50 ms |
-| `dev` build | 79 ms | -- |
+| Packaged build, five runs | 24.5 to 30.4 ms, **off the frame thread** | 50 ms |
+| `dev` build, three runs | 53 to 72 ms | -- |
 
-Inside the budget on the build that ships, with little room, and no frame
-waits for it either way: the previous sky draws until it is done.
+The first measurement, with eight bands and a radiance picture that read every
+texel of its source, was 39.5 to 48.8 ms: inside the budget with no room. Two
+changes bought the margin back. Sixteen bands keep every worker busy to the end
+instead of leaving the last one alone with an eighth of the picture; and the
+radiance picture -- 64 texels, each the average of a 32-by-32 block -- reads one
+texel in four each way, which for a blur that wide is the same average, and
+the prefilter it feeds blurs it further still. The five runs above were taken with the
+Linux gate stage building in Docker alongside, so they are not an idle machine's.
 
 **CityBench against Godot, the owner's benchmark** (`luaug-playground/benchmark`),
 before Stage 1 and after Stage 10, three rounds each at raised priority. The

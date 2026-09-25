@@ -23,8 +23,9 @@ constexpr std::string_view kAssetScheme = "asset://";
 
 // How many bands the octahedral picture is resampled in. Each is a job, so a
 // machine with this many workers resamples the whole picture in the time one
-// band takes; more bands than workers only queue.
-constexpr u32 kBands = 8;
+// band takes; more bands than workers only queue. Sixteen, because at eight the
+// bake came to 40-49 ms on the reference machine against a 50 ms budget.
+constexpr u32 kBands = 16;
 
 } // namespace
 
