@@ -325,13 +325,13 @@ TEST_CASE("a path that comes back to a place it has been, with the world it left
 TEST_CASE("the same path with more world at the end of it does not")
 {
     seedRealCatalog();
-    // Ten per cent more, against an eight per cent tolerance.
-    const SoakVerdict verdict = outAndBack(4000, 4400).evaluate(kRevisit);
+    // Twenty per cent more, against a fifteen per cent tolerance.
+    const SoakVerdict verdict = outAndBack(4000, 4800).evaluate(kRevisit);
 
     CHECK_FALSE(verdict.ok);
     CHECK(verdict.focusReturned);
     CHECK(mentions(verdict, "engine.soak.err.return_grew"));
-    CHECK(verdict.returnInstances == 4400);
+    CHECK(verdict.returnInstances == 4800);
 }
 
 TEST_CASE("a little more world is inside the tolerance, because streaming is not exact")

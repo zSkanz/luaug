@@ -119,7 +119,14 @@ struct SoakThresholds
     // first. Tighter than `growthTolerance` on purpose: that one has to absorb
     // two windows of a run that may hold genuinely different amounts of world,
     // and this one compares the same place with itself.
-    f64 returnTolerance = 0.08;
+    //
+    // **Fifteen per cent, not eight** (D186, measured): with the machine
+    // loaded, how far streaming trails a focus moving at 157 m/s moved even the
+    // MEDIAN over every revisited place by 9.4% (1464 against 1601, in a run
+    // whose late quarter held FEWER instances than its early one). The leak
+    // this watches for -- instances never freed -- grows by the world's whole
+    // population every lap, which no fifteen per cent hides.
+    f64 returnTolerance = 0.15;
 };
 
 struct SoakSample
