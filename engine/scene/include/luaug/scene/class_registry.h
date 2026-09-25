@@ -18,6 +18,7 @@
 #include "luaug/scene/value.h"
 
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -251,6 +252,13 @@ struct ClassDescriptor
     core::NameAtom defaultName{};
     // English prose from the IDL, never null. See `PropertyDesc::doc`.
     const char* doc = "";
+    // Where an instance of this class does its job -- the IDL's `Parents`, as
+    // class names, each matching that class and every class extending it.
+    // Empty means anywhere, or whatever the superclass says; advice for the
+    // editor's add-a-child list, never a rule the world enforces. Text rather
+    // than atoms: interning them at registration would renumber every atom
+    // after them, and the world hash with them.
+    std::span<const std::string_view> parents{};
 
     // Views into generated static storage, which outlives the registry. The
     // arrays hold only what the class *declares*; inherited members are found

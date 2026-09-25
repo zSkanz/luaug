@@ -741,6 +741,22 @@ local function generate(target: Module)
         emit(`    {descriptor}.flags = {flagsExpression(class)};`)
         emit(`    {descriptor}.defaultName = atoms.intern("{class.DefaultName or class.Name}");`)
         emit(`    {descriptor}.doc = {cppString(class.Doc)};`)
+        -- Where it does its job (`Schema.Class.Parents`), as plain text: a
+        -- class may name one another module registers later, and interning
+        -- the names here would move every atom after them -- and with them
+        -- every determinism trace, for a list only the editor reads.
+        local places = class.Parents
+        if places ~= nil and #places > 0 then
+            local arrayName = `{prefix}Parents`
+            local quoted = {}
+            for _, place in places do
+                table.insert(quoted, `"{place}"`)
+            end
+            emit(
+                `    static constexpr std::array<std::string_view, {#places}> {arrayName}\{\{{table.concat(quoted, ", ")}\}\};`
+            )
+            emit(`    {descriptor}.parents = {arrayName};`)
+        end
         if #properties > 0 then
             emit(`    {descriptor}.properties = {prefix}Properties;`)
         end

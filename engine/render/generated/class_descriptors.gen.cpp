@@ -92,6 +92,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     meshPartDesc.flags = scene::ClassFlags::None;
     meshPartDesc.defaultName = atoms.intern("MeshPart");
     meshPartDesc.doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a model made of several pieces is several MeshParts, which is the shape a prefab assumes.";
+    static constexpr std::array<std::string_view, 5> meshPartParents{{"Workspace", "Model", "BasePart", "ReplicatedStorage", "ServerStorage"}};
+    meshPartDesc.parents = meshPartParents;
     meshPartDesc.properties = meshPartProperties;
     meshPartDesc.attachComponents = native::attachMeshPartComponents;
     meshPartDesc.detachComponents = native::detachMeshPartComponents;
@@ -140,6 +142,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     boneDesc.flags = scene::ClassFlags::None;
     boneDesc.defaultName = atoms.intern("Bone");
     boneDesc.doc = "An attachment that follows a joint of the `MeshPart` it is parented to. Weld a sword to a character's hand, hang a light off a lamp's swinging arm, or read where a foot is for a footstep -- and it moves with the animation, because it IS the joint.\012\012**Created on demand rather than one per joint.** A rig has tens of bones and a crowd has thousands; instantiating every one would put them all in the world hash and the change queue to answer a question about three of them. Make the ones you need.\012\012A bone whose `JointName` the rig does not have follows the mesh part itself, which puts it on the character rather than at the world origin -- the failure a renamed joint should produce is a sword in the wrong place, not a sword in another country.";
+    static constexpr std::array<std::string_view, 4> boneParents{{"BasePart", "Bone", "ReplicatedStorage", "ServerStorage"}};
+    boneDesc.parents = boneParents;
     boneDesc.properties = boneProperties;
     classes.registerClass(boneDesc);
 
@@ -220,6 +224,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     cameraDesc.flags = scene::ClassFlags::None;
     cameraDesc.defaultName = atoms.intern("Camera");
     cameraDesc.doc = "The viewpoint the world is rendered from. A camera is an ordinary instance a script owns and moves; the engine never takes it over, which is why there is no CameraType.";
+    static constexpr std::array<std::string_view, 3> cameraParents{{"Workspace", "ReplicatedStorage", "ServerStorage"}};
+    cameraDesc.parents = cameraParents;
     cameraDesc.properties = cameraProperties;
     cameraDesc.attachComponents = native::attachCameraComponents;
     cameraDesc.detachComponents = native::detachCameraComponents;
@@ -301,6 +307,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     pointLightDesc.flags = scene::ClassFlags::None;
     pointLightDesc.defaultName = atoms.intern("PointLight");
     pointLightDesc.doc = "A light radiating equally in every direction. Inside a BasePart or an Attachment it shines from there and moves with it; anywhere else it shines from its own `CFrame` (ADR 0095).";
+    static constexpr std::array<std::string_view, 4> pointLightParents{{"BasePart", "Attachment", "ReplicatedStorage", "ServerStorage"}};
+    pointLightDesc.parents = pointLightParents;
     pointLightDesc.properties = pointLightProperties;
     pointLightDesc.attachComponents = native::attachPointLightComponents;
     pointLightDesc.detachComponents = native::detachPointLightComponents;
@@ -372,6 +380,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     decalDesc.flags = scene::ClassFlags::None;
     decalDesc.defaultName = atoms.intern("Decal");
     decalDesc.doc = "An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, a crack. **No face to choose and no parent required** -- `CFrame.lookAt(hit.Position, hit.Position + hit.Normal)` from a `Raycast` and a size is the whole placement, and it lands on parts, terrain and blocks alike. Parented to a `BasePart` its `CFrame` is relative to the part, so it moves with it.\012\012A decal MULTIPLIES what it lands on, after lighting, which keeps the surface's own light and shadow on it exactly: it darkens and tints, and it cannot make a surface brighter than it was. A white pixel is no change.";
+    static constexpr std::array<std::string_view, 3> decalParents{{"BasePart", "ReplicatedStorage", "ServerStorage"}};
+    decalDesc.parents = decalParents;
     decalDesc.properties = decalProperties;
     decalDesc.attachComponents = native::attachDecalComponents;
     decalDesc.detachComponents = native::detachDecalComponents;
@@ -573,6 +583,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     particleEmitterDesc.flags = scene::ClassFlags::None;
     particleEmitterDesc.defaultName = atoms.intern("ParticleEmitter");
     particleEmitterDesc.doc = "Sparks, smoke, dust and magic (F2). Parent it to a `BasePart` or an `Attachment`: particles are born at its position and fly along its up direction. **They are a picture, not the world** -- they collide with nothing, a script cannot find one, and they are simulated on the frame rather than the tick -- which is what lets a scene hold thousands for the price of one draw.";
+    static constexpr std::array<std::string_view, 4> particleEmitterParents{{"BasePart", "Attachment", "ReplicatedStorage", "ServerStorage"}};
+    particleEmitterDesc.parents = particleEmitterParents;
     particleEmitterDesc.properties = particleEmitterProperties;
     particleEmitterDesc.methods = particleEmitterMethods;
     particleEmitterDesc.attachComponents = native::attachParticleEmitterComponents;
@@ -666,6 +678,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     spotLightDesc.flags = scene::ClassFlags::None;
     spotLightDesc.defaultName = atoms.intern("SpotLight");
     spotLightDesc.doc = "A light confined to a cone about its forward direction -- its holder's, turned by its own `CFrame`, or its own alone when nothing holds it (ADR 0095). A sibling of PointLight rather than a subclass of it: the two share their placement and a few properties, and no behaviour.";
+    static constexpr std::array<std::string_view, 4> spotLightParents{{"BasePart", "Attachment", "ReplicatedStorage", "ServerStorage"}};
+    spotLightDesc.parents = spotLightParents;
     spotLightDesc.properties = spotLightProperties;
     spotLightDesc.attachComponents = native::attachSpotLightComponents;
     spotLightDesc.detachComponents = native::detachSpotLightComponents;
@@ -692,6 +706,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     postEffectDesc.flags = scene::ClassFlags::Abstract;
     postEffectDesc.defaultName = atoms.intern("PostEffect");
     postEffectDesc.doc = "The abstract base of the effects that change the finished picture rather than the world in it (ADR 0096). **Where one is decides whose it is**: directly under `Lighting` it belongs to the world -- saved with the scene and seen by everybody -- and directly under `Workspace.CurrentCamera` it belongs to whoever looks through that camera. Anywhere else it does nothing, and the editor says so on the instance.";
+    static constexpr std::array<std::string_view, 4> postEffectParents{{"Lighting", "Camera", "ReplicatedStorage", "ServerStorage"}};
+    postEffectDesc.parents = postEffectParents;
     postEffectDesc.properties = postEffectProperties;
     postEffectDesc.attachComponents = native::attachPostEffectComponents;
     postEffectDesc.detachComponents = native::detachPostEffectComponents;
@@ -1002,6 +1018,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     atmosphereDesc.flags = scene::ClassFlags::None;
     atmosphereDesc.defaultName = atoms.intern("Atmosphere");
     atmosphereDesc.doc = "The air between the camera and everything it sees. Distance fades into it and it thins with height, it is lit by the sun and glows around it, and it tints the sky towards the horizon so the ground and the sky meet. **It counts only directly under `Lighting`**, and only the first one there. With one, `Lighting.FogStart`, `FogEnd` and `FogColor` are kept but not used.";
+    static constexpr std::array<std::string_view, 3> atmosphereParents{{"Lighting", "ReplicatedStorage", "ServerStorage"}};
+    atmosphereDesc.parents = atmosphereParents;
     atmosphereDesc.properties = atmosphereProperties;
     atmosphereDesc.attachComponents = native::attachAtmosphereComponents;
     atmosphereDesc.detachComponents = native::detachAtmosphereComponents;
@@ -1201,6 +1219,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     skyDesc.flags = scene::ClassFlags::None;
     skyDesc.defaultName = atoms.intern("Sky");
     skyDesc.doc = "What the sky shows: six images around the world, the sun's and the moon's look, stars and clouds. **It counts only directly under `Lighting`**, and only the first one there. The images are also what surfaces reflect and are lit by. **The sun stays on the clock**: its direction comes from `Lighting.ClockTime` and `GeographicLatitude` whatever the images show, so shadows and the drawn sun agree -- choose images without a sun painted in, or turn `CelestialBodiesShown` off.";
+    static constexpr std::array<std::string_view, 3> skyParents{{"Lighting", "ReplicatedStorage", "ServerStorage"}};
+    skyDesc.parents = skyParents;
     skyDesc.properties = skyProperties;
     skyDesc.attachComponents = native::attachSkyComponents;
     skyDesc.detachComponents = native::detachSkyComponents;
@@ -1222,6 +1242,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     animationPlayerDesc.flags = scene::ClassFlags::None;
     animationPlayerDesc.defaultName = atoms.intern("AnimationPlayer");
     animationPlayerDesc.doc = "Plays a skinned mesh's animation clips (\302\247" "2.2).\012\012**Parent it to the `Model` whose character it is, and it drives every skinned `MeshPart` under that model.** A character is a body, a shirt and a pair of trousers -- several meshes wearing the same skeleton -- and one clip has to move all of them. Only one of the pieces needs to carry the animation; the clip is taken from the first that does, in tree order.\012\012**The joints are matched by NAME across the pieces, never by index.** Two files exported separately wear the same skeleton in the sense that matters -- the same joints, named the same -- and in no other: an exporter is free to order them differently, and a clip applied through the wrong index twists a sleeve in a way that looks like a broken animation rather than a mismatched rig. A joint one piece does not have is skipped, so a shirt with no fingers keeps its own sleeve.\012\012Parenting it straight to a `MeshPart` still works and drives exactly that mesh, which is what a character made of one piece wants.\012\012It stores nothing: the tracks are the state, and each one is a handle a script holds rather than a child in the tree. Sampling happens at `PreAnimation` on the SimClock, so a clip's position at a given tick is the same in a replay as it was live.\012\012v1 is clip playback and linear blending -- no state machines, no IK, and no root motion.";
+    static constexpr std::array<std::string_view, 3> animationPlayerParents{{"Model", "ReplicatedStorage", "ServerStorage"}};
+    animationPlayerDesc.parents = animationPlayerParents;
     animationPlayerDesc.methods = animationPlayerMethods;
     classes.registerClass(animationPlayerDesc);
 

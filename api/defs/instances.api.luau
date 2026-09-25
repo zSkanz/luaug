@@ -17,6 +17,23 @@ local AttributeValue = "string | number | boolean | vector | CFrame | Color3 | V
 local OptionalAttributeValue = "(" .. AttributeValue .. ")?"
 local AttributeMap = "{ [string]: " .. AttributeValue .. " }"
 
+--- Where a class does its job (`Schema.Class.Parents`), in the groups most of
+--- them share. The two storages are in every one: a template waiting in
+--- `ReplicatedStorage` to be cloned is exactly where anything may sit.
+local function under(...: string): { string }
+    local places = { ... }
+    table.insert(places, "ReplicatedStorage")
+    table.insert(places, "ServerStorage")
+    return places
+end
+--- Something with a place in the 3D world: the world, a model, or a part
+--- (a part inside a part moves with it).
+local InTheWorld = under("Workspace", "Model", "BasePart")
+--- Something a part or a point on one gives off or wears.
+local OnAPart = under("BasePart", "Attachment")
+--- An element of a UI tree, under one of its three roots or another element.
+local InAUi = under("ScreenGui", "BillboardGui", "SurfaceGui", "UIObject")
+
 --- The list carries its own annotation so that `Schema.Class` is the expected
 --- type of every entry. Written inline under `Definition`, the new solver infers
 --- the element type from the first class and then rejects every later one that
@@ -273,6 +290,7 @@ local Classes: { Schema.Class } = {
         Name = "Model",
         Extends = "PVInstance",
         Module = "scene",
+        Parents = InTheWorld,
         Storage = "Model",
         Doc = "A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with.",
         Properties = {
@@ -602,6 +620,7 @@ local Classes: { Schema.Class } = {
         Name = "Part",
         Extends = "BasePart",
         Module = "scene",
+        Parents = InTheWorld,
         Doc = "The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh.",
         Properties = {
             {
@@ -626,6 +645,7 @@ local Classes: { Schema.Class } = {
         Name = "MeshPart",
         Extends = "BasePart",
         Module = "render",
+        Parents = InTheWorld,
         Storage = "MeshPart",
         Doc = "A part whose geometry is an imported mesh rather than a primitive solid. One file is one mesh: a "
             .. "model made of several pieces is several MeshParts, which is the shape a prefab assumes.",
@@ -675,6 +695,7 @@ local Classes: { Schema.Class } = {
         Name = "Bone",
         Extends = "Attachment",
         Module = "render",
+        Parents = under("BasePart", "Bone"),
         -- No `Storage`: it inherits `Attachment`'s. `World::create` calls every
         -- hook down the ancestry, so declaring one here would attach a second
         -- `AttachmentComponent` -- the same reason `Script` does not declare one
@@ -716,6 +737,7 @@ local Classes: { Schema.Class } = {
         Name = "Attachment",
         Extends = "Instance",
         Module = "scene",
+        Parents = under("BasePart"),
         Storage = "Attachment",
         Doc = "A named place on a part: a socket to weld something to, a joint frame for a constraint, a "
             .. "muzzle to spawn something at. It has no body and is not simulated -- what it costs is one "
@@ -746,6 +768,7 @@ local Classes: { Schema.Class } = {
         Name = "Constraint",
         Extends = "Instance",
         Module = "scene",
+        Parents = InTheWorld,
         Storage = "Constraint",
         Tags = { "Abstract", "NotCreatable" } :: { Schema.ClassTag },
         Doc = "The base of anything the SOLVER holds together. A constraint hands both bodies to the solver "
@@ -879,6 +902,7 @@ local Classes: { Schema.Class } = {
         Name = "Ragdoll",
         Extends = "Instance",
         Module = "scene",
+        Parents = under("MeshPart"),
         Storage = "Ragdoll",
         Doc = "Makes a character's pose come from the simulation instead of from a clip. Parent it to the "
             .. "`MeshPart` whose skeleton, put the limbs under it, and switch it on.\n\n"
@@ -952,6 +976,7 @@ local Classes: { Schema.Class } = {
         Name = "Weld",
         Extends = "Instance",
         Module = "scene",
+        Parents = InTheWorld,
         Storage = "Weld",
         Doc = "Holds one part at a fixed offset from another. **A transform weld, not a solver constraint**: "
             .. "Part1 stops being independently simulated and is driven from Part0 every tick, so welding a "
@@ -1003,6 +1028,7 @@ local Classes: { Schema.Class } = {
         Name = "Terrain",
         Extends = "Instance",
         Module = "scene",
+        Parents = under("Workspace"),
         Storage = "Terrain",
         Doc = "A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.\n\n"
             .. "**It is a grid of voxels.** Space is cut into cubes `VoxelSize` on a side, and each one "
@@ -1298,6 +1324,7 @@ local Classes: { Schema.Class } = {
         Name = "WeldConstraint",
         Extends = "Instance",
         Module = "scene",
+        Parents = InTheWorld,
         Storage = "WeldConstraint",
         Doc = "The same joint, with the offset CAPTURED rather than authored. When it becomes active it "
             .. "records where the two parts are relative to each other and holds that; a Weld is told the "
@@ -1443,6 +1470,7 @@ local Classes: { Schema.Class } = {
         Name = "Camera",
         Extends = "PVInstance",
         Module = "render",
+        Parents = under("Workspace"),
         Storage = "Camera",
         Doc = "The viewpoint the world is rendered from. A camera is an ordinary instance a script owns and moves; "
             .. "the engine never takes it over, which is why there is no CameraType.",
@@ -1494,6 +1522,7 @@ local Classes: { Schema.Class } = {
         Name = "PointLight",
         Extends = "Instance",
         Module = "render",
+        Parents = OnAPart,
         Storage = "PointLight",
         Doc = "A light radiating equally in every direction. Inside a BasePart or an Attachment it shines from "
             .. "there and moves with it; anywhere else it shines from its own `CFrame` (ADR 0095).",
@@ -1550,6 +1579,7 @@ local Classes: { Schema.Class } = {
         Name = "Decal",
         Extends = "Instance",
         Module = "render",
+        Parents = under("BasePart"),
         Storage = "Decal",
         Doc = "An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, "
             .. "a crack. **No face to choose and no parent required** -- `CFrame.lookAt(hit.Position, "
@@ -1597,6 +1627,7 @@ local Classes: { Schema.Class } = {
         Name = "ParticleEmitter",
         Extends = "Instance",
         Module = "render",
+        Parents = OnAPart,
         Storage = "ParticleEmitter",
         Doc = "Sparks, smoke, dust and magic (F2). Parent it to a `BasePart` or an `Attachment`: particles are "
             .. "born at its position and fly along its up direction. **They are a picture, not the world** -- "
@@ -1726,6 +1757,7 @@ local Classes: { Schema.Class } = {
         Name = "SpotLight",
         Extends = "Instance",
         Module = "render",
+        Parents = OnAPart,
         Storage = "SpotLight",
         Doc = "A light confined to a cone about its forward direction -- its holder's, turned by its own "
             .. "`CFrame`, or its own alone when nothing holds it (ADR 0095). A sibling of PointLight rather than "
@@ -1786,6 +1818,7 @@ local Classes: { Schema.Class } = {
         Name = "PostEffect",
         Extends = "Instance",
         Module = "render",
+        Parents = under("Lighting", "Camera"),
         Tags = { "Abstract" } :: { Schema.ClassTag },
         -- Every effect class stores its own numbers beside this one's `Enabled`:
         -- `World::create` calls every hook down the ancestry, so the base's
@@ -1979,6 +2012,7 @@ local Classes: { Schema.Class } = {
         Name = "Atmosphere",
         Extends = "Instance",
         Module = "render",
+        Parents = under("Lighting"),
         Storage = "Atmosphere",
         Doc = "The air between the camera and everything it sees. Distance fades into it and it thins with "
             .. "height, it is lit by the sun and glows around it, and it tints the sky towards the horizon so "
@@ -2040,6 +2074,7 @@ local Classes: { Schema.Class } = {
         Name = "Sky",
         Extends = "Instance",
         Module = "render",
+        Parents = under("Lighting"),
         Storage = "Sky",
         Doc = "What the sky shows: six images around the world, the sun's and the moon's look, stars and "
             .. "clouds. **It counts only directly under `Lighting`**, and only the first one there. The images "
@@ -2210,6 +2245,7 @@ local Classes: { Schema.Class } = {
         Name = "InputAction",
         Extends = "Instance",
         Module = "input",
+        Parents = under("InputContext"),
         Storage = "InputAction",
         Doc = "A named thing the player can do, decoupled from the input that does it (§2.4, ADR 0029). Game "
             .. "code connects to the action; `InputBinding` children say what drives it. That indirection is "
@@ -2286,6 +2322,7 @@ local Classes: { Schema.Class } = {
         Name = "InputBinding",
         Extends = "Instance",
         Module = "input",
+        Parents = under("InputAction"),
         Storage = "InputBinding",
         Doc = "One physical input that drives its parent `InputAction` (§2.4). An action may have several, and "
             .. "they are ORed: a key, a gamepad stick and a UI button on one action are three ways to do one "
@@ -2377,6 +2414,7 @@ local Classes: { Schema.Class } = {
         Name = "ScreenGui",
         Extends = "Instance",
         Module = "ui",
+        Parents = under("UIService"),
         Storage = "ScreenGui",
         Doc = "The root of one screen-space UI tree, parented to `UIService` (§2.2). Everything under it is "
             .. "laid out against the window and drawn over the world.\n\nIt is the unit of layout: a write "
@@ -2414,6 +2452,7 @@ local Classes: { Schema.Class } = {
         Name = "BillboardGui",
         Extends = "Instance",
         Module = "ui",
+        Parents = OnAPart,
         Storage = "BillboardGui",
         Doc = "A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health "
             .. "bar over a crate, a marker on an objective. Its children are laid out exactly as a "
@@ -2482,6 +2521,7 @@ local Classes: { Schema.Class } = {
         Name = "SurfaceGui",
         Extends = "Instance",
         Module = "ui",
+        Parents = under("BasePart"),
         Storage = "SurfaceGui",
         Doc = "A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a "
             .. "label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a "
@@ -2537,6 +2577,7 @@ local Classes: { Schema.Class } = {
         Name = "UIObject",
         Extends = "Instance",
         Module = "ui",
+        Parents = InAUi,
         Tags = { "Abstract", "NotCreatable" } :: { Schema.ClassTag },
         Storage = "UIObject",
         Doc = "Anything that occupies a rectangle on screen (§2.2). Every property here is one the layout "
@@ -2926,6 +2967,7 @@ local Classes: { Schema.Class } = {
         Name = "UIListLayout",
         Extends = "Instance",
         Module = "ui",
+        Parents = InAUi,
         Storage = "UIListLayout",
         Doc = "Stacks its parent's `UIObject` children in a line (§2.2). A modifier rather than a container: "
             .. "it is parented BESIDE the things it arranges, so adding one to a Frame does not reparent "
@@ -2976,6 +3018,7 @@ local Classes: { Schema.Class } = {
         Name = "UIPadding",
         Extends = "Instance",
         Module = "ui",
+        Parents = InAUi,
         Storage = "UIPadding",
         Doc = "Insets its parent's content on each side (§2.2). Like `UIListLayout`, a modifier parented "
             .. "beside what it affects.",
@@ -3010,6 +3053,7 @@ local Classes: { Schema.Class } = {
         Name = "UICorner",
         Extends = "Instance",
         Module = "ui",
+        Parents = under("UIObject"),
         Storage = "UICorner",
         Doc = "Rounds its parent's corners (§2.2). It changes the DRAWING and not the layout or the hit test: "
             .. "a rounded button is still a rectangle to the solver and to the pointer, which is what keeps "
@@ -3228,6 +3272,7 @@ local Classes: { Schema.Class } = {
         Name = "AnimationPlayer",
         Extends = "Instance",
         Module = "render",
+        Parents = under("Model"),
         Doc = "Plays a skinned mesh's animation clips (§2.2).\n\n**Parent it to the `Model` "
             .. "whose character it is, and it drives every skinned `MeshPart` under that model.** A "
             .. "character is a body, a shirt and a pair of trousers -- several meshes wearing the same "
@@ -3271,6 +3316,7 @@ local Classes: { Schema.Class } = {
         Name = "Part2D",
         Extends = "Instance",
         Module = "scene",
+        Parents = under("Workspace", "Model", "Part2D"),
         Storage = "Part2D",
         Doc = "A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D "
             .. "world. It lies on the world's XY plane facing -Z, so an orthographic `Camera` looking down -Z "
@@ -3430,6 +3476,7 @@ local Classes: { Schema.Class } = {
         Name = "Tilemap2D",
         Extends = "Instance",
         Module = "scene",
+        Parents = under("Workspace", "Model"),
         Storage = "Tilemap2D",
         Doc = "A grid of tiles from one tileset image, on the 2D plane (the 2D layer, phase 3): a level you "
             .. "paint. Tile 0 is empty; tile `n` is the `n`-th tile of the tileset, counted along its rows "

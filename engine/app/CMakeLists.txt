@@ -23,6 +23,7 @@ luaug_add_module(app
         src/script_document.cpp
         src/script_syntax.cpp
         src/script_editor.cpp
+        src/class_favorites.cpp
         src/script_editor_settings.cpp
         src/script_editor_panel.cpp
         src/script_complete.cpp
@@ -276,6 +277,7 @@ luaug_add_module_tests(app
         tests/ui_text_tests.cpp
         tests/thumbnail_tests.cpp
         tests/script_document_tests.cpp
+        tests/class_favorites_tests.cpp
         tests/script_editor_settings_tests.cpp
         tests/script_editor_tests.cpp
         tests/script_complete_tests.cpp

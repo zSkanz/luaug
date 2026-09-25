@@ -87,6 +87,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     screenGuiDesc.flags = scene::ClassFlags::None;
     screenGuiDesc.defaultName = atoms.intern("ScreenGui");
     screenGuiDesc.doc = "The root of one screen-space UI tree, parented to `UIService` (\302\247" "2.2). Everything under it is laid out against the window and drawn over the world.\012\012It is the unit of layout: a write that changes a layout marks the nearest ScreenGui dirty, and a screen nothing changed does not run the solver at all. That is a design constraint rather than an optimisation -- the benchmark asserts ZERO solver invocations on an idle frame, because \"about zero microseconds\" is a measurement of the clock.";
+    static constexpr std::array<std::string_view, 3> screenGuiParents{{"UIService", "ReplicatedStorage", "ServerStorage"}};
+    screenGuiDesc.parents = screenGuiParents;
     screenGuiDesc.properties = screenGuiProperties;
     screenGuiDesc.attachComponents = native::attachScreenGuiComponents;
     screenGuiDesc.detachComponents = native::detachScreenGuiComponents;
@@ -180,6 +182,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     billboardGuiDesc.flags = scene::ClassFlags::None;
     billboardGuiDesc.defaultName = atoms.intern("BillboardGui");
     billboardGuiDesc.doc = "A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas of `Size`, and drawn IN the world -- behind what is in front of it, in the same light as the picture around it -- rather than over it.\012\012It hangs over `Adornee`, or over its parent when that is a part and `Adornee` is empty. Its buttons are pressed like the screen's: the pointer's ray finds them in the world, and something solid in front hides them unless `AlwaysOnTop` is set. A screen element over the same pixel wins.";
+    static constexpr std::array<std::string_view, 4> billboardGuiParents{{"BasePart", "Attachment", "ReplicatedStorage", "ServerStorage"}};
+    billboardGuiDesc.parents = billboardGuiParents;
     billboardGuiDesc.properties = billboardGuiProperties;
     billboardGuiDesc.attachComponents = native::attachBillboardGuiComponents;
     billboardGuiDesc.detachComponents = native::detachBillboardGuiComponents;
@@ -263,6 +267,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     surfaceGuiDesc.flags = scene::ClassFlags::None;
     surfaceGuiDesc.defaultName = atoms.intern("SurfaceGui");
     surfaceGuiDesc.doc = "A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. Its children are laid out exactly as a `ScreenGui`'s are, against a canvas the size of the face at `PixelsPerMetre`, and it moves, turns and is hidden with the part.\012\012It covers `Adornee`, or its parent when that is a part and `Adornee` is empty. Its buttons are pressed like the screen's, from in front of the face: the pointer's ray finds them in the world, and something solid in front hides them unless `AlwaysOnTop` is set.";
+    static constexpr std::array<std::string_view, 3> surfaceGuiParents{{"BasePart", "ReplicatedStorage", "ServerStorage"}};
+    surfaceGuiDesc.parents = surfaceGuiParents;
     surfaceGuiDesc.properties = surfaceGuiProperties;
     surfaceGuiDesc.attachComponents = native::attachSurfaceGuiComponents;
     surfaceGuiDesc.detachComponents = native::detachSurfaceGuiComponents;
@@ -440,6 +446,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIObjectDesc.flags = scene::ClassFlags::Abstract | scene::ClassFlags::NotCreatable;
     uIObjectDesc.defaultName = atoms.intern("UIObject");
     uIObjectDesc.doc = "Anything that occupies a rectangle on screen (\302\247" "2.2). Every property here is one the layout solver or the 2D pass reads, which is what makes it the base rather than a convenience.\012\012Coordinates are `UDim2`: a fraction of the parent plus a pixel offset, on each axis. That pair is what lets one layout be correct at every resolution, and it is why the reference images are recorded at two of them.";
+    static constexpr std::array<std::string_view, 6> uIObjectParents{{"ScreenGui", "BillboardGui", "SurfaceGui", "UIObject", "ReplicatedStorage", "ServerStorage"}};
+    uIObjectDesc.parents = uIObjectParents;
     uIObjectDesc.properties = uIObjectProperties;
     uIObjectDesc.events = uIObjectEvents;
     uIObjectDesc.attachComponents = native::attachUIObjectComponents;
@@ -830,6 +838,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIListLayoutDesc.flags = scene::ClassFlags::None;
     uIListLayoutDesc.defaultName = atoms.intern("UIListLayout");
     uIListLayoutDesc.doc = "Stacks its parent's `UIObject` children in a line (\302\247" "2.2). A modifier rather than a container: it is parented BESIDE the things it arranges, so adding one to a Frame does not reparent anything.\012\012A child laid out by one keeps its `Size` and loses its `Position` -- the layout decides where each one goes, which is what a layout is.";
+    static constexpr std::array<std::string_view, 6> uIListLayoutParents{{"ScreenGui", "BillboardGui", "SurfaceGui", "UIObject", "ReplicatedStorage", "ServerStorage"}};
+    uIListLayoutDesc.parents = uIListLayoutParents;
     uIListLayoutDesc.properties = uIListLayoutProperties;
     uIListLayoutDesc.attachComponents = native::attachUIListLayoutComponents;
     uIListLayoutDesc.detachComponents = native::detachUIListLayoutComponents;
@@ -889,6 +899,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uIPaddingDesc.flags = scene::ClassFlags::None;
     uIPaddingDesc.defaultName = atoms.intern("UIPadding");
     uIPaddingDesc.doc = "Insets its parent's content on each side (\302\247" "2.2). Like `UIListLayout`, a modifier parented beside what it affects.";
+    static constexpr std::array<std::string_view, 6> uIPaddingParents{{"ScreenGui", "BillboardGui", "SurfaceGui", "UIObject", "ReplicatedStorage", "ServerStorage"}};
+    uIPaddingDesc.parents = uIPaddingParents;
     uIPaddingDesc.properties = uIPaddingProperties;
     uIPaddingDesc.attachComponents = native::attachUIPaddingComponents;
     uIPaddingDesc.detachComponents = native::detachUIPaddingComponents;
@@ -915,6 +927,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     uICornerDesc.flags = scene::ClassFlags::None;
     uICornerDesc.defaultName = atoms.intern("UICorner");
     uICornerDesc.doc = "Rounds its parent's corners (\302\247" "2.2). It changes the DRAWING and not the layout or the hit test: a rounded button is still a rectangle to the solver and to the pointer, which is what keeps a corner radius from being a geometry problem.";
+    static constexpr std::array<std::string_view, 3> uICornerParents{{"UIObject", "ReplicatedStorage", "ServerStorage"}};
+    uICornerDesc.parents = uICornerParents;
     uICornerDesc.properties = uICornerProperties;
     uICornerDesc.attachComponents = native::attachUICornerComponents;
     uICornerDesc.detachComponents = native::detachUICornerComponents;

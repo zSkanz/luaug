@@ -8,6 +8,7 @@
 #if LUAUG_DEBUG_UI
 
 #include "luaug/app/backends.h"
+#include "luaug/app/class_favorites.h"
 #include "luaug/app/icons.h"
 #include "luaug/app/project_config.h"
 #include "luaug/app/script_editor.h"
@@ -926,7 +927,8 @@ std::string g_addHighlightFilter;
 // The matches this frame, rebuilt each frame because the filter can change each
 // frame. A member of the file rather than of the loop so the allocation is paid
 // once rather than once a frame.
-std::vector<scene::ClassId> g_addMatches;
+std::vector<ClassPick> g_addMatches;
+std::vector<ClassPick> g_addPicks;
 // Whether the right-drag in progress BEGAN over the viewport image. Latched on
 // the press, because that is the only moment the question can be answered: once
 // the pointer is held it stops reporting a position, and asking afterwards lets
@@ -1077,8 +1079,45 @@ struct ContentDrag
 //
 // `spacing` is the caller's item spacing: this window is a menu and not a row,
 // and the two callers draw rows at different pitches.
+// A five-pointed star centred on `centre`: filled for a favourite, drawn as an
+// outline for one that could be. Drawn rather than taken from the font, which
+// carries no star glyph.
+void drawStar(ImDrawList* draw, ImVec2 centre, float radius, bool filled, ImU32 colour)
+{
+    ImVec2 points[10];
+    for (int index = 0; index < 10; ++index) {
+        const float reach = index % 2 == 0 ? radius : radius * 0.45f;
+        const float angle = -1.5707964f + static_cast<float>(index) * 0.62831855f;
+        points[index] = ImVec2(centre.x + std::cos(angle) * reach, centre.y + std::sin(angle) * reach);
+    }
+    if (filled) {
+        for (int index = 0; index < 10; ++index)
+            draw->AddTriangleFilled(centre, points[index], points[(index + 1) % 10], colour);
+    }
+    else {
+        draw->AddPolyline(points, 10, colour, ImDrawFlags_Closed, 1.2f);
+    }
+}
+
+// Where a class does its job, as a sentence for the dimmed rows' tooltip.
+[[nodiscard]] std::string placesOf(const scene::World& world, scene::ClassId id)
+{
+    const scene::ClassDescriptor* descriptor = world.classes().find(id);
+    while (descriptor != nullptr && descriptor->parents.empty() && descriptor->super != scene::InvalidClass)
+        descriptor = world.classes().find(descriptor->super);
+    std::string places;
+    if (descriptor == nullptr)
+        return places;
+    for (const std::string_view place : descriptor->parents) {
+        if (!places.empty())
+            places += ", ";
+        places += place;
+    }
+    return places;
+}
+
 [[nodiscard]] scene::ClassId drawClassPicker(const scene::World& world, const Inspector& inspector,
-                                             const IconAtlas* icons, ImVec2 spacing)
+                                             core::InstanceId parent, const IconAtlas* icons, ImVec2 spacing)
 {
     scene::ClassId picked = scene::InvalidClass;
     // Same as the row menu above: this window is not a row.
@@ -1128,13 +1167,25 @@ struct ContentDrag
     // to know how many rows there are, and Enter has to know which
     // class it is about, both before the first `Selectable` decides
     // whether it is the highlighted one.
+    //
+    // **In three groups for a parent** (see `orderClassPicks`): what is
+    // starred for this kind of parent, what does its job here, and the rest,
+    // dimmed. The content browser's picker has no parent and one group.
+    std::string parentClass;
+    if (parent.valid() && world.alive(parent)) {
+        if (const scene::ClassDescriptor* kind = world.classes().find(world.classOf(parent)); kind != nullptr)
+            parentClass = std::string(world.atoms().text(kind->name));
+    }
+    ClassFavorites& favorites = classFavorites();
+    orderClassPicks(world, parent, g_creatable,
+                    parentClass.empty() ? std::span<const std::string>{} : favorites.of(parentClass), g_addPicks);
     g_addMatches.clear();
-    for (const scene::ClassId classId : g_creatable) {
-        const scene::ClassDescriptor* candidate = world.classes().find(classId);
+    for (const ClassPick& pick : g_addPicks) {
+        const scene::ClassDescriptor* candidate = world.classes().find(pick.id);
         if (candidate == nullptr)
             continue;
         if (filter.empty() || containsFold(world.atoms().text(candidate->name), filter))
-            g_addMatches.push_back(classId);
+            g_addMatches.push_back(pick);
     }
 
     // **Typing puts you back on the first match**, which is the
@@ -1180,7 +1231,7 @@ struct ContentDrag
     scene::ClassId chosenByKey = scene::InvalidClass;
     if (matchCount > 0 &&
         (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
-        chosenByKey = g_addMatches[static_cast<core::usize>(g_addHighlight)];
+        chosenByKey = g_addMatches[static_cast<core::usize>(g_addHighlight)].id;
 
     if (ImGui::BeginChild("add-list", ImVec2(210.0f, 260.0f))) {
         // **Whether the pointer has actually moved.** Hovering a row
@@ -1193,10 +1244,16 @@ struct ContentDrag
         const bool pointerMoved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
 
         for (int match = 0; match < matchCount; ++match) {
-            const scene::ClassId classId = g_addMatches[static_cast<core::usize>(match)];
+            const ClassPick& pick = g_addMatches[static_cast<core::usize>(match)];
+            const scene::ClassId classId = pick.id;
             const scene::ClassDescriptor* candidate = world.classes().find(classId);
             if (candidate == nullptr)
                 continue;
+            // A line between the groups, so where the favourites end and the
+            // dimmed rest begins is seen rather than inferred.
+            if (match > 0 && g_addMatches[static_cast<core::usize>(match - 1)].group != pick.group)
+                ImGui::Separator();
+            const bool dimmed = pick.group == ClassPickGroup::Elsewhere;
             const std::string_view candidateName = world.atoms().text(candidate->name);
 
             // **The icon a row of this class would wear**, drawn
@@ -1214,8 +1271,11 @@ struct ContentDrag
             (void)std::snprintf(item, sizeof(item), "##%.*s", static_cast<int>(candidateName.size()),
                                 candidateName.data());
             const ImVec2 itemOrigin = ImGui::GetCursorPos();
+            const float rowWidth = ImGui::GetContentRegionAvail().x;
             const bool highlighted = match == g_addHighlight;
-            const bool chosen = ImGui::Selectable(item, highlighted);
+            // Overlap allowed, so the star drawn over its right end takes its
+            // own click instead of choosing the class.
+            const bool chosen = ImGui::Selectable(item, highlighted, ImGuiSelectableFlags_AllowOverlap);
             // Taken here, because the icon and the name are drawn
             // over the selectable afterwards and `IsItemHovered`
             // answers about the LAST item -- which would make the
@@ -1237,11 +1297,45 @@ struct ContentDrag
             // False means there is no atlas at all, which is a build
             // with no icons rather than a class with none, and then
             // the name simply stands where it always did.
+            if (dimmed)
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.45f);
             if (drawIcon(icons, classIconFor(icons, &world.classes(), &world.atoms(), candidateName), itemIcon))
                 ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
             else
                 ImGui::SetCursorPos(itemOrigin);
             ImGui::TextUnformatted(candidateName.data(), candidateName.data() + candidateName.size());
+            if (dimmed)
+                ImGui::PopStyleVar();
+
+            // **The star**, on the right: filled on a favourite, an outline on
+            // the row under the pointer, nothing elsewhere -- thirty outlines
+            // would be a column of noise. Only where there is a parent to be a
+            // favourite FOR.
+            bool starHovered = false;
+            if (!parentClass.empty()) {
+                const float starSize = ImGui::GetTextLineHeight();
+                const bool favourite = pick.group == ClassPickGroup::Favorite;
+                ImGui::SetCursorPos(ImVec2(itemOrigin.x + rowWidth - starSize - 2.0f, itemOrigin.y));
+                char starId[104];
+                (void)std::snprintf(starId, sizeof(starId), "##star%.*s", static_cast<int>(candidateName.size()),
+                                    candidateName.data());
+                if (ImGui::InvisibleButton(starId, ImVec2(starSize, starSize))) {
+                    (void)favorites.toggle(parentClass, candidateName);
+                    (void)saveClassFavorites(classFavoritesFile(), favorites);
+                }
+                starHovered = ImGui::IsItemHovered();
+                if (starHovered)
+                    ImGui::SetTooltip(favourite ? "a favourite under every %s -- click to unstar"
+                                                : "star it: first in this list under every %s",
+                                      parentClass.c_str());
+                if (favourite || itemHovered || starHovered) {
+                    const ImVec2 box = ImGui::GetItemRectMin();
+                    const ImU32 colour = favourite || starHovered ? ImGui::GetColorU32(themeColor(palette().warning))
+                                                                  : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+                    drawStar(ImGui::GetWindowDrawList(), ImVec2(box.x + starSize * 0.5f, box.y + starSize * 0.5f),
+                             starSize * 0.42f, favourite, colour);
+                }
+            }
 
             if (chosen || classId == chosenByKey) {
                 picked = classId;
@@ -1250,9 +1344,16 @@ struct ContentDrag
             // The IDL's own prose, which the properties grid already
             // shows for a property and which is the only description
             // of a class anywhere at runtime.
-            if (candidate->doc[0] != 0 && itemHovered) {
+            if ((candidate->doc[0] != 0 || dimmed) && itemHovered && !starHovered) {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                // Why it is dimmed, before what it is.
+                if (dimmed) {
+                    const std::string places = placesOf(world, classId);
+                    ImGui::TextColored(ImGui::GetStyle().Colors[ImGuiCol_TextDisabled],
+                                       "does nothing under %s -- it works under %s", parentClass.c_str(),
+                                       places.c_str());
+                }
                 ImGui::TextUnformatted(candidate->doc);
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
@@ -2044,7 +2145,7 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
 
             if (commands != nullptr && ImGui::BeginPopup("add-child")) {
                 g_addOpenRow = row.id.index;
-                if (const scene::ClassId picked = drawClassPicker(world, inspector, icons, spacing);
+                if (const scene::ClassId picked = drawClassPicker(world, inspector, row.id, icons, spacing);
                     picked != scene::InvalidClass) {
                     commands->createClass = picked;
                     commands->createParent = row.id;
@@ -6115,7 +6216,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
         // Null while nothing is being inspected -- a host with no world -- and
         // then there is no list of classes to offer.
         if (world != nullptr && inspector != nullptr) {
-            if (const scene::ClassId picked = drawClassPicker(*world, *inspector, icons, ImGui::GetStyle().ItemSpacing);
+            if (const scene::ClassId picked =
+                    drawClassPicker(*world, *inspector, core::InstanceId{}, icons, ImGui::GetStyle().ItemSpacing);
                 picked != scene::InvalidClass) {
                 dialogs.newStampClass = picked;
                 dialogs.newStampFromClass = true;

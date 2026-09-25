@@ -170,6 +170,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     inputActionDesc.flags = scene::ClassFlags::None;
     inputActionDesc.defaultName = atoms.intern("InputAction");
     inputActionDesc.doc = "A named thing the player can do, decoupled from the input that does it (\302\247" "2.4, ADR 0029). Game code connects to the action; `InputBinding` children say what drives it. That indirection is the whole point: rebinding is a property write, and a prompt can ask the action what key to draw.\012\012Parent it to an `InputContext`. An action outside one is inert -- resolution walks contexts, so an action nothing groups is an action nothing dispatches.";
+    static constexpr std::array<std::string_view, 3> inputActionParents{{"InputContext", "ReplicatedStorage", "ServerStorage"}};
+    inputActionDesc.parents = inputActionParents;
     inputActionDesc.properties = inputActionProperties;
     inputActionDesc.methods = inputActionMethods;
     inputActionDesc.events = inputActionEvents;
@@ -293,6 +295,8 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     inputBindingDesc.flags = scene::ClassFlags::None;
     inputBindingDesc.defaultName = atoms.intern("InputBinding");
     inputBindingDesc.doc = "One physical input that drives its parent `InputAction` (\302\247" "2.4). An action may have several, and they are ORed: a key, a gamepad stick and a UI button on one action are three ways to do one thing.\012\012Which fields matter depends on the parent's `Type`. A `Bool` action reads `KeyCode`; a `Direction2D` action reads either `KeyCode` naming a 2D source such as `LeftThumbstick`, or the four composite keys. A binding whose fields do not suit its parent is inert rather than an error -- an action's type is a property somebody can change after the binding was built.";
+    static constexpr std::array<std::string_view, 3> inputBindingParents{{"InputAction", "ReplicatedStorage", "ServerStorage"}};
+    inputBindingDesc.parents = inputBindingParents;
     inputBindingDesc.properties = inputBindingProperties;
     inputBindingDesc.attachComponents = native::attachInputBindingComponents;
     inputBindingDesc.detachComponents = native::detachInputBindingComponents;

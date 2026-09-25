@@ -730,6 +730,50 @@ void collectCreatableClasses(const scene::World& world, std::vector<scene::Class
     });
 }
 
+bool worksUnder(const scene::World& world, scene::ClassId child, core::InstanceId parent)
+{
+    const scene::ClassRegistry& classes = world.classes();
+    // The class's own list, or its nearest superclass's.
+    const scene::ClassDescriptor* descriptor = classes.find(child);
+    while (descriptor != nullptr && descriptor->parents.empty() && descriptor->super != scene::InvalidClass)
+        descriptor = classes.find(descriptor->super);
+    if (descriptor == nullptr || descriptor->parents.empty() || !parent.valid() || !world.alive(parent))
+        return true;
+
+    core::InstanceId context = parent;
+    const scene::ClassId folder = classes.findId(world.atoms().lookup("Folder"));
+    while (folder != scene::InvalidClass && world.classOf(context) == folder && world.parentOf(context).valid())
+        context = world.parentOf(context);
+
+    const scene::ClassId contextClass = world.classOf(context);
+    return std::any_of(descriptor->parents.begin(), descriptor->parents.end(), [&](std::string_view place) {
+        const scene::ClassId placeClass = classes.findId(world.atoms().lookup(place));
+        return placeClass != scene::InvalidClass && classes.isA(contextClass, placeClass);
+    });
+}
+
+void orderClassPicks(const scene::World& world, core::InstanceId parent, std::span<const scene::ClassId> creatable,
+                     std::span<const std::string> favorites, std::vector<ClassPick>& out)
+{
+    out.clear();
+    out.reserve(creatable.size());
+    const auto starred = [&](scene::ClassId id) {
+        const std::string_view name = world.atoms().text(world.classes().find(id)->name);
+        return std::find(favorites.begin(), favorites.end(), name) != favorites.end();
+    };
+    for (const ClassPickGroup group : {ClassPickGroup::Favorite, ClassPickGroup::Works, ClassPickGroup::Elsewhere}) {
+        for (const scene::ClassId id : creatable) {
+            if (world.classes().find(id) == nullptr)
+                continue;
+            const ClassPickGroup mine = starred(id)                     ? ClassPickGroup::Favorite
+                                        : worksUnder(world, id, parent) ? ClassPickGroup::Works
+                                                                        : ClassPickGroup::Elsewhere;
+            if (mine == group)
+                out.push_back(ClassPick{id, group});
+        }
+    }
+}
+
 void collectTree(const scene::World& world, core::InstanceId root, std::vector<TreeRow>& out)
 {
     out.clear();

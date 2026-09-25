@@ -364,6 +364,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     modelDesc.flags = ClassFlags::None;
     modelDesc.defaultName = atoms.intern("Model");
     modelDesc.doc = "A group of parts handled as one object, with a pivot to move it by and an extents box to measure it with.";
+    static constexpr std::array<std::string_view, 5> modelParents{{"Workspace", "Model", "BasePart", "ReplicatedStorage", "ServerStorage"}};
+    modelDesc.parents = modelParents;
     modelDesc.properties = modelProperties;
     modelDesc.methods = modelMethods;
     modelDesc.attachComponents = native::attachModelComponents;
@@ -686,6 +688,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     partDesc.flags = ClassFlags::None;
     partDesc.defaultName = atoms.intern("Part");
     partDesc.doc = "The primitive solid: a part whose geometry is one of a small set of shapes rather than an imported mesh.";
+    static constexpr std::array<std::string_view, 5> partParents{{"Workspace", "Model", "BasePart", "ReplicatedStorage", "ServerStorage"}};
+    partDesc.parents = partParents;
     partDesc.properties = partProperties;
     classes.registerClass(partDesc);
 
@@ -721,6 +725,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     attachmentDesc.flags = ClassFlags::None;
     attachmentDesc.defaultName = atoms.intern("Attachment");
     attachmentDesc.doc = "A named place on a part: a socket to weld something to, a joint frame for a constraint, a muzzle to spawn something at. It has no body and is not simulated -- what it costs is one transform per tick, and a world with none pays nothing.\012\012It is not on `PVInstance`, deliberately: an attachment is a thing you make and name, and giving every part an invisible one would make \"where is this attached\" ambiguous in exactly the cases it needs to be clear.";
+    static constexpr std::array<std::string_view, 3> attachmentParents{{"BasePart", "ReplicatedStorage", "ServerStorage"}};
+    attachmentDesc.parents = attachmentParents;
     attachmentDesc.properties = attachmentProperties;
     attachmentDesc.attachComponents = native::attachAttachmentComponents;
     attachmentDesc.detachComponents = native::detachAttachmentComponents;
@@ -782,6 +788,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     constraintDesc.flags = ClassFlags::Abstract | ClassFlags::NotCreatable;
     constraintDesc.defaultName = atoms.intern("Constraint");
     constraintDesc.doc = "The base of anything the SOLVER holds together. A constraint hands both bodies to the solver and lets it work out where they end up -- a door swings under its own weight, a ragdoll falls.\012\012**This is not a `Weld`.** A weld DRIVES its second part from its first every tick and the solver is never asked, which is what keeps a sword on a hand whatever else is happening. A constraint asks. Use a weld to attach, a constraint to articulate.\012\012**It joins two `Attachment`s, not two parts**, which is what makes the joint frame something you can see and move: where a door hinges is a place on the door and a place on the frame. A constraint cannot reach a `CharacterBody` -- that is swept rather than solved, so there is no body for a joint to hold.";
+    static constexpr std::array<std::string_view, 5> constraintParents{{"Workspace", "Model", "BasePart", "ReplicatedStorage", "ServerStorage"}};
+    constraintDesc.parents = constraintParents;
     constraintDesc.properties = constraintProperties;
     constraintDesc.attachComponents = native::attachConstraintComponents;
     constraintDesc.detachComponents = native::detachConstraintComponents;
@@ -935,6 +943,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     ragdollDesc.flags = ClassFlags::None;
     ragdollDesc.defaultName = atoms.intern("Ragdoll");
     ragdollDesc.doc = "Makes a character's pose come from the simulation instead of from a clip. Parent it to the `MeshPart` whose skeleton, put the limbs under it, and switch it on.\012\012**It owns nothing.** A ragdoll is parts, `Bone`s and constraints -- every one of them an instance you can see, select and move -- and this is the flag that says to drive the pose from them. A class that owned its own hidden bodies would be a second owner of things the physics mirror already creates from the tree, and two owners of one body is a rule broken.\012\012How the pose is found: every `Bone` under this ragdoll that names a joint, sitting on a part. The part is where the simulation put that limb and the bone says which joint it is. Nothing else is declared, which is also why a partial ragdoll works -- simulate a dozen bones and the fingers ride along on the wrist, because the joints nobody drives keep their own place relative to their parent.";
+    static constexpr std::array<std::string_view, 3> ragdollParents{{"MeshPart", "ReplicatedStorage", "ServerStorage"}};
+    ragdollDesc.parents = ragdollParents;
     ragdollDesc.properties = ragdollProperties;
     ragdollDesc.methods = ragdollMethods;
     ragdollDesc.attachComponents = native::attachRagdollComponents;
@@ -1007,6 +1017,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     weldDesc.flags = ClassFlags::None;
     weldDesc.defaultName = atoms.intern("Weld");
     weldDesc.doc = "Holds one part at a fixed offset from another. **A transform weld, not a solver constraint**: Part1 stops being independently simulated and is driven from Part0 every tick, so welding a MeshPart to a CharacterBody keeps the two together without anything asking the solver's permission. Welding two dynamic parts so the SOLVER treats them as one rigid assembly is a different feature and is not this one. A weld whose two parts are already joined by another weld, directly or through a chain, is refused: welds form a graph and a cycle has no resolution order.";
+    static constexpr std::array<std::string_view, 5> weldParents{{"Workspace", "Model", "BasePart", "ReplicatedStorage", "ServerStorage"}};
+    weldDesc.parents = weldParents;
     weldDesc.properties = weldProperties;
     weldDesc.attachComponents = native::attachWeldComponents;
     weldDesc.detachComponents = native::detachWeldComponents;
@@ -1187,6 +1199,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     terrainDesc.flags = ClassFlags::None;
     terrainDesc.defaultName = atoms.intern("Terrain");
     terrainDesc.doc = "A sculpted, collidable landscape: ground you dig into rather than a floor made of parts.\012\012**It is a grid of voxels.** Space is cut into cubes `VoxelSize` on a side, and each one holds a material and an occupancy -- how full of that material it is, from 0 to 1. The surface is wherever the occupancy crosses one half, found by interpolating between neighbouring voxels, so a ball carved out of a hillside lands where you put it rather than on a grid line. Caves, arches, overhangs and flat ground are all the same data.\012\012Materials are numbered: 0 is air, and 1 to 8 are Grass, Sand, Rock, Snow, Mud, Sandstone, Basalt and Ice.\012\012There is one per `Workspace`, reached as `workspace.Terrain`, because a world has one ground. Creating a second is legal and it simply is not the one the workspace names.\012\012**Every verb here is a write to the voxels**, and the voxels are part of the world -- so a sculpt is undoable in the editor, it moves the world hash, and it saves with the project.";
+    static constexpr std::array<std::string_view, 3> terrainParents{{"Workspace", "ReplicatedStorage", "ServerStorage"}};
+    terrainDesc.parents = terrainParents;
     terrainDesc.properties = terrainProperties;
     terrainDesc.methods = terrainMethods;
     terrainDesc.attachComponents = native::attachTerrainComponents;
@@ -1249,6 +1263,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     weldConstraintDesc.flags = ClassFlags::None;
     weldConstraintDesc.defaultName = atoms.intern("WeldConstraint");
     weldConstraintDesc.doc = "The same joint, with the offset CAPTURED rather than authored. When it becomes active it records where the two parts are relative to each other and holds that; a Weld is told the relationship and a WeldConstraint reads it off the world. That difference is the whole reason both names exist: authoring an offset by hand for two parts already in the right place is arithmetic nobody should have to do, and capturing one when you meant to specify it is a joint that silently depends on where things happened to be.";
+    static constexpr std::array<std::string_view, 5> weldConstraintParents{{"Workspace", "Model", "BasePart", "ReplicatedStorage", "ServerStorage"}};
+    weldConstraintDesc.parents = weldConstraintParents;
     weldConstraintDesc.properties = weldConstraintProperties;
     weldConstraintDesc.attachComponents = native::attachWeldConstraintComponents;
     weldConstraintDesc.detachComponents = native::detachWeldConstraintComponents;
@@ -1660,6 +1676,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     part2DDesc.flags = ClassFlags::None;
     part2DDesc.defaultName = atoms.intern("Part2D");
     part2DDesc.doc = "A sprite and a body in one, on the 2D plane (the 2D layer, phase 3): what a `Part` is to a 3D world. It lies on the world's XY plane facing -Z, so an orthographic `Camera` looking down -Z sees it as it is; `ZIndex` orders sprites that overlap. It is drawn as its `Image` -- or a flat `Color` without one -- and simulated by 2D physics unless `Anchored`, which makes it ground.";
+    static constexpr std::array<std::string_view, 5> part2DParents{{"Workspace", "Model", "Part2D", "ReplicatedStorage", "ServerStorage"}};
+    part2DDesc.parents = part2DParents;
     part2DDesc.properties = part2DProperties;
     part2DDesc.methods = part2DMethods;
     part2DDesc.events = part2DEvents;
@@ -1816,6 +1834,8 @@ void registerClasses(ClassRegistry& classes, core::AtomTable& atoms)
     tilemap2DDesc.flags = ClassFlags::None;
     tilemap2DDesc.defaultName = atoms.intern("Tilemap2D");
     tilemap2DDesc.doc = "A grid of tiles from one tileset image, on the 2D plane (the 2D layer, phase 3): a level you paint. Tile 0 is empty; tile `n` is the `n`-th tile of the tileset, counted along its rows from the top left. Every tile that is not empty is solid when `Collides` is on, as one body whose edges are merged, so a character runs across a floor of tiles without catching on their seams.";
+    static constexpr std::array<std::string_view, 4> tilemap2DParents{{"Workspace", "Model", "ReplicatedStorage", "ServerStorage"}};
+    tilemap2DDesc.parents = tilemap2DParents;
     tilemap2DDesc.properties = tilemap2DProperties;
     tilemap2DDesc.methods = tilemap2DMethods;
     tilemap2DDesc.attachComponents = native::attachTilemap2DComponents;

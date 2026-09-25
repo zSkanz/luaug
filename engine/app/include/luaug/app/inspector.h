@@ -359,6 +359,42 @@ struct SharedValue
 // placeholder.
 void collectCreatableClasses(const scene::World& world, std::vector<scene::ClassId>& out);
 
+// **Whether an instance of `child` does its job under `parent`** (the IDL's
+// `Parents`): a light under a part, an effect under `Lighting`, a button in a
+// UI tree. A class that does not say works anywhere, and one that does not say
+// inherits its superclass's answer. A `Folder` is transparent -- what is under
+// one is judged by what the folder is under -- because a folder organises and
+// does not change what anything is.
+//
+// Advice, not a rule: the world parents anything anywhere. This orders the
+// add-a-child list, and nothing refuses on it.
+[[nodiscard]] bool worksUnder(const scene::World& world, scene::ClassId child, core::InstanceId parent);
+
+// Which part of the add-a-child list a class is in.
+enum class ClassPickGroup : core::u8
+{
+    // Starred for this kind of parent (see `ClassFavorites`).
+    Favorite,
+    // Does its job here.
+    Works,
+    // Can go here and would do nothing; drawn dimmed.
+    Elsewhere,
+};
+
+struct ClassPick
+{
+    scene::ClassId id = scene::InvalidClass;
+    ClassPickGroup group = ClassPickGroup::Works;
+};
+
+// **The add-a-child list for `parent`** (the owner: "first what that instance
+// accepts, A to Z, then what it does not, A to Z, and a star for a
+// favourite"): the favourites first, then what works there, then the rest --
+// each in the order `creatable` is already in, which is the alphabet. No
+// parent is every class in one group, which is the content browser's list.
+void orderClassPicks(const scene::World& world, core::InstanceId parent, std::span<const scene::ClassId> creatable,
+                     std::span<const std::string> favorites, std::vector<ClassPick>& out);
+
 // The subtree under `root` in depth-first preorder, which is document order
 // (api-design.md §2.2). Sibling order is parenting order and the panel does not
 // sort: the tree's order is observable and reproducible, and a sorted view

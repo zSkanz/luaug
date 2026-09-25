@@ -235,6 +235,18 @@ export type Class = {
     --- parent's name on a child would attach the same component twice. Absent
     --- means the class stores nothing of its own, which is most of them.
     Storage: string?,
+    --- **Where an instance of this class does its job**: the classes it works
+    --- under, each name matching that class and every class extending it. A
+    --- light under a part, an effect under `Lighting` or a camera, a button
+    --- inside a UI tree. Absent means anywhere -- a `Folder`, a `Script`.
+    ---
+    --- Advice rather than a rule: parenting elsewhere is legal, and the
+    --- editor's add-a-child list uses this to put what works under the
+    --- chosen instance first and the rest after it, dimmed. A `Folder` is
+    --- transparent to it -- what is under a folder is judged by what the
+    --- folder is under -- because a folder organises and does not change
+    --- what anything is. A class that does not say inherits its parent's.
+    Parents: { string }?,
     Properties: { Property }?,
     Methods: { Method }?,
     Events: { Event }?,
@@ -595,6 +607,12 @@ function Schema.validate(definition: Definition): { string }
         local parent = class.Extends
         if parent ~= nil and not classNames[parent] then
             table.insert(errors, `{class.Name}: extends "{parent}", which no definition declares`)
+        end
+        local places: { string } = class.Parents or {}
+        for _, place in places do
+            if not classNames[place] then
+                table.insert(errors, `{class.Name}: works under "{place}", which no definition declares`)
+            end
         end
     end
 
