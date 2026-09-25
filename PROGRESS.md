@@ -384,7 +384,8 @@ make room for the next. Session 29's -- the ground, and two ways a brush can lie
 -- followed them on 2026-09-22, and session 30's -- the ground drawn by the GPU,
 and a block world -- went to
 [`docs/progress-archive/2026-09.md`](docs/progress-archive/2026-09.md) on
-2026-09-23.
+2026-09-23, where sessions 32 to 34 -- voxel terrain, the 2D layer and
+navigation, and materials as assets -- joined them on 2026-09-25.
 
 - **Session 36 — atmosphere, post effects and a sky, 2026-09-25.** ADR
   0096's ten stages, each on the full local gate and pushed behind a green CI.
@@ -396,9 +397,12 @@ and a block world -- went to
   frame's time is the CPU's** -- the GPU cost of a post pass was measured as
   the slope of whole-run wall time between two run lengths ending in a
   screenshot, and every effect sits under a tenth of a millisecond at 1080p;
-  and **D186 was quarantined, not fixed** -- two fixes to the soak's revisit
-  check were tried and backed out, because the flagship's route revisits a
-  place only while the world is still loading. The owner's CityBench against
+  and **D186 is fixed, on the fourth attempt** -- what is resident where a
+  moving focus stands depends on how far streaming trails it, so ONE revisited
+  place (1194 instances on one lap, 1689 on another, in a run averaging 1938)
+  is noise, and the first quarter is the world still arriving on a loaded
+  machine. The check now compares the median of every place revisited between
+  the second quarter and the fourth, and gates again. The owner's CityBench against
   Godot did not move (LuauG 1.50-1.54 ms against 1.55-1.63 before).
 - **Session 35 — a user's game, and the script editor, 2026-09-24/25.**
   D182-D185 from benchmarking the owner's friend's game, each row closed
@@ -417,54 +421,3 @@ and a block world -- went to
   automatic `end` after a return type; and lights that stand on their own
   (ADR 0095). One full gate for the whole batch, at the owner's request
   rather than one per commit.
-- **Session 34 — materials as assets, 2026-09-24.** ADR 0090's eight
-  stages, each green on the local gate before it was pushed and on all three
-  CI tiers before the next push.
-  No golden moved -- the engine default's white times a tint IS the tint, and
-  the renderer's default path was kept bit for bit -- and all five determinism
-  traces moved once, at tick 0, because `BasePart`'s declared properties
-  changed. Two things only a build found: the pack reader had never accepted
-  its own `Material` kind, and a tool that rewrites `content/` rewrote an
-  untracked file of the owner's, which had to be put back by hand -- so a
-  rewriting tool is now run with such a file copied aside first.
-- **Session 33 — the 2D layer and navigation, 2026-09-23 to 09-24.** The
-  mandate's S6 and S7, and with them phase 3.
-  - **2D**: `Part2D` and `Tilemap2D` simulated by Box2D beside Jolt, an
-    orthographic camera, an instanced sprite pass, the editor's 2D view and
-    Tiles tool, `examples/20-platformer`, and `Part2D` on protocol 11
-    (ADR 0088). A tilemap collides as the outline of its tiles, so nothing
-    catches on seams.
-  - **Navigation**: `NavigationService` over Recast/Detour (ADR 0089), with
-    tiles built where queries go and rebuilt when what stands in them
-    changes. `examples/21-navigation` is gated on its walker arriving.
-  - **What reality corrected**: the survey found six places that assumed a
-    perspective projection, and there were ten. The first 2D frame showed a
-    bloom that wrapped round the screen, D181, fixed. A tilemap's revision
-    lied after an undo, and `World::restores` now counts. A navigation cache
-    kept per tick missed a wall a script built in the same tick, and
-    `World::mutations` now counts. Each is written up in its brief's or its
-    ADR's findings.
-  - **The owner's uncommitted editor-shell work stayed untouched.** Where a
-    commit needed a file both of us had changed, the commit took HEAD plus this
-    session's lines, compiled in isolation against HEAD's headers, and went
-    in through the index.
-
-- **Session 32 — terrain becomes a grid of voxels, 2026-09-23.** The owner
-  asked for the reference platform's terrain after D161 to D163 and a dig that
-  lagged. ADR 0082 records what that platform does and what was taken from it.
-
-  **Three findings the rewrite paid for.**
-  - **A one-voxel occupancy ramp terraces every slope past 45 degrees**, once
-    ground is laid from heights. The ramp is four voxels, and `writeHeights`
-    divides by the slope.
-  - **Taking the larger or smaller of two ramps misplaces the surface** when
-    their slopes differ. Moving a column's top writes the ramp exactly near the
-    target.
-  - **A level-of-detail ancestor let go while its children were drawn came
-    back as "ready"** and covered the close-up, coarse, every few seconds. That
-    was the flicker the owner saw in `17-cave`. Nodes on the selection's path
-    are kept, and "ready" means covered all the way down.
-
-  A dig now rebuilds one mesh (2.2 ms) and one collider. Each is keyed on only
-  the two layers of each neighbour it reads.
-
