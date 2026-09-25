@@ -228,7 +228,7 @@ local function buildDxc(toolchain: Toolchain, jobs: string)
 
     print(`toolchain: building {toolchain.name} {toolchain.version} into {root}`)
     local started = os.clock()
-    run({
+    local configure = {
         "cmake",
         "-S",
         source,
@@ -245,7 +245,14 @@ local function buildDxc(toolchain: Toolchain, jobs: string)
         "-DCLANG_INCLUDE_TESTS=OFF",
         "-DSPIRV_BUILD_TESTS=OFF",
         "-DHLSL_BUILD_DXILCONV=OFF",
-    }, "configuring DXC (on Windows, from a Developer Shell)")
+    }
+    -- The LLVM inside DXC specialises `std::is_nothrow_constructible`, which
+    -- Apple's newer libc++ refuses as an error; the diagnostic is turned off
+    -- for that platform alone.
+    if platform.macos then
+        table.insert(configure, "-DCMAKE_CXX_FLAGS=-Wno-invalid-specialization")
+    end
+    run(configure, "configuring DXC (on Windows, from a Developer Shell)")
     run({ "ninja", "-C", build, `-j{jobs}`, "dxc" }, "building DXC")
 
     local bin = joined(root, "bin")
