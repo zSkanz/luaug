@@ -27,7 +27,7 @@
 {"op":"createShader","shader":19,"stage":"Vertex","bytes":6940,"samplers":0,"uniformBuffers":1,"name":"pbr_instanced"}
 {"op":"createShader","shader":20,"stage":"Fragment","bytes":45452,"samplers":13,"uniformBuffers":2,"name":"pbr_instanced"}
 {"op":"createShader","shader":21,"stage":"Vertex","bytes":1368,"samplers":0,"uniformBuffers":0,"name":"ssao"}
-{"op":"createShader","shader":22,"stage":"Fragment","bytes":4844,"samplers":1,"uniformBuffers":1,"name":"ssao"}
+{"op":"createShader","shader":22,"stage":"Fragment","bytes":7212,"samplers":1,"uniformBuffers":1,"name":"ssao"}
 {"op":"createShader","shader":23,"stage":"Vertex","bytes":1424,"samplers":0,"uniformBuffers":0,"name":"ssao_blur"}
 {"op":"createShader","shader":24,"stage":"Fragment","bytes":5088,"samplers":2,"uniformBuffers":1,"name":"ssao_blur"}
 {"op":"createShader","shader":25,"stage":"Vertex","bytes":1376,"samplers":0,"uniformBuffers":0,"name":"contact_shadow"}

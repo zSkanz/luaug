@@ -77,10 +77,32 @@ float4 FragmentMain(Interpolants input) : SV_Target0
     const float linearDepth = linearDepthOf(deviceDepth);
     const float3 position = viewPositionOf(input.Uv, linearDepth);
 
-    // Derivatives of the reconstructed position give the plane the surface lies
-    // in. The facing test is what makes the winding irrelevant: whichever way
-    // the cross product came out, the normal must point back at the eye.
-    float3 normal = normalize(cross(ddx(position), ddy(position)));
+    // **The plane the surface lies in, from its neighbours on the SAME
+    // surface.** `ddx`/`ddy` differentiate across a 2x2 quad, so a ground
+    // pixel whose quad held one pixel of the object in front of it got a
+    // normal across the depth jump -- tilted into the ground, and a dark
+    // block where the ground met a silhouette (the owner's report: stripes
+    // under a floating box, gone with occlusion off). So each axis reads both
+    // neighbours and keeps the one whose depth jumps least: the one on this
+    // surface. The facing test is what makes the winding irrelevant: whichever
+    // way the cross product came out, the normal must point back at the eye.
+    //
+    // One of THIS pass's pixels apart, which is what the derivatives spanned:
+    // the UV is linear, so its own derivatives are exact even on a silhouette,
+    // and a full-resolution texel instead turned the depth buffer's steps on a
+    // face seen edge-on into stripes.
+    const float2 texel = float2(abs(ddx(input.Uv.x)), abs(ddy(input.Uv.y)));
+    const float3 left = viewPositionOf(input.Uv - float2(texel.x, 0.0f),
+                                       linearDepthOf(DepthTexture.SampleLevel(DepthSampler, input.Uv - float2(texel.x, 0.0f), 0.0f)));
+    const float3 right = viewPositionOf(input.Uv + float2(texel.x, 0.0f),
+                                        linearDepthOf(DepthTexture.SampleLevel(DepthSampler, input.Uv + float2(texel.x, 0.0f), 0.0f)));
+    const float3 up = viewPositionOf(input.Uv - float2(0.0f, texel.y),
+                                     linearDepthOf(DepthTexture.SampleLevel(DepthSampler, input.Uv - float2(0.0f, texel.y), 0.0f)));
+    const float3 down = viewPositionOf(input.Uv + float2(0.0f, texel.y),
+                                       linearDepthOf(DepthTexture.SampleLevel(DepthSampler, input.Uv + float2(0.0f, texel.y), 0.0f)));
+    const float3 across = abs(right.z - position.z) < abs(position.z - left.z) ? right - position : position - left;
+    const float3 along = abs(down.z - position.z) < abs(position.z - up.z) ? down - position : position - up;
+    float3 normal = normalize(cross(across, along));
     if (dot(normal, -position) < 0.0f)
     {
         normal = -normal;
