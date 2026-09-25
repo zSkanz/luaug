@@ -162,7 +162,13 @@ end
 local function run(argv: { string }, what: string, cwd: string?): string
     local result = process.run(argv, if cwd then { cwd = cwd } else nil)
     if not result.ok then
-        fail(`{what} failed (exit {result.exitcode})\n{result.stderr}`)
+        -- Ninja and CMake say what went wrong on stdout, not stderr: the tail
+        -- of both, so a failure in CI can be read without a rerun.
+        local stdout = result.stdout
+        if #stdout > 6000 then
+            stdout = "..." .. string.sub(stdout, -6000)
+        end
+        fail(`{what} failed (exit {result.exitcode})\n{stdout}\n{result.stderr}`)
     end
     return result.stdout
 end

@@ -698,8 +698,9 @@ jobs:
         include:
           - { os: windows-latest, platform: windows-x64 }
           - { os: ubuntu-latest, platform: linux-x64 }
+          # arm64 only, as `build-macos` is: GitHub's last Intel image is gone,
+          # and a matrix row naming it waits in the queue for ever.
           - { os: macos-latest, platform: macos-arm64 }
-          - { os: macos-13, platform: macos-x64 }
     runs-on: ${{ matrix.os }}
     # A cold build on a four-core runner is the whole of LLVM's HLSL front end;
     # measured locally at 5 to 6 minutes on 14 threads, so a quarter of that
@@ -764,7 +765,9 @@ jobs:
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSPATH=%%i
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          lute tools/repo/toolchain.luau build dxc --jobs=4 --platform=${{ matrix.platform }} || exit /b 1
+          rem `lute` by path: the bash step above put rokit's directory on PATH in
+          rem bash's spelling, which cmd does not read.
+          "%USERPROFILE%\.rokit\bin\lute.exe" tools/repo/toolchain.luau build dxc --jobs=4 --platform=${{ matrix.platform }} || exit /b 1
 
       - name: Build DXC from source
         if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
