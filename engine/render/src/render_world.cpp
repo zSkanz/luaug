@@ -595,6 +595,12 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         out.environment.exposureCompensation = lighting->exposureCompensation;
     }
 
+    // The look (ADR 0096): `Lighting`'s children and the current camera's. The
+    // WORLD's camera, not an editor's view override -- a viewer's effects belong
+    // to the camera the game looks through, and a tool looking at the scene is
+    // looking at that.
+    resolveLook(world, lightingHost, cameraUsable ? cameraId : core::InstanceId{}, out.look);
+
     // --- Debug parts --------------------------------------------------------
     //
     // Still here, and not culled: the debug path is how anything is seen when

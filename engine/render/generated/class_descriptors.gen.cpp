@@ -671,6 +671,541 @@ void registerClasses(scene::ClassRegistry& classes, core::AtomTable& atoms)
     spotLightDesc.detachComponents = native::detachSpotLightComponents;
     classes.registerClass(spotLightDesc);
 
+    // --- PostEffect ---
+    static std::array<scene::PropertyDesc, 1> postEffectProperties;
+    postEffectProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Enabled"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "Whether this effect takes part. Off is not the same as deleting it: a `BloomEffect` that is off still governs bloom, and governs it to nothing.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getPostEffectEnabled,
+            .set = native::setPostEffectEnabled,
+        },
+    }};
+    scene::ClassDescriptor postEffectDesc;
+    postEffectDesc.name = atoms.intern("PostEffect");
+    postEffectDesc.super = instanceClass;
+    postEffectDesc.flags = scene::ClassFlags::Abstract;
+    postEffectDesc.defaultName = atoms.intern("PostEffect");
+    postEffectDesc.doc = "The abstract base of the effects that change the finished picture rather than the world in it (ADR 0096). **Where one is decides whose it is**: directly under `Lighting` it belongs to the world -- saved with the scene and seen by everybody -- and directly under `Workspace.CurrentCamera` it belongs to whoever looks through that camera. Anywhere else it does nothing, and the editor says so on the instance.";
+    postEffectDesc.properties = postEffectProperties;
+    postEffectDesc.attachComponents = native::attachPostEffectComponents;
+    postEffectDesc.detachComponents = native::detachPostEffectComponents;
+    const scene::ClassId postEffectClass = classes.registerClass(postEffectDesc);
+
+    // --- BloomEffect ---
+    static std::array<scene::PropertyDesc, 3> bloomEffectProperties;
+    bloomEffectProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Intensity"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How strongly the glow is added, as a multiple of the engine's own: 1 is the look every world has without this instance, 2 is twice the glow, 0 is none.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getBloomEffectIntensity,
+            .set = native::setBloomEffectIntensity,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Size"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How far the glow reaches, from 0 to 56. 24 is the engine's own reach; 48 spreads the same light about twice as far, and fainter for it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_bloom_size"),
+            .get = native::getBloomEffectSize,
+            .set = native::setBloomEffectSize,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Threshold"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How bright a pixel must be, after exposure, before it glows. Exposure maps a frame's average to about 0.45, so the default blooms what is a little over twice as bright as the average; 0 makes everything glow a little.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getBloomEffectThreshold,
+            .set = native::setBloomEffectThreshold,
+        },
+    }};
+    scene::ClassDescriptor bloomEffectDesc;
+    bloomEffectDesc.name = atoms.intern("BloomEffect");
+    bloomEffectDesc.super = postEffectClass;
+    bloomEffectDesc.flags = scene::ClassFlags::None;
+    bloomEffectDesc.defaultName = atoms.intern("BloomEffect");
+    bloomEffectDesc.doc = "The glow that bright light spills onto what is around it. **The engine blooms without one**, exactly as this class's defaults do; adding one takes the glow over, and one with `Enabled` off turns it off -- what a 2D game whose white sprites should not shine wants. When several apply, the first enabled one in order wins: `Lighting`'s children first, then the camera's.";
+    bloomEffectDesc.properties = bloomEffectProperties;
+    bloomEffectDesc.attachComponents = native::attachBloomEffectComponents;
+    bloomEffectDesc.detachComponents = native::detachBloomEffectComponents;
+    classes.registerClass(bloomEffectDesc);
+
+    // --- ColorCorrectionEffect ---
+    static std::array<scene::PropertyDesc, 4> colorCorrectionEffectProperties;
+    colorCorrectionEffectProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Brightness"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "Light added to every pixel, from -1 to 1. A frame's average sits near 0.45 after exposure, so 0.1 is a gentle lift and -0.2 a clear darkening; the darkest pixels stop at black.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_minus_one_to_one"),
+            .get = native::getColorCorrectionEffectBrightness,
+            .set = native::setColorCorrectionEffectBrightness,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Contrast"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How far every pixel is pushed from the frame's average brightness, from -1 to 1. 0 leaves it, 0.5 spreads it half as far again, and -1 flattens the picture to one grey.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_minus_one_to_one"),
+            .get = native::getColorCorrectionEffectContrast,
+            .set = native::setColorCorrectionEffectContrast,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Saturation"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How vivid colours are, from -1 to 1. -1 is black and white, 0 leaves them, 1 is twice as far from grey.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_minus_one_to_one"),
+            .get = native::getColorCorrectionEffectSaturation,
+            .set = native::setColorCorrectionEffectSaturation,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("TintColor"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "Multiplies the picture. White changes nothing; a warm white warms it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getColorCorrectionEffectTintColor,
+            .set = native::setColorCorrectionEffectTintColor,
+        },
+    }};
+    scene::ClassDescriptor colorCorrectionEffectDesc;
+    colorCorrectionEffectDesc.name = atoms.intern("ColorCorrectionEffect");
+    colorCorrectionEffectDesc.super = postEffectClass;
+    colorCorrectionEffectDesc.flags = scene::ClassFlags::None;
+    colorCorrectionEffectDesc.defaultName = atoms.intern("ColorCorrectionEffect");
+    colorCorrectionEffectDesc.doc = "A grade over the whole picture: brighter or darker, flatter or punchier, greyer or more vivid, and tinted. It works on the exposed light, before the tone curve compresses it, so a highlight it brightens still rolls off rather than clipping. **Every enabled one applies**, one after another in order -- `Lighting`'s children first, then the camera's -- and each applies its tint, then its saturation, then its contrast, then its brightness.";
+    colorCorrectionEffectDesc.properties = colorCorrectionEffectProperties;
+    colorCorrectionEffectDesc.attachComponents = native::attachColorCorrectionEffectComponents;
+    colorCorrectionEffectDesc.detachComponents = native::detachColorCorrectionEffectComponents;
+    classes.registerClass(colorCorrectionEffectDesc);
+
+    // --- BlurEffect ---
+    static std::array<scene::PropertyDesc, 1> blurEffectProperties;
+    blurEffectProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Size"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it lands within this distance. It scales with the window, so a blur looks the same at any size. 0 is no blur, and costs nothing.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getBlurEffectSize,
+            .set = native::setBlurEffectSize,
+        },
+    }};
+    scene::ClassDescriptor blurEffectDesc;
+    blurEffectDesc.name = atoms.intern("BlurEffect");
+    blurEffectDesc.super = postEffectClass;
+    blurEffectDesc.flags = scene::ClassFlags::None;
+    blurEffectDesc.defaultName = atoms.intern("BlurEffect");
+    blurEffectDesc.doc = "Softens the whole world picture, as behind a pause menu. The interface is drawn after it and stays sharp. **Several combine as blurs do in optics**: the sizes add by their squares, so two blurs of 8 are one of about 11.3, not one of 16.";
+    blurEffectDesc.properties = blurEffectProperties;
+    blurEffectDesc.attachComponents = native::attachBlurEffectComponents;
+    blurEffectDesc.detachComponents = native::detachBlurEffectComponents;
+    classes.registerClass(blurEffectDesc);
+
+    // --- DepthOfFieldEffect ---
+    static std::array<scene::PropertyDesc, 4> depthOfFieldEffectProperties;
+    depthOfFieldEffectProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("FocusDistance"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The distance from the camera, in metres, that is sharpest.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getDepthOfFieldEffectFocusDistance,
+            .set = native::setDepthOfFieldEffectFocusDistance,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("InFocusRadius"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How many metres either side of `FocusDistance` stay fully sharp before the softening begins.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_at_least_zero"),
+            .get = native::getDepthOfFieldEffectInFocusRadius,
+            .set = native::setDepthOfFieldEffectInFocusRadius,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("NearIntensity"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How soft what is nearer than the sharp band becomes, from 0 (not at all) to 1.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getDepthOfFieldEffectNearIntensity,
+            .set = native::setDepthOfFieldEffectNearIntensity,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("FarIntensity"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How soft what is further than the sharp band becomes, from 0 (not at all) to 1.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getDepthOfFieldEffectFarIntensity,
+            .set = native::setDepthOfFieldEffectFarIntensity,
+        },
+    }};
+    scene::ClassDescriptor depthOfFieldEffectDesc;
+    depthOfFieldEffectDesc.name = atoms.intern("DepthOfFieldEffect");
+    depthOfFieldEffectDesc.super = postEffectClass;
+    depthOfFieldEffectDesc.flags = scene::ClassFlags::None;
+    depthOfFieldEffectDesc.defaultName = atoms.intern("DepthOfFieldEffect");
+    depthOfFieldEffectDesc.doc = "Focus by distance, as a camera lens has it: a band of the world in focus, and what is nearer or further softening away from it. The sky counts as infinitely far. When several apply, the first enabled one wins, in the order `Lighting`'s children and then the camera's. A machine whose graphics settings turn depth of field off draws without it.";
+    depthOfFieldEffectDesc.properties = depthOfFieldEffectProperties;
+    depthOfFieldEffectDesc.attachComponents = native::attachDepthOfFieldEffectComponents;
+    depthOfFieldEffectDesc.detachComponents = native::detachDepthOfFieldEffectComponents;
+    classes.registerClass(depthOfFieldEffectDesc);
+
+    // --- SunRaysEffect ---
+    static std::array<scene::PropertyDesc, 2> sunRaysEffectProperties;
+    sunRaysEffectProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Intensity"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How bright the shafts are, from 0 to 1.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getSunRaysEffectIntensity,
+            .set = native::setSunRaysEffectIntensity,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Spread"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How far the shafts reach from the sun, from 0 (a halo) to 1 (across the screen).",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getSunRaysEffectSpread,
+            .set = native::setSunRaysEffectSpread,
+        },
+    }};
+    scene::ClassDescriptor sunRaysEffectDesc;
+    sunRaysEffectDesc.name = atoms.intern("SunRaysEffect");
+    sunRaysEffectDesc.super = postEffectClass;
+    sunRaysEffectDesc.flags = scene::ClassFlags::None;
+    sunRaysEffectDesc.defaultName = atoms.intern("SunRaysEffect");
+    sunRaysEffectDesc.doc = "Shafts of light streaming from the sun past whatever stands in front of it. They come from the open sky around the sun, so a tree or a wall cuts them, and they fade away as the sun leaves the view or sets. When several apply, the first enabled one wins, in the order `Lighting`'s children and then the camera's. A machine whose graphics settings turn sun rays off draws without them.";
+    sunRaysEffectDesc.properties = sunRaysEffectProperties;
+    sunRaysEffectDesc.attachComponents = native::attachSunRaysEffectComponents;
+    sunRaysEffectDesc.detachComponents = native::detachSunRaysEffectComponents;
+    classes.registerClass(sunRaysEffectDesc);
+
+    // --- Atmosphere ---
+    static std::array<scene::PropertyDesc, 6> atmosphereProperties;
+    atmosphereProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("Density"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what stands 330 metres away still shows through at the height of `Offset`; at 1, half is gone within 35 metres.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getAtmosphereDensity,
+            .set = native::setAtmosphereDensity,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Offset"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The height, in metres, at which the air has exactly its `Density`. It is thicker below and thinner above, by `Decay`, so raising it lifts the haze up a valley's sides.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_finite"),
+            .get = native::getAtmosphereOffset,
+            .set = native::setAtmosphereOffset,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Color"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The colour of the air, lit. Distant things fade towards it, and the sky turns towards it at the horizon. The sun's height still decides how bright it is: the same colour is dark at night.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getAtmosphereColor,
+            .set = native::setAtmosphereColor,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Decay"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How quickly the air thins with height, from 0 to 1. 0 keeps it equally thick at every altitude; at the default it halves every 100 metres of height; at 1, every 10.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getAtmosphereDecay,
+            .set = native::setAtmosphereDecay,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Glare"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The bright lobe the air makes around the sun, from 0 to 10. It brightens the sky near the sun and the distance seen towards it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_ten"),
+            .get = native::getAtmosphereGlare,
+            .set = native::setAtmosphereGlare,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("Haze"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "Extra thickness near the horizon, from 0 to 10: it washes the sky's horizon band into the air's colour and buries far distance deeper than `Density` alone.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_ten"),
+            .get = native::getAtmosphereHaze,
+            .set = native::setAtmosphereHaze,
+        },
+    }};
+    scene::ClassDescriptor atmosphereDesc;
+    atmosphereDesc.name = atoms.intern("Atmosphere");
+    atmosphereDesc.super = instanceClass;
+    atmosphereDesc.flags = scene::ClassFlags::None;
+    atmosphereDesc.defaultName = atoms.intern("Atmosphere");
+    atmosphereDesc.doc = "The air between the camera and everything it sees. Distance fades into it and it thins with height, it is lit by the sun and glows around it, and it tints the sky towards the horizon so the ground and the sky meet. **It counts only directly under `Lighting`**, and only the first one there. With one, `Lighting.FogStart`, `FogEnd` and `FogColor` are kept but not used.";
+    atmosphereDesc.properties = atmosphereProperties;
+    atmosphereDesc.attachComponents = native::attachAtmosphereComponents;
+    atmosphereDesc.detachComponents = native::detachAtmosphereComponents;
+    classes.registerClass(atmosphereDesc);
+
+    // --- Sky ---
+    static std::array<scene::PropertyDesc, 16> skyProperties;
+    skyProperties = {{
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxBack"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The image towards +Z, before `SkyboxOrientation` turns the set. None of the six means the engine's own sky, drawn from the time of day.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySkyboxBack,
+            .set = native::setSkySkyboxBack,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxDown"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The image straight down.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySkyboxDown,
+            .set = native::setSkySkyboxDown,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxFront"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The image towards -Z, which a camera with no rotation looks at.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySkyboxFront,
+            .set = native::setSkySkyboxFront,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxLeft"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The image towards -X.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySkyboxLeft,
+            .set = native::setSkySkyboxLeft,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxRight"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The image towards +X.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySkyboxRight,
+            .set = native::setSkySkyboxRight,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxUp"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The image straight up.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySkyboxUp,
+            .set = native::setSkySkyboxUp,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SkyboxOrientation"),
+            .type = scene::ValueType::Vector3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "Turns the six images together, in degrees about X, Y and Z -- a mountain range painted into the images is moved to where the world wants it.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_vector"),
+            .get = native::getSkySkyboxOrientation,
+            .set = native::setSkySkyboxOrientation,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SunTexture"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "An image drawn as the sun's disc, lit by the sun's colour. None draws a round, soft-edged disc.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkySunTexture,
+            .set = native::setSkySunTexture,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("MoonTexture"),
+            .type = scene::ValueType::String,
+            .contentKind = atoms.intern("Texture"),
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "An image drawn as the moon's disc at night. None draws a plain pale disc.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_string"),
+            .get = native::getSkyMoonTexture,
+            .set = native::setSkyMoonTexture,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("SunAngularSize"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How wide the sun looks, in degrees across, above 0 and at most 60. The real sun is about half a degree; the default is larger so a sunset reads in a short day.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_angular_size"),
+            .get = native::getSkySunAngularSize,
+            .set = native::setSkySunAngularSize,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("MoonAngularSize"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How wide the moon looks, in degrees across, above 0 and at most 60.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_angular_size"),
+            .get = native::getSkyMoonAngularSize,
+            .set = native::setSkyMoonAngularSize,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("StarCount"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How many stars cover the whole sky at night, from 0 to 10,000. They come out as the sun goes down and are the same stars in the same places every night.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_star_count"),
+            .get = native::getSkyStarCount,
+            .set = native::setSkyStarCount,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("CelestialBodiesShown"),
+            .type = scene::ValueType::Bool,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "Whether the sun, the moon and the stars are drawn. Off leaves only the images and the clouds -- the light still comes from where the clock puts the sun.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_boolean"),
+            .get = native::getSkyCelestialBodiesShown,
+            .set = native::setSkyCelestialBodiesShown,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("CloudCover"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How much of the sky the clouds cover, from 0 (none) to 1 (overcast). They drift with the game's own clock, so a paused game's clouds stand still and a replay's move the same way.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getSkyCloudCover,
+            .set = native::setSkyCloudCover,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("CloudDensity"),
+            .type = scene::ValueType::Number,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "How thick each cloud is, from 0 (wisps the sky shows through) to 1 (solid, with dark undersides).",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.number_zero_to_one"),
+            .get = native::getSkyCloudDensity,
+            .set = native::setSkyCloudDensity,
+        },
+        scene::PropertyDesc{
+            .name = atoms.intern("CloudColor"),
+            .type = scene::ValueType::Color3,
+            .threadSafety = scene::ThreadSafety::Unsafe,
+            .readOnly = false,
+            .inert = true,
+            .doc = "The clouds' colour where the sun lights them.",
+            .errKeyOnInvalidSet = LUAUG_TR("scene.err.expected_color3"),
+            .get = native::getSkyCloudColor,
+            .set = native::setSkyCloudColor,
+        },
+    }};
+    scene::ClassDescriptor skyDesc;
+    skyDesc.name = atoms.intern("Sky");
+    skyDesc.super = instanceClass;
+    skyDesc.flags = scene::ClassFlags::None;
+    skyDesc.defaultName = atoms.intern("Sky");
+    skyDesc.doc = "What the sky shows: six images around the world, the sun's and the moon's look, stars and clouds. **It counts only directly under `Lighting`**, and only the first one there. The images are also what surfaces reflect and are lit by. **The sun stays on the clock**: its direction comes from `Lighting.ClockTime` and `GeographicLatitude` whatever the images show, so shadows and the drawn sun agree -- choose images without a sun painted in, or turn `CelestialBodiesShown` off.";
+    skyDesc.properties = skyProperties;
+    skyDesc.attachComponents = native::attachSkyComponents;
+    skyDesc.detachComponents = native::detachSkyComponents;
+    classes.registerClass(skyDesc);
+
     // --- AnimationPlayer ---
     static std::array<scene::MethodDesc, 1> animationPlayerMethods;
     animationPlayerMethods = {{

@@ -1783,6 +1783,420 @@ local Classes: { Schema.Class } = {
         },
     },
     {
+        Name = "PostEffect",
+        Extends = "Instance",
+        Module = "render",
+        Tags = { "Abstract" } :: { Schema.ClassTag },
+        -- Every effect class stores its own numbers beside this one's `Enabled`:
+        -- `World::create` calls every hook down the ancestry, so the base's
+        -- component and the class's are two pools, never one attached twice.
+        Storage = "PostEffect",
+        Doc = "The abstract base of the effects that change the finished picture rather than the world in it "
+            .. "(ADR 0096). **Where one is decides whose it is**: directly under `Lighting` it belongs to the "
+            .. "world -- saved with the scene and seen by everybody -- and directly under "
+            .. "`Workspace.CurrentCamera` it belongs to whoever looks through that camera. Anywhere else it does "
+            .. "nothing, and the editor says so on the instance.",
+        Properties = {
+            {
+                Name = "Enabled",
+                Type = "boolean",
+                Inert = true,
+                Default = "true",
+                Doc = "Whether this effect takes part. Off is not the same as deleting it: a `BloomEffect` that "
+                    .. "is off still governs bloom, and governs it to nothing.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "BloomEffect",
+        Extends = "PostEffect",
+        Module = "render",
+        Storage = "BloomEffect",
+        Doc = "The glow that bright light spills onto what is around it. **The engine blooms without one**, "
+            .. "exactly as this class's defaults do; adding one takes the glow over, and one with `Enabled` "
+            .. "off turns it off -- what a 2D game whose white sprites should not shine wants. When several "
+            .. "apply, the first enabled one in order wins: `Lighting`'s children first, then the camera's.",
+        Properties = {
+            {
+                Name = "Intensity",
+                Type = "number",
+                Inert = true,
+                Default = "1",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How strongly the glow is added, as a multiple of the engine's own: 1 is the look every "
+                    .. "world has without this instance, 2 is twice the glow, 0 is none.",
+            },
+            {
+                Name = "Size",
+                Type = "number",
+                Inert = true,
+                Default = "24",
+                ErrorKey = "scene.err.number_bloom_size",
+                Doc = "How far the glow reaches, from 0 to 56. 24 is the engine's own reach; 48 spreads the "
+                    .. "same light about twice as far, and fainter for it.",
+            },
+            {
+                Name = "Threshold",
+                Type = "number",
+                Inert = true,
+                Default = "1.1",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How bright a pixel must be, after exposure, before it glows. Exposure maps a frame's "
+                    .. "average to about 0.45, so the default blooms what is a little over twice as bright as "
+                    .. "the average; 0 makes everything glow a little.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "ColorCorrectionEffect",
+        Extends = "PostEffect",
+        Module = "render",
+        Storage = "ColorCorrectionEffect",
+        Doc = "A grade over the whole picture: brighter or darker, flatter or punchier, greyer or more vivid, "
+            .. "and tinted. It works on the exposed light, before the tone curve compresses it, so a "
+            .. "highlight it brightens still rolls off rather than clipping. **Every enabled one applies**, "
+            .. "one after another in order -- `Lighting`'s children first, then the camera's -- and each "
+            .. "applies its tint, then its saturation, then its contrast, then its brightness.",
+        Properties = {
+            {
+                Name = "Brightness",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_minus_one_to_one",
+                Doc = "Light added to every pixel, from -1 to 1. A frame's average sits near 0.45 after "
+                    .. "exposure, so 0.1 is a gentle lift and -0.2 a clear darkening; the darkest pixels "
+                    .. "stop at black.",
+            },
+            {
+                Name = "Contrast",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_minus_one_to_one",
+                Doc = "How far every pixel is pushed from the frame's average brightness, from -1 to 1. 0 "
+                    .. "leaves it, 0.5 spreads it half as far again, and -1 flattens the picture to one grey.",
+            },
+            {
+                Name = "Saturation",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_minus_one_to_one",
+                Doc = "How vivid colours are, from -1 to 1. -1 is black and white, 0 leaves them, 1 is twice "
+                    .. "as far from grey.",
+            },
+            {
+                Name = "TintColor",
+                Type = "Color3",
+                Inert = true,
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "Multiplies the picture. White changes nothing; a warm white warms it.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "BlurEffect",
+        Extends = "PostEffect",
+        Module = "render",
+        Storage = "BlurEffect",
+        Doc = "Softens the whole world picture, as behind a pause menu. The interface is drawn after it and "
+            .. "stays sharp. **Several combine as blurs do in optics**: the sizes add by their squares, so two "
+            .. "blurs of 8 are one of about 11.3, not one of 16.",
+        Properties = {
+            {
+                Name = "Size",
+                Type = "number",
+                Inert = true,
+                Default = "24",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it "
+                    .. "lands within this distance. It scales with the window, so a blur looks the same at any "
+                    .. "size. 0 is no blur, and costs nothing.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "DepthOfFieldEffect",
+        Extends = "PostEffect",
+        Module = "render",
+        Storage = "DepthOfFieldEffect",
+        Doc = "Focus by distance, as a camera lens has it: a band of the world in focus, and what is nearer or "
+            .. "further softening away from it. The sky counts as infinitely far. When several apply, the "
+            .. "first enabled one wins, in the order `Lighting`'s children and then the camera's. A machine "
+            .. "whose graphics settings turn depth of field off draws without it.",
+        Properties = {
+            {
+                Name = "FocusDistance",
+                Type = "number",
+                Inert = true,
+                Default = "25",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "The distance from the camera, in metres, that is sharpest.",
+            },
+            {
+                Name = "InFocusRadius",
+                Type = "number",
+                Inert = true,
+                Default = "10",
+                ErrorKey = "scene.err.number_at_least_zero",
+                Doc = "How many metres either side of `FocusDistance` stay fully sharp before the softening "
+                    .. "begins.",
+            },
+            {
+                Name = "NearIntensity",
+                Type = "number",
+                Inert = true,
+                Default = "0.5",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How soft what is nearer than the sharp band becomes, from 0 (not at all) to 1.",
+            },
+            {
+                Name = "FarIntensity",
+                Type = "number",
+                Inert = true,
+                Default = "0.5",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How soft what is further than the sharp band becomes, from 0 (not at all) to 1.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "SunRaysEffect",
+        Extends = "PostEffect",
+        Module = "render",
+        Storage = "SunRaysEffect",
+        Doc = "Shafts of light streaming from the sun past whatever stands in front of it. They come from the "
+            .. "open sky around the sun, so a tree or a wall cuts them, and they fade away as the sun leaves "
+            .. "the view or sets. When several apply, the first enabled one wins, in the order `Lighting`'s "
+            .. "children and then the camera's. A machine whose graphics settings turn sun rays off draws "
+            .. "without them.",
+        Properties = {
+            {
+                Name = "Intensity",
+                Type = "number",
+                Inert = true,
+                Default = "0.25",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How bright the shafts are, from 0 to 1.",
+            },
+            {
+                Name = "Spread",
+                Type = "number",
+                Inert = true,
+                Default = "0.5",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How far the shafts reach from the sun, from 0 (a halo) to 1 (across the screen).",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "Atmosphere",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "Atmosphere",
+        Doc = "The air between the camera and everything it sees. Distance fades into it and it thins with "
+            .. "height, it is lit by the sun and glows around it, and it tints the sky towards the horizon so "
+            .. "the ground and the sky meet. **It counts only directly under `Lighting`**, and only the first "
+            .. "one there. With one, `Lighting.FogStart`, `FogEnd` and `FogColor` are kept but not used.",
+        Properties = {
+            {
+                Name = "Density",
+                Type = "number",
+                Inert = true,
+                Default = "0.35",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what "
+                    .. "stands 330 metres away still shows through at the height of `Offset`; at 1, half is "
+                    .. "gone within 35 metres.",
+            },
+            {
+                Name = "Offset",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_finite",
+                Doc = "The height, in metres, at which the air has exactly its `Density`. It is thicker below "
+                    .. "and thinner above, by `Decay`, so raising it lifts the haze up a valley's sides.",
+            },
+            {
+                Name = "Color",
+                Type = "Color3",
+                Inert = true,
+                Default = "Color3.fromRGB(196, 210, 230)",
+                Doc = "The colour of the air, lit. Distant things fade towards it, and the sky turns towards it "
+                    .. "at the horizon. The sun's height still decides how bright it is: the same colour is dark "
+                    .. "at night.",
+            },
+            {
+                Name = "Decay",
+                Type = "number",
+                Inert = true,
+                Default = "0.1",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How quickly the air thins with height, from 0 to 1. 0 keeps it equally thick at every "
+                    .. "altitude; at the default it halves every 100 metres of height; at 1, every 10.",
+            },
+            {
+                Name = "Glare",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_zero_to_ten",
+                Doc = "The bright lobe the air makes around the sun, from 0 to 10. It brightens the sky near "
+                    .. "the sun and the distance seen towards it.",
+            },
+            {
+                Name = "Haze",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_zero_to_ten",
+                Doc = "Extra thickness near the horizon, from 0 to 10: it washes the sky's horizon band into "
+                    .. "the air's colour and buries far distance deeper than `Density` alone.",
+            },
+        } :: { Schema.Property },
+    },
+    {
+        Name = "Sky",
+        Extends = "Instance",
+        Module = "render",
+        Storage = "Sky",
+        Doc = "What the sky shows: six images around the world, the sun's and the moon's look, stars and "
+            .. "clouds. **It counts only directly under `Lighting`**, and only the first one there. The images "
+            .. "are also what surfaces reflect and are lit by. **The sun stays on the clock**: its direction "
+            .. "comes from `Lighting.ClockTime` and `GeographicLatitude` whatever the images show, so "
+            .. "shadows and the drawn sun agree -- choose images without a sun painted in, or turn "
+            .. "`CelestialBodiesShown` off.",
+        Properties = {
+            {
+                Name = "SkyboxBack",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "The image towards +Z, before `SkyboxOrientation` turns the set. None of the six means "
+                    .. "the engine's own sky, drawn from the time of day.",
+            },
+            {
+                Name = "SkyboxDown",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "The image straight down.",
+            },
+            {
+                Name = "SkyboxFront",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "The image towards -Z, which a camera with no rotation looks at.",
+            },
+            {
+                Name = "SkyboxLeft",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "The image towards -X.",
+            },
+            {
+                Name = "SkyboxRight",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "The image towards +X.",
+            },
+            {
+                Name = "SkyboxUp",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "The image straight up.",
+            },
+            {
+                Name = "SkyboxOrientation",
+                Type = "vector",
+                Inert = true,
+                Default = "vector.create(0, 0, 0)",
+                Doc = "Turns the six images together, in degrees about X, Y and Z -- a mountain range painted "
+                    .. "into the images is moved to where the world wants it.",
+            },
+            {
+                Name = "SunTexture",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "An image drawn as the sun's disc, lit by the sun's colour. None draws a round, soft-edged "
+                    .. "disc.",
+            },
+            {
+                Name = "MoonTexture",
+                Type = "Content",
+                Inert = true,
+                ContentKind = "Texture",
+                Doc = "An image drawn as the moon's disc at night. None draws a plain pale disc.",
+            },
+            {
+                Name = "SunAngularSize",
+                Type = "number",
+                Inert = true,
+                Default = "2.3",
+                ErrorKey = "scene.err.number_angular_size",
+                Doc = "How wide the sun looks, in degrees across, above 0 and at most 60. The real sun is about "
+                    .. "half a degree; the default is larger so a sunset reads in a short day.",
+            },
+            {
+                Name = "MoonAngularSize",
+                Type = "number",
+                Inert = true,
+                Default = "2",
+                ErrorKey = "scene.err.number_angular_size",
+                Doc = "How wide the moon looks, in degrees across, above 0 and at most 60.",
+            },
+            {
+                Name = "StarCount",
+                Type = "number",
+                Inert = true,
+                Default = "3000",
+                ErrorKey = "scene.err.number_star_count",
+                Doc = "How many stars cover the whole sky at night, from 0 to 10,000. They come out as the "
+                    .. "sun goes down and are the same stars in the same places every night.",
+            },
+            {
+                Name = "CelestialBodiesShown",
+                Type = "boolean",
+                Inert = true,
+                Default = "true",
+                Doc = "Whether the sun, the moon and the stars are drawn. Off leaves only the images and the "
+                    .. "clouds -- the light still comes from where the clock puts the sun.",
+            },
+            {
+                Name = "CloudCover",
+                Type = "number",
+                Inert = true,
+                Default = "0",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How much of the sky the clouds cover, from 0 (none) to 1 (overcast). They drift with the "
+                    .. "game's own clock, so a paused game's clouds stand still and a replay's move the same way.",
+            },
+            {
+                Name = "CloudDensity",
+                Type = "number",
+                Inert = true,
+                Default = "0.5",
+                ErrorKey = "scene.err.number_zero_to_one",
+                Doc = "How thick each cloud is, from 0 (wisps the sky shows through) to 1 (solid, with dark "
+                    .. "undersides).",
+            },
+            {
+                Name = "CloudColor",
+                Type = "Color3",
+                Inert = true,
+                Default = "Color3.new(1, 1, 1)",
+                Doc = "The clouds' colour where the sun lights them.",
+            },
+        } :: { Schema.Property },
+    },
+    {
         Name = "InputContext",
         Extends = "Instance",
         Module = "input",

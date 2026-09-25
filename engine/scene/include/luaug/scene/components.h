@@ -473,6 +473,101 @@ struct LightingComponent
     f32 exposureCompensation = 0.0f;
 };
 
+// --- The look of a world (ADR 0096) -------------------------------------------
+//
+// Where one of these sits decides whose it is -- directly under `Lighting`, the
+// world's; directly under the current camera, its viewer's -- and that is
+// resolved at extraction (`render::resolveLook`), never stored here: a
+// component that cached "am I active" would be wrong the tick after a reparent.
+
+// `PostEffect`'s own state, beside each effect class's numbers.
+struct PostEffectComponent
+{
+    bool enabled = true;
+};
+
+// `BloomEffect`. The defaults are the engine's own bloom exactly, so inserting
+// one changes nothing until a number is changed.
+struct BloomEffectComponent
+{
+    // A multiple of the engine's own strength.
+    f32 intensity = 1.0f;
+    // How far the glow reaches; 24 is the engine's own reach.
+    f32 size = 24.0f;
+    // After exposure, as the chain has always applied it.
+    f32 threshold = 1.1f;
+};
+
+struct ColorCorrectionEffectComponent
+{
+    // Each -1 to 1, zero changing nothing.
+    f32 brightness = 0.0f;
+    f32 contrast = 0.0f;
+    f32 saturation = 0.0f;
+    core::Color3 tintColor{1.0f, 1.0f, 1.0f};
+};
+
+struct BlurEffectComponent
+{
+    // Pixels of a 1080-line picture.
+    f32 size = 24.0f;
+};
+
+struct DepthOfFieldEffectComponent
+{
+    // Metres.
+    f32 focusDistance = 25.0f;
+    f32 inFocusRadius = 10.0f;
+    // 0 to 1.
+    f32 nearIntensity = 0.5f;
+    f32 farIntensity = 0.5f;
+};
+
+struct SunRaysEffectComponent
+{
+    // 0 to 1, both.
+    f32 intensity = 0.25f;
+    f32 spread = 0.5f;
+};
+
+struct AtmosphereComponent
+{
+    // 0 to 1: how thick the air is at the height of `offset`.
+    f32 density = 0.35f;
+    // Metres.
+    f32 offset = 0.0f;
+    core::Color3 color{196.0f / 255.0f, 210.0f / 255.0f, 230.0f / 255.0f};
+    // 0 to 1: how quickly it thins with height.
+    f32 decay = 0.1f;
+    // 0 to 10, both.
+    f32 glare = 0.0f;
+    f32 haze = 0.0f;
+};
+
+struct SkyComponent
+{
+    // Six images by content URN; all six empty is the engine's own sky.
+    core::NameAtom skyboxBack;
+    core::NameAtom skyboxDown;
+    core::NameAtom skyboxFront;
+    core::NameAtom skyboxLeft;
+    core::NameAtom skyboxRight;
+    core::NameAtom skyboxUp;
+    // Degrees about X, Y and Z.
+    core::Vec3 skyboxOrientation{0.0f, 0.0f, 0.0f};
+    core::NameAtom sunTexture;
+    core::NameAtom moonTexture;
+    // Degrees across.
+    f32 sunAngularSize = 2.3f;
+    f32 moonAngularSize = 2.0f;
+    f32 starCount = 3000.0f;
+    bool celestialBodiesShown = true;
+    // 0 to 1, both.
+    f32 cloudCover = 0.0f;
+    f32 cloudDensity = 0.5f;
+    core::Color3 cloudColor{1.0f, 1.0f, 1.0f};
+};
+
 // `Workspace`'s own state. One field, and it is a reference rather than a
 // camera: the camera is an ordinary instance under the tree, and this says which
 // one the renderer looks through.

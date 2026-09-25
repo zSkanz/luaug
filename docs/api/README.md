@@ -45,18 +45,23 @@ guided tour.
 | Class | Inherits | Summary |
 |---|---|---|
 | [`AnimationPlayer`](animationplayer.md) | [`Instance`](instance.md) | Plays a skinned mesh's animation clips (§2.2). |
+| [`Atmosphere`](atmosphere.md) | [`Instance`](instance.md) | The air between the camera and everything it sees. |
 | [`Attachment`](attachment.md) | [`Instance`](instance.md) | A named place on a part: a socket to weld something to, a joint frame for a constraint, a muzzle to spawn something at. |
 | [`AudioGroup`](audiogroup.md) | [`Instance`](instance.md) | A mixing bus (§2.1, §2.2). |
 | [`BallSocketConstraint`](ballsocketconstraint.md) | [`Constraint`](constraint.md) | A joint free to rotate in every direction about one point, and optionally limited to a cone and a twist. |
 | [`BasePart`](basepart.md) | [`PVInstance`](pvinstance.md) | The abstract base of every solid object in the world: a transform, a size and a look. |
 | [`BaseScript`](basescript.md) | [`Instance`](instance.md) | The abstract base of anything that carries Luau code. |
 | [`BillboardGui`](billboardgui.md) | [`Instance`](instance.md) | A UI tree hung in the world and turned to face the camera (F3): a name over a head, a health bar over a crate, a marker on an objective. |
+| [`BloomEffect`](bloomeffect.md) | [`PostEffect`](posteffect.md) | The glow that bright light spills onto what is around it. |
+| [`BlurEffect`](blureffect.md) | [`PostEffect`](posteffect.md) | Softens the whole world picture, as behind a pause menu. |
 | [`Bone`](bone.md) | [`Attachment`](attachment.md) | An attachment that follows a joint of the `MeshPart` it is parented to. |
 | [`Camera`](camera.md) | [`PVInstance`](pvinstance.md) | The viewpoint the world is rendered from. |
 | [`CharacterBody`](characterbody.md) | [`BasePart`](basepart.md) | A capsule that walks: the player, or anything that should climb a ramp and step over a kerb instead of tumbling. |
+| [`ColorCorrectionEffect`](colorcorrectioneffect.md) | [`PostEffect`](posteffect.md) | A grade over the whole picture: brighter or darker, flatter or punchier, greyer or more vivid, and tinted. |
 | [`Constraint`](constraint.md) | [`Instance`](instance.md) | The base of anything the SOLVER holds together. |
 | [`DataModel`](datamodel.md) | [`Instance`](instance.md) | The root of the instance tree, reached through the `game` global. |
 | [`Decal`](decal.md) | [`Instance`](instance.md) | An image projected onto whatever lies inside a box (F2): a scorch mark, a footprint, a poster, a crack. |
+| [`DepthOfFieldEffect`](depthoffieldeffect.md) | [`PostEffect`](posteffect.md) | Focus by distance, as a camera lens has it: a band of the world in focus, and what is nearer or further softening away from it. |
 | [`FixedConstraint`](fixedconstraint.md) | [`Constraint`](constraint.md) | A joint with no freedom at all: two bodies the solver treats as one rigid assembly. |
 | [`Folder`](folder.md) | [`Instance`](instance.md) | A node with no behaviour of its own, for grouping instances; mounting src/scripts also builds one per subdirectory. |
 | [`Frame`](frame.md) | [`UIObject`](uiobject.md) | A rectangle and nothing else: a background, a border of children, and the layout it imposes on them. |
@@ -76,14 +81,17 @@ guided tour.
 | [`ParticleEmitter`](particleemitter.md) | [`Instance`](instance.md) | Sparks, smoke, dust and magic (F2). |
 | [`Player`](player.md) | [`Instance`](instance.md) | Somebody taking part in this world (N1). |
 | [`PointLight`](pointlight.md) | [`Instance`](instance.md) | A light radiating equally in every direction. |
+| [`PostEffect`](posteffect.md) | [`Instance`](instance.md) | The abstract base of the effects that change the finished picture rather than the world in it (ADR 0096). |
 | [`Ragdoll`](ragdoll.md) | [`Instance`](instance.md) | Makes a character's pose come from the simulation instead of from a clip. |
 | [`RemoteEvent`](remoteevent.md) | [`Instance`](instance.md) | A message a game sends between machines (ADR 0077): "I bought the sword" from a client to the server, "the round starts" from the server to everyone. |
 | [`RemoteFunction`](remotefunction.md) | [`Instance`](instance.md) | A question a client asks the server and waits for the answer to (ADR 0079): "what is in my inventory?", "may I open this door?". |
 | [`ScreenGui`](screengui.md) | [`Instance`](instance.md) | The root of one screen-space UI tree, parented to `UIService` (§2.2). |
 | [`Script`](script.md) | [`BaseScript`](basescript.md) | Luau that RUNS. |
 | [`ScrollFrame`](scrollframe.md) | [`UIObject`](uiobject.md) | A `Frame` whose contents can be larger than it is (§2.2). |
+| [`Sky`](sky.md) | [`Instance`](instance.md) | What the sky shows: six images around the world, the sun's and the moon's look, stars and clouds. |
 | [`Sound`](sound.md) | [`Instance`](instance.md) | One sound, playing or not (§2.2). |
 | [`SpotLight`](spotlight.md) | [`Instance`](instance.md) | A light confined to a cone about its forward direction -- its holder's, turned by its own `CFrame`, or its own alone when nothing holds it (ADR 0095). |
+| [`SunRaysEffect`](sunrayseffect.md) | [`PostEffect`](posteffect.md) | Shafts of light streaming from the sun past whatever stands in front of it. |
 | [`SurfaceGui`](surfacegui.md) | [`Instance`](instance.md) | A UI tree drawn onto one face of a part (F3): a screen on a wall, a sign, a scoreboard, a label on a crate. |
 | [`Terrain`](terrain.md) | [`Instance`](instance.md) | A sculpted, collidable landscape: ground you dig into rather than a floor made of parts. |
 | [`TextButton`](textbutton.md) | [`TextLabel`](textlabel.md) | A `TextLabel` that is meant to be pressed. |

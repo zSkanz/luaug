@@ -23,6 +23,7 @@
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/platform/window.h"
+#include "luaug/render/look.h"
 #include "luaug/rhi/device.h"
 #include "luaug/rhi/sdlgpu_interop.h"
 #include "luaug/scene/class_registry.h"
@@ -596,6 +597,58 @@ void drawIconBadge(const IconAtlas* icons, ImVec2 origin, float size)
                    ImGui::ColorConvertFloat4ToU32(ImVec4(behind.x, behind.y, behind.z, 1.0f)));
     draw->AddImage(texture, markMin, markMax, ImVec2(face.u0, face.v0), ImVec2(face.u1, face.v1),
                    ImGui::ColorConvertFloat4ToU32(front));
+}
+
+// **Why an instance of the look's classes changes nothing** (ADR 0096), as the
+// sentence the editor shows -- or empty when it counts, or when it is not one of
+// them. Asked of `render::lookStanding`, which walks exactly what the renderer
+// resolves, so the marker and the picture cannot disagree. Found twice with
+// lights before this (ADR 0095): a silent no-op is the worst answer an editor
+// can give.
+std::string lookInactiveReason(const scene::World& world, core::InstanceId id)
+{
+    // The cheap reject first: this runs for every visible Explorer row.
+    const bool effect = world.postEffects().find(id) != nullptr;
+    const bool environment = world.atmospheres().find(id) != nullptr || world.skies().find(id) != nullptr;
+    if (!effect && !environment)
+        return {};
+
+    // The tree this instance is in, and its `Lighting` and current camera --
+    // found from the instance rather than handed in, so a panel that shows a
+    // stage's world and one that shows the scene ask the same question.
+    core::InstanceId top = id;
+    for (core::InstanceId up = world.parentOf(top); up.valid(); up = world.parentOf(top))
+        top = up;
+    const auto service = [&](std::string_view name) {
+        const scene::ClassId classId = world.classes().findId(world.atoms().lookup(name));
+        return classId == scene::InvalidClass ? core::InstanceId{} : world.findFirstChildOfClass(top, classId);
+    };
+    const core::InstanceId lighting = service("Lighting");
+    core::InstanceId camera;
+    if (const scene::WorkspaceComponent* workspace = world.workspaces().find(service("Workspace")))
+        camera = workspace->currentCamera;
+
+    core::TextKey key;
+    switch (render::lookStanding(world, id, lighting, camera)) {
+    case render::LookStanding::Counts:
+    case render::LookStanding::NotALook:
+        return {};
+    case render::LookStanding::Disabled:
+        key = world.bloomEffects().find(id) != nullptr ? LUAUG_TR("engine.overlay.look.bloom_disabled")
+                                                       : LUAUG_TR("engine.overlay.look.disabled");
+        break;
+    case render::LookStanding::WrongParent:
+        key = effect ? LUAUG_TR("engine.overlay.look.wrong_parent_effect")
+                     : LUAUG_TR("engine.overlay.look.wrong_parent_environment");
+        break;
+    case render::LookStanding::NotFirst:
+        key = LUAUG_TR("engine.overlay.look.not_first");
+        break;
+    case render::LookStanding::Outranked:
+        key = LUAUG_TR("engine.overlay.look.outranked");
+        break;
+    }
+    return core::engineCatalog().format(key);
 }
 
 // A button whose face is an icon, with the word as its fallback and its tooltip.
@@ -1896,7 +1949,17 @@ void drawExplorer(scene::World& world, core::InstanceId root, Inspector& inspect
             }
 
             ImGui::SetCursorPos(ImVec2(penX, centred(ImGui::GetTextLineHeight())));
+            // **An effect that does nothing where it is says so** (ADR 0096):
+            // its name is dimmed, and hovering it gives the reason.
+            const std::string inactive = lookInactiveReason(world, row.id);
+            if (!inactive.empty())
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
             ImGui::TextUnformatted(label);
+            if (!inactive.empty()) {
+                ImGui::PopStyleColor();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", inactive.c_str());
+            }
             penX += ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x;
 
             // Only where an instance can actually go: nothing authored lives
@@ -3669,6 +3732,21 @@ void drawProperties(scene::World& world, core::InstanceId root, Inspector& inspe
     // for forty is one somebody edits forty instances with by accident.
     if (live > 1)
         ImGui::Text("%zu instances selected - every edit writes to all of them", live);
+
+    // The same sentence the Explorer row gives on hover, where the numbers are
+    // being edited: a person tuning a blur that is under the wrong parent is
+    // the person who most needs to be told.
+    if (live == 1) {
+        for (const core::InstanceId id : targets) {
+            if (!world.alive(id))
+                continue;
+            if (const std::string inactive = lookInactiveReason(world, id); !inactive.empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.72f, 0.3f, 1.0f));
+                ImGui::TextWrapped("%s", inactive.c_str());
+                ImGui::PopStyleColor();
+            }
+        }
+    }
 
     // **Which of these properties are this instance's own** (S5.6). Asked once
     // for the whole grid rather than once per row, and answered from a cache the

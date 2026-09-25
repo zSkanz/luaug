@@ -22,6 +22,51 @@
       "Events": []
     },
     {
+      "Name": "Atmosphere",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Color",
+          "Type": "Color3",
+          "Default": "Color3.fromRGB(196, 210, 230)",
+          "Inert": true
+        },
+        {
+          "Name": "Decay",
+          "Type": "number",
+          "Default": "0.1",
+          "Inert": true
+        },
+        {
+          "Name": "Density",
+          "Type": "number",
+          "Default": "0.35",
+          "Inert": true
+        },
+        {
+          "Name": "Glare",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        },
+        {
+          "Name": "Haze",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        },
+        {
+          "Name": "Offset",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Attachment",
       "Extends": "Instance",
       "Tags": [],
@@ -312,6 +357,48 @@
       "Events": []
     },
     {
+      "Name": "BloomEffect",
+      "Extends": "PostEffect",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Intensity",
+          "Type": "number",
+          "Default": "1",
+          "Inert": true
+        },
+        {
+          "Name": "Size",
+          "Type": "number",
+          "Default": "24",
+          "Inert": true
+        },
+        {
+          "Name": "Threshold",
+          "Type": "number",
+          "Default": "1.1",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "BlurEffect",
+      "Extends": "PostEffect",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Size",
+          "Type": "number",
+          "Default": "24",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Bone",
       "Extends": "Attachment",
       "Tags": [],
@@ -434,6 +521,39 @@
           ]
         }
       ]
+    },
+    {
+      "Name": "ColorCorrectionEffect",
+      "Extends": "PostEffect",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Brightness",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        },
+        {
+          "Name": "Contrast",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        },
+        {
+          "Name": "Saturation",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        },
+        {
+          "Name": "TintColor",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
     },
     {
       "Name": "Constraint",
@@ -693,6 +813,39 @@
           "Name": "Transparency",
           "Type": "number",
           "Default": "0"
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
+      "Name": "DepthOfFieldEffect",
+      "Extends": "PostEffect",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "FarIntensity",
+          "Type": "number",
+          "Default": "0.5",
+          "Inert": true
+        },
+        {
+          "Name": "FocusDistance",
+          "Type": "number",
+          "Default": "25",
+          "Inert": true
+        },
+        {
+          "Name": "InFocusRadius",
+          "Type": "number",
+          "Default": "10",
+          "Inert": true
+        },
+        {
+          "Name": "NearIntensity",
+          "Type": "number",
+          "Default": "0.5",
+          "Inert": true
         }
       ],
       "Methods": [],
@@ -2038,6 +2191,21 @@
       "Events": []
     },
     {
+      "Name": "PostEffect",
+      "Extends": "Instance",
+      "Tags": ["Abstract"],
+      "Properties": [
+        {
+          "Name": "Enabled",
+          "Type": "boolean",
+          "Default": "true",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Ragdoll",
       "Extends": "Instance",
       "Tags": [],
@@ -2340,6 +2508,103 @@
       "Events": []
     },
     {
+      "Name": "Sky",
+      "Extends": "Instance",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "CelestialBodiesShown",
+          "Type": "boolean",
+          "Default": "true",
+          "Inert": true
+        },
+        {
+          "Name": "CloudColor",
+          "Type": "Color3",
+          "Default": "Color3.new(1, 1, 1)",
+          "Inert": true
+        },
+        {
+          "Name": "CloudCover",
+          "Type": "number",
+          "Default": "0",
+          "Inert": true
+        },
+        {
+          "Name": "CloudDensity",
+          "Type": "number",
+          "Default": "0.5",
+          "Inert": true
+        },
+        {
+          "Name": "MoonAngularSize",
+          "Type": "number",
+          "Default": "2",
+          "Inert": true
+        },
+        {
+          "Name": "MoonTexture",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxBack",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxDown",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxFront",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxLeft",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxOrientation",
+          "Type": "vector",
+          "Default": "vector.create(0, 0, 0)",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxRight",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "SkyboxUp",
+          "Type": "Content",
+          "Inert": true
+        },
+        {
+          "Name": "StarCount",
+          "Type": "number",
+          "Default": "3000",
+          "Inert": true
+        },
+        {
+          "Name": "SunAngularSize",
+          "Type": "number",
+          "Default": "2.3",
+          "Inert": true
+        },
+        {
+          "Name": "SunTexture",
+          "Type": "Content",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
+    },
+    {
       "Name": "Sound",
       "Extends": "Instance",
       "Tags": [],
@@ -2590,6 +2855,27 @@
           ]
         }
       ]
+    },
+    {
+      "Name": "SunRaysEffect",
+      "Extends": "PostEffect",
+      "Tags": [],
+      "Properties": [
+        {
+          "Name": "Intensity",
+          "Type": "number",
+          "Default": "0.25",
+          "Inert": true
+        },
+        {
+          "Name": "Spread",
+          "Type": "number",
+          "Default": "0.5",
+          "Inert": true
+        }
+      ],
+      "Methods": [],
+      "Events": []
     },
     {
       "Name": "SurfaceGui",

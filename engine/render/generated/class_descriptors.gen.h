@@ -202,6 +202,112 @@ bool setSpotLightShadows(scene::World& world, core::InstanceId id, const scene::
 void attachSpotLightComponents(scene::World& world, core::InstanceId id);
 void detachSpotLightComponents(scene::World& world, core::InstanceId id);
 
+// PostEffect
+scene::Value getPostEffectEnabled(const scene::World& world, core::InstanceId id);
+bool setPostEffectEnabled(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachPostEffectComponents(scene::World& world, core::InstanceId id);
+void detachPostEffectComponents(scene::World& world, core::InstanceId id);
+
+// BloomEffect
+scene::Value getBloomEffectIntensity(const scene::World& world, core::InstanceId id);
+bool setBloomEffectIntensity(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBloomEffectSize(const scene::World& world, core::InstanceId id);
+bool setBloomEffectSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getBloomEffectThreshold(const scene::World& world, core::InstanceId id);
+bool setBloomEffectThreshold(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachBloomEffectComponents(scene::World& world, core::InstanceId id);
+void detachBloomEffectComponents(scene::World& world, core::InstanceId id);
+
+// ColorCorrectionEffect
+scene::Value getColorCorrectionEffectBrightness(const scene::World& world, core::InstanceId id);
+bool setColorCorrectionEffectBrightness(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getColorCorrectionEffectContrast(const scene::World& world, core::InstanceId id);
+bool setColorCorrectionEffectContrast(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getColorCorrectionEffectSaturation(const scene::World& world, core::InstanceId id);
+bool setColorCorrectionEffectSaturation(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getColorCorrectionEffectTintColor(const scene::World& world, core::InstanceId id);
+bool setColorCorrectionEffectTintColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachColorCorrectionEffectComponents(scene::World& world, core::InstanceId id);
+void detachColorCorrectionEffectComponents(scene::World& world, core::InstanceId id);
+
+// BlurEffect
+scene::Value getBlurEffectSize(const scene::World& world, core::InstanceId id);
+bool setBlurEffectSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachBlurEffectComponents(scene::World& world, core::InstanceId id);
+void detachBlurEffectComponents(scene::World& world, core::InstanceId id);
+
+// DepthOfFieldEffect
+scene::Value getDepthOfFieldEffectFocusDistance(const scene::World& world, core::InstanceId id);
+bool setDepthOfFieldEffectFocusDistance(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDepthOfFieldEffectInFocusRadius(const scene::World& world, core::InstanceId id);
+bool setDepthOfFieldEffectInFocusRadius(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDepthOfFieldEffectNearIntensity(const scene::World& world, core::InstanceId id);
+bool setDepthOfFieldEffectNearIntensity(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getDepthOfFieldEffectFarIntensity(const scene::World& world, core::InstanceId id);
+bool setDepthOfFieldEffectFarIntensity(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachDepthOfFieldEffectComponents(scene::World& world, core::InstanceId id);
+void detachDepthOfFieldEffectComponents(scene::World& world, core::InstanceId id);
+
+// SunRaysEffect
+scene::Value getSunRaysEffectIntensity(const scene::World& world, core::InstanceId id);
+bool setSunRaysEffectIntensity(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSunRaysEffectSpread(const scene::World& world, core::InstanceId id);
+bool setSunRaysEffectSpread(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachSunRaysEffectComponents(scene::World& world, core::InstanceId id);
+void detachSunRaysEffectComponents(scene::World& world, core::InstanceId id);
+
+// Atmosphere
+scene::Value getAtmosphereDensity(const scene::World& world, core::InstanceId id);
+bool setAtmosphereDensity(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getAtmosphereOffset(const scene::World& world, core::InstanceId id);
+bool setAtmosphereOffset(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getAtmosphereColor(const scene::World& world, core::InstanceId id);
+bool setAtmosphereColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getAtmosphereDecay(const scene::World& world, core::InstanceId id);
+bool setAtmosphereDecay(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getAtmosphereGlare(const scene::World& world, core::InstanceId id);
+bool setAtmosphereGlare(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getAtmosphereHaze(const scene::World& world, core::InstanceId id);
+bool setAtmosphereHaze(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachAtmosphereComponents(scene::World& world, core::InstanceId id);
+void detachAtmosphereComponents(scene::World& world, core::InstanceId id);
+
+// Sky
+scene::Value getSkySkyboxBack(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxBack(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySkyboxDown(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxDown(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySkyboxFront(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxFront(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySkyboxLeft(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxLeft(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySkyboxRight(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxRight(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySkyboxUp(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxUp(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySkyboxOrientation(const scene::World& world, core::InstanceId id);
+bool setSkySkyboxOrientation(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySunTexture(const scene::World& world, core::InstanceId id);
+bool setSkySunTexture(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyMoonTexture(const scene::World& world, core::InstanceId id);
+bool setSkyMoonTexture(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkySunAngularSize(const scene::World& world, core::InstanceId id);
+bool setSkySunAngularSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyMoonAngularSize(const scene::World& world, core::InstanceId id);
+bool setSkyMoonAngularSize(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyStarCount(const scene::World& world, core::InstanceId id);
+bool setSkyStarCount(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyCelestialBodiesShown(const scene::World& world, core::InstanceId id);
+bool setSkyCelestialBodiesShown(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyCloudCover(const scene::World& world, core::InstanceId id);
+bool setSkyCloudCover(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyCloudDensity(const scene::World& world, core::InstanceId id);
+bool setSkyCloudDensity(scene::World& world, core::InstanceId id, const scene::Value& value);
+scene::Value getSkyCloudColor(const scene::World& world, core::InstanceId id);
+bool setSkyCloudColor(scene::World& world, core::InstanceId id, const scene::Value& value);
+void attachSkyComponents(scene::World& world, core::InstanceId id);
+void detachSkyComponents(scene::World& world, core::InstanceId id);
+
 // Lighting
 scene::Value getLightingClockTime(const scene::World& world, core::InstanceId id);
 bool setLightingClockTime(scene::World& world, core::InstanceId id, const scene::Value& value);

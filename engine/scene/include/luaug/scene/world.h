@@ -315,6 +315,14 @@ struct NameIndex
     X(NavigationComponent, navigation)                                                                                 \
     X(SpotLightComponent, spotLights)                                                                                  \
     X(LightingComponent, lighting)                                                                                     \
+    X(PostEffectComponent, postEffects)                                                                                \
+    X(BloomEffectComponent, bloomEffects)                                                                              \
+    X(ColorCorrectionEffectComponent, colorCorrectionEffects)                                                          \
+    X(BlurEffectComponent, blurEffects)                                                                                \
+    X(DepthOfFieldEffectComponent, depthOfFieldEffects)                                                                \
+    X(SunRaysEffectComponent, sunRaysEffects)                                                                          \
+    X(AtmosphereComponent, atmospheres)                                                                                \
+    X(SkyComponent, skies)                                                                                             \
     X(NameIndex, nameIndices)                                                                                          \
     X(AttributeMap, attributes)                                                                                        \
     X(TagSet, tags)
@@ -854,6 +862,38 @@ public:
     [[nodiscard]] const ComponentPool<SpotLightComponent>& spotLights() const noexcept { return m_spotLights; }
     [[nodiscard]] ComponentPool<LightingComponent>& lighting() noexcept { return m_lighting; }
     [[nodiscard]] const ComponentPool<LightingComponent>& lighting() const noexcept { return m_lighting; }
+    // The look of a world (ADR 0096): what `render::resolveLook` reads.
+    [[nodiscard]] ComponentPool<PostEffectComponent>& postEffects() noexcept { return m_postEffects; }
+    [[nodiscard]] const ComponentPool<PostEffectComponent>& postEffects() const noexcept { return m_postEffects; }
+    [[nodiscard]] ComponentPool<BloomEffectComponent>& bloomEffects() noexcept { return m_bloomEffects; }
+    [[nodiscard]] const ComponentPool<BloomEffectComponent>& bloomEffects() const noexcept { return m_bloomEffects; }
+    [[nodiscard]] ComponentPool<ColorCorrectionEffectComponent>& colorCorrectionEffects() noexcept
+    {
+        return m_colorCorrectionEffects;
+    }
+    [[nodiscard]] const ComponentPool<ColorCorrectionEffectComponent>& colorCorrectionEffects() const noexcept
+    {
+        return m_colorCorrectionEffects;
+    }
+    [[nodiscard]] ComponentPool<BlurEffectComponent>& blurEffects() noexcept { return m_blurEffects; }
+    [[nodiscard]] const ComponentPool<BlurEffectComponent>& blurEffects() const noexcept { return m_blurEffects; }
+    [[nodiscard]] ComponentPool<DepthOfFieldEffectComponent>& depthOfFieldEffects() noexcept
+    {
+        return m_depthOfFieldEffects;
+    }
+    [[nodiscard]] const ComponentPool<DepthOfFieldEffectComponent>& depthOfFieldEffects() const noexcept
+    {
+        return m_depthOfFieldEffects;
+    }
+    [[nodiscard]] ComponentPool<SunRaysEffectComponent>& sunRaysEffects() noexcept { return m_sunRaysEffects; }
+    [[nodiscard]] const ComponentPool<SunRaysEffectComponent>& sunRaysEffects() const noexcept
+    {
+        return m_sunRaysEffects;
+    }
+    [[nodiscard]] ComponentPool<AtmosphereComponent>& atmospheres() noexcept { return m_atmospheres; }
+    [[nodiscard]] const ComponentPool<AtmosphereComponent>& atmospheres() const noexcept { return m_atmospheres; }
+    [[nodiscard]] ComponentPool<SkyComponent>& skies() noexcept { return m_skies; }
+    [[nodiscard]] const ComponentPool<SkyComponent>& skies() const noexcept { return m_skies; }
 
     // The input module's classes (M6). Same arrangement as the render pools
     // above: the storage is here, the meaning is not.

@@ -1261,6 +1261,127 @@ declare extern type SpotLight extends Instance with
     Shadows: boolean
 end
 
+declare extern type PostEffect extends Instance with
+    --- Whether this effect takes part. Off is not the same as deleting it: a `BloomEffect` that is off
+    --- still governs bloom, and governs it to nothing.
+    Enabled: boolean
+end
+
+declare extern type BloomEffect extends PostEffect with
+    --- How strongly the glow is added, as a multiple of the engine's own: 1 is the look every world has
+    --- without this instance, 2 is twice the glow, 0 is none.
+    Intensity: number
+    --- How far the glow reaches, from 0 to 56. 24 is the engine's own reach; 48 spreads the same light
+    --- about twice as far, and fainter for it.
+    Size: number
+    --- How bright a pixel must be, after exposure, before it glows. Exposure maps a frame's average to
+    --- about 0.45, so the default blooms what is a little over twice as bright as the average; 0 makes
+    --- everything glow a little.
+    Threshold: number
+end
+
+declare extern type ColorCorrectionEffect extends PostEffect with
+    --- Light added to every pixel, from -1 to 1. A frame's average sits near 0.45 after exposure, so
+    --- 0.1 is a gentle lift and -0.2 a clear darkening; the darkest pixels stop at black.
+    Brightness: number
+    --- How far every pixel is pushed from the frame's average brightness, from -1 to 1. 0 leaves it,
+    --- 0.5 spreads it half as far again, and -1 flattens the picture to one grey.
+    Contrast: number
+    --- How vivid colours are, from -1 to 1. -1 is black and white, 0 leaves them, 1 is twice as far
+    --- from grey.
+    Saturation: number
+    --- Multiplies the picture. White changes nothing; a warm white warms it.
+    TintColor: Color3
+end
+
+declare extern type BlurEffect extends PostEffect with
+    --- How far a pixel's light is spread, in pixels of a picture 1,080 lines tall -- most of it lands
+    --- within this distance. It scales with the window, so a blur looks the same at any size. 0 is no
+    --- blur, and costs nothing.
+    Size: number
+end
+
+declare extern type DepthOfFieldEffect extends PostEffect with
+    --- The distance from the camera, in metres, that is sharpest.
+    FocusDistance: number
+    --- How many metres either side of `FocusDistance` stay fully sharp before the softening begins.
+    InFocusRadius: number
+    --- How soft what is nearer than the sharp band becomes, from 0 (not at all) to 1.
+    NearIntensity: number
+    --- How soft what is further than the sharp band becomes, from 0 (not at all) to 1.
+    FarIntensity: number
+end
+
+declare extern type SunRaysEffect extends PostEffect with
+    --- How bright the shafts are, from 0 to 1.
+    Intensity: number
+    --- How far the shafts reach from the sun, from 0 (a halo) to 1 (across the screen).
+    Spread: number
+end
+
+declare extern type Atmosphere extends Instance with
+    --- How thick the air is, from 0 to 1. 0 is perfectly clear; at the default, half of what stands 330
+    --- metres away still shows through at the height of `Offset`; at 1, half is gone within 35 metres.
+    Density: number
+    --- The height, in metres, at which the air has exactly its `Density`. It is thicker below and
+    --- thinner above, by `Decay`, so raising it lifts the haze up a valley's sides.
+    Offset: number
+    --- The colour of the air, lit. Distant things fade towards it, and the sky turns towards it at the
+    --- horizon. The sun's height still decides how bright it is: the same colour is dark at night.
+    Color: Color3
+    --- How quickly the air thins with height, from 0 to 1. 0 keeps it equally thick at every altitude;
+    --- at the default it halves every 100 metres of height; at 1, every 10.
+    Decay: number
+    --- The bright lobe the air makes around the sun, from 0 to 10. It brightens the sky near the sun
+    --- and the distance seen towards it.
+    Glare: number
+    --- Extra thickness near the horizon, from 0 to 10: it washes the sky's horizon band into the air's
+    --- colour and buries far distance deeper than `Density` alone.
+    Haze: number
+end
+
+declare extern type Sky extends Instance with
+    --- The image towards +Z, before `SkyboxOrientation` turns the set. None of the six means the
+    --- engine's own sky, drawn from the time of day.
+    SkyboxBack: Content
+    --- The image straight down.
+    SkyboxDown: Content
+    --- The image towards -Z, which a camera with no rotation looks at.
+    SkyboxFront: Content
+    --- The image towards -X.
+    SkyboxLeft: Content
+    --- The image towards +X.
+    SkyboxRight: Content
+    --- The image straight up.
+    SkyboxUp: Content
+    --- Turns the six images together, in degrees about X, Y and Z -- a mountain range painted into the
+    --- images is moved to where the world wants it.
+    SkyboxOrientation: vector
+    --- An image drawn as the sun's disc, lit by the sun's colour. None draws a round, soft-edged disc.
+    SunTexture: Content
+    --- An image drawn as the moon's disc at night. None draws a plain pale disc.
+    MoonTexture: Content
+    --- How wide the sun looks, in degrees across, above 0 and at most 60. The real sun is about half a
+    --- degree; the default is larger so a sunset reads in a short day.
+    SunAngularSize: number
+    --- How wide the moon looks, in degrees across, above 0 and at most 60.
+    MoonAngularSize: number
+    --- How many stars cover the whole sky at night, from 0 to 10,000. They come out as the sun goes
+    --- down and are the same stars in the same places every night.
+    StarCount: number
+    --- Whether the sun, the moon and the stars are drawn. Off leaves only the images and the clouds --
+    --- the light still comes from where the clock puts the sun.
+    CelestialBodiesShown: boolean
+    --- How much of the sky the clouds cover, from 0 (none) to 1 (overcast). They drift with the game's
+    --- own clock, so a paused game's clouds stand still and a replay's move the same way.
+    CloudCover: number
+    --- How thick each cloud is, from 0 (wisps the sky shows through) to 1 (solid, with dark
+    --- undersides).
+    CloudDensity: number
+    --- The clouds' colour where the sun lights them.
+    CloudColor: Color3
+end
+
 declare extern type InputContext extends Instance with
     --- Whether this context and its actions take part in resolution at all. A disabled context consumes
     --- nothing, so a lower-priority one bound to the same key starts firing the tick this goes false --
@@ -2992,6 +3113,13 @@ declare Instance: {
         & (("Decal") -> Decal)
         & (("ParticleEmitter") -> ParticleEmitter)
         & (("SpotLight") -> SpotLight)
+        & (("BloomEffect") -> BloomEffect)
+        & (("ColorCorrectionEffect") -> ColorCorrectionEffect)
+        & (("BlurEffect") -> BlurEffect)
+        & (("DepthOfFieldEffect") -> DepthOfFieldEffect)
+        & (("SunRaysEffect") -> SunRaysEffect)
+        & (("Atmosphere") -> Atmosphere)
+        & (("Sky") -> Sky)
         & (("InputContext") -> InputContext)
         & (("InputAction") -> InputAction)
         & (("InputBinding") -> InputBinding)

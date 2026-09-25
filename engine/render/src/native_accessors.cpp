@@ -18,7 +18,9 @@
 #include "luaug/scene/world.h"
 
 #include <cmath>
+#include <limits>
 #include <string>
+#include <type_traits>
 #include <variant>
 
 #include "../generated/class_descriptors.gen.h"
@@ -1157,6 +1159,575 @@ void attachLightingComponents(scene::World& world, core::InstanceId id)
 void detachLightingComponents(scene::World& world, core::InstanceId id)
 {
     world.lighting().remove(id);
+}
+
+// --- The look of a world (ADR 0096) ---------------------------------------------
+//
+// Eight classes whose properties are all one of a handful of shapes, so the
+// shapes are written once below and each accessor is one line naming its field
+// and its range. Every range is CLOSED and refused rather than clamped, for the
+// reason the lights' are: a value that silently became another reads back as
+// something nobody wrote.
+
+namespace {
+
+constexpr f32 kUnbounded = std::numeric_limits<f32>::infinity();
+
+template <typename Component>
+[[nodiscard]] Value readNumber(const scene::ComponentPool<Component>& pool, core::InstanceId id, f32 Component::*field)
+{
+    const Component* component = pool.find(id);
+    return component == nullptr ? Value{} : Value{static_cast<f64>(component->*field)};
+}
+
+template <typename Component>
+[[nodiscard]] bool writeNumber(scene::ComponentPool<Component>& pool, core::InstanceId id, const Value& value,
+                               f32 Component::*field, f32 low, f32 high)
+{
+    Component* component = pool.find(id);
+    f32 next = 0.0f;
+    if (component == nullptr || !takeFinite(value, next) || next < low || next > high)
+        return false;
+    component->*field = next;
+    return true;
+}
+
+template <typename Component, typename Field>
+[[nodiscard]] Value readValue(const scene::ComponentPool<Component>& pool, core::InstanceId id, Field Component::*field)
+{
+    const Component* component = pool.find(id);
+    return component == nullptr ? Value{} : Value{component->*field};
+}
+
+// A boolean, a colour or a vector: any value of the right type is legal, except
+// a vector with a non-finite component -- an orientation of NaN degrees turns
+// every direction the sky is sampled in into NaN.
+template <typename Component, typename Field>
+[[nodiscard]] bool writeValue(scene::ComponentPool<Component>& pool, core::InstanceId id, const Value& value,
+                              Field Component::*field)
+{
+    const auto* next = std::get_if<Field>(&value);
+    Component* component = pool.find(id);
+    if (next == nullptr || component == nullptr)
+        return false;
+    if constexpr (std::is_same_v<Field, core::Vec3>) {
+        if (!std::isfinite(next->x) || !std::isfinite(next->y) || !std::isfinite(next->z))
+            return false;
+    }
+    component->*field = *next;
+    return true;
+}
+
+template <typename Component>
+[[nodiscard]] Value readContent(const scene::World& world, const scene::ComponentPool<Component>& pool,
+                                core::InstanceId id, core::NameAtom Component::*field)
+{
+    const Component* component = pool.find(id);
+    return component == nullptr ? Value{} : Value{std::string(world.atoms().text(component->*field))};
+}
+
+// Interned, not resolved, as `MeshPart.MeshContent` is: whether the image loads
+// is the renderer's question, and a later one.
+template <typename Component>
+[[nodiscard]] bool writeContent(scene::World& world, scene::ComponentPool<Component>& pool, core::InstanceId id,
+                                const Value& value, core::NameAtom Component::*field)
+{
+    const auto* text = std::get_if<std::string>(&value);
+    Component* component = pool.find(id);
+    if (text == nullptr || component == nullptr)
+        return false;
+    component->*field = world.atoms().intern(*text);
+    return true;
+}
+
+} // namespace
+
+// PostEffect
+
+void attachPostEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.postEffects().add(id, scene::PostEffectComponent{});
+}
+
+void detachPostEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.postEffects().remove(id);
+}
+
+Value getPostEffectEnabled(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.postEffects(), id, &scene::PostEffectComponent::enabled);
+}
+
+bool setPostEffectEnabled(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.postEffects(), id, value, &scene::PostEffectComponent::enabled);
+}
+
+// BloomEffect
+
+void attachBloomEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.bloomEffects().add(id, scene::BloomEffectComponent{});
+}
+
+void detachBloomEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.bloomEffects().remove(id);
+}
+
+Value getBloomEffectIntensity(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.bloomEffects(), id, &scene::BloomEffectComponent::intensity);
+}
+
+bool setBloomEffectIntensity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.bloomEffects(), id, value, &scene::BloomEffectComponent::intensity, 0.0f, kUnbounded);
+}
+
+Value getBloomEffectSize(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.bloomEffects(), id, &scene::BloomEffectComponent::size);
+}
+
+bool setBloomEffectSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.bloomEffects(), id, value, &scene::BloomEffectComponent::size, 0.0f, 56.0f);
+}
+
+Value getBloomEffectThreshold(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.bloomEffects(), id, &scene::BloomEffectComponent::threshold);
+}
+
+bool setBloomEffectThreshold(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.bloomEffects(), id, value, &scene::BloomEffectComponent::threshold, 0.0f, kUnbounded);
+}
+
+// ColorCorrectionEffect
+
+void attachColorCorrectionEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.colorCorrectionEffects().add(id, scene::ColorCorrectionEffectComponent{});
+}
+
+void detachColorCorrectionEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.colorCorrectionEffects().remove(id);
+}
+
+Value getColorCorrectionEffectBrightness(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.colorCorrectionEffects(), id, &scene::ColorCorrectionEffectComponent::brightness);
+}
+
+bool setColorCorrectionEffectBrightness(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.colorCorrectionEffects(), id, value, &scene::ColorCorrectionEffectComponent::brightness,
+                       -1.0f, 1.0f);
+}
+
+Value getColorCorrectionEffectContrast(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.colorCorrectionEffects(), id, &scene::ColorCorrectionEffectComponent::contrast);
+}
+
+bool setColorCorrectionEffectContrast(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.colorCorrectionEffects(), id, value, &scene::ColorCorrectionEffectComponent::contrast,
+                       -1.0f, 1.0f);
+}
+
+Value getColorCorrectionEffectSaturation(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.colorCorrectionEffects(), id, &scene::ColorCorrectionEffectComponent::saturation);
+}
+
+bool setColorCorrectionEffectSaturation(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.colorCorrectionEffects(), id, value, &scene::ColorCorrectionEffectComponent::saturation,
+                       -1.0f, 1.0f);
+}
+
+Value getColorCorrectionEffectTintColor(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.colorCorrectionEffects(), id, &scene::ColorCorrectionEffectComponent::tintColor);
+}
+
+bool setColorCorrectionEffectTintColor(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.colorCorrectionEffects(), id, value, &scene::ColorCorrectionEffectComponent::tintColor);
+}
+
+// BlurEffect
+
+void attachBlurEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.blurEffects().add(id, scene::BlurEffectComponent{});
+}
+
+void detachBlurEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.blurEffects().remove(id);
+}
+
+Value getBlurEffectSize(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.blurEffects(), id, &scene::BlurEffectComponent::size);
+}
+
+bool setBlurEffectSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.blurEffects(), id, value, &scene::BlurEffectComponent::size, 0.0f, kUnbounded);
+}
+
+// DepthOfFieldEffect
+
+void attachDepthOfFieldEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.depthOfFieldEffects().add(id, scene::DepthOfFieldEffectComponent{});
+}
+
+void detachDepthOfFieldEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.depthOfFieldEffects().remove(id);
+}
+
+Value getDepthOfFieldEffectFocusDistance(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.depthOfFieldEffects(), id, &scene::DepthOfFieldEffectComponent::focusDistance);
+}
+
+bool setDepthOfFieldEffectFocusDistance(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.depthOfFieldEffects(), id, value, &scene::DepthOfFieldEffectComponent::focusDistance, 0.0f,
+                       kUnbounded);
+}
+
+Value getDepthOfFieldEffectInFocusRadius(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.depthOfFieldEffects(), id, &scene::DepthOfFieldEffectComponent::inFocusRadius);
+}
+
+bool setDepthOfFieldEffectInFocusRadius(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.depthOfFieldEffects(), id, value, &scene::DepthOfFieldEffectComponent::inFocusRadius, 0.0f,
+                       kUnbounded);
+}
+
+Value getDepthOfFieldEffectNearIntensity(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.depthOfFieldEffects(), id, &scene::DepthOfFieldEffectComponent::nearIntensity);
+}
+
+bool setDepthOfFieldEffectNearIntensity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.depthOfFieldEffects(), id, value, &scene::DepthOfFieldEffectComponent::nearIntensity, 0.0f,
+                       1.0f);
+}
+
+Value getDepthOfFieldEffectFarIntensity(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.depthOfFieldEffects(), id, &scene::DepthOfFieldEffectComponent::farIntensity);
+}
+
+bool setDepthOfFieldEffectFarIntensity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.depthOfFieldEffects(), id, value, &scene::DepthOfFieldEffectComponent::farIntensity, 0.0f,
+                       1.0f);
+}
+
+// SunRaysEffect
+
+void attachSunRaysEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.sunRaysEffects().add(id, scene::SunRaysEffectComponent{});
+}
+
+void detachSunRaysEffectComponents(scene::World& world, core::InstanceId id)
+{
+    world.sunRaysEffects().remove(id);
+}
+
+Value getSunRaysEffectIntensity(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.sunRaysEffects(), id, &scene::SunRaysEffectComponent::intensity);
+}
+
+bool setSunRaysEffectIntensity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.sunRaysEffects(), id, value, &scene::SunRaysEffectComponent::intensity, 0.0f, 1.0f);
+}
+
+Value getSunRaysEffectSpread(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.sunRaysEffects(), id, &scene::SunRaysEffectComponent::spread);
+}
+
+bool setSunRaysEffectSpread(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.sunRaysEffects(), id, value, &scene::SunRaysEffectComponent::spread, 0.0f, 1.0f);
+}
+
+// Atmosphere
+
+void attachAtmosphereComponents(scene::World& world, core::InstanceId id)
+{
+    world.atmospheres().add(id, scene::AtmosphereComponent{});
+}
+
+void detachAtmosphereComponents(scene::World& world, core::InstanceId id)
+{
+    world.atmospheres().remove(id);
+}
+
+Value getAtmosphereDensity(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.atmospheres(), id, &scene::AtmosphereComponent::density);
+}
+
+bool setAtmosphereDensity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.atmospheres(), id, value, &scene::AtmosphereComponent::density, 0.0f, 1.0f);
+}
+
+Value getAtmosphereOffset(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.atmospheres(), id, &scene::AtmosphereComponent::offset);
+}
+
+bool setAtmosphereOffset(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.atmospheres(), id, value, &scene::AtmosphereComponent::offset, -kUnbounded, kUnbounded);
+}
+
+Value getAtmosphereColor(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.atmospheres(), id, &scene::AtmosphereComponent::color);
+}
+
+bool setAtmosphereColor(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.atmospheres(), id, value, &scene::AtmosphereComponent::color);
+}
+
+Value getAtmosphereDecay(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.atmospheres(), id, &scene::AtmosphereComponent::decay);
+}
+
+bool setAtmosphereDecay(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.atmospheres(), id, value, &scene::AtmosphereComponent::decay, 0.0f, 1.0f);
+}
+
+Value getAtmosphereGlare(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.atmospheres(), id, &scene::AtmosphereComponent::glare);
+}
+
+bool setAtmosphereGlare(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.atmospheres(), id, value, &scene::AtmosphereComponent::glare, 0.0f, 10.0f);
+}
+
+Value getAtmosphereHaze(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.atmospheres(), id, &scene::AtmosphereComponent::haze);
+}
+
+bool setAtmosphereHaze(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.atmospheres(), id, value, &scene::AtmosphereComponent::haze, 0.0f, 10.0f);
+}
+
+// Sky
+
+void attachSkyComponents(scene::World& world, core::InstanceId id)
+{
+    world.skies().add(id, scene::SkyComponent{});
+}
+
+void detachSkyComponents(scene::World& world, core::InstanceId id)
+{
+    world.skies().remove(id);
+}
+
+Value getSkySkyboxBack(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::skyboxBack);
+}
+
+bool setSkySkyboxBack(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::skyboxBack);
+}
+
+Value getSkySkyboxDown(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::skyboxDown);
+}
+
+bool setSkySkyboxDown(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::skyboxDown);
+}
+
+Value getSkySkyboxFront(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::skyboxFront);
+}
+
+bool setSkySkyboxFront(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::skyboxFront);
+}
+
+Value getSkySkyboxLeft(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::skyboxLeft);
+}
+
+bool setSkySkyboxLeft(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::skyboxLeft);
+}
+
+Value getSkySkyboxRight(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::skyboxRight);
+}
+
+bool setSkySkyboxRight(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::skyboxRight);
+}
+
+Value getSkySkyboxUp(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::skyboxUp);
+}
+
+bool setSkySkyboxUp(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::skyboxUp);
+}
+
+Value getSkySkyboxOrientation(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.skies(), id, &scene::SkyComponent::skyboxOrientation);
+}
+
+bool setSkySkyboxOrientation(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.skies(), id, value, &scene::SkyComponent::skyboxOrientation);
+}
+
+Value getSkySunTexture(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::sunTexture);
+}
+
+bool setSkySunTexture(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::sunTexture);
+}
+
+Value getSkyMoonTexture(const scene::World& world, core::InstanceId id)
+{
+    return readContent(world, world.skies(), id, &scene::SkyComponent::moonTexture);
+}
+
+bool setSkyMoonTexture(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeContent(world, world.skies(), id, value, &scene::SkyComponent::moonTexture);
+}
+
+Value getSkySunAngularSize(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.skies(), id, &scene::SkyComponent::sunAngularSize);
+}
+
+bool setSkySunAngularSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    // Above zero -- a disc of no size is `CelestialBodiesShown` spelled wrong --
+    // and at most sixty degrees, past which a disc is most of the sky.
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !(*number > 0.0))
+        return false;
+    return writeNumber(world.skies(), id, value, &scene::SkyComponent::sunAngularSize, 0.0f, 60.0f);
+}
+
+Value getSkyMoonAngularSize(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.skies(), id, &scene::SkyComponent::moonAngularSize);
+}
+
+bool setSkyMoonAngularSize(scene::World& world, core::InstanceId id, const Value& value)
+{
+    // Above zero -- a disc of no size is `CelestialBodiesShown` spelled wrong --
+    // and at most sixty degrees, past which a disc is most of the sky.
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || !(*number > 0.0))
+        return false;
+    return writeNumber(world.skies(), id, value, &scene::SkyComponent::moonAngularSize, 0.0f, 60.0f);
+}
+
+Value getSkyStarCount(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.skies(), id, &scene::SkyComponent::starCount);
+}
+
+bool setSkyStarCount(scene::World& world, core::InstanceId id, const Value& value)
+{
+    // A whole number: half a star is not a thing the sky can draw, and a count
+    // that read back rounded would not be what was written.
+    const auto* number = std::get_if<f64>(&value);
+    if (number == nullptr || std::floor(*number) != *number)
+        return false;
+    return writeNumber(world.skies(), id, value, &scene::SkyComponent::starCount, 0.0f, 10000.0f);
+}
+
+Value getSkyCelestialBodiesShown(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.skies(), id, &scene::SkyComponent::celestialBodiesShown);
+}
+
+bool setSkyCelestialBodiesShown(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.skies(), id, value, &scene::SkyComponent::celestialBodiesShown);
+}
+
+Value getSkyCloudCover(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.skies(), id, &scene::SkyComponent::cloudCover);
+}
+
+bool setSkyCloudCover(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.skies(), id, value, &scene::SkyComponent::cloudCover, 0.0f, 1.0f);
+}
+
+Value getSkyCloudDensity(const scene::World& world, core::InstanceId id)
+{
+    return readNumber(world.skies(), id, &scene::SkyComponent::cloudDensity);
+}
+
+bool setSkyCloudDensity(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeNumber(world.skies(), id, value, &scene::SkyComponent::cloudDensity, 0.0f, 1.0f);
+}
+
+Value getSkyCloudColor(const scene::World& world, core::InstanceId id)
+{
+    return readValue(world.skies(), id, &scene::SkyComponent::cloudColor);
+}
+
+bool setSkyCloudColor(scene::World& world, core::InstanceId id, const Value& value)
+{
+    return writeValue(world.skies(), id, value, &scene::SkyComponent::cloudColor);
 }
 
 } // namespace luaug::render::native

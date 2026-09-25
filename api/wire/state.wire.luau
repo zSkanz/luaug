@@ -813,6 +813,28 @@ local Excluded: { Schema.Excluded } = {
         Name = "SpotLight",
         Reason = "The same as `PointLight`.",
     },
+
+    -- ADR 0096's classes. **Not yet, rather than never**: the ADR decides that
+    -- the world's own -- the ones under `Lighting` -- travel, and a camera's do
+    -- not, and Stage 10 of its ledger carries them with a protocol bump.
+    {
+        Name = "PostEffect",
+        Reason = "Abstract. Its five classes are listed by name below.",
+    },
+    {
+        Name = "BloomEffect",
+        Reason = "Not yet carried: ADR 0096 replicates the world's effects under `Lighting` from its ledger's "
+            .. "Stage 10, and never a camera's, which belong to one viewer.",
+    },
+    { Name = "ColorCorrectionEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
+    { Name = "BlurEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
+    { Name = "DepthOfFieldEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
+    { Name = "SunRaysEffect", Reason = "Not yet carried. The same as `BloomEffect`." },
+    {
+        Name = "Atmosphere",
+        Reason = "Not yet carried: ADR 0096 replicates it under `Lighting` from its ledger's Stage 10.",
+    },
+    { Name = "Sky", Reason = "Not yet carried. The same as `Atmosphere`." },
     {
         Name = "Material",
         Reason = "A material is an asset reference, and assets arrive with the build rather than over " .. "the wire.",

@@ -47,22 +47,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ## Stage 1 — The framework
 
-- [ ] IDL: the abstract `PostEffect` (`Enabled`) and the five effect classes.
+- [x] IDL: the abstract `PostEffect` (`Enabled`) and the five effect classes.
       `Atmosphere` and `Sky` with their members from ADR 0096. Regenerate
       everything the generators write.
-- [ ] Where an effect counts: directly under `Lighting` (the world's, saved,
+- [x] Where an effect counts: directly under `Lighting` (the world's, saved,
       replicated) or under `Workspace.CurrentCamera` (the viewer's, local).
       Anywhere else is inactive.
-- [ ] The combination rules from ADR 0096, applied in one place in `extract`,
+- [x] The combination rules from ADR 0096, applied in one place in `extract`,
       into a POD block in `RenderWorld`: colour corrections compose in document
       order, blur sizes combine as `sqrt(a² + b²)`, and for bloom, depth of
       field and sun rays the first enabled one wins.
-- [ ] The editor: each class insertable under `Lighting` and under the camera,
+- [x] The editor: each class insertable under `Lighting` and under the camera,
       and an **inactive** marker (with a reason, as an i18n key) on anything that
       does not count: wrong parent, second `Sky`, second `Atmosphere`, a losing
       bloom. Record the missing class icons for the owner. The fallback icon is
       used until the owner draws them.
-- [ ] Tests: the combination rules; placement; that a world with none of these
+- [x] Tests: the combination rules; placement; that a world with none of these
       has an identical `RenderWorld` post block to today's.
 
 ## Stage 2 — `BloomEffect` and `ColorCorrectionEffect`
@@ -179,4 +179,28 @@ here*.
 
 ## Findings
 
-*(Appended as the stages land.)*
+1. **The class icons already exist** (Stage 1). The brief and the mission
+   prompt both said the eight new classes had none; the owner drew them before
+   this work began (`art/editor-icons/orbit/class/`, committed in `cb9beabf`),
+   and they are in the atlas under `icons/default/class/` with their theme
+   entries. The editor shows them. **Nothing is needed from the owner here.**
+2. **The rules live in one function, and the editor asks it** (Stage 1).
+   `render::resolveLook` (`engine/render/src/look.cpp`) is the only place the
+   placement and combination rules are written; `extract` calls it, and the
+   editor's inactive marker calls `render::lookStanding`, which replays the
+   same walk. A marker that said one thing while the picture did another would
+   be the ADR 0095 failure again.
+3. **Several colour corrections cost one multiply** (Stage 1). Each effect's
+   tint, saturation, contrast and brightness are affine maps of linear colour,
+   and so is any composition of them, so `resolveLook` folds every enabled one
+   into a single 3x4 matrix the tonemap applies. The contrast pivots about 0.45
+   -- where exposure puts a frame's average -- and saturation mixes towards
+   Rec. 709 luminance.
+4. **The properties land `Inert` and come alive stage by stage** (Stage 1).
+   The IDL, the storage and the rules are Stage 1's; what draws each class is
+   its own stage's. Until then the Properties panel says "stored" rather than
+   implying the number does something, which is the D030 lesson.
+5. **`Lighting`'s children do not travel today** (Stage 1, for Stage 10). The
+   wire carries `Lighting`'s own fields but not its contents -- it has no
+   `Contents = true` (ADR 0080) -- so the effects are listed as excluded,
+   "not yet", until Stage 10 carries them.

@@ -22,6 +22,7 @@
 #include "luaug/core/name_atom.h"
 #include "luaug/core/types.h"
 #include "luaug/render/animation.h"
+#include "luaug/render/look.h"
 #include "luaug/render/mesh_cache.h"
 #include "luaug/render/shader_types.h"
 #include "luaug/render/transform_history.h"
@@ -383,6 +384,9 @@ struct RenderWorld
 {
     RenderCamera camera;
     RenderEnvironment environment;
+    // Atmosphere, a sky and the post effects (ADR 0096): `RenderLook{}` for a
+    // world with none of them, which is the picture it always drew.
+    RenderLook look;
     std::vector<RenderPart> parts;
     std::vector<RenderLight> lights;
     std::vector<RenderMaterial> materials;
@@ -470,6 +474,7 @@ struct RenderWorld
     {
         camera = RenderCamera{};
         environment = RenderEnvironment{};
+        look = RenderLook{};
         parts.clear();
         lights.clear();
         materials.clear();
