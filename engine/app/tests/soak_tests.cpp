@@ -471,3 +471,27 @@ TEST_CASE("no radius declared asserts nothing at all")
     CHECK_FALSE(mentions(verdict, "engine.soak.err.return_grew"));
     CHECK_FALSE(mentions(verdict, "engine.soak.err.never_returned"));
 }
+
+TEST_CASE("a runner pausing the process inside streaming is not a streaming hitch (D176, D194)")
+{
+    // What macOS CI recorded: one frame whose streaming took 40 ms by the wall
+    // clock, in a run where frames with no streaming at all reached 79 ms. The
+    // CPU the pump used is the attributable part.
+    SoakRecorder paused(0);
+    steady(paused, 100);
+    paused.sample(
+        {.frameMs = 79.0, .streamingMs = 40.4, .streamingCpuMs = 0.9, .residentBytes = 0, .instanceCount = 4000});
+    steady(paused, 100);
+    const SoakVerdict verdict = paused.evaluate(SoakThresholds{});
+    CHECK(verdict.hitches == 0);
+    CHECK(verdict.worstStreamingMs == doctest::Approx(40.4));
+    CHECK(verdict.worstStreamingCpuMs == doctest::Approx(0.9));
+
+    // Streaming that really works that long is still one.
+    SoakRecorder working(0);
+    steady(working, 100);
+    working.sample(
+        {.frameMs = 45.0, .streamingMs = 41.0, .streamingCpuMs = 39.0, .residentBytes = 0, .instanceCount = 4000});
+    steady(working, 100);
+    CHECK(working.evaluate(SoakThresholds{}).hitches == 1);
+}

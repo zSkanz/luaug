@@ -130,6 +130,10 @@ public:
     // runner most of a long frame is the runner, and a gate that fails on the
     // host machine being busy is a gate everyone learns to re-run.
     [[nodiscard]] f64 lastPumpMilliseconds() const noexcept { return m_lastPumpMs; }
+    // The same pump in this thread's CPU time, or a negative number where the
+    // platform cannot say. The pump never waits -- reads are polled -- so any
+    // wall time beyond this is the machine keeping the thread off a CPU.
+    [[nodiscard]] f64 lastPumpCpuMilliseconds() const noexcept { return m_lastPumpCpuMs; }
 
     // Every chunk inside every focus's minimum ring is resident.
     [[nodiscard]] bool minimumRingResident() const noexcept { return m_manager.minimumRingResident(); }
@@ -161,6 +165,7 @@ private:
     bool m_active = false;
     u64 m_rebases = 0;
     f64 m_lastPumpMs = 0.0;
+    f64 m_lastPumpCpuMs = -1.0;
 
     // Which chunk an outstanding read belongs to. The IO service answers with
     // its own handle and nothing else, and a chunk id does not fit in a

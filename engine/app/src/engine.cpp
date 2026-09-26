@@ -1531,6 +1531,7 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                              // deliberately so: every pump is counted exactly
                              // once, which is the property a histogram needs.
                              .streamingMs = streaming.lastPumpMilliseconds(),
+                             .streamingCpuMs = streaming.lastPumpCpuMilliseconds(),
                              .residentBytes = platform::residentBytes(),
                              .instanceCount = static_cast<core::u64>(host->world().instanceCount()),
                              .focus = focusPosition});

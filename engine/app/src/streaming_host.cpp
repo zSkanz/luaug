@@ -314,6 +314,7 @@ std::vector<asset::StreamingFocus> collectStreamingFoci(const scene::World& worl
 void StreamingHost::pump(f64 budgetMilliseconds)
 {
     m_lastPumpMs = 0.0;
+    m_lastPumpCpuMs = -1.0;
     if (!m_active || m_world == nullptr) {
         return;
     }
@@ -324,6 +325,7 @@ void StreamingHost::pump(f64 budgetMilliseconds)
     // streaming: a whole-frame time on a shared CI runner is mostly the runner.
     // R10 is not in the way -- nothing measured here reaches the simulation.
     const u64 startedNs = platform::nowNs();
+    const core::i64 startedCpuNs = platform::threadCpuNs();
 
     // Completed reads first, so a chunk that arrived during the frame can
     // materialise in the same one rather than waiting for the next.
@@ -384,6 +386,8 @@ void StreamingHost::pump(f64 budgetMilliseconds)
     }
 
     m_lastPumpMs = static_cast<f64>(platform::nowNs() - startedNs) / 1.0e6;
+    if (const core::i64 endedCpuNs = platform::threadCpuNs(); startedCpuNs >= 0 && endedCpuNs >= startedCpuNs)
+        m_lastPumpCpuMs = static_cast<f64>(endedCpuNs - startedCpuNs) / 1.0e6;
 }
 
 std::vector<core::InstanceId> StreamingHost::drainStreamedOut()

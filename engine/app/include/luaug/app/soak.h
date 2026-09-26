@@ -133,9 +133,16 @@ struct SoakSample
 {
     f64 frameMs = 0.0;
 
-    // What this frame spent inside streaming. The attributable half, and the
-    // one the hitch check reads.
+    // What this frame spent inside streaming, by the wall clock.
     f64 streamingMs = 0.0;
+    // **The same span in the thread's CPU time**, and the one the hitch check
+    // reads when it is known (not negative). The wall clock counts the time a
+    // shared runner kept the process off a CPU as streaming: macOS CI failed
+    // twice on one 40 ms "streaming" frame in a run whose frames WITHOUT
+    // streaming reached 79 ms, against a local worst of 1.1 ms (D176, D194).
+    // Streaming never waits -- its reads are polled -- so what it costs is
+    // exactly the CPU it used.
+    f64 streamingCpuMs = -1.0;
     u64 residentBytes = 0;
     u64 instanceCount = 0;
 
@@ -171,6 +178,8 @@ struct SoakVerdict
     f64 worstMs = 0.0;
     usize hitches = 0;
     f64 worstStreamingMs = 0.0;
+    // The worst in CPU time, or negative when no frame could say.
+    f64 worstStreamingCpuMs = -1.0;
     u64 peakResidentBytes = 0;
     u64 finalResidentBytes = 0;
     u64 earlyInstances = 0;

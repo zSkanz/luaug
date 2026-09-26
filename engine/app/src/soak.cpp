@@ -85,8 +85,11 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
         verdict.peakResidentBytes = std::max(verdict.peakResidentBytes, sample.residentBytes);
         verdict.peakInstances = std::max(verdict.peakInstances, sample.instanceCount);
         verdict.worstStreamingMs = std::max(verdict.worstStreamingMs, sample.streamingMs);
-        // The ATTRIBUTED time, not the frame. See `SoakThresholds::hitchMs`.
-        if (sample.streamingMs > thresholds.hitchMs) {
+        verdict.worstStreamingCpuMs = std::max(verdict.worstStreamingCpuMs, sample.streamingCpuMs);
+        // The ATTRIBUTED time, not the frame -- and the work, not the wait,
+        // where the platform can tell them apart. See `SoakSample::streamingCpuMs`.
+        const f64 attributed = sample.streamingCpuMs >= 0.0 ? sample.streamingCpuMs : sample.streamingMs;
+        if (attributed > thresholds.hitchMs) {
             verdict.hitches += 1;
         }
     }
@@ -120,9 +123,10 @@ SoakVerdict SoakRecorder::evaluate(const SoakThresholds& thresholds) const
     }
 
     if (verdict.hitches > 0) {
-        const core::I18nArg args[] = {{"hitches", static_cast<core::i64>(verdict.hitches)},
-                                      {"threshold", thresholds.hitchMs},
-                                      {"worst", verdict.worstStreamingMs}};
+        const core::I18nArg args[] = {
+            {"hitches", static_cast<core::i64>(verdict.hitches)},
+            {"threshold", thresholds.hitchMs},
+            {"worst", verdict.worstStreamingCpuMs >= 0.0 ? verdict.worstStreamingCpuMs : verdict.worstStreamingMs}};
         verdict.failures.push_back(core::makeError(LUAUG_TR("engine.soak.err.hitches"), args));
     }
 
@@ -337,6 +341,7 @@ std::string SoakRecorder::report(const SoakThresholds& thresholds) const
     out << "  \"hitchMs\": " << fixed(thresholds.hitchMs, 3) << ",\n";
     out << "  \"hitches\": " << verdict.hitches << ",\n";
     out << "  \"worstStreamingMs\": " << fixed(verdict.worstStreamingMs, 3) << ",\n";
+    out << "  \"worstStreamingCpuMs\": " << fixed(verdict.worstStreamingCpuMs, 3) << ",\n";
     out << "  \"wholeFrameP99Ms\": " << fixed(thresholds.wholeFrameP99Ms, 3) << ",\n";
     out << "  \"peakResidentBytes\": " << verdict.peakResidentBytes << ",\n";
     out << "  \"finalResidentBytes\": " << verdict.finalResidentBytes << ",\n";

@@ -14,6 +14,7 @@
 #include <SDL3/SDL_process.h>
 #include <SDL3/SDL_stdinc.h>
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -35,6 +36,7 @@
 // `SetCurrentProcessExplicitAppUserModelID` lives here, and shobjidl_core.h has
 // the same ordering requirement psapi.h does.
 #include <shobjidl_core.h>
+#include <intrin.h>
 // clang-format on
 #elif defined(__linux__)
 #include <cstdio>
@@ -163,6 +165,32 @@ u64 nowNs() noexcept
     // every platform we target.
     const auto since = std::chrono::steady_clock::now().time_since_epoch();
     return static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(since).count());
+}
+
+core::i64 threadCpuNs() noexcept
+{
+#if defined(_WIN32) && defined(_M_X64)
+    ULONG64 cycles = 0;
+    if (QueryThreadCycleTime(GetCurrentThread(), &cycles) == 0)
+        return -1;
+    // The thread's cycles are counted in timestamp-counter ticks, which run at
+    // a constant rate; that rate is read off the wall clock since the first
+    // call rather than off a table nobody keeps.
+    static const u64 wallStart = nowNs();
+    static const u64 ticksStart = __rdtsc();
+    const u64 wall = nowNs() - wallStart;
+    const u64 ticks = __rdtsc() - ticksStart;
+    if (wall < 1'000'000 || ticks == 0)
+        return -1;
+    return static_cast<core::i64>(static_cast<double>(cycles) * static_cast<double>(wall) / static_cast<double>(ticks));
+#elif defined(_WIN32)
+    return -1;
+#else
+    timespec now{};
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) != 0)
+        return -1;
+    return static_cast<core::i64>(now.tv_sec) * 1'000'000'000 + static_cast<core::i64>(now.tv_nsec);
+#endif
 }
 
 u64 residentBytes() noexcept

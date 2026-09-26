@@ -7,6 +7,7 @@
 #include "luaug/platform/window.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <doctest/doctest.h>
@@ -16,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -779,4 +781,31 @@ TEST_CASE("raising the process priority is honest about whether it happened")
 #else
     CHECK_FALSE(raised);
 #endif
+}
+
+TEST_CASE("a thread's CPU clock runs while it works and stops while it waits")
+{
+    // The first call starts the Windows calibration; give it its millisecond.
+    (void)luaug::platform::threadCpuNs();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (luaug::platform::threadCpuNs() < 0) {
+        MESSAGE("no per-thread CPU clock on this platform");
+        return;
+    }
+
+    // Working: most of the wall time is CPU time.
+    const luaug::core::u64 wallStart = luaug::platform::nowNs();
+    const luaug::core::i64 cpuStart = luaug::platform::threadCpuNs();
+    volatile luaug::core::u64 sink = 0;
+    while (luaug::platform::nowNs() - wallStart < 40'000'000)
+        sink = sink + 1;
+    const double wall = static_cast<double>(luaug::platform::nowNs() - wallStart);
+    const double cpu = static_cast<double>(luaug::platform::threadCpuNs() - cpuStart);
+    CHECK(cpu > 0.25 * wall);
+    CHECK(cpu < 1.25 * wall + 2.0e6);
+
+    // Waiting: next to none.
+    const luaug::core::i64 idleStart = luaug::platform::threadCpuNs();
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    CHECK(static_cast<double>(luaug::platform::threadCpuNs() - idleStart) < 10.0e6);
 }

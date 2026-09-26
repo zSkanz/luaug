@@ -60,6 +60,18 @@ void shutdown();
 // a fixed dt down precisely so nothing below it needs the real time.
 [[nodiscard]] u64 nowNs() noexcept;
 
+// **The CPU time the calling thread has used**, in nanoseconds, or -1 where it
+// cannot be read. Not a clock of the world: it stops while the thread is not
+// running, which is the point -- the difference between it and `nowNs` over a
+// span is how long the machine kept the thread off a CPU. What a timing gate
+// on a shared runner needs, so that a runner pausing the process is not read
+// as the engine doing work (D176, D194).
+//
+// POSIX reads `CLOCK_THREAD_CPUTIME_ID`. Windows reads the thread's cycle count
+// and converts it with the rate the processor's timestamp counter has run at
+// since the first call, so the first millisecond after that answers -1.
+[[nodiscard]] core::i64 threadCpuNs() noexcept;
+
 // Resident set size in bytes, or zero where the platform will not say.
 //
 // Here for one caller and it is worth naming: M7's gate is "peak memory under
