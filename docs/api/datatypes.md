@@ -311,6 +311,14 @@ The shared, read-only handle for a material asset: `Material.load("asset://mater
 
 A writable runtime copy: the same properties, the same `Source`, owned by nobody and never saved. Put it on a part with `part.Material = copy`, then change it -- every part wearing this copy changes with it, and nothing else does.
 
+### `GetShaderParameter(name: string): (number | Vector2 | vector | { number } | string)?`
+
+A parameter of the surface shader this material names (ADR 0091), as the material sets it: a number, a `Vector2`, a `vector` (a colour reads as one), four numbers in a table, or a texture's URN. `nil` when the material leaves it to the shader's own default.
+
+### `SetShaderParameter(name: string, value: number | boolean | Vector2 | vector | Color3 | { number } | string)`
+
+Sets a parameter of the surface shader, on a clone -- a loaded material is shared and read-only, as it is for the built-in fields. A string is a texture's URN. Every part wearing the clone draws with the new value from the next frame. **Not replicated**: a clone's shader parameters are this machine's; set them where the part is drawn.
+
 ## Promise
 
 A value that arrives later (ADR 0094), with evaera's semantics: the executor runs at once on its own thread, resolving with a promise adopts it, a handler that errors rejects, cancelling reaches every consumer, and a rejection nothing handled is warned about after the drain. Timing is the simulation's clock, never the wall clock.

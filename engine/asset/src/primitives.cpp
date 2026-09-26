@@ -292,6 +292,37 @@ Mesh makeWedge()
 
 } // namespace
 
+Mesh makeGrid(u32 segments)
+{
+    segments = segments == 0 ? 1 : segments;
+    Builder out;
+    const f32 step = 1.0f / static_cast<f32>(segments);
+    // Walked as a box's top face is -- across +x, up -z -- so the quads face +y.
+    for (u32 row = 0; row <= segments; ++row) {
+        for (u32 column = 0; column <= segments; ++column) {
+            const f32 u = static_cast<f32>(column) * step;
+            const f32 v = static_cast<f32>(row) * step;
+            out.add(Vec3{u - 0.5f, 0.0f, 0.5f - v}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}, 1.0f, u, v);
+        }
+    }
+    const u32 stride = segments + 1;
+    for (u32 row = 0; row < segments; ++row) {
+        for (u32 column = 0; column < segments; ++column) {
+            const u32 at = row * stride + column;
+            out.quad(at, at + 1, at + 1 + stride, at + stride);
+        }
+    }
+    out.finish();
+    const auto pad = [](AABB& box) {
+        box.min.y = -0.5f;
+        box.max.y = 0.5f;
+    };
+    pad(out.mesh.bounds);
+    for (Submesh& submesh : out.mesh.submeshes)
+        pad(submesh.bounds);
+    return std::move(out.mesh);
+}
+
 Mesh makePrimitive(PrimitiveShape shape)
 {
     switch (shape) {

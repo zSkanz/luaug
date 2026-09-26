@@ -137,7 +137,11 @@ TEST_CASE("a wrapper declares the block and the textures where the renderer bind
 
     CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Forward, SurfaceStage::Fragment).samplers == 13);
     CHECK(surfaceFragmentSlot(4) == 13);
-    CHECK(surfaceFragmentSlot(6) == 15);
+    // A blended surface also reads the scene, at the last two slots.
+    CHECK(surfaceResourceCounts(reflection, SurfaceVariant::ForwardBlended, SurfaceStage::Fragment).samplers == 16);
+    const std::string blended =
+        surfaceWrapper(reflection, SurfaceVariant::ForwardBlended, SurfaceStage::Fragment, "ocean.surface.hlsl");
+    CHECK(blended.find("LuaugSceneDepth : register(t14, space2)") != std::string::npos);
     CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Forward, SurfaceStage::Fragment).uniformBuffers == 3);
     CHECK(surfaceResourceCounts(reflection, SurfaceVariant::Depth, SurfaceStage::Vertex).samplers == 2);
 }

@@ -995,6 +995,9 @@ asset::ResolvedMaterial World::resolveMaterial(core::NameAtom urn, u32 clone) co
             if ((copy->set & asset::fieldBit(field)) != 0)
                 asset::copyMaterialField(field, copy->values, out.properties);
         }
+        // A clone's shader parameters replace the asset's by name (ADR 0091).
+        for (const asset::ShaderParameter& parameter : copy->values.shaderParameters)
+            out.properties.setShaderParameter(parameter);
     }
     return out;
 }

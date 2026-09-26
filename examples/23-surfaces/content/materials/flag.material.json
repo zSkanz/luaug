@@ -1,0 +1,11 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/flag.surface.hlsl",
+  "readsSceneColor": false,
+  "instanceParameters": [],
+  "properties": {
+    "Wind": 1.2
+  }
+}

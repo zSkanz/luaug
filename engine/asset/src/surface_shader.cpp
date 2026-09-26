@@ -544,8 +544,13 @@ constexpr std::string_view ForwardFragment = R"(float4 FragmentMain(Interpolants
     inputs.VertexColor = float4(1.0f, 1.0f, 1.0f, 1.0f);
     inputs.ScreenUv = input.Position.xy * ViewportParams.zw;
     inputs.ScreenPosition = float4(input.Position.xy, 0.0f, input.ViewDepth);
+#if defined(LUAUG_SURFACE_BLENDED)
+    inputs.SceneDepth = LuaugSceneDepth.SampleLevel(LuaugSceneDepthSampler, inputs.ScreenUv, 0.0f);
+    inputs.SceneColor = LuaugSceneColor.SampleLevel(LuaugSceneColorSampler, inputs.ScreenUv, 0.0f).rgb;
+#else
     inputs.SceneDepth = 3.0e38f;
     inputs.SceneColor = float3(0.0f, 0.0f, 0.0f);
+#endif
 
     SurfaceOutput surface;
     surface.BaseColor = float3(1.0f, 1.0f, 1.0f);
@@ -559,6 +564,13 @@ constexpr std::string_view ForwardFragment = R"(float4 FragmentMain(Interpolants
     // The draw's own alpha -- a part's transparency -- on top of the surface's.
     const float alpha = surface.Alpha * input.InstanceAlpha;
     clip(alpha - MetallicRoughnessNormalCutoff.w);
+    // **Every interpolant is read**, whatever the surface reads: D3D12 links a
+    // pixel shader's inputs to the vertex shader's outputs by position, and a
+    // surface that never touched its uv had them stripped and its pipeline
+    // refused. A test no value can pass keeps them without costing a thing --
+    // the clip above already makes this a shader that may discard.
+    if (input.Uv.x == -3.0e38f && input.Tangent.w == -3.0e38f)
+        discard;
     const float3 normal = normalize(surface.Normal);
     Surface lit = makeSurface(input.ShadingPosition, normal, surface.BaseColor, saturate(surface.Metallic),
                               saturate(surface.Roughness));
@@ -601,6 +613,24 @@ std::string surfaceWrapper(const SurfaceReflection& reflection, SurfaceVariant v
         appendBlock(out, reflection, "b2, space3");
         appendTextures(out, reflection, true, "space2");
     }
+    // In both stages' text, since both carry both entry points; the vertex
+    // stage never reads them and the compiler drops them there.
+    if (variant == SurfaceVariant::ForwardBlended) {
+        out += "Texture2D<float> LuaugSceneDepth : register(t14, space2);\n";
+        out += "SamplerState LuaugSceneDepthSampler : register(s14, space2);\n";
+        out += "Texture2D LuaugSceneColor : register(t15, space2);\n";
+        out += "SamplerState LuaugSceneColorSampler : register(s15, space2);\n\n";
+        out += "float sceneDepthAt(float2 uv)\n{\n"
+               "    return LuaugSceneDepth.SampleLevel(LuaugSceneDepthSampler, uv, 0.0f);\n}\n";
+        out += "float3 sceneColorAt(float2 uv)\n{\n"
+               "    return LuaugSceneColor.SampleLevel(LuaugSceneColorSampler, uv, 0.0f).rgb;\n}\n\n";
+    }
+    else {
+        // Every variant compiles the same user file, so the functions exist in
+        // every variant; outside a blended surface there is no scene to read.
+        out += "float sceneDepthAt(float2 uv)\n{\n    return 3.0e38f;\n}\n";
+        out += "float3 sceneColorAt(float2 uv)\n{\n    return float3(0.0f, 0.0f, 0.0f);\n}\n\n";
+    }
 
     out += "#include \"";
     out += userInclude;
@@ -631,6 +661,8 @@ SurfaceResourceCounts surfaceResourceCounts(const SurfaceReflection& reflection,
         return SurfaceResourceCounts{textures, 2};
     if (depthOnly(variant))
         return SurfaceResourceCounts{0, 0};
+    if (variant == SurfaceVariant::ForwardBlended)
+        return SurfaceResourceCounts{SceneColorSlot + 1, 3};
     return SurfaceResourceCounts{textures > 4 ? surfaceFragmentSlot(textures - 1) + 1 : EngineFragmentSamplers, 3};
 }
 

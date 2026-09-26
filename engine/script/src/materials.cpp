@@ -139,6 +139,117 @@ int materialSet(lua_State* L)
     return 0;
 }
 
+// --- Surface shader parameters (ADR 0091) -------------------------------------
+//
+// Methods rather than members: a shader's parameters are whatever its file
+// declares, and a datatype's members are the IDL's closed set. What is read is
+// what the MATERIAL says -- the asset, a variant's parents, a clone's changes --
+// and nil where it leaves a parameter to the shader's own default.
+
+int materialGetShaderParameter(lua_State* L)
+{
+    const MaterialData& self = checkMaterial(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+    const asset::ResolvedMaterial resolved = describe(L, self);
+    const asset::ShaderParameter* parameter = resolved.properties.shaderParameter(std::string_view{text, length});
+    if (parameter == nullptr) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (parameter->isTexture()) {
+        lua_pushlstring(L, parameter->texture.data(), parameter->texture.size());
+        return 1;
+    }
+    switch (parameter->components) {
+    case 2:
+        pushVector2(L, core::Vec2{parameter->value[0], parameter->value[1]});
+        return 1;
+    case 3:
+        pushVector3(L, core::Vec3{parameter->value[0], parameter->value[1], parameter->value[2]});
+        return 1;
+    case 4:
+        lua_createtable(L, 4, 0);
+        for (int index = 0; index < 4; ++index) {
+            lua_pushnumber(L, static_cast<double>(parameter->value[static_cast<usize>(index)]));
+            lua_rawseti(L, -2, index + 1);
+        }
+        return 1;
+    default:
+        lua_pushnumber(L, static_cast<double>(parameter->value[0]));
+        return 1;
+    }
+}
+
+int materialSetShaderParameter(lua_State* L)
+{
+    const MaterialData& self = checkMaterial(L, 1);
+    size_t length = 0;
+    const char* text = luaL_checklstring(L, 2, &length);
+    const std::string_view name{text, length};
+    if (self.clone == 0) {
+        const core::I18nArg args[] = {{"property", name}, {"content", std::string_view{self.source}}};
+        raise(L, LUAUG_TR("script.err.material_read_only"), args);
+    }
+    asset::ShaderParameter parameter;
+    parameter.name = std::string(name);
+    const int type = lua_type(L, 3);
+    if (type == LUA_TNUMBER) {
+        parameter.value[0] = static_cast<f32>(lua_tonumber(L, 3));
+    }
+    else if (type == LUA_TBOOLEAN) {
+        parameter.value[0] = lua_toboolean(L, 3) != 0 ? 1.0f : 0.0f;
+    }
+    else if (type == LUA_TSTRING) {
+        size_t size = 0;
+        const char* urn = lua_tolstring(L, 3, &size);
+        parameter.texture.assign(urn, size);
+    }
+    else if (lua_isvector(L, 3)) {
+        const core::Vec3 v = checkVector3(L, 3);
+        parameter.components = 3;
+        parameter.value = {v.x, v.y, v.z, 0.0f};
+    }
+    else if (type == LUA_TUSERDATA && lua_userdatatag(L, 3) == static_cast<int>(UserdataTag::Color3)) {
+        const core::Color3 c = checkColor3(L, 3);
+        parameter.components = 3;
+        parameter.value = {c.r, c.g, c.b, 0.0f};
+    }
+    else if (type == LUA_TUSERDATA && lua_userdatatag(L, 3) == static_cast<int>(UserdataTag::Vector2)) {
+        const core::Vec2 v = checkVector2(L, 3);
+        parameter.components = 2;
+        parameter.value = {v.x, v.y, 0.0f, 0.0f};
+    }
+    else if (type == LUA_TTABLE && lua_objlen(L, 3) == 4) {
+        parameter.components = 4;
+        for (int index = 0; index < 4; ++index) {
+            lua_rawgeti(L, 3, index + 1);
+            parameter.value[static_cast<usize>(index)] = static_cast<f32>(lua_tonumber(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+    else {
+        const core::I18nArg args[] = {{"property", name}};
+        raise(L, LUAUG_TR("script.err.material_value_type"), args);
+    }
+    for (const f32 component : parameter.value) {
+        if (!std::isfinite(component)) {
+            const core::I18nArg args[] = {{"property", name}};
+            raise(L, LUAUG_TR("script.err.material_value_type"), args);
+        }
+    }
+    scene::MaterialClone* clone = world(L).writeMaterialClone(self.clone);
+    if (clone == nullptr) {
+        const core::I18nArg args[] = {{"content", std::string_view{self.source}}};
+        raise(L, LUAUG_TR("script.err.material_clone_gone"), args);
+    }
+    // A texture is a name the renderer finds by atom, as a map is.
+    if (parameter.isTexture())
+        (void)world(L).atoms().intern(parameter.texture);
+    clone->values.setShaderParameter(std::move(parameter));
+    return 0;
+}
+
 int materialClone(lua_State* L)
 {
     const MaterialData& self = checkMaterial(L, 1);
@@ -209,6 +320,8 @@ void registerMaterialTypes(lua_State* L)
 
     MemberTable& methods = ctx.methods[static_cast<usize>(UserdataTag::Material)];
     addMember(methods, atoms, "Clone", materialClone);
+    addMember(methods, atoms, "GetShaderParameter", materialGetShaderParameter);
+    addMember(methods, atoms, "SetShaderParameter", materialSetShaderParameter);
 
     installTagMetatable(L, UserdataTag::Material, materialEq, materialTostring);
     lua_setuserdatadtor(L, MaterialTag, materialDtor);

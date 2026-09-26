@@ -28,6 +28,8 @@
 
 #include "luaug/asset/model.h"
 
+#include <array>
+
 namespace luaug::asset {
 
 // `Enum.PartShape`'s five members, in its own value order -- the enum's numbers
@@ -69,5 +71,16 @@ inline constexpr core::u32 kCapsuleCapRings = 6;
 // One submesh, material 0, and the caller supplies the material -- a `Part`'s
 // look is its own properties, not a file's.
 [[nodiscard]] Mesh makePrimitive(PrimitiveShape shape);
+
+// **A flat square of `segments` x `segments` quads** (ADR 0091): one metre
+// across in x and z, facing up, uv 0..1 -- what a surface shader displaces
+// into water or cloth. Its bounds are a metre tall, centred on the plane, so
+// `Size.y` is the headroom the displacement may use before a tile is culled
+// while its waves are still on screen.
+[[nodiscard]] Mesh makeGrid(core::u32 segments);
+
+// The grids the engine carries, by the URN a `MeshPart.MeshContent` names:
+// `luaug://mesh/grid-16`, `-64` and `-256`.
+inline constexpr std::array<core::u32, 3> BuiltInGridSegments{16, 64, 256};
 
 } // namespace luaug::asset

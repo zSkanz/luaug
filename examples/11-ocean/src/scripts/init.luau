@@ -9,22 +9,20 @@
 ---
 --- **Three things worth reading as technique rather than as plumbing:**
 ---
----   1. **The water is opaque, deliberately.** The renderer batches identical
----      geometry into one instanced draw (ADR 0043) and explicitly refuses to
----      batch transparent draws — "their ORDER is their correctness". A
----      translucent sea of 1600 tiles is 1600 draw calls; an opaque one is a
----      handful. Deep water is nearly opaque anyway, so this costs the look
----      almost nothing and buys the whole frame budget back.
----   2. **A fixed pool of tiles follows the boat.** The grid is allocated once
----      and its origin is snapped to the tile size every tick, so the ocean is
----      unbounded while the part count never changes. Nothing is created or
----      destroyed after startup.
----   3. **Position is exact every tick; colour is not.** The tile transforms
----      must all be right or the surface tears, but the crest tint is a slow
----      gradient nobody can time — so it is refreshed a quarter of the grid at a
----      time. That asymmetry is where the interpreter budget actually goes
----      (R16), and it is worth a comment because it is invisible in a
----      screenshot.
+---   1. **The water is a surface shader** (ADR 0091), in this project's own
+---      `content/shaders/ocean.surface.hlsl`: nine flat grids follow the boat and
+---      the GPU moves every vertex of them. The same three waves are written in
+---      that file and in this one, and both are evaluated at one clock --
+---      `RunService.SimTime` -- so the boat Luau places sits on the water the GPU
+---      draws.
+---   2. **Nothing about the water is written from here after startup.** The
+---      grids are placed once a tick in whole-cell steps, which is nine property
+---      writes; the version of this example that moved 676 plates from Luau
+---      spent five milliseconds a frame on the writes alone.
+---   3. **The sea is translucent, and reads what is under it**: foam where the
+---      water is thin against the hull and the cargo, and the scene behind
+---      refracted through it -- `SceneDepth` and `SceneColor`, which a blended
+---      surface shader reads and an opaque one does not.
 ---
 --- **What is genuinely simulated and what is not**, because the difference is a
 --- limit of v1 and not a shortcut:
@@ -49,36 +47,23 @@ local RunService = game:GetService("RunService")
 
 -- --- The sea state ------------------------------------------------------------
 
---- Metres of water per tile, and how many tiles on a side. 676 tiles of 6 m is
---- 156 m of ocean; the fog closes at 62 m, well inside the 78 m half-extent, so the
---- grid's edge is never a thing you can see.
----
---- **These two numbers are the example's entire performance budget, and they
---- were set by measuring.** The ceiling is not the renderer -- 676 tiles draw in
---- one instanced batch and the whole frame is 83 draws -- and it is not the
---- wave arithmetic either. It is the property write: moving one part from Luau
---- costs about **4.7 microseconds**, measured by taking the write out and
---- leaving everything else in, so a thousand moving parts is five milliseconds
---- before anything has been drawn.
----
---- So: raise `TileSize` to cover the same water with fewer plates, and the
---- crests get blockier. The shortest wave below is 41 m, so at 6 m there are
---- seven tiles across it. Past about 8 m it aliases, and a wave that aliases
---- does not look like a coarser wave -- it looks like the sea is crawling.
----
---- The plates are THIN and TILTED rather than thick and flat. A stepped surface
---- of level boxes is a grid of little cliffs, and a low sun draws a shadow off
---- every one of them: the first version of this example looked like tiled
---- bathroom floor for exactly that reason.
-local TileSize = 6
-local GridSide = 26
-local TileThickness = 0.5
+--- Each water grid: `luaug://mesh/grid-256`, 256 quads a side, stretched to
+--- `GridSpan` metres -- about 0.37 m a quad. Nine of them, the middle one under
+--- the boat, snapped to the quad spacing so the vertices never slide under the
+--- waves they carry.
+local GridSpan = 96
+local GridQuads = 256
+--- How far the waves may lift the grid before a grid is culled while its crests
+--- are still on screen: the three amplitudes summed, with room.
+local GridHeadroom = 8
 
 --- Deep-water gravity waves: `omega = sqrt(g * k)`, so a long swell outruns a
 --- short chop instead of every wave sliding at one speed. It is one `sqrt` at
 --- load time and it is the difference between a sea and a tablecloth.
 local Gravity = 9.81
 
+--- **The same three waves are written in `content/shaders/ocean.surface.hlsl`**,
+--- which draws the water. Change one, change both.
 local WaveDefinitions = {
     -- Wavelength (m), amplitude (m), direction (unnormalised), phase offset.
     { Length = 139, Amplitude = 1.9, X = 1.0, Z = 0.15, Phase = 0.0 },
@@ -120,45 +105,9 @@ local function surfaceHeight(x: number, z: number, t: number): number
     return height
 end
 
---- The sum of every amplitude: the highest the sea can possibly reach, used to
---- normalise the crest tint so the colour ramp does not depend on the numbers
---- above staying what they are today.
-local WaveCeiling = 0
-for index = 1, WaveCount do
-    WaveCeiling += WaveAmplitude[index]
-end
-
 -- --- The look -----------------------------------------------------------------
 
-local Trough = Color3.fromRGB(6, 26, 54)
-local Crest = Color3.fromRGB(54, 114, 150)
 local Horizon = Color3.fromRGB(146, 158, 172)
-
---- **Colour is part of a material, and a material is what a batch is keyed on.**
---- Tinting every tile by its own height looked free — the model matrix is a
---- per-instance vertex attribute, so surely the colour is too — and measuring it
---- said otherwise: 3629 draws and 14.2 ms with a continuous ramp against 47
---- draws and 6.7 ms without one. So the ramp is QUANTISED: twelve colours are
---- twelve materials and therefore twelve batches, which is a cost measured in
---- draw calls rather than in milliseconds.
----
---- Twelve and not seven because seven BANDS. The steps land on plates six
---- metres wide, and at seven the eye picks out the rectangles; the fix was to
---- spend more materials, which the measurement said were the cheap thing.
----
---- This is the whole reason to have measured rather than reasoned: the vertex
---- layout genuinely does carry a per-instance colour, and it is not the thing
---- that decides the batch.
-local PaletteSize = 12
-local Palette: { Color3 } = table.create(PaletteSize) :: { Color3 }
-for step = 1, PaletteSize do
-    local lift = (step - 1) / (PaletteSize - 1)
-    Palette[step] = Color3.new(
-        Trough.R + (Crest.R - Trough.R) * lift,
-        Trough.G + (Crest.G - Trough.G) * lift,
-        Trough.B + (Crest.B - Trough.B) * lift
-    )
-end
 
 Lighting.ClockTime = 8.4
 Lighting.GeographicLatitude = 22
@@ -187,40 +136,23 @@ local ocean = Instance.new("Folder")
 ocean.Name = "Ocean"
 ocean.Parent = workspace
 
---- Every tile, in row-major order, allocated once. `GridSide * GridSide` parts
---- is the entire cost of the water for the rest of the session.
-local Tiles: { Part } = table.create(GridSide * GridSide) :: { Part }
---- Which palette step each tile is wearing. A tile only pays for a colour write
---- when its step actually changes, which on a slow swell is a small fraction of
---- the grid on any given tick.
-local TileLevel: { number } = table.create(GridSide * GridSide) :: { number }
---- This tick's height under every tile. Filled first, read second: the tilt of a
---- plate is the slope between its NEIGHBOURS, and those are heights the grid has
---- already paid for. Taking the derivative analytically instead means a
---- `math.cos` per wave per tile on top of the `math.sin`, and that measured at
---- five milliseconds a frame -- for a number two array reads already answer.
-local Heights: { number } = table.create(GridSide * GridSide) :: { number }
+local Water = Material.load("asset://materials/sea.material.json")
 
-for row = 0, GridSide - 1 do
-    for column = 0, GridSide - 1 do
-        local tile = Instance.new("Part")
-        tile.Name = `Water{row}_{column}`
-        -- Wider than the spacing, because a TILTED plate covers less ground
-        -- than a level one and the corners would otherwise open into gaps.
-        tile.Size = vector.create(TileSize * 1.22, TileThickness, TileSize * 1.22)
-        tile:SetMaterialParameter("Color", Trough)
-        tile.Anchored = true
-        -- The water is scenery for the eye and nothing else: the cargo is
-        -- floated by the wave function, not by touching a box. Turning both of
-        -- these off keeps 1600 bodies out of the solver's broadphase and out of
-        -- every raycast in the example.
-        tile.CanCollide = false
-        tile.CanQuery = false
-        tile.Parent = ocean
-        Tiles[row * GridSide + column + 1] = tile
-        TileLevel[row * GridSide + column + 1] = 0
-        Heights[row * GridSide + column + 1] = 0
-    end
+--- The nine grids, row-major, the middle one under the boat.
+local Grids: { MeshPart } = table.create(9) :: { MeshPart }
+for index = 1, 9 do
+    local grid = Instance.new("MeshPart")
+    grid.Name = `Water{index}`
+    grid.MeshContent = `luaug://mesh/grid-{GridQuads}`
+    grid.Size = vector.create(GridSpan, GridHeadroom, GridSpan)
+    grid.Material = Water
+    grid.Anchored = true
+    -- Scenery for the eye: the cargo is floated by the wave function, not by
+    -- touching the water.
+    grid.CanCollide = false
+    grid.CanQuery = false
+    grid.Parent = ocean
+    Grids[index] = grid
 end
 
 -- --- The boat -----------------------------------------------------------------
@@ -441,7 +373,6 @@ OrbitStick.Parent = OrbitAction
 --- The wave clock. Accumulated from the fixed tick rather than read from a
 --- wall clock, because a wall clock is exactly what R10 forbids and because two
 --- machines must agree on where the sea is.
-local elapsed = 0
 
 --- Where the boat is and which way it points. Two numbers and a vector rather
 --- than a CFrame, because heave and roll are read off the sea every tick and
@@ -464,7 +395,8 @@ local dropHeld = false
 -- --- The tick -----------------------------------------------------------------
 
 RunService.Heartbeat:Connect(function(dt: number)
-    elapsed += dt
+    -- The clock the water is drawn at, which is what keeps the two agreeing.
+    local elapsed = RunService.SimTime
 
     -- --- Sailing ---------------------------------------------------------------
 
@@ -514,96 +446,16 @@ RunService.Heartbeat:Connect(function(dt: number)
 
     -- --- The water -------------------------------------------------------------
 
-    -- Snapped to the tile size: the grid follows the boat, but it moves in whole
-    -- tiles, so a tile always lands where a tile was. Without the snap the whole
-    -- surface would slide under itself and the sea would look like it was on a
-    -- conveyor belt.
-    local originX = math.floor(boatX / TileSize + 0.5) * TileSize
-    local originZ = math.floor(boatZ / TileSize + 0.5) * TileSize
-    local half = GridSide * 0.5
-
-    -- Hoisted out of the loop: two thousand iterations is where a table lookup
-    -- or a global read stops being free (R16).
-    local ceiling = WaveCeiling
-    local sink = TileThickness * 0.5
-    local levels = PaletteSize
-    local sunward = vector.create(0, 0, -1)
-
-    -- Pass one: every height, and nothing else. One `math.sin` per wave per
-    -- tile, which is the floor this example cannot go under.
-    for row = 0, GridSide - 1 do
-        local worldZ = originZ + (row - half) * TileSize
-        local rowBase = row * GridSide
-        for column = 0, GridSide - 1 do
-            Heights[rowBase + column + 1] = surfaceHeight(originX + (column - half) * TileSize, worldZ, elapsed)
+    -- Snapped to the quad spacing: the grids follow the boat, but every vertex
+    -- lands where a vertex was, so the surface does not slide under its waves.
+    local cell = GridSpan / GridQuads
+    local originX = math.floor(boatX / cell + 0.5) * cell
+    local originZ = math.floor(boatZ / cell + 0.5) * cell
+    for row = 0, 2 do
+        for column = 0, 2 do
+            Grids[row * 3 + column + 1].CFrame =
+                CFrame.new(originX + (column - 1) * GridSpan, 0, originZ + (row - 1) * GridSpan)
         end
-    end
-
-    -- Pass two: place them. Split in two rather than branching inside one loop
-    -- -- the interior needs four neighbours and the border does not have them,
-    -- and a bounds test per tile costs more than the border ring does. The ring
-    -- lies flat, which is invisible: it sits 78 metres out and the fog has been
-    -- solid since 62.
-    --
-    -- Leaving the ring UNPLACED is not an option and was tried: every one of the
-    -- 172 tiles then stays at the world origin, in a pile, directly under the
-    -- camera. It cost four milliseconds a frame and looked like nothing at all.
-    local inverseSpan = 1 / (2 * TileSize)
-    for row = 1, GridSide - 2 do
-        local worldZ = originZ + (row - half) * TileSize
-        local rowBase = row * GridSide
-        for column = 1, GridSide - 2 do
-            local slot = rowBase + column + 1
-            local height = Heights[slot]
-            local tile = Tiles[slot]
-
-            -- Central differences against the neighbours: the same slope the
-            -- derivative would have given, to within the grid spacing, from two
-            -- array reads instead of a `math.cos` per wave.
-            local slopeX = (Heights[slot + 1] - Heights[slot - 1]) * inverseSpan
-            local slopeZ = (Heights[slot + GridSide] - Heights[slot - GridSide]) * inverseSpan
-
-            -- Laid ALONG the water rather than level with the world. Adjacent
-            -- plates then meet almost edge to edge, and the surface reads as one
-            -- continuous thing instead of as a grid of little cliffs -- which is
-            -- what the first version of this example looked like.
-            local plateUp = vector.normalize(vector.create(-slopeX, 1, -slopeZ))
-            local plateRight = vector.normalize(vector.cross(sunward, plateUp))
-            local plateForward = vector.cross(plateUp, plateRight)
-            tile.CFrame = CFrame.fromMatrix(
-                vector.create(originX + (column - half) * TileSize, height - sink, worldZ),
-                plateRight,
-                plateUp,
-                -plateForward
-            )
-
-            -- Crests catch the sky and troughs do not, in seven steps. The
-            -- comparison is what makes this cheap: most tiles keep the colour
-            -- they already had, and an unchanged property is a write nobody
-            -- pays for.
-            local level = math.clamp(math.floor((height / ceiling * 0.5 + 0.5) * levels) + 1, 1, levels)
-            if TileLevel[slot] ~= level then
-                TileLevel[slot] = level
-                tile:SetMaterialParameter("Color", Palette[level])
-            end
-        end
-    end
-
-    -- The border ring, laid flat.
-    local edge = GridSide - 1
-    for step = 0, edge do
-        local nearZ = originZ - half * TileSize
-        local farZ = originZ + (edge - half) * TileSize
-        local worldX = originX + (step - half) * TileSize
-        Tiles[step + 1].CFrame = CFrame.new(worldX, Heights[step + 1] - sink, nearZ)
-        Tiles[edge * GridSide + step + 1].CFrame = CFrame.new(worldX, Heights[edge * GridSide + step + 1] - sink, farZ)
-    end
-    for row = 1, edge - 1 do
-        local worldZ = originZ + (row - half) * TileSize
-        local rowBase = row * GridSide
-        Tiles[rowBase + 1].CFrame = CFrame.new(originX - half * TileSize, Heights[rowBase + 1] - sink, worldZ)
-        Tiles[rowBase + edge + 1].CFrame =
-            CFrame.new(originX + (edge - half) * TileSize, Heights[rowBase + edge + 1] - sink, worldZ)
     end
 
     -- --- Buoyancy --------------------------------------------------------------

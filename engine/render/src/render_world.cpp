@@ -285,6 +285,8 @@ namespace {
     // holds the shader's layout and packs them. A texture that has not loaded
     // yet travels as no texture, and reads as the shader's fallback.
     out.surface = material.shader;
+    out.readsSceneColor = material.readsSceneColor;
+    out.masked = material.alphaMode == static_cast<core::i32>(asset::MaterialAlphaMode::Mask);
     out.surfaceValues.reserve(material.shaderParameters.size());
     for (const asset::ShaderParameter& parameter : material.shaderParameters) {
         SurfaceValue value;
@@ -435,7 +437,7 @@ struct FrameMaterial
     }
     return x.baseColor[3] == y.baseColor[3] && a.baseColor == b.baseColor && a.normal == b.normal &&
            a.metallicRoughness == b.metallicRoughness && a.emissive == b.emissive && a.surface == b.surface &&
-           a.surfaceValues == b.surfaceValues;
+           a.surfaceValues == b.surfaceValues && a.readsSceneColor == b.readsSceneColor && a.masked == b.masked;
 }
 
 void tintBy(RenderMaterial& material, const Color3& color)

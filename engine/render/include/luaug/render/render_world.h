@@ -202,6 +202,11 @@ struct RenderMaterial
     // layout.
     std::string surface;
     std::vector<SurfaceValue> surfaceValues;
+    // The material asks for the scene's colour behind it (a blended surface).
+    bool readsSceneColor = false;
+    // Its `AlphaMode` is Mask: a surface shader that cuts itself, which its
+    // depth-only passes cannot do.
+    bool masked = false;
 
     // The four maps, and the four flags that say they are there.
     //

@@ -88,6 +88,8 @@ private:
     std::filesystem::path m_shadercross;
     std::filesystem::path m_include;
     std::filesystem::path m_cache;
+    // A hash of every engine header, part of every cache key.
+    core::u64 m_headers = 0;
 
     mutable std::mutex m_mutex;
     std::condition_variable m_wake;

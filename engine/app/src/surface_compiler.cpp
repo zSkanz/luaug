@@ -135,6 +135,19 @@ SurfaceCompiler::SurfaceCompiler(const asset::ContentMounts& mounts, std::filesy
     : m_mounts(mounts), m_shadercross(std::move(shadercross)), m_include(std::move(includeDirectory)),
       m_cache(std::move(cache))
 {
+    // The engine's headers, hashed once: they change with the engine, not
+    // while it runs.
+    std::error_code error;
+    std::vector<std::filesystem::path> headers;
+    for (std::filesystem::recursive_directory_iterator it(m_include, error), end; !error && it != end;
+         it.increment(error)) {
+        if (it->is_regular_file(error))
+            headers.push_back(it->path());
+    }
+    std::sort(headers.begin(), headers.end());
+    m_headers = 0xCBF29CE484222325ull;
+    for (const std::filesystem::path& header : headers)
+        m_headers = fnv(fnv(m_headers, header.filename().string()), readText(header).value_or(std::string{}));
     m_worker = std::thread([this] { work(); });
 }
 
@@ -230,6 +243,8 @@ void SurfaceCompiler::work()
 
 void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
 {
+    const auto started = std::chrono::steady_clock::now();
+    u32 compiled = 0;
     std::vector<SurfaceError> errors;
     std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>> dependencies;
     auto program = std::make_unique<render::SurfaceProgram>();
@@ -249,6 +264,14 @@ void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
         if (!dependencies.empty())
             entry.dependencies = std::move(dependencies);
         if (ok) {
+            // How long it took, and how much of it was the compiler: a cache
+            // hit runs nothing, and a person tuning a shader wants to know.
+            const auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+            const std::array<core::I18nArg, 3> timing{
+                core::I18nArg{"urn", urn}, core::I18nArg{"milliseconds", static_cast<core::i64>(elapsed.count())},
+                core::I18nArg{"compiled", static_cast<core::i64>(compiled)}};
+            core::log(core::LogLevel::Info, LUAUG_TR("render.info.surface_compiled"), timing);
             program->revision = ++entry.revision;
             entry.program = std::move(program);
             entry.status = render::SurfaceStatus::Ready;
@@ -299,6 +322,20 @@ void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
     }
 
     program->reflection = asset::reflectSurface(*source);
+    if (program->reflection.ok()) {
+        // **And everything the engine wraps it in**: the generated text and the
+        // engine's headers. A key of the user's files alone kept serving
+        // bytecode compiled around an older wrapper after the engine changed.
+        for (u32 variant = 0; variant < 5; ++variant) {
+            for (const bool fragment : {false, true}) {
+                key = fnv(key,
+                          asset::surfaceWrapper(program->reflection, static_cast<asset::SurfaceVariant>(variant),
+                                                fragment ? asset::SurfaceStage::Fragment : asset::SurfaceStage::Vertex,
+                                                file.generic_string()));
+            }
+        }
+        key ^= m_headers;
+    }
     if (!program->reflection.ok()) {
         for (const asset::SurfaceDiagnostic& diagnostic : program->reflection.errors) {
             const std::array<core::I18nArg, 1> args{core::I18nArg{"subject", diagnostic.subject}};
@@ -349,6 +386,7 @@ void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
                 "-o",
                 output.string(),
             });
+            ++compiled;
             if (!result.started || result.exitCode != 0 || !platform::readFile(output, code) || code.empty()) {
                 errors = parseErrors(result.output);
                 std::filesystem::remove(output, fsError);

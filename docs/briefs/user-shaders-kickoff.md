@@ -126,7 +126,7 @@ run at any time.
       under a new asset kind.
 - [x] `#include` of `.hlsli` files in the project's `content/` works, and the
       cache key covers them.
-- [~] **Asynchronous compilation in the editor.** A surface draws with the
+- [x] **Asynchronous compilation in the editor.** A surface draws with the
       default material while its shader compiles, and no frame waits. Measure
       and record a cold compile of the ocean shader and a warm cache hit.
 - [x] **A shader that fails draws with the error material**, and the editor
@@ -142,9 +142,9 @@ run at any time.
 
 - [~] A pipeline cache keyed by (shader, pass variant). Record pipeline creation
       time and pack size per shader in `docs/perf-baselines.md`.
-- [ ] Scene depth bound for blended surfaces, which is what intersection foam
+- [x] Scene depth bound for blended surfaces, which is what intersection foam
       needs.
-- [ ] Scene colour: a copy of the HDR target after the opaque pass, made by a
+- [x] Scene colour: a copy of the HDR target after the opaque pass, made by a
       full-screen draw (the ADR 0072 pattern, so the RHI does not change), made
       only in a frame where a visible material asks for it, and once per frame.
 - [x] The simulation time handed to `SurfaceInputs` is the same interpolated
@@ -153,14 +153,14 @@ run at any time.
 
 ## Stage 6 — The ocean, as user code
 
-- [ ] A built-in subdivided grid mesh at a few fixed resolutions.
-- [ ] `examples/11-ocean` rewritten on **public pieces only**:
+- [x] A built-in subdivided grid mesh at a few fixed resolutions.
+- [x] `examples/11-ocean` rewritten on **public pieces only**:
       - a material asset naming an ocean surface shader (Gerstner waves, depth
         colour, foam where the water meets geometry, refraction);
       - a handful of `MeshPart`s that follow the camera;
       - the same wave in Luau for the boat's and the crates' buoyancy.
       **If it needs anything private, fix the contract, not the example.**
-- [ ] Its README's budget section re-measured: draws, frame time, and the
+- [x] Its README's budget section re-measured: draws, frame time, and the
       property writes per tick against the 676 it has today.
 - [ ] Three more examples, each small, in one folder or three:
       - a flag in the wind (vertex displacement on a non-water mesh);
@@ -242,6 +242,23 @@ shaders, and mobile -- ADR 0091, *Not decided here*.
   of a user surface drew identically to the built-in one because the scene had
   no camera and neither ran the real renderer. The gate now also renders a
   copy whose surface paints everything green and fails unless that differs.
+- **Stage 5 and 6 -- D3D12 links a pixel shader to its vertex shader by
+  position.** The ocean's fragment never read its uv or tangent, DXC stripped
+  them from its input signature, and every forward pipeline of it was refused
+  (`E_INVALIDARG`); the built-in surface's copy read everything and never
+  showed it. The wrapper now reads every interpolant under a test no value can
+  pass.
+- **A cache keyed on the user's files alone serves stale bytecode.** The key
+  now covers the generated wrapper and the engine's headers too.
+- **Sixteen samplers again**: a blended surface reads the scene's depth and
+  colour at t14 and t15, so a surface has five textures, not seven.
+- **The grids are built when named, not at boot**: three extra meshes with the
+  primitives moved every capture golden of every scene without water.
+- **Gerstner waves were the wrong brief.** A Gerstner crest moves sideways, so
+  the height at a given (x, z) has no closed form and the boat would float on
+  an approximation of the water under it; the ocean uses the directional sine
+  waves both sides can evaluate exactly. Cold compile 882 ms, warm cache 1 ms;
+  6.7 ms a frame before, 0.67 ms after.
 - **SDL_shadercross links `dxcompiler` at load time** (`DxcCreateInstance` is
   an import, not a `LoadLibrary`), so whatever links it needs the library
   beside it. The player never links it; the editor and `assetc` will.

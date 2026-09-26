@@ -1,0 +1,15 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/ocean.surface.hlsl",
+  "readsSceneColor": true,
+  "instanceParameters": [],
+  "properties": {
+    "Transparency": 0.001,
+    "Roughness": 0.14,
+    "Clarity": 6,
+    "FoamWidth": 0.35,
+    "Refraction": 0.03
+  }
+}

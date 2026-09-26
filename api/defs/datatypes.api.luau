@@ -2081,6 +2081,28 @@ local Datatypes: { Schema.Datatype } = {
                     .. "never saved. Put it on a part with `part.Material = copy`, then change it -- every part "
                     .. "wearing this copy changes with it, and nothing else does.",
             },
+            {
+                Name = "GetShaderParameter",
+                Parameters = { { Name = "name", Type = "string" } },
+                Returns = { "(number | Vector2 | vector | { number } | string)?" },
+                ThreadSafety = "Unsafe",
+                Doc = "A parameter of the surface shader this material names (ADR 0091), as the material sets "
+                    .. "it: a number, a `Vector2`, a `vector` (a colour reads as one), four numbers in a table, or "
+                    .. "a texture's URN. `nil` when the material leaves it to the shader's own default.",
+            },
+            {
+                Name = "SetShaderParameter",
+                Parameters = {
+                    { Name = "name", Type = "string" },
+                    { Name = "value", Type = "number | boolean | Vector2 | vector | Color3 | { number } | string" },
+                },
+                Returns = {},
+                ThreadSafety = "Unsafe",
+                Doc = "Sets a parameter of the surface shader, on a clone -- a loaded material is shared and "
+                    .. "read-only, as it is for the built-in fields. A string is a texture's URN. Every part "
+                    .. "wearing the clone draws with the new value from the next frame. **Not replicated**: a "
+                    .. "clone's shader parameters are this machine's; set them where the part is drawn.",
+            },
         } :: { Schema.Method },
     },
 }

@@ -5329,6 +5329,32 @@
           "Parameters": [],
           "Returns": ["Material"],
           "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "GetShaderParameter",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            }
+          ],
+          "Returns": ["(number | Vector2 | vector | { number } | string)?"],
+          "ThreadSafety": "Unsafe"
+        },
+        {
+          "Name": "SetShaderParameter",
+          "Parameters": [
+            {
+              "Name": "name",
+              "Type": "string"
+            },
+            {
+              "Name": "value",
+              "Type": "number | boolean | Vector2 | vector | Color3 | { number } | string"
+            }
+          ],
+          "Returns": [],
+          "ThreadSafety": "Unsafe"
         }
       ],
       "Operators": []

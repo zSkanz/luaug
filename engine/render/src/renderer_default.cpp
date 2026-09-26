@@ -497,7 +497,10 @@ private:
     [[nodiscard]] bool buildSurfacePipelines(rhi::IDevice& device, SurfaceSet& set);
     static void releaseSurface(rhi::IDevice& device, SurfaceSet& set);
     void prepareSurfaces(rhi::IDevice& device, const RenderWorld& world);
-    void bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment) const;
+    void bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment, bool blended) const;
+    // Before the blended pass: the scene's depth and, when asked, colour.
+    void copySceneForSurfaces(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
+                              const GpuFrameUniforms& frame);
 
     // --- Terrain (ADR 0082) --------------------------------------------------
     //
@@ -780,6 +783,11 @@ private:
     LookPipeline raysAdd_;
     // The air, laid over the opaque world and the sky.
     LookPipeline air_;
+    // The scene behind blended surface shaders (ADR 0091): its depth as
+    // distances, and its colour -- each made only in a frame that needs it.
+    LookPipeline surfaceSceneDepth_;
+    rhi::TextureHandle sceneDepthCopy_{};
+    rhi::TextureHandle sceneColorCopy_{};
     // The sky a `Sky` governs. Made by `ensureSkyLook` rather than as a
     // fullscreen pass: it is drawn INSIDE the forward pass, so it declares
     // that pass's depth format as the plain sky's pipeline does.
@@ -787,10 +795,10 @@ private:
     [[nodiscard]] bool ensureSkyLook(rhi::IDevice& device);
 
     // Every look pipeline, for `destroy`.
-    [[nodiscard]] std::array<LookPipeline*, 11> lookPipelines() noexcept
+    [[nodiscard]] std::array<LookPipeline*, 12> lookPipelines() noexcept
     {
-        return {&gradedTonemap_, &blur_,       &resample_, &focusPrepare_, &focusGather_, &focusComposite_,
-                &raysMask_,      &raysGather_, &raysAdd_,  &air_,          &skyLook_};
+        return {&gradedTonemap_, &blur_,       &resample_, &focusPrepare_, &focusGather_,       &focusComposite_,
+                &raysMask_,      &raysGather_, &raysAdd_,  &air_,          &surfaceSceneDepth_, &skyLook_};
     }
 
     // **The look's own images, made the first frame one is needed** and
@@ -2021,7 +2029,7 @@ void DefaultRenderer::prepareSurfaces(rhi::IDevice& device, const RenderWorld& w
     }
 }
 
-void DefaultRenderer::bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment) const
+void DefaultRenderer::bindSurface(rhi::ICmdList& cmd, u32 material, bool fragment, bool blended) const
 {
     const std::vector<core::u8>& block = materialBlock_[material];
     const asset::SurfaceReflection& reflection = surfaces_[materialSurface_[material] - 1].reflection;
@@ -2037,7 +2045,82 @@ void DefaultRenderer::bindSurface(rhi::ICmdList& cmd, u32 material, bool fragmen
             cmd.bindTextures(rhi::ShaderStage::Fragment, 0, textures.first(low));
         if (textures.size() > low)
             cmd.bindTextures(rhi::ShaderStage::Fragment, asset::EngineFragmentSamplers, textures.subspan(low));
+        if (blended) {
+            // A blended surface's stage declares every slot up to the scene's,
+            // and SDL_GPU wants each bound: the fifth texture's, when there is
+            // no fifth texture, is white.
+            if (textures.size() <= 4) {
+                const std::array<rhi::TextureBinding, 1> unused{rhi::TextureBinding{whitePixel_, linearSampler_}};
+                cmd.bindTextures(rhi::ShaderStage::Fragment, asset::EngineFragmentSamplers, unused);
+            }
+            const std::array<rhi::TextureBinding, 2> scene{
+                rhi::TextureBinding{sceneDepthCopy_.valid() ? sceneDepthCopy_ : whitePixel_, pointSampler_},
+                rhi::TextureBinding{sceneColorCopy_.valid() ? sceneColorCopy_ : blackPixel_, linearSampler_},
+            };
+            cmd.bindTextures(rhi::ShaderStage::Fragment, asset::SceneDepthSlot, scene);
+        }
     }
+}
+
+void DefaultRenderer::copySceneForSurfaces(rhi::IDevice& device, rhi::ICmdList& cmd, const RenderWorld& world,
+                                           const GpuFrameUniforms& frame)
+{
+    // **Only a frame that has a blended surface shader in view pays for it** --
+    // and every other frame's command stream is exactly what it was.
+    bool depthWanted = false;
+    bool colorWanted = false;
+    for (const DrawItem& draw : world.draws) {
+        if (!draw.transparent || !draw.inCameraFrustum || draw.material >= materialSurface_.size() ||
+            materialSurface_[draw.material] == 0)
+            continue;
+        depthWanted = true;
+        colorWanted = colorWanted || world.materials[draw.material].readsSceneColor;
+    }
+    if (!depthWanted)
+        return;
+    if (!ensureLookPipeline(device, surfaceSceneDepth_, "surface_scene_depth", rhi::TextureFormat::R32Float) ||
+        (colorWanted && !ensureLookPipeline(device, resample_, "look_resample", kHdrFormat)))
+        return;
+    if (!sceneDepthCopy_.valid()) {
+        sceneDepthCopy_ = device.createTexture({
+            .format = rhi::TextureFormat::R32Float,
+            .usage = rhi::TextureUsage::ColorTarget | rhi::TextureUsage::Sampled,
+            .width = renderWidth_,
+            .height = renderHeight_,
+            .debugName = "surface-scene-depth",
+        });
+    }
+    if (colorWanted && !lookTexture(device, sceneColorCopy_, renderWidth_, renderHeight_, "surface-scene-color"))
+        colorWanted = false;
+    if (!sceneDepthCopy_.valid())
+        return;
+
+    cmd.endRenderPass();
+    const Mat4 inverseProjection = core::inverse(world.camera.projection);
+    const std::array<rhi::TextureBinding, 1> depth{rhi::TextureBinding{depth_, pointSampler_}};
+    fullscreenPass(cmd, surfaceSceneDepth_.handle, sceneDepthCopy_, renderWidth_, renderHeight_, "surface-scene-depth",
+                   depth, asBytes(&inverseProjection, sizeof(inverseProjection)));
+    if (colorWanted) {
+        const std::array<rhi::TextureBinding, 1> color{rhi::TextureBinding{hdr_, linearSampler_}};
+        fullscreenPass(cmd, resample_.handle, sceneColorCopy_, renderWidth_, renderHeight_, "surface-scene-color",
+                       color, {});
+    }
+
+    const std::array<rhi::ColorAttachment, 1> resumeTarget{rhi::ColorAttachment{
+        .texture = hdr_,
+        .loadOp = rhi::LoadOp::Load,
+        .storeOp = rhi::StoreOp::Store,
+    }};
+    cmd.beginRenderPass({
+        .colorAttachments = resumeTarget,
+        .depthStencil = {.texture = depth_, .loadOp = rhi::LoadOp::Load, .storeOp = rhi::StoreOp::Store},
+        .debugName = "forward-after-scene-copy",
+    });
+    cmd.setViewport({.width = static_cast<f32>(renderWidth_), .height = static_cast<f32>(renderHeight_)});
+    cmd.setScissor({.width = static_cast<core::i32>(renderWidth_), .height = static_cast<core::i32>(renderHeight_)});
+    // The frame block again: the copies bound their own at the same slot.
+    cmd.setPipeline(pbrBlendPipeline_);
+    cmd.bindUniforms(rhi::ShaderStage::Fragment, 0, asBytes(&frame, sizeof(frame)));
 }
 
 void DefaultRenderer::buildInstanceBatches(const RenderWorld& world, const MeshCache& meshes)
@@ -2368,6 +2451,11 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
                                   ? materialSurface_[draw.material]
                                   : 0u;
         const SurfaceSet* surface = surfaceId != 0 ? &surfaces_[surfaceId - 1] : nullptr;
+        // A masked surface cuts itself in its fragment, which its depth pass
+        // does not run: left in the prepass, its holes would show whatever the
+        // prepass depth hid -- the sky -- instead of what is behind them.
+        if (selection == Selection::Prepass && surface != nullptr && world.materials[draw.material].masked)
+            continue;
         const rhi::PipelineHandle surfacePipeline =
             surface == nullptr                    ? rhi::PipelineHandle{}
             : selection == Selection::Shadow      ? (batch != nullptr ? surface->shadowInstanced : surface->shadow)
@@ -2396,7 +2484,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             const GpuShadowUniforms uniforms{viewProjection, batch != nullptr ? Mat4{} : draw.transform};
             cmd.bindUniforms(rhi::ShaderStage::Vertex, 0, asBytes(&uniforms, sizeof(uniforms)));
             if (surfacePipeline.valid())
-                bindSurface(cmd, draw.material, false);
+                bindSurface(cmd, draw.material, false, false);
             if (terrainShadow) {
                 const f32 push[4] = {terrainShadowPush_, 0.0f, 0.0f, 0.0f};
                 cmd.bindUniforms(rhi::ShaderStage::Vertex, 1, asBytes(push, sizeof(push)));
@@ -2515,7 +2603,7 @@ void DefaultRenderer::drawGeometry(rhi::ICmdList& cmd, const RenderWorld& world,
             // Every draw rather than on a change of material: vertex slot 1 is
             // also where a skinned draw's joints and the terrain's block go.
             if (surfacePipeline.valid()) {
-                bindSurface(cmd, draw.material, true);
+                bindSurface(cmd, draw.material, true, selection == Selection::Transparent);
                 // Its textures took the built-in maps' slots: whatever draws
                 // next with this material binds them again.
                 boundMaterial = 0xFFFFFFFFu;
@@ -2751,6 +2839,8 @@ void DefaultRenderer::releaseLookTextures(rhi::IDevice& device)
         texture = {};
     };
     release(lookColor_);
+    release(sceneDepthCopy_);
+    release(sceneColorCopy_);
     for (rhi::TextureHandle& level : blurLevels_)
         release(level);
     for (rhi::TextureHandle& level : blurPong_)
@@ -4198,6 +4288,7 @@ void DefaultRenderer::render(rhi::IDevice& device, rhi::ICmdList& cmd, const Ren
         // otherwise: sorting is per draw, so two transparent surfaces that
         // intersect each other sort wrongly at the pixels where they cross.
         // Order-independent transparency is not on the v1 list.
+        copySceneForSurfaces(device, cmd, world, frame);
         cmd.setPipeline(pbrBlendPipeline_);
         drawGeometry(cmd, world, meshes, world.camera.viewProjection, pbrBlendPipeline_, pbrSkinnedBlendPipeline_,
                      Selection::Transparent);

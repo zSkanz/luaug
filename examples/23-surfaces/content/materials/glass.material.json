@@ -1,0 +1,11 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/glass.surface.hlsl",
+  "readsSceneColor": true,
+  "instanceParameters": [],
+  "properties": {
+    "Transparency": 0.001
+  }
+}

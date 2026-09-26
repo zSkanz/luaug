@@ -1,0 +1,12 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/dissolve.surface.hlsl",
+  "readsSceneColor": false,
+  "instanceParameters": [],
+  "properties": {
+    "AlphaMode": "Mask",
+    "AlphaCutoff": 0.5
+  }
+}

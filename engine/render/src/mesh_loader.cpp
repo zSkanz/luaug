@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <string>
 #include <string_view>
 
@@ -585,6 +586,38 @@ u32 MeshLoader::sync(rhi::IDevice& device, rhi::ICmdList& cmd, const scene::Worl
                                                    [](core::NameAtom a, core::NameAtom b) { return a.id < b.id; });
             failed_.insert(position, content);
         };
+
+        // **A grid the engine carries** (ADR 0091): built the first time a part
+        // names one, never before -- uploading them with the primitives would
+        // put three meshes into every world's command stream, and into every
+        // capture golden of a scene that has no water.
+        constexpr std::string_view GridPrefix = "luaug://mesh/grid-";
+        if (urn.starts_with(GridPrefix)) {
+            core::u32 segments = 0;
+            const std::string_view digits = std::string_view(urn).substr(GridPrefix.size());
+            (void)std::from_chars(digits.data(), digits.data() + digits.size(), segments);
+            if (std::find(asset::BuiltInGridSegments.begin(), asset::BuiltInGridSegments.end(), segments) ==
+                asset::BuiltInGridSegments.end()) {
+                markFailed();
+                return;
+            }
+            const asset::Mesh mesh = asset::makeGrid(segments);
+            core::EngineError uploadError;
+            const MeshHandle handle = cache.create(device, cmd, mesh, MeshUsage::Static, &uploadError);
+            if (!handle.valid()) {
+                core::logText(core::LogLevel::Warn, uploadError.message);
+                markFailed();
+                return;
+            }
+            MeshLibrary::Entry entry;
+            entry.mesh = handle;
+            entry.bounds = mesh.bounds;
+            entry.sectionCount = 1;
+            entry.sectionMaterial.push_back(0);
+            library.set(content, entry);
+            ++loaded;
+            return;
+        }
 
         // **One feed** (E9 step 14). There were two: a mounted pack answering
         // with a compiled mesh, and a content directory answering with the

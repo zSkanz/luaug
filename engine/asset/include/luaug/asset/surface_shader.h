@@ -19,7 +19,8 @@
 //     the parameters follow, packed as an HLSL cbuffer packs them;
 //   * a surface texture is vertex sampler `n` and fragment sampler
 //     `surfaceFragmentSlot(n)`: the four slots the built-in surface's maps use,
-//     then the three after the engine's thirteen -- SDL_GPU's limit is sixteen.
+//     then the one after the engine's thirteen. The last two of SDL_GPU's
+//     sixteen are the scene's depth and colour, for blended surfaces.
 
 #include "luaug/core/types.h"
 
@@ -105,10 +106,14 @@ struct SurfaceReflection
 inline constexpr core::u32 SurfaceContractVersion = 1;
 inline constexpr core::u32 SurfaceBlockHeaderBytes = 32;
 inline constexpr core::u32 MaxSurfaceBlockBytes = 1024;
-inline constexpr core::u32 MaxSurfaceTextures = 7;
+inline constexpr core::u32 MaxSurfaceTextures = 5;
 // The engine's fragment samplers end at t12 (`luaug_forward.hlsli`); a stage
 // has sixteen.
 inline constexpr core::u32 EngineFragmentSamplers = 13;
+
+// The scene behind a blended surface: its distance, and its colour.
+inline constexpr core::u32 SceneDepthSlot = 14;
+inline constexpr core::u32 SceneColorSlot = 15;
 
 // Where surface texture `index` binds in the fragment stage.
 [[nodiscard]] constexpr core::u32 surfaceFragmentSlot(core::u32 index) noexcept

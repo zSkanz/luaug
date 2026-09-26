@@ -99,6 +99,14 @@ struct SurfaceOutput
     float3 Emissive;
 };
 
+// **The scene behind, anywhere on screen** -- for a refraction that bends what
+// it shows, or foam that looks a little way ahead. `uv` is a `ScreenUv`. In a
+// blended surface they read the scene; anywhere else, a very large distance
+// and black, like `SceneDepth` and `SceneColor`:
+//
+//     float sceneDepthAt(float2 uv);
+//     float3 sceneColorAt(float2 uv);
+
 // A parameter of the material: `LUAUG_PARAM(type, Name, default[, annotation])`
 // with `type` one of float, float2, float3, float4, int, bool, and the
 // annotation one of `range(min, max)`, `colour` or `toggle`. It is a field of
@@ -108,7 +116,7 @@ struct SurfaceOutput
 #define LUAUG_PARAM(type, name, ...)
 // A texture of the material, sampled with `LUAUG_SAMPLE(Name, uv)`:
 // `LUAUG_TEXTURE(Name[, white | black | normal])`, the second saying what it
-// reads as when the material sets none -- white unless said. At most seven.
+// reads as when the material sets none -- white unless said. At most five.
 #define LUAUG_TEXTURE(name, ...)
 #define LUAUG_SAMPLE(name, uv) name.Sample(name##Sampler, (uv))
 // Whether the material set this texture, rather than leaving it to its
