@@ -314,7 +314,11 @@ if(LUAUG_BUILD_TESTS AND LUAUG_DEBUG_UI)
     endif()
     target_compile_definitions(luaug_app_tests PRIVATE
         LUAUG_TEST_SHADER_INCLUDE="${CMAKE_SOURCE_DIR}/shaders/include")
-    add_dependencies(luaug_app_tests shadercross)
+    # Only where there is one: a host with no shader toolchain (macOS, ADR
+    # 0032) has no shadercross target, and the test skips there.
+    if(TARGET shadercross)
+        add_dependencies(luaug_app_tests shadercross)
+    endif()
 endif()
 
 if(LUAUG_BUILD_TESTS AND LUAUG_ENABLE_REPLICATION)
