@@ -37,6 +37,13 @@ set(ANDROID_ABI "arm64-v8a" CACHE STRING "Android ABI to cross-compile for")
 # wrong.
 set(ANDROID_STL "c++_static" CACHE STRING "NDK C++ runtime")
 
+# **16 KB pages.** Android 15 devices may use them, and a library whose LOAD
+# segments are aligned to 4 KB draws a compatibility warning over the app on
+# one (seen on a Galaxy S25 Ultra, 2026-09-26) and is refused by Google Play
+# for new apps. NDK r28 aligns to 16 KB by default; r27, the pin, only when
+# asked, and this is how it is asked.
+set(ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES ON CACHE BOOL "Align shared libraries for 16 KB pages")
+
 # Resolution order: an explicit -D, then the variables the NDK's own installers
 # and the GitHub runner images export, then the SDK's conventional layout. The
 # pinned version is part of the last two paths on purpose -- an SDK holding
