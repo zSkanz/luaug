@@ -23,6 +23,10 @@
 #   scripts/localgate.ps1 -Only lavapipe      # the real-image goldens, on Mesa's
 #                                             # software rasterizer, opt-in
 #   scripts/localgate.ps1 -Only lavapipe -Record   # ...rewrite those goldens
+#   scripts/localgate.ps1 -Only android       # the engine cross-built for Android
+#                                             # arm64 with the pinned NDK; part of
+#                                             # every run once scripts/install-android.ps1
+#                                             # has installed it
 #   scripts/localgate.ps1 -SkipLinux   # ONLY when Docker is genuinely unavailable
 #   scripts/localgate.ps1 -Only format -Fix   # rewrite the C++ tree instead of checking it
 #   scripts/localgate.ps1 -AllowSkips         # ONLY on a machine with no GPU
@@ -44,7 +48,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipLinux,
-    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan', 'winprofiles', 'lavapipe')]
+    [ValidateSet('docs', 'luau', 'format', 'windows', 'linux', 'shipping', 'asan', 'winprofiles', 'lavapipe', 'android')]
     [string]$Only,
     # Only meaningful with -Only format: reformat in place rather than report.
     # Off by default, because a gate that edits your tree without being asked is
@@ -500,6 +504,48 @@ Invoke-Stage 'lavapipe' {
         -v "luaug-tier2-build:/build" `
         luaug-tier2:latest @arguments
     if ($LASTEXITCODE -ne 0) { throw "the lavapipe goldens did not match" }
+}
+
+# **The engine cross-built for Android** (arm64, the pinned NDK), which only the
+# nightly did until a surface shader's `std::from_chars(float)` -- a function
+# the NDK's standard library does not have -- reached `main` and was found the
+# next morning. Built the way the nightly's `Triangle APK` job builds it, and
+# part of every run on a machine that has the NDK: `scripts/install-android.ps1`
+# installs it. Without it, a full run says so and goes on; `-Only android` fails.
+Invoke-Stage 'android' {
+    $ndkVersion = (Select-String -Path 'cmake/toolchains/android.cmake' `
+            -Pattern '^set\(LUAUG_ANDROID_NDK_VERSION "([^"]+)"').Matches[0].Groups[1].Value
+    $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else {
+        [Environment]::GetEnvironmentVariable('ANDROID_SDK_ROOT', 'User') }
+    if (-not $sdkRoot -or -not (Test-Path (Join-Path $sdkRoot "ndk\$ndkVersion"))) {
+        if ($Only) { throw "Android NDK $ndkVersion is not installed; run scripts/install-android.ps1" }
+        Write-Host "[gate] android: skipped (no NDK $ndkVersion; scripts/install-android.ps1 installs it)" -ForegroundColor DarkGray
+        return
+    }
+
+    $vcvars = Get-DeveloperShellEnv
+    if (-not $env:LUAUG_BUILD_ROOT) {
+        $env:LUAUG_BUILD_ROOT = Join-Path $env:LOCALAPPDATA 'LuauGuild'
+    }
+    $buildDir = Join-Path $env:LUAUG_BUILD_ROOT 'android-arm64'
+    # The developer shell for CMake and Ninja; the NDK's toolchain file picks
+    # the compilers. chcp 65001 for the reason CLAUDE.md gives (D040).
+    $script = @"
+chcp 65001 >nul
+call "$vcvars" >nul || exit /b 1
+set ANDROID_SDK_ROOT=$sdkRoot
+set ANDROID_HOME=$sdkRoot
+cmake -S . -B "$buildDir" -G Ninja -DCMAKE_TOOLCHAIN_FILE="%CD%/cmake/toolchains/android.cmake" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLUAUG_PROFILE=dev -DLUAUG_BUILD_TESTS=OFF >nul || exit /b 1
+cmake --build "$buildDir" --target luaug_triangle_sample || exit /b 1
+"@
+    $temp = Join-Path $env:TEMP "luaug-android-$PID.cmd"
+    Set-Content -Path $temp -Value $script -Encoding ascii
+    try {
+        & cmd.exe /c $temp
+        if ($LASTEXITCODE -ne 0) { throw "the engine does not build for Android arm64" }
+    } finally {
+        Remove-Item $temp -ErrorAction SilentlyContinue
+    }
 }
 
 Pop-Location

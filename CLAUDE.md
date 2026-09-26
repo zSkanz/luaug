@@ -30,7 +30,9 @@ to trust when this paragraph and it disagree.
 scripts/localgate.ps1                # EVERYTHING that can run here: docs + Luau gates
                                      #   + Windows build/tests + the Linux tier in Docker
                                      #   + the shipping and player profiles nothing else builds
-scripts/localgate.ps1 -Only windows  # one stage: docs | luau | format | windows | linux | shipping
+scripts/localgate.ps1 -Only windows  # one stage: docs | luau | format | windows | linux | shipping | android
+scripts/install-android.ps1          # the pinned NDK, SDK 35, adb, JDK 17 and Gradle; the
+                                     #   `android` stage then cross-builds arm64 on every run
 ```
 
 **Run the Linux stage.** It is ~12 s warm, and it is not redundant with the

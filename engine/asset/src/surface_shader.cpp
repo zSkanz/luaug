@@ -1,5 +1,7 @@
 #include "luaug/asset/surface_shader.h"
 
+#include "luaug/core/number_parse.h"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -123,15 +125,14 @@ namespace {
         text.remove_suffix(1);
     if (text.empty())
         return std::nullopt;
-    f32 value = 0.0f;
-    const char* begin = text.data();
-    const char* end = text.data() + text.size();
-    if (*begin == '+')
-        ++begin;
-    const auto [stop, error] = std::from_chars(begin, end, value);
-    if (error != std::errc{} || stop != end)
+    if (text.front() == '+')
+        text.remove_prefix(1);
+    // Not `std::from_chars`: its floating-point overloads are missing from the
+    // Android NDK's standard library (see `core/number_parse.h`).
+    core::f64 value = 0.0;
+    if (text.empty() || !core::decimalToDouble(text, value))
         return std::nullopt;
-    return value;
+    return static_cast<f32>(value);
 }
 
 [[nodiscard]] u32 componentsOf(SurfaceParamType type) noexcept

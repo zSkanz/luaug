@@ -1,11 +1,11 @@
-#include "number_parse.h"
+#include "luaug/core/number_parse.h"
 
 #include <clocale>
 #include <cmath>
 #include <cstdlib>
 #include <string>
 
-namespace luaug::core::detail {
+namespace luaug::core {
 
 bool decimalToDouble(std::string_view token, f64& out)
 {
@@ -33,4 +33,4 @@ bool decimalToDouble(std::string_view token, f64& out)
     return true;
 }
 
-} // namespace luaug::core::detail
+} // namespace luaug::core

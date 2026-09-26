@@ -1,9 +1,9 @@
 #include "luaug/core/toml.h"
 
+#include "luaug/core/number_parse.h"
+
 #include <algorithm>
 #include <string>
-
-#include "number_parse.h"
 
 namespace luaug::core {
 namespace {
@@ -177,7 +177,7 @@ struct Parsed
     // which is why the token is checked for shape first rather than after.
     if (!digits.empty() && digits.find_first_not_of("+-.eE0123456789") == std::string::npos) {
         f64 parsedNumber = 0.0;
-        if (detail::decimalToDouble(digits, parsedNumber))
+        if (decimalToDouble(digits, parsedNumber))
             return parsedValue(
                 ScalarValue{.kind = ScalarValue::Kind::Number, .text = {}, .number = parsedNumber, .boolean = false},
                 rest);

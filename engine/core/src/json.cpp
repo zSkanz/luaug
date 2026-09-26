@@ -1,5 +1,7 @@
 #include "luaug/core/json.h"
 
+#include "luaug/core/number_parse.h"
+
 #include <charconv>
 #include <clocale>
 #include <cmath>
@@ -9,12 +11,8 @@
 #include <system_error>
 #include <utility>
 
-#include "number_parse.h"
-
 namespace luaug::core {
 namespace {
-
-using detail::decimalToDouble;
 
 // Bounds the recursion rather than the grammar: the parser descends with the
 // document, so a corrupt or hostile file that is nothing but '[' must reach a
