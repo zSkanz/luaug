@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -58,6 +59,9 @@ public:
 
     // The errors of the last compile of `urn`, empty when it compiled.
     [[nodiscard]] std::vector<SurfaceError> errors(std::string_view urn) const;
+    // Where `urn` stands, without asking for it: nothing when it has never been
+    // asked for -- a shader no drawn material names is compiled by nobody.
+    [[nodiscard]] std::optional<render::SurfaceStatus> status(std::string_view urn) const;
 
     // Whether a compiler was found at all. An editor without one draws every
     // user surface as the error surface and says why once.

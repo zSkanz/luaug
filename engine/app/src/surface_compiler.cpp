@@ -215,6 +215,15 @@ std::vector<SurfaceError> SurfaceCompiler::errors(std::string_view urn) const
     return found != m_entries.end() ? found->second.errors : std::vector<SurfaceError>{};
 }
 
+std::optional<render::SurfaceStatus> SurfaceCompiler::status(std::string_view urn) const
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    const auto found = m_entries.find(urn);
+    if (found == m_entries.end())
+        return std::nullopt;
+    return found->second.status;
+}
+
 void SurfaceCompiler::drain()
 {
     std::unique_lock<std::mutex> lock(m_mutex);

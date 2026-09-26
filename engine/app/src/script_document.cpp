@@ -688,7 +688,8 @@ void ScriptDocument::propagate(u32 first, u32 last)
         if (index > last && m_lines[index].entry == state)
             break;
         m_lines[index].entry = state;
-        state = lexLine(m_lines[index].text, index, state, m_lines[index].tokens);
+        state = m_language == ScriptLanguage::Hlsl ? lexHlslLine(m_lines[index].text, state, m_lines[index].tokens)
+                                                   : lexLine(m_lines[index].text, index, state, m_lines[index].tokens);
         ++relexed;
     }
     m_lastRelexed = relexed;
@@ -816,8 +817,43 @@ bool ScriptDocument::redo(Position& caret)
 
 void ScriptDocument::refreshDiagnostics()
 {
-    parseDiagnostics(text(), m_diagnostics);
+    if (m_language == ScriptLanguage::Hlsl)
+        m_diagnostics = m_external;
+    else
+        parseDiagnostics(text(), m_diagnostics);
     m_diagnosticsRevision = m_revision;
+}
+
+void ScriptDocument::setExternalDiagnostics(std::vector<Diagnostic> diagnostics)
+{
+    m_external = std::move(diagnostics);
+    if (m_language == ScriptLanguage::Hlsl)
+        m_diagnostics = m_external;
+}
+
+void ScriptDocument::setLanguage(ScriptLanguage language)
+{
+    if (language == m_language)
+        return;
+    m_language = language;
+    m_diagnostics.clear();
+    m_diagnosticsRevision = ~0ull;
+    propagate(0, static_cast<u32>(m_lines.size()));
+}
+
+ScriptLanguage scriptLanguageOf(std::string_view fileName) noexcept
+{
+    const auto endsWith = [&](std::string_view suffix) {
+        if (fileName.size() < suffix.size())
+            return false;
+        for (std::size_t index = 0; index < suffix.size(); ++index) {
+            const char c = fileName[fileName.size() - suffix.size() + index];
+            if ((c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c) != suffix[index])
+                return false;
+        }
+        return true;
+    };
+    return endsWith(".hlsl") || endsWith(".hlsli") ? ScriptLanguage::Hlsl : ScriptLanguage::Luau;
 }
 
 // --- Searching ---------------------------------------------------------------
@@ -939,6 +975,9 @@ private:
 ScriptDocument::BlockBreak ScriptDocument::blockBreakAt(Position caret) const
 {
     BlockBreak out;
+    // An `end` is Luau's; HLSL's blocks are braces, which the pairing closes.
+    if (m_language != ScriptLanguage::Luau)
+        return out;
     caret = clamp(caret);
     const std::string_view text = m_lines[caret.line].text;
     const std::vector<Token>& tokens = m_lines[caret.line].tokens;

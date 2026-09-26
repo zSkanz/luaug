@@ -7,6 +7,7 @@
 // they thought they had let go of, which is to say only after doing damage.
 #include "luaug/app/editor.h"
 #include "luaug/app/picking.h"
+#include "luaug/asset/surface_shader.h"
 #include "luaug/core/math.h"
 #include "luaug/platform/file.h"
 #include "luaug/render/debug_draw.h"
@@ -3191,6 +3192,28 @@ TEST_CASE("a new material is a file with the engine default's values, declaring 
 
     // A name that is taken is refused rather than overwritten.
     CHECK(desk.editor.createMaterial("stone").empty());
+}
+
+TEST_CASE("a new surface shader is the template, and the template compiles as it stands")
+{
+    MaterialDesk desk("surface-new");
+    CHECK(Editor::normalizeShaderPath("sea") == "shaders/sea.surface.hlsl");
+    CHECK(Editor::normalizeShaderPath("content/water/sea.surface.hlsl") == "water/sea.surface.hlsl");
+
+    const std::string made = desk.editor.createSurfaceShader("sea");
+    CHECK(made == "shaders/sea.surface.hlsl");
+    std::string text;
+    REQUIRE(platform::readTextFile(desk.content / "shaders" / "sea.surface.hlsl", text));
+    // Reflection is what the engine refuses a shader for before the compiler
+    // sees it; the template must pass it and declare what it documents.
+    const asset::SurfaceReflection reflection = asset::reflectSurface(text);
+    CHECK(reflection.ok());
+    CHECK(reflection.hasVertex);
+    CHECK(reflection.hasFragment);
+    CHECK(reflection.param("Tint") != nullptr);
+    CHECK(reflection.param("Wobble") != nullptr);
+
+    CHECK(desk.editor.createSurfaceShader("sea").empty());
 }
 
 TEST_CASE("a variant names its parent, overrides nothing, and follows it")

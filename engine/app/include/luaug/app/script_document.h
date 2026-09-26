@@ -199,6 +199,21 @@ inline constexpr core::u32 kTabWidth = 4;
 // too as far as this can tell; the reference editor makes the same trade.
 [[nodiscard]] std::string indentWithTabs(std::string_view source);
 
+// **What language the text is.** Luau is what a script is; HLSL is what a
+// surface shader is (ADR 0091), opened in the same pane because a person
+// writing one wants the same editor they write everything else in. The
+// language decides the highlighter and whether Luau's parser has an opinion;
+// everything else a document does is about text and is the same for both.
+enum class ScriptLanguage : core::u8
+{
+    Luau,
+    Hlsl,
+};
+
+// Which language a file is, by its extension: `.hlsl` and `.hlsli` are HLSL,
+// and everything else is Luau.
+[[nodiscard]] ScriptLanguage scriptLanguageOf(std::string_view fileName) noexcept;
+
 // The text of one script, with everything derived from it.
 //
 // Not copyable: a document carries its own undo history, and a copy sharing one
@@ -239,6 +254,11 @@ public:
     // Every edit bumps it. The panel uses it to know a re-highlight is due
     // without comparing text, and the editor uses it to know a tab is dirty.
     [[nodiscard]] core::u64 revision() const noexcept { return m_revision; }
+
+    // Re-lexes the whole document in `language`. Neither an edit nor an undo
+    // step: the text is the same text, read differently.
+    void setLanguage(ScriptLanguage language);
+    [[nodiscard]] ScriptLanguage language() const noexcept { return m_language; }
 
     // --- Editing -------------------------------------------------------------
     //
@@ -343,7 +363,9 @@ public:
 
     // --- What the gutter marks -----------------------------------------------
 
-    // Runs Luau's parser over the whole document. **The caller decides when** --
+    // Runs Luau's parser over the whole document -- or, for HLSL, which has no
+    // parser here, puts back what `setExternalDiagnostics` last said: the
+    // compiler's errors, by line. **The caller decides when** --
     // once the text has been still for a moment, not on every keystroke -- so
     // this is a plain call rather than something an edit triggers.
     void refreshDiagnostics();
@@ -355,6 +377,12 @@ public:
     {
         m_diagnostics.insert(m_diagnostics.end(), extra.begin(), extra.end());
     }
+    // **What a compiler said about this text**, for a language whose errors
+    // come from outside -- a surface shader's, from the shader compiler. Shown
+    // at once and kept across `refreshDiagnostics`, until the next answer
+    // replaces them.
+    void setExternalDiagnostics(std::vector<Diagnostic> diagnostics);
+    [[nodiscard]] std::span<const Diagnostic> externalDiagnostics() const noexcept { return m_external; }
     // Whether the text has moved since `refreshDiagnostics` last ran, so the
     // panel can ask at rest instead of on a timer.
     [[nodiscard]] bool diagnosticsStale() const noexcept { return m_diagnosticsRevision != m_revision; }
@@ -516,6 +544,8 @@ private:
     std::vector<EditSpan> m_editLog;
 
     std::vector<Diagnostic> m_diagnostics;
+    std::vector<Diagnostic> m_external;
+    ScriptLanguage m_language = ScriptLanguage::Luau;
     core::u64 m_revision = 0;
     core::u64 m_diagnosticsRevision = ~0ull;
 
@@ -534,6 +564,13 @@ private:
 // single `Text` run spanning the line -- a real fallback rather than a stub, so
 // that `script_document.cpp` and its tests never mention the option.
 [[nodiscard]] LineState lexLine(std::string_view text, core::u32 lineIndex, LineState entry, std::vector<Token>& out);
+
+// The same for HLSL (ADR 0091). Hand-written, and always built: there is no
+// HLSL front end in this process to borrow, and a highlighter needs only to
+// agree with the compiler about where a comment, a string and a word end. A
+// `/* */` that crosses a line is carried as `LexKind::LongComment`; a
+// preprocessor directive is an `Attribute`, and a built-in type a `Type`.
+[[nodiscard]] LineState lexHlslLine(std::string_view text, LineState entry, std::vector<Token>& out);
 
 // **What colour each run of a line is drawn in** -- finer than `TokenKind`,
 // which says what the lexer saw and is what completion and the automatic `end`

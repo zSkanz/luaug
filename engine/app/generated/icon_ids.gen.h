@@ -41,6 +41,7 @@ inline constexpr std::string_view ActionMove = "action.Move";
 inline constexpr std::string_view ActionNew = "action.New";
 inline constexpr std::string_view ActionNewFolder = "action.NewFolder";
 inline constexpr std::string_view ActionNewMaterial = "action.NewMaterial";
+inline constexpr std::string_view ActionNewShader = "action.NewShader";
 inline constexpr std::string_view ActionOpen = "action.Open";
 inline constexpr std::string_view ActionPaint = "action.Paint";
 inline constexpr std::string_view ActionPaste = "action.Paste";
@@ -173,6 +174,7 @@ inline constexpr std::string_view ContentMaterial = "content.Material";
 inline constexpr std::string_view ContentMesh = "content.Mesh";
 inline constexpr std::string_view ContentOther = "content.Other";
 inline constexpr std::string_view ContentScene = "content.Scene";
+inline constexpr std::string_view ContentShader = "content.Shader";
 inline constexpr std::string_view ContentTexture = "content.Texture";
 
 // overlay.*

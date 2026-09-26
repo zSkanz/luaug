@@ -169,12 +169,19 @@ run at any time.
 
 ## Stage 7 — The editor
 
-- [ ] *New Surface Shader* in the content browser, written from a commented
-      template that compiles as it stands.
-- [ ] A `.hlsl` file opens in the built-in text editor, with HLSL highlighting.
-- [ ] The material panel: a shader picker, the reflected parameters as typed
+- [x] *New Surface Shader* in the content browser, written from a commented
+      template that compiles as it stands. `Editor::createSurfaceShader`; the
+      template passes reflection in `editor_tests.cpp`, and a `.surface.hlsl`
+      is a content kind of its own (`ContentKind::Shader`).
+- [x] A `.hlsl` file opens in the built-in text editor, with HLSL highlighting.
+      A tab of `ScriptOrigin::File` -- no instance, saved to its path under the
+      content root -- over a document whose `ScriptLanguage` is HLSL: a
+      hand-written line lexer, no Luau parser, no completion, no breakpoints,
+      and the compiler's errors on their lines.
+- [x] The material panel: a shader picker, the reflected parameters as typed
       fields, the `readsSceneColor` toggle, and the compile status and errors of
-      the named shader.
+      the named shader. The parameters are reflected from the file by the panel
+      itself, so they show in a build with no compiler too.
 
 ## Stage 8 — Documentation and close
 

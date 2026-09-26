@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <string>
 #include <tuple>
 
 namespace luaug::app {
@@ -47,6 +50,50 @@ OpenScript& ScriptEditor::open(core::InstanceId instance, ScriptOrigin origin, s
     m_active = m_tabs.size() - 1;
     m_focusRequest = m_active;
     return m_tabs.back();
+}
+
+OpenScript& ScriptEditor::openFile(std::string file, std::string title, std::string_view source)
+{
+    if (const std::optional<std::size_t> found = indexOfFile(file); found.has_value()) {
+        m_active = *found;
+        m_focusRequest = *found;
+        return m_tabs[*found];
+    }
+
+    OpenScript tab;
+    tab.origin = ScriptOrigin::File;
+    tab.chunk = file;
+    tab.title = std::move(title);
+    tab.document.setLanguage(scriptLanguageOf(file));
+    tab.file = std::move(file);
+    (void)tab.document.setText(source);
+    tab.savedRevision = tab.document.revision();
+
+    m_tabs.push_back(std::move(tab));
+    m_active = m_tabs.size() - 1;
+    m_focusRequest = m_active;
+    return m_tabs.back();
+}
+
+std::optional<std::size_t> ScriptEditor::indexOfFile(std::string_view file) const noexcept
+{
+    for (std::size_t index = 0; index < m_tabs.size(); ++index) {
+        if (m_tabs[index].origin == ScriptOrigin::File && m_tabs[index].file == file)
+            return index;
+    }
+    return std::nullopt;
+}
+
+std::string scriptWindowId(const OpenScript& tab)
+{
+    if (tab.origin != ScriptOrigin::File)
+        return "###script-" + std::to_string(tab.instance.index);
+    std::uint64_t hash = 0xCBF29CE484222325ull;
+    for (const char c : tab.file)
+        hash = (hash ^ static_cast<unsigned char>(c)) * 0x100000001B3ull;
+    char text[40]{};
+    (void)std::snprintf(text, sizeof(text), "###file-%016llx", static_cast<unsigned long long>(hash));
+    return text;
 }
 
 bool ScriptEditor::close(std::size_t index)
@@ -149,6 +196,9 @@ std::size_t ScriptEditor::forgetDestroyed(const scene::World& scene, const scene
         const OpenScript& tab = m_tabs[index - 1];
         // Each tab against its OWN world. A stamp tab with no session open has
         // nowhere left to be edited, which is as gone as a deleted instance.
+        // A file's tab has no instance to lose.
+        if (tab.origin == ScriptOrigin::File)
+            continue;
         const scene::World* home = tab.origin == ScriptOrigin::Scene ? &scene : stamp;
         if (home != nullptr && home->alive(tab.instance))
             continue;

@@ -53,6 +53,10 @@ enum class ContentKind
     // because the browser does its own things with one -- it is OPENED in the
     // material panel, dropped onto a part, and drawn as a ball wearing it.
     Material,
+    // A `.surface.hlsl` (ADR 0091): the code a material names in `shader`.
+    // OPENED in the text editor, as a script is, and offered by the material
+    // panel's shader picker -- the two things nothing else in a folder is for.
+    Shader,
     Other,
 };
 
@@ -90,6 +94,10 @@ inline constexpr std::string_view kSceneExtension = ".scene.json";
 // The same, for a stamp (ADR 0049). It pairs with the scene's on purpose: they
 // are one format over a different root, and the two names say so.
 inline constexpr std::string_view kStampExtension = ".stamp.json";
+
+// A surface shader's (ADR 0091). Compound for the same reason: a project's
+// `.hlsl` may be an include, and only a surface is something a material names.
+inline constexpr std::string_view kShaderExtension = ".surface.hlsl";
 
 // Where `Create Stamp...` puts one unless somebody says otherwise. A convention
 // rather than a rule -- the file's KIND is in its name, so a project may

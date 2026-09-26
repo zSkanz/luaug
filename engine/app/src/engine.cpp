@@ -1844,6 +1844,41 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     editor.touch();
                 }
 
+                // **A surface shader's compile errors, on its lines** (ADR
+                // 0091): what the compiler last said about the file a tab
+                // holds, set on the document only when it changes. An error
+                // in another file -- an include, the generated wrapper -- is
+                // not this tab's to mark.
+#if LUAUG_DEBUG_UI
+                if (surfaceCompiler != nullptr) {
+                    for (std::size_t tabIndex = 0; tabIndex < scripts.count(); ++tabIndex) {
+                        OpenScript* tab = scripts.at(tabIndex);
+                        if (tab == nullptr || tab->origin != ScriptOrigin::File ||
+                            contentKindOf(tab->file) != ContentKind::Shader)
+                            continue;
+                        const std::string name = std::filesystem::path(tab->file).filename().string();
+                        std::vector<Diagnostic> marks;
+                        for (const SurfaceError& problem :
+                             surfaceCompiler->errors(std::string(asset::AssetScheme) + tab->file)) {
+                            const std::string file = std::filesystem::path(problem.file).filename().string();
+                            if (!problem.file.empty() && file != name)
+                                continue;
+                            Diagnostic mark;
+                            mark.at = Position{problem.line > 0 ? problem.line - 1 : 0, 0};
+                            mark.message = problem.message;
+                            marks.push_back(std::move(mark));
+                        }
+                        const std::span<const Diagnostic> shown = tab->document.externalDiagnostics();
+                        const bool same = std::equal(marks.begin(), marks.end(), shown.begin(), shown.end(),
+                                                     [](const Diagnostic& a, const Diagnostic& b) {
+                                                         return a.at == b.at && a.message == b.message;
+                                                     });
+                        if (!same)
+                            tab->document.setExternalDiagnostics(std::move(marks));
+                    }
+                }
+#endif
+
                 if (scriptCommands.toggleBreakpointLine.has_value()) {
                     if (const OpenScript* tab = scripts.at(scripts.activeIndex()); tab != nullptr) {
                         const core::u32 line = *scriptCommands.toggleBreakpointLine;
@@ -1887,7 +1922,17 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 if (scriptCommands.save.has_value()) {
                     const std::size_t index = *scriptCommands.save;
                     if (const OpenScript* tab = scripts.at(index); tab != nullptr) {
-                        if (tab->origin == ScriptOrigin::Stamp) {
+                        if (tab->origin == ScriptOrigin::File) {
+                            // A content file is its own file, under the content
+                            // root; a saved shader is recompiled when the
+                            // compiler next looks at its time (ADR 0091).
+                            if (platform::writeTextFile(editor.content().root() / std::filesystem::path(tab->file),
+                                                        tab->document.text()))
+                                scripts.markSaved(index);
+                            else
+                                editor.report("could not write " + tab->file, true);
+                        }
+                        else if (tab->origin == ScriptOrigin::Stamp) {
                             // **A stamp's script is saved by saving the STAMP**,
                             // which is the file that holds it. Falling through
                             // to the scene wrote the project's scene instead and
@@ -2354,6 +2399,24 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 }
                 if (!editorCommands.openMaterial.empty())
                     (void)editor.openMaterial(editorCommands.openMaterial);
+
+                // **A content file in the text editor** (ADR 0091): a surface
+                // shader, just written from the template or double-clicked.
+                // Read here rather than by the panel, which draws a snapshot.
+                const auto openContentFile = [&](const std::string& relative) {
+                    std::string text;
+                    if (!platform::readTextFile(editor.content().root() / std::filesystem::path(relative), text)) {
+                        editor.report("could not read " + relative, true);
+                        return;
+                    }
+                    (void)scripts.openFile(relative, std::filesystem::path(relative).filename().string(), text);
+                };
+                if (!editorCommands.newShader.empty()) {
+                    if (const std::string made = editor.createSurfaceShader(editorCommands.newShader); !made.empty())
+                        openContentFile(made);
+                }
+                if (!editorCommands.openFile.empty())
+                    openContentFile(editorCommands.openFile);
 
                 // **Which document the frame's mutations belonged to, decided
                 // BEFORE anything can swap it.** `touch()` marks the stage when
@@ -4086,6 +4149,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                     overlay->setEditorTarget(&editor, viewportTarget.texture());
                     overlay->setIcons(&iconAtlas);
                     overlay->setThumbnails(&thumbnails);
+#if LUAUG_DEBUG_UI
+                    overlay->setSurfaceCompiler(surfaceCompiler.get());
+#endif
                     overlay->setScriptEditor(&scripts);
                     // Re-pointed every frame rather than once: a project open
                     // or a hot reload builds a new animation system, and a

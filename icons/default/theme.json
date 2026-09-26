@@ -74,6 +74,7 @@
     "action.MaterialVariant": "spatial",
     "action.NewFolder": "neutral",
     "action.NewMaterial": "spatial",
+    "action.NewShader": "script",
     "action.Paint": "neutral",
     "action.Paste": "neutral",
     "action.Pause": "light",
@@ -179,6 +180,7 @@
     "content.Material": "spatial",
     "content.Mesh": "spatial",
     "content.Scene": "spatial",
+    "content.Shader": "script",
     "content.Texture": "spatial",
     "overlay.Stamp": "neutral",
     "overlay.StampBase": "neutral"
@@ -210,6 +212,7 @@
     "action.New": "action/New.png",
     "action.NewFolder": "action/NewFolder.png",
     "action.NewMaterial": "action/NewMaterial.png",
+    "action.NewShader": "class/Script.png",
     "action.Open": "action/Open.png",
     "action.Paint": "action/Paint.png",
     "action.Paste": "action/Paste.png",
@@ -338,6 +341,7 @@
     "content.Mesh": "class/MeshPart.png",
     "content.Other": "content/Other.png",
     "content.Scene": "content/Scene.png",
+    "content.Shader": "class/Script.png",
     "content.Texture": "class/ImageLabel.png",
     "overlay.Stamp": "overlay/Stamp.png",
     "overlay.StampBase": "overlay/StampBase.png"

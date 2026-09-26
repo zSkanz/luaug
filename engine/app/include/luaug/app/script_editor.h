@@ -88,6 +88,11 @@ enum class ScriptOrigin : core::u8
     // The world the open stamp is edited in. A tab of this kind has nowhere to
     // live once that session closes, and closes with it.
     Stamp,
+    // **No world at all**: a file of the project that is not a script -- a
+    // surface shader (ADR 0091). `instance` is invalid, `file` is the path
+    // under the content root, and Ctrl+S writes it there. Nothing runs it, so
+    // there is nothing to debug and no instance for it to outlive.
+    File,
 };
 
 // One tab.
@@ -305,6 +310,13 @@ public:
     // has been typing.
     OpenScript& open(core::InstanceId instance, ScriptOrigin origin, std::string chunk, std::string file,
                      std::string title, std::string_view source);
+    // Opens a content file that is no instance's (`ScriptOrigin::File`), or
+    // focuses the tab that has it. **Idempotent by path**, for the reason
+    // `open` is idempotent by instance. Its language is its extension's, and
+    // its indentation is left as the file has it: a file this editor did not
+    // write is not this editor's to re-indent.
+    OpenScript& openFile(std::string file, std::string title, std::string_view source);
+    [[nodiscard]] std::optional<std::size_t> indexOfFile(std::string_view file) const noexcept;
 
     // Closes the tab at `index`. The next tab to be in front is the one to its
     // left, which is what leaves the eye where it already was.
@@ -419,5 +431,10 @@ private:
     std::vector<Breakpoint> m_breakpoints;
     core::f32 m_zoom = 1.0f;
 };
+
+// **The id ImGui docks a tab's window by**, after the `###`. An instance's
+// tab is keyed on the instance; a file's on its path, hashed -- every file tab
+// has the same invalid instance, and keying them on it made them one window.
+[[nodiscard]] std::string scriptWindowId(const OpenScript& tab);
 
 } // namespace luaug::app

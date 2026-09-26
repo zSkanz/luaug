@@ -406,6 +406,156 @@ LineState lexLine(std::string_view text, core::u32 lineIndex, LineState entry, s
 
 namespace {
 
+[[nodiscard]] bool isHlslKeyword(std::string_view word)
+{
+    static const std::unordered_set<std::string_view> words{
+        "break",       "case",      "cbuffer",      "const",      "continue",  "default",  "discard",         "do",
+        "else",        "false",     "for",          "if",         "in",        "inline",   "inout",           "out",
+        "register",    "return",    "static",       "struct",     "switch",    "true",     "typedef",         "uniform",
+        "unroll",      "loop",      "branch",       "flatten",    "while",     "linear",   "nointerpolation", "precise",
+        "groupshared", "row_major", "column_major", "packoffset", "namespace", "template",
+    };
+    return words.contains(word);
+}
+
+// A scalar, vector or matrix type, a resource, or the contract's own
+// (`luaug/surface.hlsli`). Recognised by shape rather than listed: `float3x4`
+// and `uint2` are one rule, not twenty entries.
+[[nodiscard]] bool isHlslType(std::string_view word)
+{
+    static const std::unordered_set<std::string_view> named{
+        "void",          "Texture2D",     "Texture3D",     "TextureCube", "SamplerState", "SamplerComparisonState",
+        "SurfaceVertex", "SurfaceInputs", "SurfaceOutput", "matrix",      "vector",
+    };
+    if (named.contains(word))
+        return true;
+    for (const std::string_view scalar : {"bool", "int", "uint", "half", "float", "double", "min16float"}) {
+        if (!word.starts_with(scalar))
+            continue;
+        const std::string_view rest = word.substr(scalar.size());
+        if (rest.empty())
+            return true;
+        const auto digit = [](char c) { return c >= '1' && c <= '4'; };
+        if (rest.size() == 1 && digit(rest[0]))
+            return true;
+        if (rest.size() == 3 && digit(rest[0]) && rest[1] == 'x' && digit(rest[2]))
+            return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool isWordStart(char c) noexcept
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+[[nodiscard]] bool isWordChar(char c) noexcept
+{
+    return isWordStart(c) || (c >= '0' && c <= '9');
+}
+
+} // namespace
+
+LineState lexHlslLine(std::string_view text, LineState entry, std::vector<Token>& out)
+{
+    out.clear();
+    const auto size = static_cast<core::u32>(text.size());
+    core::u32 at = 0;
+
+    // A block comment carried from above runs to its `*/`, or to the end.
+    if (entry.kind == LexKind::LongComment) {
+        const std::size_t close = text.find("*/");
+        if (close == std::string_view::npos) {
+            pushToken(out, 0, size, TokenKind::Comment);
+            return entry;
+        }
+        at = static_cast<core::u32>(close + 2);
+        pushToken(out, 0, at, TokenKind::Comment);
+    }
+
+    // A directive colours its keyword, and the rest of the line is ordinary
+    // code -- `#define X 3` wants its `3` to be a number.
+    const std::size_t first = text.find_first_not_of(" \t", at);
+    if (first != std::string_view::npos && text[first] == '#') {
+        core::u32 end = static_cast<core::u32>(first) + 1;
+        while (end < size && (text[end] == ' ' || text[end] == '\t'))
+            ++end;
+        while (end < size && isWordChar(text[end]))
+            ++end;
+        pushToken(out, static_cast<core::u32>(first), end, TokenKind::Attribute);
+        at = end;
+        // `#include "x"` and `#include <x>`: the name is a string.
+        const std::size_t open = text.find_first_not_of(" \t", at);
+        if (open != std::string_view::npos && text[open] == '<') {
+            const std::size_t close = text.find('>', open);
+            const core::u32 stop = close == std::string_view::npos ? size : static_cast<core::u32>(close + 1);
+            pushToken(out, static_cast<core::u32>(open), stop, TokenKind::String);
+            at = stop;
+        }
+    }
+
+    while (at < size) {
+        const char c = text[at];
+        if (c == ' ' || c == '\t') {
+            ++at;
+            continue;
+        }
+        if (c == '/' && at + 1 < size && text[at + 1] == '/') {
+            pushToken(out, at, size, TokenKind::Comment);
+            return LineState{};
+        }
+        if (c == '/' && at + 1 < size && text[at + 1] == '*') {
+            const std::size_t close = text.find("*/", at + 2);
+            if (close == std::string_view::npos) {
+                pushToken(out, at, size, TokenKind::Comment);
+                return LineState{.kind = LexKind::LongComment};
+            }
+            pushToken(out, at, static_cast<core::u32>(close + 2), TokenKind::Comment);
+            at = static_cast<core::u32>(close + 2);
+            continue;
+        }
+        if (c == '"') {
+            core::u32 end = at + 1;
+            while (end < size && text[end] != '"')
+                end += text[end] == '\\' ? 2 : 1;
+            const bool closed = end < size;
+            end = std::min(end + 1, size);
+            pushToken(out, at, end, closed ? TokenKind::String : TokenKind::Error);
+            at = end;
+            continue;
+        }
+        if ((c >= '0' && c <= '9') || (c == '.' && at + 1 < size && text[at + 1] >= '0' && text[at + 1] <= '9')) {
+            core::u32 end = at + 1;
+            // Digits, a fraction, an exponent with its sign, hex, and the
+            // `f`/`h`/`u`/`l` suffixes -- one run however it is spelt.
+            while (end < size &&
+                   (isWordChar(text[end]) || text[end] == '.' ||
+                    ((text[end] == '+' || text[end] == '-') && (text[end - 1] == 'e' || text[end - 1] == 'E'))))
+                ++end;
+            pushToken(out, at, end, TokenKind::Number);
+            at = end;
+            continue;
+        }
+        if (isWordStart(c)) {
+            core::u32 end = at + 1;
+            while (end < size && isWordChar(text[end]))
+                ++end;
+            const std::string_view word = text.substr(at, end - at);
+            const TokenKind kind = isHlslKeyword(word) ? TokenKind::Keyword
+                                   : isHlslType(word)  ? TokenKind::Type
+                                                       : TokenKind::Identifier;
+            pushToken(out, at, end, kind);
+            at = end;
+            continue;
+        }
+        pushToken(out, at, at + 1, TokenKind::Operator);
+        ++at;
+    }
+    return LineState{};
+}
+
+namespace {
+
 [[nodiscard]] bool isBuiltinName(std::string_view name)
 {
     // Built once: Luau's globals and libraries, and what the engine installs --

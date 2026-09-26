@@ -2530,10 +2530,16 @@ void refreshFolds(OpenScript& tab)
     });
 }
 
-void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* world,
+void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, const scene::World* shown,
               core::InstanceId root, ScriptEditorCommands& out, std::size_t index,
               const ScriptActionButton& actionButton)
 {
+    // **The world is what every Luau-only feature asks** -- completion, the
+    // tree lint, the type checker, signatures -- so a file that is not Luau (a
+    // surface shader, ADR 0091) is drawn as if there were none: it still
+    // colours, folds, finds and edits, and nothing offers it a Part.
+    const bool luau = tab.document.language() == ScriptLanguage::Luau;
+    const scene::World* world = luau ? shown : nullptr;
     const ThemePalette& p = currentTheme().palette;
     PaneMetrics m = metricsFor(tab.document, editor.zoom());
     refreshFolds(tab);
@@ -3130,7 +3136,7 @@ void drawPane(OpenScript& tab, ScriptEditor& editor, const DebugView& debug, con
             else
                 tab.folded.push_back(clicked);
         }
-        else {
+        else if (luau) {
             out.toggleBreakpointLine = clicked;
         }
     }
@@ -3322,8 +3328,8 @@ void drawScriptEditor(ScriptEditor& editor, core::u32 dockNode, DebugView& debug
         // **Unsaved, it ends in a gap the shell paints a dot into**, for the
         // same reason the leading gap exists: a tab takes a string.
         char name[224]{};
-        (void)std::snprintf(name, sizeof(name), "%s%s%s###script-%u", tabIconPad().c_str(), tab->title.c_str(),
-                            tab->dirty() ? tabIconPad().c_str() : "", tab->instance.index);
+        (void)std::snprintf(name, sizeof(name), "%s%s%s%s", tabIconPad().c_str(), tab->title.c_str(),
+                            tab->dirty() ? tabIconPad().c_str() : "", scriptWindowId(*tab).c_str());
 
         // Beside the Viewport on first appearance, and wherever somebody moved
         // it afterwards -- `FirstUseEver` is what lets the saved layout win.

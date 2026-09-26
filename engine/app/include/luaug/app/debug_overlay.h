@@ -45,6 +45,7 @@ class AudioSystem;
 namespace luaug::app {
 class IconAtlas;
 class ThumbnailCache;
+class SurfaceCompiler;
 class ScriptEditor;
 class StreamingHost;
 } // namespace luaug::app
@@ -220,6 +221,11 @@ public:
     // live command list, and this class is handed one nowhere -- so the browser
     // asks while it draws and the loop answers between frames.
     void setThumbnails(ThumbnailCache* thumbnails) noexcept;
+
+    // What the material panel asks about the surface shader a material names
+    // (ADR 0091): whether it compiled, and what it said if not. Null in a
+    // build with no compiler, and the panel then shows the parameters alone.
+    void setSurfaceCompiler(SurfaceCompiler* compiler) noexcept;
 
     // Where `Bone.JointName`'s picker gets its list of joints, or null for a
     // shell with no renderer behind it -- in which case the field is a text box,

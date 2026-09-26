@@ -13,14 +13,17 @@
 #include "luaug/app/project_config.h"
 #include "luaug/app/script_editor.h"
 #include "luaug/app/script_editor_settings.h"
+#include "luaug/app/surface_compiler.h"
 #include "luaug/app/thumbnails.h"
 #include "luaug/app/ui_theme.h"
+#include "luaug/asset/surface_shader.h"
 #include "luaug/core/build_info.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/math.h"
 #include "luaug/core/text_key.h"
 #include "luaug/core/toml_edit.h"
+#include "luaug/platform/file.h"
 #include "luaug/platform/platform.h"
 #include "luaug/platform/sdl_interop.h"
 #include "luaug/platform/window.h"
@@ -296,6 +299,10 @@ const rhi::IDevice* g_device = nullptr;
 // and pointed at from here for the same reason `g_device` is: the row that wants
 // one is drawn several call frames below anything holding an overlay.
 ThumbnailCache* g_thumbnails = nullptr;
+
+// The surface shader compiler, for the material panel's status line (ADR
+// 0091). Owned by the frame loop, like the thumbnails.
+SurfaceCompiler* g_surfaceCompiler = nullptr;
 
 // The rig, for the one property that names a joint (`Bone.JointName`).
 //
@@ -2892,12 +2899,263 @@ struct MaterialFieldRow
     return changed;
 }
 
+// **What a surface shader declares**, read from its file and kept until the
+// file changes: the panel asks every frame, and parsing the source every frame
+// to answer the same question would be the only cost this panel has.
+[[nodiscard]] const asset::SurfaceReflection* surfaceReflectionOf(const ContentTree& tree, std::string_view urn)
+{
+    struct Cached
+    {
+        std::string urn;
+        std::filesystem::file_time_type time{};
+        asset::SurfaceReflection reflection;
+        bool readable = false;
+    };
+    static Cached cached;
+    if (!urn.starts_with(asset::AssetScheme))
+        return nullptr;
+    const std::filesystem::path file = tree.root() / std::filesystem::path(urn.substr(asset::AssetScheme.size()));
+    std::error_code error;
+    const std::filesystem::file_time_type time = std::filesystem::last_write_time(file, error);
+    if (error)
+        return nullptr;
+    if (cached.urn != urn || cached.time != time) {
+        cached.urn = std::string(urn);
+        cached.time = time;
+        std::string text;
+        cached.readable = platform::readTextFile(file, text);
+        cached.reflection = cached.readable ? asset::reflectSurface(text) : asset::SurfaceReflection{};
+    }
+    return cached.readable ? &cached.reflection : nullptr;
+}
+
+// One reflected parameter as a field of the kind its declaration asks for: a
+// slider for a `range`, a colour for a `colour`, a checkbox for a `toggle`.
+[[nodiscard]] bool drawSurfaceParam(const asset::SurfaceParam& param, std::array<core::f32, 4>& value)
+{
+    using T = asset::SurfaceParamType;
+    using A = asset::SurfaceAnnotation;
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (param.type == T::Bool || param.annotation == A::Toggle) {
+        bool on = value[0] != 0.0f;
+        if (!ImGui::Checkbox("##value", &on))
+            return false;
+        value[0] = on ? 1.0f : 0.0f;
+        return true;
+    }
+    if (param.type == T::Int) {
+        int number = static_cast<int>(value[0]);
+        const bool edited =
+            param.annotation == A::Range
+                ? ImGui::SliderInt("##value", &number, static_cast<int>(param.minimum), static_cast<int>(param.maximum))
+                : ImGui::DragInt("##value", &number);
+        value[0] = static_cast<core::f32>(number);
+        return edited;
+    }
+    if (param.annotation == A::Colour && param.type == T::Float3)
+        return ImGui::ColorEdit3("##value", value.data(), ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+    if (param.annotation == A::Colour && param.type == T::Float4)
+        return ImGui::ColorEdit4("##value", value.data(), ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+    const int components = param.type == T::Float2 ? 2 : param.type == T::Float3 ? 3 : param.type == T::Float4 ? 4 : 1;
+    if (param.annotation == A::Range)
+        return ImGui::SliderScalarN("##value", ImGuiDataType_Float, value.data(), components, &param.minimum,
+                                    &param.maximum, "%.3f");
+    return ImGui::DragScalarN("##value", ImGuiDataType_Float, value.data(), components, 0.01f, nullptr, nullptr,
+                              "%.3f");
+}
+
+[[nodiscard]] core::u8 surfaceComponents(asset::SurfaceParamType type) noexcept
+{
+    switch (type) {
+    case asset::SurfaceParamType::Float2:
+        return 2;
+    case asset::SurfaceParamType::Float3:
+        return 3;
+    case asset::SurfaceParamType::Float4:
+        return 4;
+    case asset::SurfaceParamType::Float:
+    case asset::SurfaceParamType::Int:
+    case asset::SurfaceParamType::Bool:
+        break;
+    }
+    return 1;
+}
+
+// **The surface shader a material names** (ADR 0091): which one, whether it
+// reads the scene behind, its parameters as the fields its source declares,
+// and whether it compiles. A variant that has not chosen its own shows its
+// parent's, and choosing one makes it the variant's.
+void drawSurfaceShaderFields(Editor& editor, MaterialFieldRow& row, const asset::MaterialProperties& inherited,
+                             bool variant, EditorCommands& commands)
+{
+    asset::MaterialAsset& next = row.next;
+    asset::MaterialProperties& p = next.properties;
+    ImGui::SeparatorText("surface shader");
+    ImGui::PushID("surface");
+
+    const bool own = !variant || next.shaderWritten;
+    if (!own) {
+        p.shader = inherited.shader;
+        p.readsSceneColor = inherited.readsSceneColor;
+    }
+    ImGui::TextUnformatted("shader");
+    if (variant && own) {
+        ImGui::SameLine();
+        if (iconButton(row.icons, icons::ActionInherit, ImGui::GetFontSize(), "inherit", "inherit",
+                       "Inherit parent material value")) {
+            next.shaderWritten = false;
+            p.shader = inherited.shader;
+            p.readsSceneColor = inherited.readsSceneColor;
+            row.changed = true;
+        }
+    }
+    else if (variant) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("inherited");
+    }
+    // The file's own name in the box; the whole URN is in the tooltip.
+    const bool canEdit = p.shader.starts_with(asset::AssetScheme);
+    const float editWidth = canEdit ? ImGui::CalcTextSize("Edit").x + ImGui::GetStyle().FramePadding.x * 2.0f +
+                                          ImGui::GetStyle().ItemInnerSpacing.x
+                                    : 0.0f;
+    ImGui::SetNextItemWidth(-FLT_MIN - editWidth);
+    const std::string shownShader = p.shader.empty() ? std::string("(built-in)") : p.shader;
+    if (ImGui::BeginCombo("##shader", shownShader.c_str())) {
+        if (ImGui::Selectable("(built-in)", p.shader.empty())) {
+            p.shader.clear();
+            next.shaderWritten = true;
+            row.changed = true;
+        }
+        for (const std::string& file : editor.content().filesOfKind(ContentKind::Shader)) {
+            const std::string urn = std::string(asset::AssetScheme) + file;
+            if (ImGui::Selectable(file.c_str(), urn == p.shader)) {
+                p.shader = urn;
+                next.shaderWritten = true;
+                row.changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (canEdit) {
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        if (ImGui::Button("Edit"))
+            commands.openFile = p.shader.substr(asset::AssetScheme.size());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Open the shader in the text editor");
+    }
+    if (ImGui::Checkbox("reads the scene behind", &p.readsSceneColor)) {
+        next.shaderWritten = true;
+        row.changed = true;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Blended surfaces only: the shader may call sceneColorAt. Costs a copy of the frame.");
+
+    if (p.shader.empty()) {
+        ImGui::PopID();
+        return;
+    }
+
+    // Whether it compiles, and what the compiler said if it does not.
+    if (g_surfaceCompiler != nullptr) {
+        const std::optional<render::SurfaceStatus> status = g_surfaceCompiler->status(p.shader);
+        if (!g_surfaceCompiler->available()) {
+            ImGui::TextDisabled("no shader compiler in this build: drawn with the built-in surface");
+        }
+        else if (!status.has_value()) {
+            ImGui::TextDisabled("not compiled yet: nothing drawn wears it");
+        }
+        else if (*status == render::SurfaceStatus::Pending) {
+            ImGui::TextDisabled("compiling...");
+        }
+        else if (*status == render::SurfaceStatus::Ready) {
+            ImGui::TextColored(themeColor(palette().success), "compiled");
+        }
+        else {
+            ImGui::TextColored(themeColor(palette().danger), "does not compile:");
+            for (const SurfaceError& error : g_surfaceCompiler->errors(p.shader)) {
+                const std::string where = std::filesystem::path(error.file).filename().string();
+                ImGui::TextWrapped("%s:%u  %s", where.c_str(), error.line, error.message.c_str());
+            }
+        }
+    }
+
+    const asset::SurfaceReflection* reflection = surfaceReflectionOf(editor.content(), p.shader);
+    if (reflection == nullptr) {
+        ImGui::TextDisabled("the shader file cannot be read");
+        ImGui::PopID();
+        return;
+    }
+
+    // **A parameter the material does not set reads the shader's default**, and
+    // is shown as that; setting one writes it into the material, and the reset
+    // button takes it back out. A variant's parent's value is its default.
+    const auto effective = [&](std::string_view name) -> const asset::ShaderParameter* {
+        if (const asset::ShaderParameter* mine = p.shaderParameter(name); mine != nullptr)
+            return mine;
+        return variant ? inherited.shaderParameter(name) : nullptr;
+    };
+    const auto drop = [&](std::string_view name) {
+        std::erase_if(p.shaderParameters, [&](const asset::ShaderParameter& one) { return one.name == name; });
+        row.changed = true;
+    };
+    for (const asset::SurfaceParam& param : reflection->params) {
+        ImGui::PushID(param.name.c_str());
+        const asset::ShaderParameter* current = effective(param.name);
+        const bool set = p.shaderParameter(param.name) != nullptr;
+        std::array<core::f32, 4> value = current != nullptr ? current->value : param.value;
+        ImGui::TextUnformatted(param.name.c_str());
+        if (set) {
+            ImGui::SameLine();
+            if (iconButton(row.icons, icons::ActionInherit, ImGui::GetFontSize(), "reset", "reset",
+                           "Back to the shader's default"))
+                drop(param.name);
+        }
+        if (drawSurfaceParam(param, value)) {
+            asset::ShaderParameter written;
+            written.name = param.name;
+            written.value = value;
+            written.components = surfaceComponents(param.type);
+            p.setShaderParameter(std::move(written));
+            row.changed = true;
+            row.continuing = row.continuing || (ImGui::IsItemActive() && !ImGui::IsItemActivated());
+        }
+        ImGui::PopID();
+    }
+    for (const asset::SurfaceTexture& texture : reflection->textures) {
+        ImGui::PushID(texture.name.c_str());
+        const asset::ShaderParameter* current = effective(texture.name);
+        std::string urn = current != nullptr ? current->texture : std::string{};
+        ImGui::TextUnformatted(texture.name.c_str());
+        if (drawMapField(urn, editor.content())) {
+            if (urn.empty()) {
+                drop(texture.name);
+            }
+            else {
+                asset::ShaderParameter written;
+                written.name = texture.name;
+                written.texture = urn;
+                written.linear =
+                    texture.fallback == asset::SurfaceTextureDefault::Normal || (current != nullptr && current->linear);
+                p.setShaderParameter(std::move(written));
+                row.changed = true;
+            }
+        }
+        ImGui::PopID();
+    }
+    for (const asset::SurfaceDiagnostic& problem : reflection->errors) {
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"subject", problem.subject}};
+        const std::string text = core::engineCatalog().format(core::TextKey{core::hashTextKey(problem.key)}, args);
+        ImGui::TextColored(themeColor(palette().danger), "line %u: %s", problem.line, text.c_str());
+    }
+    ImGui::PopID();
+}
+
 // **The material open in the editor**: a ball wearing it, every field of its
 // file, which parameters a part wearing it may change, and Save. Edits are shown
 // in every world as they are made and undone with the panel's own history -- an
 // edit to a file is not an edit to the scene. Closing without saving puts the
 // file's look back.
-void drawMaterialPanel(Editor& editor, const IconAtlas* icons)
+void drawMaterialPanel(Editor& editor, const IconAtlas* icons, EditorCommands& commands)
 {
     const Editor::MaterialSession& session = editor.materialSession();
     if (!session.open())
@@ -3023,6 +3281,8 @@ void drawMaterialPanel(Editor& editor, const IconAtlas* icons)
             asset::MaterialProperties& p = row.begin(F::DoubleSided);
             row.end(F::DoubleSided, ImGui::Checkbox("##value", &p.doubleSided));
         }
+
+        drawSurfaceShaderFields(editor, row, inherited, variant, commands);
 
         // **What a part wearing this may change about it** (ADR 0090). Nothing
         // by default, so an authored material is what its author made; a
@@ -5949,6 +6209,8 @@ bool dialogButton(const char* label, ImVec2 requested)
     // file.
     case ContentKind::Material:
         return icons::ContentMaterial;
+    case ContentKind::Shader:
+        return icons::ContentShader;
     case ContentKind::Other:
         break;
     }
@@ -6061,6 +6323,8 @@ bool drawContentThumbnail(const ContentTree& tree, const ContentEntry& entry, fl
         return "chunk";
     case ContentKind::Material:
         return "material";
+    case ContentKind::Shader:
+        return "shader";
     case ContentKind::Other:
         break;
     }
@@ -6471,6 +6735,11 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                         // somebody edits, with its own undo (ADR 0090).
                         else if (entry.kind == ContentKind::Material)
                             commands.openMaterial = entry.path;
+                        // A surface shader, or an include one reads, opens
+                        // in the text editor beside the scripts (ADR 0091).
+                        else if (entry.kind != ContentKind::Folder &&
+                                 scriptLanguageOf(entry.name) == ScriptLanguage::Hlsl)
+                            commands.openFile = entry.path;
                     }
 
                     // **What KIND of thing this stamp is, on hover.** A stamp
@@ -6529,6 +6798,9 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                                 dialogs.newMaterialParent = entry.path;
                             }
                         }
+                        if (entry.kind != ContentKind::Folder && scriptLanguageOf(entry.name) == ScriptLanguage::Hlsl &&
+                            iconMenuItem(icons, icons::ActionOpen, "Open"))
+                            commands.openFile = entry.path;
                         if (entry.kind == ContentKind::Stamp) {
                             if (iconMenuItem(icons, icons::ActionOpen, "Open"))
                                 commands.openStamp = entry.path;
@@ -6708,6 +6980,8 @@ void drawContent(Editor& editor, EditorCommands& commands, EditorPanels& panels,
                 dialogs.newMaterial = true;
                 dialogs.newMaterialParent.clear();
             }
+            if (iconMenuItem(icons, icons::ActionNewShader, "New Surface Shader..."))
+                dialogs.newShader = true;
             if (iconMenuItem(icons, icons::ActionRefresh, "Refresh"))
                 (void)tree.refresh();
             ImGui::EndPopup();
@@ -7202,6 +7476,10 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
         dialogs.newMaterial = false;
         ImGui::OpenPopup("New Material");
     }
+    if (dialogs.newShader) {
+        dialogs.newShader = false;
+        ImGui::OpenPopup("New Surface Shader");
+    }
     if (dialogs.newStamp) {
         dialogs.newStamp = false;
         ImGui::OpenPopup("New Stamp");
@@ -7307,6 +7585,35 @@ void drawEditorDialogs(Editor& editor, EditorCommands& commands, EditorDialogs& 
                 commands.newMaterialVariantName = typed;
             }
             dialogs.newMaterialParent.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // A surface shader, written from the template (ADR 0091) and opened in the
+    // text editor, where the template explains itself.
+    if (beginEditorDialog("New Surface Shader", 400.0f, []() {})) {
+        static std::array<char, 128> shaderName{};
+        if (dialogOpening()) {
+            shaderName.fill(0);
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(-1.0f);
+        const bool submitted =
+            ImGui::InputText("##shader", shaderName.data(), shaderName.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const std::string typed(shaderName.data());
+        if (!typed.empty())
+            ImGui::TextDisabled("content/%s", Editor::normalizeShaderPath(typed).c_str());
+
+        ImGui::Spacing();
+        ImGui::BeginDisabled(typed.empty() || !ContentTree::isUsableName(typed));
+        const bool accepted = dialogButton("Create", ImVec2(120.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (dialogButton("Cancel", ImVec2(120.0f, 0.0f)) || dialogCancelled())
+            ImGui::CloseCurrentPopup();
+        if ((submitted || accepted) && !typed.empty() && ContentTree::isUsableName(typed)) {
+            commands.newShader = typed;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -7615,10 +7922,12 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
             id = std::string(icons::ClassDebugService);
         else if (scripts != nullptr && world != nullptr) {
             for (const OpenScript& tab : scripts->tabs()) {
-                char suffix[48]{};
-                (void)std::snprintf(suffix, sizeof(suffix), "###script-%u", tab.instance.index);
-                if (!name.ends_with(suffix))
+                if (!name.ends_with(scriptWindowId(tab)))
                     continue;
+                if (tab.origin == ScriptOrigin::File) {
+                    id = std::string(icons::ContentShader);
+                    break;
+                }
                 // Its own class, so a `ModuleScript` tab and a `Script` tab are
                 // told apart at a glance -- which is the question somebody with
                 // six tabs open actually has.
@@ -7634,9 +7943,7 @@ void drawTabIcons(ImGuiID dockspace, const IconAtlas* icons, const scene::World*
         if (scripts == nullptr)
             return false;
         for (const OpenScript& tab : scripts->tabs()) {
-            char suffix[48]{};
-            (void)std::snprintf(suffix, sizeof(suffix), "###script-%u", tab.instance.index);
-            if (name.ends_with(suffix))
+            if (name.ends_with(scriptWindowId(tab)))
                 return tab.dirty();
         }
         return false;
@@ -8430,7 +8737,7 @@ void drawEditorShell(const Frame& frame, scene::World* world, core::InstanceId r
         ImGui::End();
     }
     if (editor != nullptr)
-        drawMaterialPanel(*editor, icons);
+        drawMaterialPanel(*editor, icons, commands);
 
     // Draws with no VM for the same reason it does in the overlay: the LOG half
     // is what somebody wants when the VM failed to boot.
@@ -9574,11 +9881,17 @@ DebugOverlay::~DebugOverlay()
     g_window = nullptr;
     g_device = nullptr;
     g_thumbnails = nullptr;
+    g_surfaceCompiler = nullptr;
 }
 
 void DebugOverlay::setThumbnails(ThumbnailCache* thumbnails) noexcept
 {
     g_thumbnails = thumbnails;
+}
+
+void DebugOverlay::setSurfaceCompiler(SurfaceCompiler* compiler) noexcept
+{
+    g_surfaceCompiler = compiler;
 }
 
 void DebugOverlay::clearConsole()
@@ -9752,6 +10065,9 @@ void DebugOverlay::handleEvents(std::span<const platform::Event>)
 // picture in. The frame loop still owns a cache and still offers it, which is
 // what keeps that loop free of an #ifdef.
 void DebugOverlay::setThumbnails(ThumbnailCache*) noexcept
+{}
+
+void DebugOverlay::setSurfaceCompiler(SurfaceCompiler*) noexcept
 {}
 
 void DebugOverlay::clearConsole()

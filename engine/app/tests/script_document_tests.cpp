@@ -21,10 +21,14 @@
 #include <vector>
 
 using namespace luaug;
+using app::Diagnostic;
 using app::indentWithTabs;
 using app::Position;
 using app::Range;
 using app::ScriptDocument;
+using app::ScriptLanguage;
+using app::scriptLanguageOf;
+using app::Token;
 using app::TokenKind;
 
 namespace {
@@ -974,4 +978,48 @@ TEST_CASE("a local with no value before a call on its line is a missing `=`; a p
     }
     CHECK(missingEquals);
     CHECK(unusedCall);
+}
+
+TEST_CASE("a shader is lexed as HLSL: comments across lines, directives, types")
+{
+    CHECK(scriptLanguageOf("ocean.surface.hlsl") == ScriptLanguage::Hlsl);
+    CHECK(scriptLanguageOf("common.HLSLI") == ScriptLanguage::Hlsl);
+    CHECK(scriptLanguageOf("init.luau") == ScriptLanguage::Luau);
+
+    ScriptDocument document("#include \"luaug/surface.hlsli\"\n"
+                            "/* a comment\n"
+                            "   that ends here */ float3 x = 1.5f; // tail\n"
+                            "if (x.y > 0) { discard; }\n");
+    document.setLanguage(ScriptLanguage::Hlsl);
+
+    const auto kindAt = [&](core::u32 line, core::u32 column) {
+        for (const Token& token : document.tokens(line)) {
+            if (column >= token.column && column < token.column + token.length)
+                return token.kind;
+        }
+        return TokenKind::Text;
+    };
+    CHECK(kindAt(0, 0) == TokenKind::Attribute);
+    CHECK(kindAt(0, 10) == TokenKind::String);
+    CHECK(kindAt(1, 3) == TokenKind::Comment);
+    // The comment crosses the line and stops at its `*/`.
+    CHECK(kindAt(2, 3) == TokenKind::Comment);
+    CHECK(kindAt(2, 21) == TokenKind::Type);
+    CHECK(kindAt(2, 33) == TokenKind::Number);
+    CHECK(kindAt(2, 38) == TokenKind::Comment);
+    CHECK(kindAt(3, 0) == TokenKind::Keyword);
+    CHECK(kindAt(3, 15) == TokenKind::Keyword);
+
+    // No Luau parser has an opinion about it; the compiler's errors are what
+    // it marks, and an `end` is never offered.
+    document.refreshDiagnostics();
+    CHECK(document.diagnostics().empty());
+    Diagnostic error;
+    error.at = Position{2, 0};
+    error.message = "undeclared identifier";
+    document.setExternalDiagnostics({error});
+    document.refreshDiagnostics();
+    REQUIRE(document.diagnostics().size() == 1);
+    CHECK(document.diagnostics()[0].at.line == 2);
+    CHECK_FALSE(document.blockBreakAt(Position{3, 13}).opens);
 }

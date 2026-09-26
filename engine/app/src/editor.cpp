@@ -1446,6 +1446,92 @@ std::string Editor::createMaterial(std::string_view name)
     return relative;
 }
 
+std::string Editor::normalizeShaderPath(std::string_view typed)
+{
+    std::string path(typed);
+    for (char& c : path) {
+        if (c == '\\')
+            c = '/';
+    }
+    while (!path.empty() && path.front() == '/')
+        path.erase(path.begin());
+    constexpr std::string_view ContentPrefix = "content/";
+    while (path.compare(0, ContentPrefix.size(), ContentPrefix) == 0)
+        path.erase(0, ContentPrefix.size());
+    if (path.empty())
+        return path;
+    if (path.find('/') == std::string::npos)
+        path = "shaders/" + path;
+    if (contentKindOf(path) != ContentKind::Shader)
+        path += kShaderExtension;
+    return path;
+}
+
+namespace {
+
+// **What "New Surface Shader" writes.** It compiles as it stands and draws
+// what the built-in surface draws with a tint, so a new file is never a broken
+// one; everything else is comments, because the contract is best learnt in
+// the file somebody is about to change.
+constexpr std::string_view SurfaceShaderTemplate =
+    R"hlsl(// A surface shader (ADR 0091). A material names this file in its `shader`
+// field, and every part wearing that material is drawn with it -- lit, shadowed
+// and fogged exactly as the built-in surface is. The contract, with every
+// member documented, is `luaug/surface.hlsli`.
+#include "luaug/surface.hlsli"
+
+// **Parameters** are what a material sets, by name, and what the material panel
+// shows as fields: `LUAUG_PARAM(type, Name, default, annotation)`, where the
+// annotation is `range(min, max)`, `colour`, `toggle` or `none`.
+LUAUG_PARAM(float3, Tint, float3(1.0, 1.0, 1.0), colour)
+LUAUG_PARAM(float, Wobble, 0.0, range(0, 1))
+
+// **Textures** are named the same way, and read white when a material sets
+// none: `LUAUG_TEXTURE(Name)`, or `LUAUG_TEXTURE(Name, black)` / `normal`.
+// Sample one with `LUAUG_SAMPLE(Name, inputs.Uv0)`.
+
+// Moves a vertex, in the object's space, before it is drawn and before it
+// casts its shadow. `inputs.Time` is the simulation's clock -- the one a script
+// reads as `RunService.SimTime` -- so a script can know where a vertex went.
+void surfaceVertex(inout SurfaceVertex vertex, SurfaceInputs inputs)
+{
+    vertex.Position += vertex.Normal * sin(inputs.Time * 3.0 + vertex.Position.y * 4.0) * Wobble * 0.05;
+}
+
+// Decides what the surface IS -- colour, alpha, metalness, roughness, normal,
+// emission -- and never how it is lit. `surface` starts as the engine's
+// defaults: white, opaque, roughness 0.7, the mesh's normal.
+void surfaceFragment(SurfaceInputs inputs, inout SurfaceOutput surface)
+{
+    surface.BaseColor = Tint * inputs.VertexColor.rgb;
+}
+)hlsl";
+
+} // namespace
+
+std::string Editor::createSurfaceShader(std::string_view name)
+{
+    const std::string relative = normalizeShaderPath(name);
+    if (relative.empty() || !sceneNameIsUsable(relative)) {
+        m_status = EditorStatus{"that is not a name a surface shader can have", true};
+        return {};
+    }
+    const std::filesystem::path absolute = m_content.root() / std::filesystem::path(relative);
+    std::error_code ec;
+    if (std::filesystem::exists(absolute, ec)) {
+        m_status = EditorStatus{"something is already called that", true};
+        return {};
+    }
+    std::filesystem::create_directories(absolute.parent_path(), ec);
+    if (!platform::writeTextFile(absolute, SurfaceShaderTemplate)) {
+        m_status = EditorStatus{"could not write " + relative, true};
+        return {};
+    }
+    (void)m_content.refresh();
+    m_status = EditorStatus{"created " + relative, false};
+    return relative;
+}
+
 std::string Editor::createMaterialVariant(std::string_view parent, std::string_view name)
 {
     const std::string parentPath = normalizeMaterialPath(parent);

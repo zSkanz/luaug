@@ -260,6 +260,8 @@ struct EditorDialogs
     // material a variant would be made of -- empty for a new base.
     bool newMaterial = false;
     std::string newMaterialParent;
+    // "New Surface Shader" (ADR 0091): its name box.
+    bool newShader = false;
 
     // **What is about to throw work away, waiting to be answered.**
     //
@@ -648,6 +650,10 @@ struct EditorCommands
     std::string newMaterial;
     std::string newMaterialVariantOf;
     std::string newMaterialVariantName;
+    // A surface shader to write from the template, and a content file to open
+    // in the text editor -- both content-relative (ADR 0091).
+    std::string newShader;
+    std::string openFile;
 
     // **A sky's pictures, by folder** (ADR 0096): a folder of six images -- or
     // one image -- dropped on a `Sky`, its faces filled by the names' suffixes.
@@ -696,7 +702,7 @@ struct EditorCommands
                !duplicateContent.empty() || newStampClass != scene::InvalidClass || !renameContent.empty() ||
                !assignStampPath.empty() || importAssets || importParent.valid() || openScript.valid() ||
                !assignMaterialPath.empty() || !openMaterial.empty() || !newMaterial.empty() ||
-               !newMaterialVariantOf.empty() || !assignSkyboxPath.empty();
+               !newMaterialVariantOf.empty() || !assignSkyboxPath.empty() || !newShader.empty() || !openFile.empty();
     }
 };
 
@@ -1195,6 +1201,15 @@ public:
     // that names it and overrides nothing yet, so it looks exactly like its
     // parent until somebody changes one field.
     [[nodiscard]] std::string createMaterialVariant(std::string_view parent, std::string_view name);
+
+    // The same for a surface shader (ADR 0091): a bare name lands in
+    // `shaders/`, with `.surface.hlsl`.
+    [[nodiscard]] static std::string normalizeShaderPath(std::string_view typed);
+    // **Writes a surface shader from the template** -- commented, and compiling
+    // as it stands, so the first thing somebody sees is a working surface and
+    // the contract explained where they will read it. Content-relative path,
+    // or empty with `status()` saying why; refused over an existing file.
+    [[nodiscard]] std::string createSurfaceShader(std::string_view name);
 
     // **Makes every instance in `targets` wear the material at `path`**, as one
     // undo step. The gesture is a drop of a material row onto a part, or onto

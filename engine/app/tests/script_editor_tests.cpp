@@ -17,6 +17,7 @@
 #include "class_descriptors.gen.h"
 
 using namespace luaug;
+using app::OpenScript;
 using app::Position;
 using app::ScriptEditor;
 using luaug::app::parseSourceLocation;
@@ -466,4 +467,33 @@ TEST_CASE("a block folds to its first and last lines, and the rows close up")
     CHECK(partly.hidden(2));
     CHECK_FALSE(partly.hidden(3));
     CHECK(partly.rows() == document.lineCount() - 1);
+}
+
+TEST_CASE("a content file opens once, by path, and outlives every world")
+{
+    TwoScripts fixture;
+    ScriptEditor editor;
+    editor.open(fixture.first, app::ScriptOrigin::Scene, "a", "", "a", "");
+    OpenScript& shader = editor.openFile("shaders/sea.surface.hlsl", "sea.surface.hlsl", "float x;\n");
+    CHECK(shader.origin == app::ScriptOrigin::File);
+    CHECK(shader.document.language() == app::ScriptLanguage::Hlsl);
+    CHECK_FALSE(shader.dirty());
+
+    // Opening it again is looking at it, not a second document.
+    editor.setActive(0);
+    editor.openFile("shaders/sea.surface.hlsl", "sea.surface.hlsl", "other");
+    CHECK(editor.count() == 2);
+    CHECK(editor.activeIndex() == 1);
+    CHECK(editor.at(1)->document.text() == "float x;\n");
+
+    // A file's tab has no instance to lose, so a world emptied under it does
+    // not close it -- and its window is not every other file tab's window.
+    fixture.world.destroy(fixture.first);
+    fixture.world.retireDestroyed();
+    CHECK(editor.forgetDestroyed(fixture.world, nullptr) == 1);
+    CHECK(editor.count() == 1);
+    CHECK(editor.at(0)->origin == app::ScriptOrigin::File);
+
+    editor.openFile("shaders/flag.surface.hlsl", "flag.surface.hlsl", "");
+    CHECK(app::scriptWindowId(*editor.at(0)) != app::scriptWindowId(*editor.at(1)));
 }

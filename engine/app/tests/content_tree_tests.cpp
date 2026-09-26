@@ -68,6 +68,12 @@ TEST_CASE("a scene is not a plain json file")
     CHECK(app::contentKindOf("bark.png") == ContentKind::Texture);
     CHECK(app::contentKindOf("notes.txt") == ContentKind::Other);
     CHECK(app::contentKindOf("") == ContentKind::Other);
+
+    // A surface shader is its compound suffix; an include beside it is not
+    // something a material can name (ADR 0091).
+    CHECK(app::contentKindOf("ocean.surface.hlsl") == ContentKind::Shader);
+    CHECK(app::contentKindOf("waves.hlsli") == ContentKind::Other);
+    CHECK(app::contentKindOf("post.hlsl") == ContentKind::Other);
 }
 
 TEST_CASE("folders come first and names are ordered, so two screens agree")
