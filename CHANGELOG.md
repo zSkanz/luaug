@@ -9,6 +9,28 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **A part may change its material's surface shader parameters** (ADR 0091),
+  one by one, as it changes `Color`: a material names them in
+  `instanceParameters`, and `BasePart:SetMaterialParameter`,
+  `GetMaterialParameter` and `ClearMaterialParameter` take their names. The
+  values are saved with the scene, copied by `Clone` and edited in the
+  Properties panel; they are not replicated, and a texture is not one.
+  `GetMaterialParameter` answers `nil` for a shader parameter nothing sets.
+- **A lost graphics device is survived.** A shader that hangs the GPU made the
+  driver reset and the engine crash inside SDL; now the engine says so, the
+  editor offers to save and restart, and the surface shaders that were on
+  screen are held back until they change. A game says so and closes, with
+  exit code 5. `--simulate-device-loss=N` loses the device on frame N, and
+  `--surface-cache=DIR` moves the compiled-surface cache.
+
+### Changed
+
+- `SetMaterialParameter` with a name no built-in field has, on a part whose
+  material does not declare it, raises *not declared* rather than *not a
+  parameter*: such a name may be a surface shader's.
+
 ## [2.0.0] — 2026-09-26
 
 **A major version, because the public API broke**: a part's look is the

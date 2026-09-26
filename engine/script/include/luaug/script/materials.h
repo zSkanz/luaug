@@ -30,6 +30,13 @@ void pushMaterialParameters(lua_State* L, const asset::MaterialOverrides& overri
 // parameter or a value of the wrong kind.
 [[nodiscard]] std::optional<asset::MaterialOverrides> toMaterialParameters(lua_State* L, int index);
 
+// **A surface shader parameter's value** (ADR 0091), to and from Luau: a
+// number, a boolean (1 or 0), a `Vector2`, a `vector` or `Color3` (three), a
+// table of four numbers, or -- where `texture` allows -- a texture's URN. False
+// for anything else, and for a component that is not finite.
+[[nodiscard]] bool readShaderParameterValue(lua_State* L, int index, asset::ShaderParameter& out, bool texture);
+void pushShaderParameterValue(lua_State* L, const asset::ShaderParameter& parameter);
+
 // One parameter's value: a `Color3` for `Color` and `Emissive`, a number for
 // the rest.
 void pushMaterialField(lua_State* L, asset::MaterialField field, const asset::MaterialProperties& values);

@@ -317,6 +317,18 @@ u64 World::worldHash() const
             hasher.pod(u64{0});
         }
 
+        // A part's own shader parameters (ADR 0091), which a script set and
+        // can read back. Hashed only where there are some, so every world that
+        // has none hashes exactly as it did before they existed.
+        if (const std::vector<asset::ShaderParameter>* own = partShaderParameters(id); own != nullptr) {
+            for (const asset::ShaderParameter& parameter : *own) {
+                hasher.text(parameter.name);
+                for (const f32 component : parameter.value)
+                    hasher.number(component);
+                hasher.pod(static_cast<u32>(parameter.components));
+            }
+        }
+
         // Simulation state that is NOT a property, and therefore not covered by
         // the walk below (architecture.md §9: the hash is over sim-relevant
         // components AND physics state).

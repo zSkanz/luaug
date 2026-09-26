@@ -4,7 +4,7 @@
   "parent": "",
   "shader": "asset://shaders/dissolve.surface.hlsl",
   "readsSceneColor": false,
-  "instanceParameters": [],
+  "instanceParameters": ["Threshold"],
   "properties": {
     "AlphaMode": "Mask",
     "AlphaCutoff": 0.5

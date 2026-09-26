@@ -156,11 +156,13 @@ TEST_CASE("an unknown field is reported and not fatal; a wrong-shaped one reads 
     CHECK(read->properties.color == core::Color3{0.0f, 1.0f, 0.0f});
     CHECK(static_cast<double>(read->properties.roughness) == doctest::Approx(0.7));
     CHECK(read->written == fieldBit(MaterialField::Color));
-    // A map is not declarable, and a name that is not a field is not a field.
+    // A map is not declarable; a name that is not a field is one of the
+    // shader's parameters a part may change (ADR 0091) -- `Sparkle` here.
     CHECK(read->instanceParameters == fieldBit(MaterialField::Color));
+    CHECK(read->instanceShaderParameters == std::vector<std::string>{"Sparkle"});
     // `shader` is a field since ADR 0091, and with a shader named, a field the
     // built-in set lacks is one of the shader's parameters -- `Glow` here.
-    CHECK(notes.unknownFields.size() == 2);
+    CHECK(notes.unknownFields.size() == 1);
     CHECK(notes.malformedFields.size() == 1);
     CHECK(read->properties.shaderParameter("Glow") != nullptr);
 
@@ -342,4 +344,52 @@ TEST_CASE("a variant keeps its parent's shader and replaces its parameters by na
                             &notes);
     REQUIRE(notes.unknownFields.size() == 1);
     CHECK(notes.unknownFields[0] == "properties.Mystery");
+}
+
+TEST_CASE("a material lets a part change its shader's parameters by name, and a variant adds to them")
+{
+    const std::string text = R"({
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/dissolve.surface.hlsl",
+  "instanceParameters": ["Threshold", "Color", "Edge", "Threshold", "9bad"],
+  "properties": { "Threshold": 0.5 }
+})";
+    MaterialReadNotes notes;
+    const std::optional<MaterialAsset> read = readMaterialAsset(text, &notes);
+    REQUIRE(read.has_value());
+    // Sorted and once each; a name no parameter can have is noted.
+    CHECK(read->instanceShaderParameters == std::vector<std::string>{"Edge", "Threshold"});
+    CHECK(read->instanceParameters == fieldBit(MaterialField::Color));
+    REQUIRE(notes.unknownFields.size() == 1);
+    CHECK(notes.unknownFields[0] == "instanceParameters.9bad");
+
+    // Written after the built-in fields, and read back to the same file.
+    const std::string written = writeMaterialAsset(*read);
+    CHECK(written.find(R"("instanceParameters": ["Color", "Edge", "Threshold"])") != std::string::npos);
+    CHECK(readMaterialAsset(written)->instanceShaderParameters == read->instanceShaderParameters);
+
+    // A variant declares its parent's and its own.
+    MaterialAsset child;
+    child.parent = "asset://materials/dissolve.material.json";
+    child.instanceShaderParameters = {"Glow"};
+    const MaterialLookup lookup = [&](std::string_view urn) -> const MaterialAsset* {
+        if (urn == "asset://materials/dissolve.material.json")
+            return &*read;
+        if (urn == "asset://materials/burning.material.json")
+            return &child;
+        return nullptr;
+    };
+    const ResolvedMaterial resolved = resolveMaterial("asset://materials/burning.material.json", lookup);
+    CHECK(resolved.instanceShaderParameters == std::vector<std::string>{"Edge", "Glow", "Threshold"});
+    CHECK(resolved.declaresShaderParameter("Glow"));
+    CHECK_FALSE(resolved.declaresShaderParameter("Speed"));
+
+    // And the compiled form carries them.
+    CompiledMaterial compiled;
+    compiled.asset = *read;
+    const std::optional<CompiledMaterial> back = decodeMaterial(encodeMaterial(compiled));
+    REQUIRE(back.has_value());
+    CHECK(back->asset.instanceShaderParameters == read->instanceShaderParameters);
 }

@@ -287,3 +287,62 @@ TEST_CASE("a version 1 scene opens looking the same: its tints become the defaul
     CHECK(report.unknownClasses == 1);
     CHECK(report.droppedReferences == 1);
 }
+
+TEST_CASE("a part's own shader parameters apply where its material declares them, and travel with it")
+{
+    Stage stage;
+    asset::MaterialAsset sea;
+    sea.properties.shader = "asset://shaders/ocean.surface.hlsl";
+    sea.shaderWritten = true;
+    asset::ShaderParameter height;
+    height.name = "Height";
+    height.value[0] = 0.5f;
+    sea.properties.setShaderParameter(height);
+    sea.instanceShaderParameters = {"Height"};
+    sea.written = asset::AllMaterialFields;
+    stage.library.put("asset://materials/sea.material.json", sea);
+
+    const core::InstanceId part = stage.part("Wave");
+    REQUIRE(stage.wear(part, "asset://materials/sea.material.json") == scene::World::SetResult::Changed);
+    const core::u64 plain = stage.world.worldHash();
+
+    asset::ShaderParameter mine = height;
+    mine.value[0] = 2.0f;
+    stage.world.setPartShaderParameter(part, mine);
+    asset::ShaderParameter ignored;
+    ignored.name = "Speed";
+    ignored.value[0] = 9.0f;
+    stage.world.setPartShaderParameter(part, ignored);
+
+    // Applied where declared; kept and ignored where not.
+    asset::ResolvedMaterial surface = stage.world.surfaceOf(*stage.world.parts().find(part));
+    stage.world.applyPartShaderParameters(part, surface);
+    CHECK(surface.properties.shaderParameter("Height")->value[0] == 2.0f);
+    CHECK(surface.properties.shaderParameter("Speed") == nullptr);
+    CHECK(stage.world.worldHash() != plain);
+
+    // A clone carries them; a snapshot does; a scene file does.
+    const core::InstanceId copy = stage.world.clone(part);
+    REQUIRE(stage.world.partShaderParameters(copy) != nullptr);
+    CHECK(stage.world.partShaderParameters(copy)->size() == 2);
+
+    const std::string text = scene::writeScene(stage.world);
+    CHECK(text.find("\"shaderParameters\":{\"Height\":2,\"Speed\":9}") != std::string::npos);
+    Stage reloaded;
+    reloaded.library.put("asset://materials/sea.material.json", sea);
+    REQUIRE_FALSE(scene::readScene(reloaded.world, text).has_value());
+    const core::InstanceId wave = reloaded.world.findFirstChild(reloaded.workspace, reloaded.atom("Wave"));
+    REQUIRE(reloaded.world.partShaderParameters(wave) != nullptr);
+    CHECK(reloaded.world.partShaderParameters(wave)->front().value[0] == 2.0f);
+
+    // Cleared, one at a time; the last takes the entry with it.
+    CHECK(stage.world.clearPartShaderParameter(part, "Height"));
+    CHECK_FALSE(stage.world.clearPartShaderParameter(part, "Height"));
+    CHECK(stage.world.clearPartShaderParameter(part, "Speed"));
+    CHECK(stage.world.partShaderParameters(part) == nullptr);
+
+    // Destroyed: gone from the table.
+    stage.world.destroy(copy);
+    stage.world.retireDestroyed();
+    CHECK(stage.world.allPartShaderParameters().empty());
+}

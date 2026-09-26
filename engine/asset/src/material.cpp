@@ -370,9 +370,16 @@ std::optional<MaterialAsset> readMaterialAsset(std::string_view json, MaterialRe
                 continue;
             }
             for (core::usize item = 0; item < value.size(); ++item) {
-                const std::optional<MaterialField> field = materialFieldNamed(value.at(item).asString());
+                const std::string_view name = value.at(item).asString();
+                const std::optional<MaterialField> field = materialFieldNamed(name);
+                // A name no built-in field has is a surface shader parameter's
+                // (ADR 0091); a built-in field a part may not change is not.
+                if (!field.has_value() && isShaderParameterName(name)) {
+                    addShaderParameterName(out.instanceShaderParameters, name);
+                    continue;
+                }
                 if (!field.has_value() || (fieldBit(*field) & DeclarableParameters) == 0) {
-                    noted.unknownFields.push_back("instanceParameters." + std::string(value.at(item).asString()));
+                    noted.unknownFields.push_back("instanceParameters." + std::string(name));
                     continue;
                 }
                 out.instanceParameters |= fieldBit(*field);
@@ -455,6 +462,8 @@ std::string writeMaterialAsset(const MaterialAsset& material)
         if ((material.instanceParameters & DeclarableParameters & fieldBit(field)) != 0)
             out.value(materialFieldName(field));
     }
+    for (const std::string& name : material.instanceShaderParameters)
+        out.value(name);
     out.endArray();
 
     // A base says everything, so reading it never depends on this engine's
@@ -541,6 +550,8 @@ ResolvedMaterial resolveMaterial(std::string_view urn, const MaterialLookup& loo
         for (const ShaderParameter& parameter : asset.properties.shaderParameters)
             out.properties.setShaderParameter(parameter);
         out.instanceParameters |= static_cast<MaterialFieldMask>(asset.instanceParameters & DeclarableParameters);
+        for (const std::string& name : asset.instanceShaderParameters)
+            addShaderParameterName(out.instanceShaderParameters, name);
     }
     return out;
 }
@@ -706,7 +717,8 @@ namespace {
 
 constexpr std::array<char, 4> CompiledMagic{'L', 'M', 'A', 'T'};
 // 2: the surface shader and its parameters (ADR 0091).
-constexpr core::u32 CompiledVersion = 2;
+// 3: the shader parameters a part may override, by name. 2 is still read.
+constexpr core::u32 CompiledVersion = 3;
 
 class ByteWriter
 {
@@ -787,6 +799,28 @@ private:
 
 } // namespace
 
+bool isShaderParameterName(std::string_view name) noexcept
+{
+    if (name.empty() || name.size() > 64)
+        return false;
+    const auto letter = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
+    if (!letter(name.front()))
+        return false;
+    return std::all_of(name.begin(), name.end(), [&](char c) { return letter(c) || (c >= '0' && c <= '9'); });
+}
+
+void addShaderParameterName(std::vector<std::string>& names, std::string_view name)
+{
+    const auto at = std::lower_bound(names.begin(), names.end(), name);
+    if (at == names.end() || *at != name)
+        names.insert(at, std::string(name));
+}
+
+bool ResolvedMaterial::declaresShaderParameter(std::string_view name) const noexcept
+{
+    return std::binary_search(instanceShaderParameters.begin(), instanceShaderParameters.end(), name);
+}
+
 std::vector<std::byte> encodeMaterial(const CompiledMaterial& material)
 {
     const MaterialAsset& asset = material.asset;
@@ -820,6 +854,9 @@ std::vector<std::byte> encodeMaterial(const CompiledMaterial& material)
         out.text(parameter.texture);
         out.word(parameter.linear ? 1u : 0u);
     }
+    out.word(static_cast<core::u32>(asset.instanceShaderParameters.size()));
+    for (const std::string& name : asset.instanceShaderParameters)
+        out.text(name);
     return out.take();
 }
 
@@ -834,7 +871,7 @@ std::optional<CompiledMaterial> decodeMaterial(std::span<const std::byte> bytes)
     core::u32 version = 0;
     core::u32 written = 0;
     core::u32 declared = 0;
-    if (!in.word(version) || version != CompiledVersion || !in.word(written) || !in.word(declared) ||
+    if (!in.word(version) || (version != CompiledVersion && version != 2) || !in.word(written) || !in.word(declared) ||
         !in.text(asset.parent))
         return std::nullopt;
     asset.written = static_cast<MaterialFieldMask>(written & AllMaterialFields);
@@ -879,6 +916,17 @@ std::optional<CompiledMaterial> decodeMaterial(std::span<const std::byte> bytes)
         parameter.components = static_cast<core::u8>(components);
         parameter.linear = linear != 0;
         p.shaderParameters.push_back(std::move(parameter));
+    }
+    if (version >= 3) {
+        core::u32 names = 0;
+        if (!in.word(names))
+            return std::nullopt;
+        for (core::u32 index = 0; index < names; ++index) {
+            std::string name;
+            if (!in.text(name) || !isShaderParameterName(name))
+                return std::nullopt;
+            addShaderParameterName(asset.instanceShaderParameters, name);
+        }
     }
     if (!in.done())
         return std::nullopt;

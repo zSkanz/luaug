@@ -8,6 +8,7 @@
 #include <lua.h>
 #include <lualib.h>
 
+#include <algorithm>
 #include <cmath>
 #include <new>
 #include <string>
@@ -140,6 +141,84 @@ int materialSet(lua_State* L)
 }
 
 // --- Surface shader parameters (ADR 0091) -------------------------------------
+
+} // namespace
+
+bool readShaderParameterValue(lua_State* L, int index, asset::ShaderParameter& out, bool texture)
+{
+    out.components = 1;
+    out.value = {};
+    out.texture.clear();
+    const int type = lua_type(L, index);
+    if (type == LUA_TNUMBER) {
+        out.value[0] = static_cast<f32>(lua_tonumber(L, index));
+    }
+    else if (type == LUA_TBOOLEAN) {
+        out.value[0] = lua_toboolean(L, index) != 0 ? 1.0f : 0.0f;
+    }
+    else if (type == LUA_TSTRING) {
+        if (!texture)
+            return false;
+        size_t size = 0;
+        const char* urn = lua_tolstring(L, index, &size);
+        out.texture.assign(urn, size);
+    }
+    else if (lua_isvector(L, index)) {
+        const core::Vec3 v = checkVector3(L, index);
+        out.components = 3;
+        out.value = {v.x, v.y, v.z, 0.0f};
+    }
+    else if (type == LUA_TUSERDATA && lua_userdatatag(L, index) == static_cast<int>(UserdataTag::Color3)) {
+        const core::Color3 c = checkColor3(L, index);
+        out.components = 3;
+        out.value = {c.r, c.g, c.b, 0.0f};
+    }
+    else if (type == LUA_TUSERDATA && lua_userdatatag(L, index) == static_cast<int>(UserdataTag::Vector2)) {
+        const core::Vec2 v = checkVector2(L, index);
+        out.components = 2;
+        out.value = {v.x, v.y, 0.0f, 0.0f};
+    }
+    else if (type == LUA_TTABLE && lua_objlen(L, index) == 4) {
+        out.components = 4;
+        for (int slot = 0; slot < 4; ++slot) {
+            lua_rawgeti(L, index, slot + 1);
+            out.value[static_cast<usize>(slot)] = static_cast<f32>(lua_tonumber(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+    else {
+        return false;
+    }
+    return std::all_of(out.value.begin(), out.value.end(), [](f32 component) { return std::isfinite(component); });
+}
+
+void pushShaderParameterValue(lua_State* L, const asset::ShaderParameter& parameter)
+{
+    if (parameter.isTexture()) {
+        lua_pushlstring(L, parameter.texture.data(), parameter.texture.size());
+        return;
+    }
+    switch (parameter.components) {
+    case 2:
+        pushVector2(L, core::Vec2{parameter.value[0], parameter.value[1]});
+        return;
+    case 3:
+        pushVector3(L, core::Vec3{parameter.value[0], parameter.value[1], parameter.value[2]});
+        return;
+    case 4:
+        lua_createtable(L, 4, 0);
+        for (int index = 0; index < 4; ++index) {
+            lua_pushnumber(L, static_cast<double>(parameter.value[static_cast<usize>(index)]));
+            lua_rawseti(L, -2, index + 1);
+        }
+        return;
+    default:
+        lua_pushnumber(L, static_cast<double>(parameter.value[0]));
+        return;
+    }
+}
+
+namespace {
 //
 // Methods rather than members: a shader's parameters are whatever its file
 // declares, and a datatype's members are the IDL's closed set. What is read is
@@ -157,28 +236,8 @@ int materialGetShaderParameter(lua_State* L)
         lua_pushnil(L);
         return 1;
     }
-    if (parameter->isTexture()) {
-        lua_pushlstring(L, parameter->texture.data(), parameter->texture.size());
-        return 1;
-    }
-    switch (parameter->components) {
-    case 2:
-        pushVector2(L, core::Vec2{parameter->value[0], parameter->value[1]});
-        return 1;
-    case 3:
-        pushVector3(L, core::Vec3{parameter->value[0], parameter->value[1], parameter->value[2]});
-        return 1;
-    case 4:
-        lua_createtable(L, 4, 0);
-        for (int index = 0; index < 4; ++index) {
-            lua_pushnumber(L, static_cast<double>(parameter->value[static_cast<usize>(index)]));
-            lua_rawseti(L, -2, index + 1);
-        }
-        return 1;
-    default:
-        lua_pushnumber(L, static_cast<double>(parameter->value[0]));
-        return 1;
-    }
+    pushShaderParameterValue(L, *parameter);
+    return 1;
 }
 
 int materialSetShaderParameter(lua_State* L)
@@ -193,50 +252,9 @@ int materialSetShaderParameter(lua_State* L)
     }
     asset::ShaderParameter parameter;
     parameter.name = std::string(name);
-    const int type = lua_type(L, 3);
-    if (type == LUA_TNUMBER) {
-        parameter.value[0] = static_cast<f32>(lua_tonumber(L, 3));
-    }
-    else if (type == LUA_TBOOLEAN) {
-        parameter.value[0] = lua_toboolean(L, 3) != 0 ? 1.0f : 0.0f;
-    }
-    else if (type == LUA_TSTRING) {
-        size_t size = 0;
-        const char* urn = lua_tolstring(L, 3, &size);
-        parameter.texture.assign(urn, size);
-    }
-    else if (lua_isvector(L, 3)) {
-        const core::Vec3 v = checkVector3(L, 3);
-        parameter.components = 3;
-        parameter.value = {v.x, v.y, v.z, 0.0f};
-    }
-    else if (type == LUA_TUSERDATA && lua_userdatatag(L, 3) == static_cast<int>(UserdataTag::Color3)) {
-        const core::Color3 c = checkColor3(L, 3);
-        parameter.components = 3;
-        parameter.value = {c.r, c.g, c.b, 0.0f};
-    }
-    else if (type == LUA_TUSERDATA && lua_userdatatag(L, 3) == static_cast<int>(UserdataTag::Vector2)) {
-        const core::Vec2 v = checkVector2(L, 3);
-        parameter.components = 2;
-        parameter.value = {v.x, v.y, 0.0f, 0.0f};
-    }
-    else if (type == LUA_TTABLE && lua_objlen(L, 3) == 4) {
-        parameter.components = 4;
-        for (int index = 0; index < 4; ++index) {
-            lua_rawgeti(L, 3, index + 1);
-            parameter.value[static_cast<usize>(index)] = static_cast<f32>(lua_tonumber(L, -1));
-            lua_pop(L, 1);
-        }
-    }
-    else {
+    if (!readShaderParameterValue(L, 3, parameter, true)) {
         const core::I18nArg args[] = {{"property", name}};
         raise(L, LUAUG_TR("script.err.material_value_type"), args);
-    }
-    for (const f32 component : parameter.value) {
-        if (!std::isfinite(component)) {
-            const core::I18nArg args[] = {{"property", name}};
-            raise(L, LUAUG_TR("script.err.material_value_type"), args);
-        }
     }
     scene::MaterialClone* clone = world(L).writeMaterialClone(self.clone);
     if (clone == nullptr) {

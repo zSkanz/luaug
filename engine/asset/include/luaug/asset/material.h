@@ -167,6 +167,11 @@ struct MaterialAsset
     // Which parameters a part wearing this may override. A variant inherits its
     // parent's and may add more; only `DeclarableParameters` bits are kept.
     MaterialFieldMask instanceParameters = 0;
+    // **And which of its surface shader's parameters** (ADR 0091), by name --
+    // any `instanceParameters` entry that is not a built-in field. Sorted,
+    // each once. A shader's parameters are whatever its file declares, so they
+    // cannot be bits of the built-in mask.
+    std::vector<std::string> instanceShaderParameters;
     // Which fields this file writes. A base written by `writeMaterialAsset`
     // writes every one; a variant writes only what it overrides, and every
     // other field comes from its parent.
@@ -215,7 +220,16 @@ struct ResolvedMaterial
 {
     MaterialProperties properties;
     MaterialFieldMask instanceParameters = DefaultMaterialParameters;
+    // The shader parameters a part may override: the union down the chain.
+    std::vector<std::string> instanceShaderParameters;
+
+    [[nodiscard]] bool declaresShaderParameter(std::string_view name) const noexcept;
 };
+
+// Whether `name` can name a shader parameter: an HLSL identifier.
+[[nodiscard]] bool isShaderParameterName(std::string_view name) noexcept;
+// Adds `name` to a sorted list of names, once.
+void addShaderParameterName(std::vector<std::string>& names, std::string_view name);
 
 // The engine default material: built in, never a file.
 [[nodiscard]] const ResolvedMaterial& defaultMaterial() noexcept;

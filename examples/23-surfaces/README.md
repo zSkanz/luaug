@@ -14,7 +14,7 @@ examples\23-surfaces\run.bat
 | | shader | what it shows |
 |---|---|---|
 | the flag | `flag.surface.hlsl` | **vertex displacement** on something that is not water: a flat `luaug://mesh/grid-64` on a pole, rippling away from it, its folds shaded from the same function |
-| the dissolve | `dissolve.surface.hlsl` | a **Mask** surface cut by noise, with a glowing rim ahead of the cut. Each block wears its own `Material:Clone()`, and the script moves the clone's `Threshold` with `SetShaderParameter` |
+| the dissolve | `dissolve.surface.hlsl` | a **Mask** surface cut by noise, with a glowing rim ahead of the cut. All three wear one material that lets a part change `Threshold` (`instanceParameters`), and the script moves each block's own with `SetMaterialParameter` |
 | the glass | `glass.surface.hlsl` | a **blended** surface that reads the scene behind it (`readsSceneColor`) and bends it with `sceneColorAt` |
 
 **Edit any of the three while the editor runs** and it recompiles on save; the
@@ -23,4 +23,4 @@ cache.
 
 **What it does not do yet.** A dissolving block's shadow stays whole: the
 shadow pass draws where a surface is, not where it has cut itself. And a
-clone's shader parameters are this machine's -- they do not replicate.
+part's shader parameters are this machine's -- they do not replicate.

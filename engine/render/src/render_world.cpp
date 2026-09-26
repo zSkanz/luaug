@@ -327,7 +327,8 @@ struct PartLook
     {
         return material == other.material && clone == other.clone && color == other.color &&
                emissive == other.emissive && metalness == other.metalness && roughness == other.roughness &&
-               normalScale == other.normalScale && alphaCutoff == other.alphaCutoff;
+               normalScale == other.normalScale && alphaCutoff == other.alphaCutoff &&
+               block.surfaceValues == other.block.surfaceValues;
     }
 };
 
@@ -340,7 +341,7 @@ struct FrameMaterial
     RenderMaterial block;
 };
 
-[[nodiscard]] PartLook lookOf(const scene::World& world, const scene::PartComponent& part,
+[[nodiscard]] PartLook lookOf(const scene::World& world, core::InstanceId id, const scene::PartComponent& part,
                               const TextureLibrary* textures, std::vector<FrameMaterial>& frame,
                               usize& lastFrameMaterial)
 {
@@ -412,6 +413,29 @@ struct FrameMaterial
     look.block.uniforms.metallicRoughnessNormalCutoff[2] = look.normalScale;
     if (base.alphaMode == static_cast<core::i32>(asset::MaterialAlphaMode::Mask))
         look.block.uniforms.metallicRoughnessNormalCutoff[3] = look.alphaCutoff;
+
+    // **The part's own surface shader parameters** (ADR 0091), where its
+    // material declares them. A part that sets one is a block of its own --
+    // `sameBlock` compares the values -- so it is drawn apart from the parts
+    // that do not, as a part with its own colour is.
+    if (const std::vector<asset::ShaderParameter>* own = world.partShaderParameters(id); own != nullptr) {
+        std::vector<SurfaceValue>& values = look.block.surfaceValues;
+        for (const asset::ShaderParameter& parameter : *own) {
+            if (parameter.isTexture() || !found->resolved.declaresShaderParameter(parameter.name))
+                continue;
+            const auto at =
+                std::lower_bound(values.begin(), values.end(), parameter.name,
+                                 [](const SurfaceValue& value, const std::string& name) { return value.name < name; });
+            if (at != values.end() && at->name == parameter.name) {
+                at->value = parameter.value;
+                at->isTexture = false;
+                at->texture = {};
+            }
+            else {
+                values.insert(at, SurfaceValue{.name = parameter.name, .value = parameter.value});
+            }
+        }
+    }
     return look;
 }
 
@@ -853,7 +877,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         // What the part itself says about its surface, resolved once for the
         // whole mesh rather than once per section: `Material` is a property of
         // the PART, and every section of it gets the same answer.
-        const PartLook look = lookOf(world, *part, materials, frameMaterials, lastFrameMaterial);
+        const PartLook look = lookOf(world, id, *part, materials, frameMaterials, lastFrameMaterial);
 
         for (u32 section = 0; section < entry->sectionCount; ++section) {
             // Resolved before the cull test so that `material` is meaningful
@@ -1335,7 +1359,7 @@ void extract(const scene::World& world, core::InstanceId root, core::InstanceId 
         if (entry == nullptr)
             return;
 
-        const PartLook look = lookOf(world, part, materials, frameMaterials, lastFrameMaterial);
+        const PartLook look = lookOf(world, id, part, materials, frameMaterials, lastFrameMaterial);
         const f32 opacity = 1.0f - look.transparency;
         if (opacity <= 0.0f)
             return;

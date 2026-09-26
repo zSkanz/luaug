@@ -253,7 +253,7 @@
               "Type": "string"
             }
           ],
-          "Returns": ["Color3 | number"],
+          "Returns": ["(Color3 | number | Vector2 | vector | { number })?"],
           "ThreadSafety": "Unsafe"
         },
         {
@@ -271,7 +271,7 @@
             },
             {
               "Name": "value",
-              "Type": "Color3 | number"
+              "Type": "Color3 | number | boolean | Vector2 | vector | { number }"
             }
           ],
           "Returns": [],

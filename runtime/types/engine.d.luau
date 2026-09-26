@@ -806,11 +806,16 @@ declare extern type BasePart extends PVInstance with
     --- Overrides one parameter of the material this part wears, for this part alone. **Raises for a
     --- parameter the material does not declare**: a material decides what a part may change about it,
     --- and a tint written to one that did not allow it would be a surface that silently ignores its
-    --- script. `Color` and `Emissive` take a `Color3`; the rest take a number.
-    function SetMaterialParameter(self, name: string, value: Color3 | number): ()
+    --- script. `Color` and `Emissive` take a `Color3`; the rest take a number. A parameter of the
+    --- material's surface shader, when the material lists it in `instanceParameters`, takes a number, a
+    --- boolean, a `Vector2`, a `vector` or a `Color3`, or four numbers in a table -- not a texture,
+    --- which would make the part a material of its own. **A surface shader parameter is not
+    --- replicated**: set it where the part is drawn.
+    function SetMaterialParameter(self, name: string, value: Color3 | number | boolean | Vector2 | vector | { number }): ()
     --- The value this part draws with for one parameter: its override when it has one the material
-    --- declares, and the material's own value otherwise.
-    function GetMaterialParameter(self, name: string): Color3 | number
+    --- declares, and the material's own value otherwise. `nil` for a surface shader parameter neither
+    --- sets, which draws with the shader's own default.
+    function GetMaterialParameter(self, name: string): (Color3 | number | Vector2 | vector | { number })?
     --- Removes this part's override of one parameter, so it draws with the material's value again.
     --- Clearing one that is not overridden does nothing.
     function ClearMaterialParameter(self, name: string): ()

@@ -352,6 +352,13 @@ struct MaterialClone
 // order the run made them (R10).
 using MaterialClones = std::map<u32, MaterialClone>;
 
+// **A part's own surface shader parameters** (ADR 0091): the ones its material
+// declares in `instanceParameters`, each by name, sorted. A table beside the
+// pools rather than a field of `PartComponent`, because a component is copied
+// as bytes and a name is not one. Keyed by the instance's index and
+// generation, so a walk is in a fixed order (R10).
+using PartShaderParameters = std::map<u64, std::vector<asset::ShaderParameter>>;
+
 // A whole world's state, held in memory (ADR 0016's "snapshottable POD ECS
 // pools" -- foundations, not rollback).
 //
@@ -393,6 +400,7 @@ struct WorldSnapshot
     u64 rngIncrement = 1;
     MaterialClones materialClones;
     u32 lastMaterialClone = 0;
+    PartShaderParameters partShaderParameters;
 };
 
 class World
@@ -641,6 +649,22 @@ public:
     // material declares. `instanceParameters` is what it declares, so a caller
     // can tell a kept-and-ignored override from an applied one.
     [[nodiscard]] asset::ResolvedMaterial surfaceOf(const PartComponent& part) const;
+
+    // A part's own surface shader parameters, or null for one that sets none.
+    // Kept whatever its material declares, as a built-in override is, so a
+    // part put back into a material that declares them looks as it did.
+    [[nodiscard]] const std::vector<asset::ShaderParameter>* partShaderParameters(core::InstanceId id) const noexcept;
+    // Sets one by name. Counted as a mutation.
+    void setPartShaderParameter(core::InstanceId id, asset::ShaderParameter parameter);
+    // Whether there was one to clear.
+    bool clearPartShaderParameter(core::InstanceId id, std::string_view name);
+    [[nodiscard]] const PartShaderParameters& allPartShaderParameters() const noexcept
+    {
+        return m_partShaderParameters;
+    }
+    // A part's parameters applied over what its material says: only the ones
+    // `material` declares, as `applyOverrides` does for the built-in fields.
+    void applyPartShaderParameters(core::InstanceId id, asset::ResolvedMaterial& material) const;
 
     // A new runtime clone of `source` (an asset URN) carrying `set` changes.
     // Its id is the next in creation order, which is part of world state.
@@ -1028,6 +1052,7 @@ private:
     asset::MaterialLibrary* m_materialLibrary = nullptr;
     MaterialClones m_materialClones;
     u32 m_lastMaterialClone = 0;
+    PartShaderParameters m_partShaderParameters;
     std::map<u32, u32> m_materialHolds;
     bool m_sweepMaterials = false;
 };

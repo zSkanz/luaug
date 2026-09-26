@@ -975,10 +975,37 @@ void Inspector::enqueueTag(core::InstanceId target, core::NameAtom tag, bool pre
     pending_.push_back(PendingWrite{target, tag, scene::Value{present}, WriteKind::Tag});
 }
 
+void Inspector::enqueueShaderParameter(core::InstanceId target, core::NameAtom name, asset::ShaderParameter parameter)
+{
+    PendingWrite write{target, name, scene::Value{true}, WriteKind::ShaderParameter};
+    write.shader = std::move(parameter);
+    pending_.push_back(std::move(write));
+}
+
+void Inspector::enqueueShaderParameterClear(core::InstanceId target, core::NameAtom name)
+{
+    pending_.push_back(PendingWrite{target, name, scene::Value{false}, WriteKind::ShaderParameter});
+}
+
 void Inspector::applyPending(scene::World& world)
 {
     for (const PendingWrite& write : pending_) {
         switch (write.kind) {
+        case WriteKind::ShaderParameter: {
+            const auto* set = std::get_if<bool>(&write.value);
+            bool changed = false;
+            if (set != nullptr && *set) {
+                world.setPartShaderParameter(write.target, write.shader);
+                changed = world.alive(write.target);
+            }
+            else {
+                changed = world.clearPartShaderParameter(write.target, world.atoms().text(write.property));
+            }
+            recordOutcome(
+                WriteOutcome{write.target, write.property,
+                             changed ? scene::World::SetResult::Changed : scene::World::SetResult::Unchanged});
+            break;
+        }
         case WriteKind::Attribute: {
             // **The world's own refusal, reported the same way a property's
             // is.** `setAttribute` rejects a value outside the documented

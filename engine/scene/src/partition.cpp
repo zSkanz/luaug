@@ -603,7 +603,8 @@ Leaf Partitioner::readLeaf(std::string_view node)
     // a part wearing any other material stays a whole instance.
     if (const PartComponent* part = m_scratch.world().parts().find(id);
         part != nullptr &&
-        (part->material.valid() || (part->materialParameters.set & ~asset::DefaultMaterialParameters) != 0)) {
+        (part->material.valid() || (part->materialParameters.set & ~asset::DefaultMaterialParameters) != 0 ||
+         m_scratch.world().partShaderParameters(id) != nullptr)) {
         m_scratch.drop(id);
         return leaf;
     }

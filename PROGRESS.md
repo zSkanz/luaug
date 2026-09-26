@@ -378,9 +378,11 @@ in the background, writes one from a template, edits it and shows its
 parameters; `assetc` packs it compiled for SPIR-V, DXIL and MSL and a player
 draws it with no compiler; DXC is built from source and ships beside the
 editor. `examples/11-ocean` is user code now (0.67 ms a frame) and
-`examples/23-surfaces` shows three more. **Not built, and said so in the
-ledger**: a shader parameter a part overrides (`instanceParameters`), surviving
-a GPU hang, and pipeline creation times in `docs/perf-baselines.md`.
+`examples/23-surfaces` shows three more. The three items left open at
+v2.0.0 are built since: a part's own shader parameters (`instanceParameters`
+by name), surviving a lost device (an SDL patch, `IDevice::lost`, a restart
+with the on-screen surfaces held back), and pipeline creation times in
+`docs/perf-baselines.md`.
 
 ## Session Log
 

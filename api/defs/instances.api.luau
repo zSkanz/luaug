@@ -563,22 +563,29 @@ local Classes: { Schema.Class } = {
         Methods = {
             {
                 Name = "SetMaterialParameter",
-                Parameters = { { Name = "name", Type = "string" }, { Name = "value", Type = "Color3 | number" } },
+                Parameters = {
+                    { Name = "name", Type = "string" },
+                    { Name = "value", Type = "Color3 | number | boolean | Vector2 | vector | { number }" },
+                },
                 Returns = {},
                 ThreadSafety = "Unsafe",
                 Doc = "Overrides one parameter of the material this part wears, for this part alone. **Raises "
                     .. "for a parameter the material does not declare**: a material decides what a part may "
                     .. "change about it, and a tint written to one that did not allow it would be a surface "
                     .. "that silently ignores its script. `Color` and `Emissive` take a `Color3`; the rest take "
-                    .. "a number.",
+                    .. "a number. A parameter of the material's surface shader, when the material lists it in "
+                    .. "`instanceParameters`, takes a number, a boolean, a `Vector2`, a `vector` or a `Color3`, or "
+                    .. "four numbers in a table -- not a texture, which would make the part a material of its "
+                    .. "own. **A surface shader parameter is not replicated**: set it where the part is drawn.",
             },
             {
                 Name = "GetMaterialParameter",
                 Parameters = { { Name = "name", Type = "string" } },
-                Returns = { "Color3 | number" },
+                Returns = { "(Color3 | number | Vector2 | vector | { number })?" },
                 ThreadSafety = "Unsafe",
                 Doc = "The value this part draws with for one parameter: its override when it has one the "
-                    .. "material declares, and the material's own value otherwise.",
+                    .. "material declares, and the material's own value otherwise. `nil` for a surface shader "
+                    .. "parameter neither sets, which draws with the shader's own default.",
             },
             {
                 Name = "ClearMaterialParameter",

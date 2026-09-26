@@ -3,6 +3,16 @@
 #include <algorithm>
 
 namespace luaug::scene {
+
+namespace {
+
+// The side table's key: index, then generation, so a walk is in a fixed order.
+[[nodiscard]] constexpr u64 partKey(core::InstanceId id) noexcept
+{
+    return (static_cast<u64>(id.index) << 32) | id.generation;
+}
+
+} // namespace
 namespace {
 
 // api-design.md §2.2: attributes hold the value datatypes and nothing else. A
@@ -157,6 +167,7 @@ void World::retireDestroyed()
         m_attributes.remove(id);
         m_tags.remove(id);
         m_nameIndices.remove(id);
+        m_partShaderParameters.erase(partKey(id));
         // The generation bump lives here and nowhere else: it is the single
         // point at which a handle stops resolving (divergence #25).
         m_instances.erase(id);
@@ -612,6 +623,10 @@ core::InstanceId World::clone(core::InstanceId id)
 
         if (const AttributeMap* attributes = m_attributes.find(original); attributes != nullptr)
             m_attributes.add(copy, *attributes);
+        // A part's own shader parameters go with it (ADR 0091).
+        if (const std::vector<asset::ShaderParameter>* own = partShaderParameters(original); own != nullptr) {
+            m_partShaderParameters[partKey(copy)] = *own;
+        }
         if (const TagSet* tags = m_tags.find(original); tags != nullptr) {
             const TagSet owned = *tags;
             for (const core::NameAtom tag : owned)
@@ -1026,6 +1041,51 @@ MaterialClone& World::adoptMaterialClone(u32 id, core::NameAtom source)
     clone.source = source;
     ++m_mutations;
     return clone;
+}
+
+const std::vector<asset::ShaderParameter>* World::partShaderParameters(core::InstanceId id) const noexcept
+{
+    const auto found = m_partShaderParameters.find(partKey(id));
+    return found == m_partShaderParameters.end() ? nullptr : &found->second;
+}
+
+void World::setPartShaderParameter(core::InstanceId id, asset::ShaderParameter parameter)
+{
+    if (!alive(id))
+        return;
+    std::vector<asset::ShaderParameter>& list = m_partShaderParameters[partKey(id)];
+    const auto at =
+        std::lower_bound(list.begin(), list.end(), parameter.name,
+                         [](const asset::ShaderParameter& one, const std::string& name) { return one.name < name; });
+    if (at != list.end() && at->name == parameter.name)
+        *at = std::move(parameter);
+    else
+        list.insert(at, std::move(parameter));
+    ++m_mutations;
+}
+
+bool World::clearPartShaderParameter(core::InstanceId id, std::string_view name)
+{
+    const auto found = m_partShaderParameters.find(partKey(id));
+    if (found == m_partShaderParameters.end())
+        return false;
+    const auto erased =
+        std::erase_if(found->second, [&](const asset::ShaderParameter& one) { return one.name == name; });
+    if (found->second.empty())
+        m_partShaderParameters.erase(found);
+    if (erased != 0)
+        ++m_mutations;
+    return erased != 0;
+}
+
+void World::applyPartShaderParameters(core::InstanceId id, asset::ResolvedMaterial& material) const
+{
+    if (const std::vector<asset::ShaderParameter>* own = partShaderParameters(id); own != nullptr) {
+        for (const asset::ShaderParameter& parameter : *own) {
+            if (material.declaresShaderParameter(parameter.name))
+                material.properties.setShaderParameter(parameter);
+        }
+    }
 }
 
 const MaterialClone* World::materialClone(u32 id) const noexcept

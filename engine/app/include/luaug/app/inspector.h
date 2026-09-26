@@ -79,6 +79,9 @@ enum class WriteKind : core::u8
     // `World::addTag` / `removeTag`, chosen by `value` holding `true` or
     // `false`. A tag is a name and not a value, so the boolean is the verb.
     Tag,
+    // `World::setPartShaderParameter` (ADR 0091) with `shader`, or -- `value`
+    // holding `false` -- `clearPartShaderParameter` of the one `property` names.
+    ShaderParameter,
 };
 
 struct PendingWrite
@@ -88,6 +91,8 @@ struct PendingWrite
     core::NameAtom property;
     scene::Value value;
     WriteKind kind = WriteKind::Property;
+    // For `ShaderParameter`: the value to set.
+    asset::ShaderParameter shader{};
 };
 
 // What the drain did with one write. Reported back to the panel so a refusal is
@@ -561,6 +566,9 @@ public:
     // take to the world is the property path.
     void enqueueAttribute(core::InstanceId target, core::NameAtom attribute, scene::Value value);
     void enqueueTag(core::InstanceId target, core::NameAtom tag, bool present);
+    // A part's own surface shader parameter (ADR 0091), set or cleared.
+    void enqueueShaderParameter(core::InstanceId target, core::NameAtom name, asset::ShaderParameter parameter);
+    void enqueueShaderParameterClear(core::InstanceId target, core::NameAtom name);
 
     [[nodiscard]] usize pendingCount() const noexcept { return pending_.size(); }
     [[nodiscard]] std::span<const PendingWrite> pending() const noexcept { return pending_; }

@@ -872,19 +872,29 @@ int methodGetNetworkOwner(lua_State* L)
 
 // --- Materials (ADR 0090) -----------------------------------------------------
 
-// The parameter a method names: one of the closed set a material may declare,
-// or a raise naming what was asked for.
-[[nodiscard]] asset::MaterialField checkParameter(lua_State* L, int index)
+// The parameter a method names: a built-in field a material may declare, or --
+// any other name an HLSL identifier can have -- one of its surface shader's
+// (ADR 0091). A raise for a built-in field no part may change, or a name no
+// parameter can have.
+struct NamedParameter
+{
+    std::string_view name;
+    std::optional<asset::MaterialField> field;
+};
+
+[[nodiscard]] NamedParameter checkParameter(lua_State* L, int index)
 {
     size_t length = 0;
     const char* text = luaL_checklstring(L, index, &length);
     const std::string_view name{text, length};
     const std::optional<asset::MaterialField> field = asset::materialFieldNamed(name);
-    if (!field.has_value() || (asset::fieldBit(*field) & asset::DeclarableParameters) == 0) {
-        const core::I18nArg args[] = {{"name", name}};
-        raise(L, LUAUG_TR("script.err.material_parameter_unknown"), args);
-    }
-    return *field;
+    if (field.has_value() && (asset::fieldBit(*field) & asset::DeclarableParameters) != 0)
+        return {name, field};
+    if (!field.has_value() && asset::isShaderParameterName(name))
+        return {name, std::nullopt};
+    const core::I18nArg args[] = {{"name", name}};
+    raise(L, LUAUG_TR("script.err.material_parameter_unknown"), args);
+    return {name, std::nullopt};
 }
 
 // Written through the property rather than into the component, so a `Changed`
@@ -895,32 +905,53 @@ void writeParameters(lua_State* L, core::InstanceId id, const asset::MaterialOve
     (void)w.setProperty(id, w.atoms().intern("MaterialParameters"), scene::Value{overrides});
 }
 
+// **Raises for a parameter the material does not declare** (ADR 0090): a
+// material decides what a part may change about it, and a write it would
+// silently ignore is a script that looks like it works.
+void raiseUndeclared(lua_State* L, const scene::PartComponent& part, std::string_view name)
+{
+    World& w = world(L);
+    if (!part.material.valid()) {
+        const core::I18nArg args[] = {{"name", name}};
+        raise(L, LUAUG_TR("script.err.material_parameter_undeclared_default"), args);
+    }
+    const core::I18nArg args[] = {{"name", name}, {"content", w.atoms().text(part.material)}};
+    raise(L, LUAUG_TR("script.err.material_parameter_undeclared"), args);
+}
+
 int methodSetMaterialParameter(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
-    const asset::MaterialField field = checkParameter(L, 2);
+    const NamedParameter parameter = checkParameter(L, 2);
     World& w = world(L);
     const scene::PartComponent* part = w.parts().find(id);
     if (part == nullptr)
         return 0;
-
-    // **Raises for a parameter the material does not declare** (ADR 0090): a
-    // material decides what a part may change about it, and a write it would
-    // silently ignore is a script that looks like it works.
     const asset::ResolvedMaterial material = w.resolveMaterial(part->material, part->materialClone);
-    const std::string_view name = asset::materialFieldName(field);
-    if ((material.instanceParameters & asset::fieldBit(field)) == 0) {
-        if (!part->material.valid()) {
-            const core::I18nArg args[] = {{"name", name}};
-            raise(L, LUAUG_TR("script.err.material_parameter_undeclared_default"), args);
+
+    if (!parameter.field.has_value()) {
+        // A surface shader's parameter, by name. Not a texture: what a part
+        // draws is batched by material, and a texture of its own would be a
+        // material of its own -- which is what a clone is for.
+        if (!material.declaresShaderParameter(parameter.name))
+            raiseUndeclared(L, *part, parameter.name);
+        asset::ShaderParameter value;
+        value.name = std::string(parameter.name);
+        if (!readShaderParameterValue(L, 3, value, false)) {
+            const core::I18nArg args[] = {{"name", parameter.name}};
+            raise(L, LUAUG_TR("script.err.material_parameter_type"), args);
         }
-        const core::I18nArg args[] = {{"name", name}, {"content", w.atoms().text(part->material)}};
-        raise(L, LUAUG_TR("script.err.material_parameter_undeclared"), args);
+        w.setPartShaderParameter(id, std::move(value));
+        return 0;
     }
+
+    const asset::MaterialField field = *parameter.field;
+    if ((material.instanceParameters & asset::fieldBit(field)) == 0)
+        raiseUndeclared(L, *part, parameter.name);
 
     asset::MaterialProperties values;
     if (!readMaterialParameter(L, 3, field, values)) {
-        const core::I18nArg args[] = {{"name", name}};
+        const core::I18nArg args[] = {{"name", parameter.name}};
         raise(L, LUAUG_TR("script.err.material_parameter_type"), args);
     }
     asset::MaterialOverrides overrides = part->materialParameters;
@@ -932,7 +963,7 @@ int methodSetMaterialParameter(lua_State* L)
 int methodGetMaterialParameter(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
-    const asset::MaterialField field = checkParameter(L, 2);
+    const NamedParameter parameter = checkParameter(L, 2);
     World& w = world(L);
     const scene::PartComponent* part = w.parts().find(id);
     if (part == nullptr) {
@@ -941,19 +972,35 @@ int methodGetMaterialParameter(lua_State* L)
     }
     // What the part draws with: its override where the material declares it,
     // and the material's own value everywhere else.
-    pushMaterialField(L, field, w.surfaceOf(*part).properties);
+    asset::ResolvedMaterial surface = w.surfaceOf(*part);
+    if (!parameter.field.has_value()) {
+        w.applyPartShaderParameters(id, surface);
+        // Nil where neither the part nor its material says: the shader's own
+        // default, which only the shader knows.
+        if (const asset::ShaderParameter* value = surface.properties.shaderParameter(parameter.name); value != nullptr)
+            pushShaderParameterValue(L, *value);
+        else
+            lua_pushnil(L);
+        return 1;
+    }
+    pushMaterialField(L, *parameter.field, surface.properties);
     return 1;
 }
 
 int methodClearMaterialParameter(lua_State* L)
 {
     const core::InstanceId id = liveInstance(L, 1);
-    const asset::MaterialField field = checkParameter(L, 2);
-    const scene::PartComponent* part = world(L).parts().find(id);
-    if (part == nullptr || !part->materialParameters.has(field))
+    const NamedParameter parameter = checkParameter(L, 2);
+    World& w = world(L);
+    if (!parameter.field.has_value()) {
+        (void)w.clearPartShaderParameter(id, parameter.name);
+        return 0;
+    }
+    const scene::PartComponent* part = w.parts().find(id);
+    if (part == nullptr || !part->materialParameters.has(*parameter.field))
         return 0;
     asset::MaterialOverrides overrides = part->materialParameters;
-    asset::clearOverride(overrides, field);
+    asset::clearOverride(overrides, *parameter.field);
     writeParameters(L, id, overrides);
     return 0;
 }

@@ -160,6 +160,34 @@ A value is a number, a boolean, a `Vector2`, a `vector`, a `Color3`, a table of
 four numbers, or a texture's URN. **A clone's shader parameters are not
 replicated**: set them on every machine that draws the part.
 
+## One value per part
+
+A material may let a part change a shader parameter, as it lets one change
+`Color`: name it in `instanceParameters`.
+
+```json
+"instanceParameters": ["Threshold"]
+```
+
+Then every part wearing the material has a `Threshold` of its own, set the way
+a part's colour is -- in the Properties panel, or from a script:
+
+```luau
+--!strict
+crate:SetMaterialParameter("Threshold", 0.5)
+print(crate:GetMaterialParameter("Threshold")) --> 0.5
+crate:ClearMaterialParameter("Threshold") -- back to the material's value
+```
+
+A part's own values are saved with the scene and copied by `Clone`. They take
+anything a shader parameter takes except a texture: a part with a texture of
+its own is a material of its own, which is what `Material:Clone` is for. Like
+a clone's, **a part's shader parameters are not replicated**.
+
+A part with a value of its own is drawn apart from the parts without one, as a
+part with a colour of its own is -- so a few hundred parts each with a
+different value cost a few hundred draws.
+
 ## Moving vertices the game can feel
 
 The GPU moves a vertex, and nothing can read where it went: the picture is
@@ -237,6 +265,15 @@ surfaces go in as source alone, and the game draws them as the error surface.
 A shader runs on the graphics card, with nothing between it and the hardware.
 A loop that never ends -- or one that runs a million times a pixel -- stalls
 the whole card, and after a couple of seconds the operating system resets the
-driver. The editor does not survive that. **Save before you experiment**, keep
-loops bounded by constants, and prefer `[unroll]` over a loop whose count comes
-from a parameter.
+driver -- the screen may go black for a moment.
+
+The editor survives it but cannot keep drawing: the device it drew with is
+gone. It says what happened and offers to **save and restart**. The surface
+shaders that were on screen are **held back** in the restarted editor -- drawn
+as the error surface, with *held back* beside them in the console and the
+material panel -- until you change and save them, so the one that hung the
+card does not hang it again the moment the editor opens. A game that loses its
+device says so and closes.
+
+Keep loops bounded by constants, and prefer `[unroll]` over a loop whose count
+comes from a parameter.

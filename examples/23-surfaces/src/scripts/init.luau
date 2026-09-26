@@ -6,9 +6,9 @@
 ---   * **A flag** (`flag.surface.hlsl`): vertex displacement on something that
 ---     is not water. A flat grid on a pole, rippling away from it.
 ---   * **A dissolve** (`dissolve.surface.hlsl`): a Mask surface that eats itself
----     away. Each block wears its own clone of the material, and this script
----     moves the clone's `Threshold` -- a parameter of the SHADER, set with
----     `SetShaderParameter`.
+---     away. All three blocks wear one material, which lets a part change the
+---     shader's `Threshold` (`instanceParameters`); this script moves each
+---     block's own with `SetMaterialParameter`, as it would a part's colour.
 ---   * **Glass** (`glass.surface.hlsl`): a blended surface that reads the scene
 ---     behind it and bends it.
 ---
@@ -51,18 +51,16 @@ flag.Parent = workspace
 -- --- The dissolve -----------------------------------------------------------
 
 local dissolveMaterial = Material.load("asset://materials/dissolve.material.json")
-local blocks: { { material: Material, phase: number } } = {}
+local blocks: { { part: Part, phase: number } } = {}
 for index = 0, 2 do
     local block = Instance.new("Part")
     block.Name = `Dissolving{index}`
     block.Anchored = true
     block.Size = vector.create(2, 2, 2)
     block.Position = vector.create(-1 + index * 2.8, 1, -3)
-    -- A clone each, so each block has a threshold of its own.
-    local own = dissolveMaterial:Clone()
-    block.Material = own
+    block.Material = dissolveMaterial
     block.Parent = workspace
-    table.insert(blocks, { material = own, phase = index * 1.3 })
+    table.insert(blocks, { part = block, phase = index * 1.3 })
 end
 
 -- --- The glass --------------------------------------------------------------
@@ -100,7 +98,7 @@ RunService.Heartbeat:Connect(function()
         -- In, hold, out, hold: a threshold from 0 to 1 and back, every six seconds.
         local cycle = (now + block.phase) % 6
         local threshold = math.clamp(if cycle < 3 then cycle / 2.4 else (6 - cycle) / 2.4, 0, 1)
-        block.material:SetShaderParameter("Threshold", threshold)
+        block.part:SetMaterialParameter("Threshold", threshold)
     end
 end)
 

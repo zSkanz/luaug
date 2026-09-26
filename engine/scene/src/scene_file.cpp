@@ -766,6 +766,25 @@ void writeInstance(JsonWriter& out, const World& world, core::InstanceId id,
         out.endArray();
     }
 
+    // A part's own surface shader parameters (ADR 0091): a number, or two to
+    // four in an array. Sorted by name already, so the file is stable.
+    if (const std::vector<asset::ShaderParameter>* own = world.partShaderParameters(id); own != nullptr) {
+        out.key("shaderParameters");
+        out.beginObject();
+        for (const asset::ShaderParameter& parameter : *own) {
+            out.key(parameter.name);
+            if (parameter.components <= 1) {
+                out.value(static_cast<double>(parameter.value[0]));
+                continue;
+            }
+            out.beginInlineArray();
+            for (core::u8 component = 0; component < parameter.components; ++component)
+                out.value(static_cast<double>(parameter.value[component]));
+            out.endArray();
+        }
+        out.endObject();
+    }
+
     // **The ground, because a sculpted world is somebody's afternoon.**
     //
     // Terrain is the one piece of world state that is not a property: a field is
@@ -1146,6 +1165,33 @@ void applyNode(World& world, core::InstanceId id, const JsonValue& json, std::ve
     if (const JsonValue tags = json["tags"]; tags.type() == core::JsonType::Array) {
         for (core::usize index = 0; index < tags.size(); ++index)
             (void)world.addTag(id, world.atoms().intern(tags.at(index).asString()));
+    }
+
+    if (const JsonValue own = json["shaderParameters"]; own.type() == core::JsonType::Object) {
+        for (core::usize index = 0; index < own.size(); ++index) {
+            const std::string_view name = own.keyAt(index);
+            const JsonValue entry = own[name];
+            asset::ShaderParameter parameter;
+            parameter.name = std::string(name);
+            bool whole = asset::isShaderParameterName(name);
+            if (entry.type() == core::JsonType::Number) {
+                parameter.value[0] = static_cast<core::f32>(entry.asNumber());
+            }
+            else if (entry.type() == core::JsonType::Array && entry.size() >= 2 && entry.size() <= 4) {
+                parameter.components = static_cast<core::u8>(entry.size());
+                for (core::usize component = 0; component < entry.size(); ++component) {
+                    whole = whole && entry.at(component).type() == core::JsonType::Number;
+                    parameter.value[component] = static_cast<core::f32>(entry.at(component).asNumber());
+                }
+            }
+            else {
+                whole = false;
+            }
+            if (whole)
+                world.setPartShaderParameter(id, std::move(parameter));
+            else
+                ++report.refusedProperties;
+        }
     }
 
     // A tilemap's painted blocks.

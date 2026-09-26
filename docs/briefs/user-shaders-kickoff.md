@@ -111,11 +111,14 @@ run at any time.
       and the texture slots are the engine's and never the user's.
 - [x] The material asset's `"shader"` field and `"readsSceneColor"`. Shader
       parameters are written in `properties` like the built-in fields.
-- [ ] Shader parameters are eligible for `instanceParameters` (ADR 0090), and a
-      part's `SetMaterialParameter` reaches them. **Not built**: a per-part
-      value is a clone per value today (`examples/23-surfaces` does exactly
-      that for its three dissolving blocks).
-- [~] Luau: a shader parameter reads off any handle and writes on a clone,
+- [x] Shader parameters are eligible for `instanceParameters` (ADR 0090), and a
+      part's `SetMaterialParameter` reaches them. By name: a non-field entry of
+      `instanceParameters` is a shader parameter (`instanceShaderParameters`,
+      compiled material v3), and a part keeps its values in a side table of the
+      world (`PartShaderParameters`) -- snapshotted, cloned, hashed where
+      present, saved in the scene as `shaderParameters`, and edited in the
+      Properties panel. Not textures, and not replicated.
+- [x] Luau: a shader parameter reads off any handle and writes on a clone,
       through `Material:GetShaderParameter` and `SetShaderParameter` -- methods
       rather than members, since a shader's parameters are whatever its file
       declares and a datatype's members are the IDL's closed set. The conformance specs cover
@@ -140,8 +143,13 @@ run at any time.
       lists each error with its file and line.
 - [x] Saving a shader or an include recompiles it and reloads every surface
       using it (ADR 0062).
-- [ ] The editor survives a GPU device loss caused by a user shader: it reports
-      the loss and recovers, and does not crash.
+- [x] The editor survives a GPU device loss caused by a user shader: it reports
+      the loss and recovers, and does not crash. **Recovers by restarting**: the
+      RHI marks the device lost (`IDevice::lost`) from the driver's code in
+      SDL's error and drops every call after it; the editor offers to save and
+      restart itself, and the surfaces that were on screen are held back until
+      they change. `device_loss_survived` proves it on a simulated loss, and a
+      real TDR was reproduced by hand before and after.
 - [x] A game packaged by `luaug build` contains no compiler and never compiles.
       The player profile has no `SurfaceCompiler` at all (it is behind
       `LUAUG_DEBUG_UI`), and `tests/packaging` asserts the built folder carries
@@ -149,8 +157,9 @@ run at any time.
 
 ## Stage 5 — The renderer
 
-- [~] A pipeline cache keyed by (shader, pass variant). Record pipeline creation
-      time and pack size per shader in `docs/perf-baselines.md`.
+- [x] A pipeline cache keyed by (shader, pass variant). Record pipeline creation
+      time and pack size per shader in `docs/perf-baselines.md`: 3 to 5.5 ms
+      once per surface per run, about 400 KB a surface in a pack.
 - [x] Scene depth bound for blended surfaces, which is what intersection foam
       needs.
 - [x] Scene colour: a copy of the HDR target after the opaque pass, made by a
@@ -298,6 +307,26 @@ shaders, and mobile -- ADR 0091, *Not decided here*.
 - **Stage 7 -- every file tab was one window.** The script editor keyed a tab's
   window on its instance, and a file has none; the first two shaders opened
   shared a window. `scriptWindowId` keys a file on its path.
-- **Stage 8 -- the editor does not survive a GPU hang.** The brief's device-loss
-  item is not built, and the manual says so in its warning rather than
-  promising a recovery that does not exist.
+- **A lost device crashed inside SDL, not in the engine.** Reproduced with a
+  shader that loops two billion times a pixel: after the reset, SDL's D3D12
+  backend dereferenced the NULL uniform buffer its pool returned
+  (`D3D12_INTERNAL_PushUniformData`), so the process died before the engine
+  could learn anything. `third_party/patches/sdl3/0002` drops the push instead.
+- **SDL_GPU has no device-lost query or event.** The only signal is the
+  driver's code inside the message it sets on a failed call --
+  `0x887A0006` in a message otherwise in the system's language -- so the RHI
+  matches on the codes, never on the words.
+- **Recovery is a restart, not a rebuilt device.** Every GPU object the engine
+  owns -- meshes, textures, pipelines, the editor's own interface -- would have
+  to be recreated in place; a new process does that already, and the one thing
+  it must not do is draw the same shader again, which is what the held-back
+  list is for.
+- **A part's shader parameters are not a component field.** `PartComponent` is
+  copied as bytes, the wire's fields are fixed cells, and a name is neither;
+  the values live in a table beside the pools, which is what the material
+  clones already did. It is hashed only where present, so every recorded world
+  hash and replay is unchanged.
+- **"Sparkle" stopped being unknown.** A name no built-in field has may now be
+  a shader parameter, so on a part whose material does not declare it the
+  error is *not declared*, not *not a parameter*; *not a parameter* is left for
+  a name no parameter can have.

@@ -27,6 +27,7 @@ WorldSnapshot World::snapshot() const
     out.rngIncrement = m_rng.increment();
     out.materialClones = m_materialClones;
     out.lastMaterialClone = m_lastMaterialClone;
+    out.partShaderParameters = m_partShaderParameters;
 
     // The change queue is deliberately absent. A snapshot is taken at a frame
     // boundary where the queue is empty, and a queue captured anywhere else
@@ -53,6 +54,7 @@ void World::restore(const WorldSnapshot& snapshot)
     // not: they are the VM's, and the caller rebuilds the VM.
     m_materialClones = snapshot.materialClones;
     m_lastMaterialClone = snapshot.lastMaterialClone;
+    m_partShaderParameters = snapshot.partShaderParameters;
     m_sweepMaterials = true;
 
     // Cleared rather than restored, and cleared rather than left alone: the

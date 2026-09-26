@@ -50,6 +50,7 @@
 #include <imgui_impl_sdlgpu3.h>
 #include <imgui_internal.h>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -2723,11 +2724,18 @@ void strikeText(const char* text)
     ImGui::GetWindowDrawList()->AddLine(ImVec2(min.x, y), ImVec2(max.x, y), ImGui::GetColorU32(ImGuiCol_TextDisabled));
 }
 
+// Defined with the material panel below; the Properties panel draws a part's
+// own surface shader parameters with the same widgets (ADR 0091).
+[[nodiscard]] const asset::SurfaceReflection* surfaceReflectionOf(const ContentTree& tree, std::string_view urn);
+[[nodiscard]] bool drawSurfaceParam(const asset::SurfaceParam& param, std::array<core::f32, 4>& value);
+[[nodiscard]] core::u8 surfaceComponents(asset::SurfaceParamType type) noexcept;
+
 // **What a part may change about its material**: the parameters the material
 // declares, each with its value and a revert when this part overrides it, and
 // below them any override the part keeps that this material does not declare.
 void drawMaterialParameters(scene::World& world, Inspector& inspector, std::span<const core::InstanceId> targets,
-                            const scene::PropertyDesc& descriptor, bool mixed, const IconAtlas* icons)
+                            const scene::PropertyDesc& descriptor, bool mixed, const IconAtlas* icons,
+                            const ContentTree* tree)
 {
     if (mixed || targets.size() != 1) {
         ImGui::TextDisabled(mixed ? "mixed" : "select one part to edit its parameters");
@@ -2794,6 +2802,79 @@ void drawMaterialParameters(scene::World& world, Inspector& inspector, std::span
             }
         }
         ImGui::PopID();
+    }
+
+    // **The surface shader's parameters this material lets a part change**
+    // (ADR 0091), drawn as the material panel draws them -- by what the
+    // shader's source declares -- and written through the same queue, so undo
+    // and the safe point see them as they see a property.
+    const core::InstanceId id = targets.front();
+    const std::vector<asset::ShaderParameter>* own = world.partShaderParameters(id);
+    const asset::SurfaceReflection* reflection = tree != nullptr && !material.properties.shader.empty()
+                                                     ? surfaceReflectionOf(*tree, material.properties.shader)
+                                                     : nullptr;
+    const auto mineOf = [&](std::string_view name) -> const asset::ShaderParameter* {
+        if (own == nullptr)
+            return nullptr;
+        for (const asset::ShaderParameter& parameter : *own) {
+            if (parameter.name == name)
+                return &parameter;
+        }
+        return nullptr;
+    };
+    for (const std::string& name : material.instanceShaderParameters) {
+        any = true;
+        ImGui::PushID(name.c_str());
+        const asset::ShaderParameter* mine = mineOf(name);
+        const asset::ShaderParameter* base = material.properties.shaderParameter(name);
+        const asset::SurfaceParam* param = reflection != nullptr ? reflection->param(name) : nullptr;
+        ImGui::TextUnformatted(name.c_str());
+        if (mine != nullptr) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "*");
+        }
+        ImGui::SameLine();
+        if (param == nullptr) {
+            ImGui::TextDisabled("not a parameter of its shader");
+        }
+        else {
+            ImGui::SetNextItemWidth(
+                -(mine != nullptr ? ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x : 1.0f));
+            std::array<core::f32, 4> value = mine != nullptr   ? mine->value
+                                             : base != nullptr ? base->value
+                                                               : param->value;
+            if (drawSurfaceParam(*param, value)) {
+                asset::ShaderParameter written;
+                written.name = name;
+                written.value = value;
+                written.components = surfaceComponents(param->type);
+                inspector.enqueueShaderParameter(id, world.atoms().intern(name), std::move(written));
+            }
+        }
+        if (mine != nullptr) {
+            ImGui::SameLine();
+            if (iconButton(icons, icons::ActionRevert, ImGui::GetFontSize(), "revert", "revert",
+                           "Revert to material value"))
+                inspector.enqueueShaderParameterClear(id, world.atoms().intern(name));
+        }
+        ImGui::PopID();
+    }
+    // Kept on the part and ignored, as a built-in override is.
+    if (own != nullptr) {
+        for (const asset::ShaderParameter& parameter : *own) {
+            if (material.declaresShaderParameter(parameter.name))
+                continue;
+            any = true;
+            ImGui::PushID(parameter.name.c_str());
+            strikeText(parameter.name.c_str());
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Kept on this part and ignored: its material does not let a part change %s.",
+                                  parameter.name.c_str());
+            ImGui::SameLine();
+            if (iconButton(icons, icons::ActionRevert, ImGui::GetFontSize(), "revert", "revert", "Remove it"))
+                inspector.enqueueShaderParameterClear(id, world.atoms().intern(parameter.name));
+            ImGui::PopID();
+        }
     }
     if (!any)
         ImGui::TextDisabled("this material lets a part change nothing about it");
@@ -2906,12 +2987,14 @@ struct MaterialFieldRow
 {
     struct Cached
     {
-        std::string urn;
         std::filesystem::file_time_type time{};
         asset::SurfaceReflection reflection;
         bool readable = false;
+        bool read = false;
     };
-    static Cached cached;
+    // By URN: the material panel and the Properties panel ask about different
+    // shaders in the same frame.
+    static std::map<std::string, Cached, std::less<>> cache;
     if (!urn.starts_with(asset::AssetScheme))
         return nullptr;
     const std::filesystem::path file = tree.root() / std::filesystem::path(urn.substr(asset::AssetScheme.size()));
@@ -2919,8 +3002,12 @@ struct MaterialFieldRow
     const std::filesystem::file_time_type time = std::filesystem::last_write_time(file, error);
     if (error)
         return nullptr;
-    if (cached.urn != urn || cached.time != time) {
-        cached.urn = std::string(urn);
+    auto found = cache.find(urn);
+    if (found == cache.end())
+        found = cache.emplace(std::string(urn), Cached{}).first;
+    Cached& cached = found->second;
+    if (!cached.read || cached.time != time) {
+        cached.read = true;
         cached.time = time;
         std::string text;
         cached.readable = platform::readTextFile(file, text);
@@ -3170,12 +3257,14 @@ void drawMaterialPanel(Editor& editor, const IconAtlas* icons, EditorCommands& c
         asset::MaterialProperties inherited;
         const bool variant = !session.asset.parent.empty();
         asset::MaterialFieldMask parentDeclares = 0;
+        std::vector<std::string> parentDeclaresShader;
         if (variant) {
             ImGui::TextDisabled("a variant of %s", session.asset.parent.c_str());
             if (asset::MaterialLibrary* library = editor.materialLibrary(); library != nullptr) {
                 const asset::ResolvedMaterial& parent = library->resolve(session.asset.parent);
                 inherited = parent.properties;
                 parentDeclares = parent.instanceParameters;
+                parentDeclaresShader = parent.instanceShaderParameters;
             }
         }
 
@@ -3307,6 +3396,35 @@ void drawMaterialPanel(Editor& editor, const IconAtlas* icons, EditorCommands& c
                 ImGui::SetTooltip("declared by the parent material");
             ImGui::PopID();
         }
+        // And the surface shader's own parameters (ADR 0091), by name: every
+        // value one declares, and none of its textures -- a part with a
+        // texture of its own is a material of its own.
+        if (const asset::SurfaceReflection* reflection =
+                next.properties.shader.empty() ? nullptr
+                                               : surfaceReflectionOf(editor.content(), next.properties.shader);
+            reflection != nullptr) {
+            for (const asset::SurfaceParam& param : reflection->params) {
+                ImGui::PushID(param.name.c_str());
+                const bool fromParent =
+                    std::binary_search(parentDeclaresShader.begin(), parentDeclaresShader.end(), param.name);
+                const auto mine = std::lower_bound(next.instanceShaderParameters.begin(),
+                                                   next.instanceShaderParameters.end(), param.name);
+                const bool listed = mine != next.instanceShaderParameters.end() && *mine == param.name;
+                bool declared = fromParent || listed;
+                ImGui::BeginDisabled(fromParent);
+                if (ImGui::Checkbox(param.name.c_str(), &declared)) {
+                    if (declared)
+                        asset::addShaderParameterName(next.instanceShaderParameters, param.name);
+                    else if (listed)
+                        next.instanceShaderParameters.erase(mine);
+                    row.changed = true;
+                }
+                ImGui::EndDisabled();
+                if (fromParent && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                    ImGui::SetTooltip("declared by the parent material");
+                ImGui::PopID();
+            }
+        }
 
         if (row.changed) {
             editor.editMaterial(next, row.continuing);
@@ -3398,7 +3516,7 @@ void drawEditor(scene::World& world, core::InstanceId root, Inspector& inspector
     }
     if (editorFor(descriptor) == EditorKind::MaterialParameters) {
         ImGui::PushID(static_cast<int>(descriptor.name.id));
-        drawMaterialParameters(world, inspector, targets, descriptor, mixed, icons);
+        drawMaterialParameters(world, inspector, targets, descriptor, mixed, icons, tree);
         ImGui::PopID();
         return;
     }
