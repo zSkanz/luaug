@@ -45,9 +45,12 @@ local ReloadBudgetMs = 500
 -- The tick both worlds are sampled at. Large enough that the Heartbeat handler
 -- below has run many times, so the hash reflects simulated behaviour rather
 -- than the tree boot built -- and far enough ahead in wall-clock terms (a dev
--- session runs at the fixed 60 Hz tick, so this is one second) that the request
--- for it always arrives before the world gets there.
-local SampleTick = 60
+-- session runs at the fixed 60 Hz tick, so this is four seconds) that the
+-- request for it arrives before the world gets there. One second was not: a
+-- loaded CI runner delivered the request at tick 63, and a sample of a tick
+-- already past is answered at the tick it is taken, so the comparison failed
+-- on timing alone (D201).
+local SampleTick = 240
 
 -- A long string rather than an interpolated one: Luau's backtick strings cannot
 -- span lines, and this has to be a whole file.

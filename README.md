@@ -7,11 +7,11 @@
 
 LuauG gives you the developer experience you already know — `Instance` trees, `game:GetService`, `task.spawn`, signals with `:Connect` — in an independent, professional engine: a modern C++ core embedding the Luau VM directly, a data-oriented ECS behind a familiar Instance facade, a swappable renderer and physics stack, deterministic fixed-tick simulation, and a code-first workflow (VS Code + CLI + sub-second hot reload). It targets complete 2D and 3D games, from small scenes to huge streamed open worlds, on desktop first, then mobile, with a console-ready architecture.
 
-> **STATUS: `v1.1.0` is released**, with the engine (`v1.0.0`) and the visual
-> editor on top of it. Every milestone is signed off and tagged. The phases
-> after it are being built in the open: sculpted terrain with caves, block
-> worlds with flowing water, particles and decals, UI in the world, and
-> multiplayer. The engine boots a sandboxed Luau VM, opens a window, runs a
+> **STATUS: `v2.0.0` is released**: the engine (`v1.0.0`), the visual editor
+> (`v1.1.0`), and the phases after them -- materials as assets and surface
+> shaders, sculpted terrain with caves, block worlds with flowing water,
+> particles and decals, UI in the world, multiplayer with teams, ownership and
+> rollback, navigation, and the 2D layer with joints and sprite animation. The engine boots a sandboxed Luau VM, opens a window, runs a
 > deterministic fixed-tick simulation over an Instance tree on an ECS,
 > hot-reloads a saved script into a new world in under two milliseconds, renders
 > a world with cascaded shadows, clustered lights, image-based lighting and a
@@ -68,7 +68,7 @@ LuauG gives you the developer experience you already know — `Instance` trees, 
 | ✅ | **F2** — `ParticleEmitter` and projected `Decal`s, soft particles | built |
 | ✅ | **F3** — `SurfaceGui`, `BillboardGui` and rich text: UI drawn and pressed in the world | built |
 | ✅ | **N1** — multiplayer: host, dedicated server and replica from one binary; prediction, interpolation, interest | playable on a LAN |
-| 🔨 | **N2** — a game's own messages: `RemoteEvent` | its first piece built |
+| ✅ | **N2** — a game's own messages, teams, network ownership, rollback and a published protocol | released `v2.0.0` |
 
 **What runs today.** `luaug new` scaffolds a project; `luaug dev` runs it with a
 watcher, so a saved file rebuilds the world without the window closing;

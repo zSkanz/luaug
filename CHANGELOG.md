@@ -9,6 +9,19 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-26
+
+**A major version, because the public API broke**: a part's look is the
+material it wears (ADR 0090), and `BasePart.Color` and `BasePart.Transparency`
+are gone -- see *Changed -- BREAKING* for the migration. Around that change:
+surface shaders, and an ocean made from one (ADR 0091); the world's look as
+instances under `Lighting` (ADR 0096); voxel terrain that streams from disk;
+multiplayer with prediction, interpolation, interest, remotes, teams, network
+ownership, rollback and a published wire protocol, now at version 15;
+navigation for several agent sizes, priced ground, links, crowds and the 2D
+plane; and the 2D layer's joints, sprite animation and replication. A peer on
+protocol 14 or older is refused.
+
 ### Changed -- BREAKING
 
 - **A text's alignment is `TextXAlignment` / `TextYAlignment`** on `TextLabel`
@@ -559,5 +572,6 @@ every value collides as a box. Properties the engine stores and does not read
 are marked `Inert` in the inspector and the api-dump, and a gate stops a new one
 appearing quietly.
 
+[2.0.0]: https://github.com/zSkanz/LuauG/releases/tag/v2.0.0
 [1.1.0]: https://github.com/zSkanz/LuauG/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zSkanz/LuauG/releases/tag/v1.0.0

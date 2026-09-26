@@ -231,6 +231,10 @@ approximating one, and the packaged game ships Luau SOURCE rather than bytecode
 
   Both of those closed on 2026-09-23 on the owner's delegation: the four
   milestones are signed and tagged, and `v1.1.0` is cut.
+- **`v2.0.0` is released, 2026-09-26**, on the owner's word ("mete marcha na
+  tag"): a major version because ADR 0090 removed `BasePart.Color` and
+  `BasePart.Transparency`. It carries the 2026-09-24 mandate, ADR 0091's
+  surface shaders and the wire at protocol 15.
 - **`v1.1.0` is released, 2026-09-23**, tagged on `main` with the editor phase
   and the first of phases 2 and 4 in it; the archive is built from a clean
   checkout of the tag, and the GitHub release carries it.
