@@ -70,6 +70,15 @@ public:
     // Blocks until nothing is compiling: for tests and for a measured compile.
     void drain();
 
+    // **After the graphics device was lost**: every surface drawn in the last
+    // few seconds is held back -- compiled to the error surface, and said so --
+    // until its source changes. One of them is the likeliest reason the device
+    // was lost, and a restarted editor that drew it again would lose it again.
+    // Kept beside the cache, so the next process reads it.
+    void quarantineShown();
+    // Whether `urn` is held back, for the material panel and tests.
+    [[nodiscard]] bool quarantined(std::string_view urn) const;
+
 private:
     struct Entry
     {
@@ -83,6 +92,9 @@ private:
         std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>> dependencies;
         std::chrono::steady_clock::time_point checked{};
         core::u64 revision = 0;
+        // When the renderer last asked for it: what "on screen" means to
+        // `quarantineShown`.
+        std::chrono::steady_clock::time_point asked{};
     };
 
     void work();
@@ -94,6 +106,9 @@ private:
     std::filesystem::path m_cache;
     // A hash of every engine header, part of every cache key.
     core::u64 m_headers = 0;
+    // Held-back surfaces: urn to a hash of the source that was held back.
+    std::map<std::string, core::u64, std::less<>> m_quarantine;
+    void writeQuarantine() const;
 
     mutable std::mutex m_mutex;
     std::condition_variable m_wake;

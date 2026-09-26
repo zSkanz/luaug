@@ -12,6 +12,7 @@
 //   and the release all happen here, because a caller that had to know about
 //   them would be writing SDL_GPU code through a wrapper.
 
+#include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/sdl_interop.h"
@@ -21,9 +22,12 @@
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_gpu.h>
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "sdlgpu_enums.h"
@@ -107,6 +111,18 @@ public:
     void pushDebugGroup(std::string_view name) override;
     void popDebugGroup() override;
 
+    // **Drops the frame without a word to the driver**, for a lost device:
+    // ending a pass or releasing a buffer is a call into a backend that has
+    // already failed. Every method after this is a no-op until `begin`.
+    void abandon() noexcept
+    {
+        renderPass_ = nullptr;
+        copyPass_ = nullptr;
+        buffer_ = nullptr;
+        staging_ = nullptr;
+        stagingCapacity_ = 0;
+    }
+
 private:
     [[nodiscard]] SDL_GPUCopyPass* ensureCopyPass() noexcept;
 
@@ -152,7 +168,10 @@ public:
 
     ~SdlGpuDevice() override
     {
-        if (device_ == nullptr)
+        // A lost device is left as it is: releasing into it is exactly the
+        // kind of call that crashed inside the backend. The process is about
+        // to end, and the operating system takes it all back.
+        if (device_ == nullptr || lost_)
             return;
 
         SDL_WaitForGPUIdle(device_);
@@ -191,8 +210,41 @@ public:
         return caps;
     }
 
+    [[nodiscard]] bool lost() const noexcept override { return lost_; }
+    void simulateLoss() noexcept override { markLost("simulated"); }
+
+    // Called where an SDL call failed: the device is lost when the error says
+    // so. SDL has no event or query for it, only the driver's code in the
+    // message it sets -- DXGI's 0x887A0005/6/7/20, Vulkan's
+    // VK_ERROR_DEVICE_LOST -- which is also what makes this independent of the
+    // language the rest of the message is in.
+    void noteFailure() noexcept
+    {
+        std::string error = SDL_GetError();
+        std::transform(error.begin(), error.end(), error.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        for (const char* code : {"0X887A0005", "0X887A0006", "0X887A0007", "0X887A0020", "VK_ERROR_DEVICE_LOST"}) {
+            if (error.find(code) != std::string::npos) {
+                markLost(SDL_GetError());
+                return;
+            }
+        }
+    }
+
+    void markLost(std::string_view reason) noexcept
+    {
+        if (lost_)
+            return;
+        lost_ = true;
+        cmdList_.abandon();
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"reason", reason}};
+        core::log(core::LogLevel::Error, LUAUG_TR("rhi.err.device_lost"), args);
+    }
+
     [[nodiscard]] bool claimWindow(platform::Window& window) override
     {
+        if (lost_)
+            return false;
         SDL_Window* native = platform::nativeWindow(window);
         if (!SDL_ClaimWindowForGPUDevice(device_, native))
             return false;
@@ -206,6 +258,8 @@ public:
 
     void releaseWindow(platform::Window& window) override
     {
+        if (lost_)
+            return;
         SDL_Window* native = platform::nativeWindow(window);
         for (usize i = 0; i < windows_.size(); ++i) {
             if (windows_[i].window != native)
@@ -222,14 +276,18 @@ public:
 
     [[nodiscard]] BufferHandle createBuffer(const BufferDesc& desc) override
     {
+        if (lost_)
+            return {};
         const SDL_GPUBufferCreateInfo info{
             .usage = toSdl(desc.usage),
             .size = desc.sizeBytes,
             .props = 0,
         };
         SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(device_, &info);
-        if (buffer == nullptr)
+        if (buffer == nullptr) {
+            noteFailure();
             return {};
+        }
 
         if (!desc.debugName.empty())
             SDL_SetGPUBufferName(device_, buffer, std::string(desc.debugName).c_str());
@@ -239,6 +297,8 @@ public:
 
     [[nodiscard]] TextureHandle createTexture(const TextureDesc& desc) override
     {
+        if (lost_)
+            return {};
         const SDL_GPUTextureCreateInfo info{
             .type = SDL_GPU_TEXTURETYPE_2D,
             .format = toSdl(desc.format),
@@ -251,8 +311,10 @@ public:
             .props = 0,
         };
         SDL_GPUTexture* texture = SDL_CreateGPUTexture(device_, &info);
-        if (texture == nullptr)
+        if (texture == nullptr) {
+            noteFailure();
             return {};
+        }
 
         if (!desc.debugName.empty())
             SDL_SetGPUTextureName(device_, texture, std::string(desc.debugName).c_str());
@@ -268,6 +330,8 @@ public:
 
     [[nodiscard]] SamplerHandle createSampler(const SamplerDesc& desc) override
     {
+        if (lost_)
+            return {};
         const SDL_GPUSamplerCreateInfo info{
             .min_filter = toSdl(desc.minFilter),
             .mag_filter = toSdl(desc.magFilter),
@@ -287,11 +351,15 @@ public:
             .props = 0,
         };
         SDL_GPUSampler* sampler = SDL_CreateGPUSampler(device_, &info);
+        if (sampler == nullptr)
+            noteFailure();
         return sampler != nullptr ? SamplerHandle{addSlot(samplers_, sampler)} : SamplerHandle{};
     }
 
     [[nodiscard]] ShaderHandle createShader(const ShaderDesc& desc) override
     {
+        if (lost_)
+            return {};
         const std::string entryPoint(desc.entryPoint);
         const SDL_GPUShaderCreateInfo info{
             .code_size = desc.code.size(),
@@ -306,6 +374,8 @@ public:
             .props = 0,
         };
         SDL_GPUShader* shader = SDL_CreateGPUShader(device_, &info);
+        if (shader == nullptr)
+            noteFailure();
         return shader != nullptr ? ShaderHandle{addSlot(shaders_, shader)} : ShaderHandle{};
     }
 
@@ -313,6 +383,8 @@ public:
 
     void destroy(BufferHandle handle) override
     {
+        if (lost_)
+            return;
         if (SDL_GPUBuffer** entry = slot(buffers_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUBuffer(device_, *entry);
             *entry = nullptr;
@@ -321,6 +393,8 @@ public:
 
     void destroy(TextureHandle handle) override
     {
+        if (lost_)
+            return;
         if (TextureEntry* entry = slot(textures_, handle.id); entry != nullptr && entry->texture != nullptr) {
             if (entry->owned)
                 SDL_ReleaseGPUTexture(device_, entry->texture);
@@ -330,6 +404,8 @@ public:
 
     void destroy(SamplerHandle handle) override
     {
+        if (lost_)
+            return;
         if (SDL_GPUSampler** entry = slot(samplers_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUSampler(device_, *entry);
             *entry = nullptr;
@@ -338,6 +414,8 @@ public:
 
     void destroy(ShaderHandle handle) override
     {
+        if (lost_)
+            return;
         if (SDL_GPUShader** entry = slot(shaders_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUShader(device_, *entry);
             *entry = nullptr;
@@ -346,6 +424,8 @@ public:
 
     void destroy(PipelineHandle handle) override
     {
+        if (lost_)
+            return;
         if (SDL_GPUGraphicsPipeline** entry = slot(pipelines_, handle.id); entry != nullptr && *entry != nullptr) {
             SDL_ReleaseGPUGraphicsPipeline(device_, *entry);
             *entry = nullptr;
@@ -354,7 +434,15 @@ public:
 
     [[nodiscard]] ICmdList* beginFrame() override
     {
-        cmdList_.begin(SDL_AcquireGPUCommandBuffer(device_));
+        // A lost device's frame is an empty one: every command a no-op.
+        if (lost_) {
+            cmdList_.begin(nullptr);
+            return &cmdList_;
+        }
+        SDL_GPUCommandBuffer* buffer = SDL_AcquireGPUCommandBuffer(device_);
+        if (buffer == nullptr)
+            noteFailure();
+        cmdList_.begin(lost_ ? nullptr : buffer);
         return &cmdList_;
     }
 
@@ -366,11 +454,16 @@ public:
             return;
 
         cmdList_.endOpenPass();
-        SDL_SubmitGPUCommandBuffer(cmdList_.buffer());
+        if (!SDL_SubmitGPUCommandBuffer(cmdList_.buffer()))
+            noteFailure();
         cmdList_.begin(nullptr);
     }
 
-    void waitIdle() override { SDL_WaitForGPUIdle(device_); }
+    void waitIdle() override
+    {
+        if (!lost_)
+            SDL_WaitForGPUIdle(device_);
+    }
 
     [[nodiscard]] bool readTexture(TextureHandle texture, std::span<std::byte> out) override;
 
@@ -417,6 +510,7 @@ private:
     SDL_GPUDevice* device_ = nullptr;
     ShaderFormat shaderFormat_ = ShaderFormat::Unknown;
     SdlGpuCmdList cmdList_;
+    bool lost_ = false;
 
     std::vector<SDL_GPUBuffer*> buffers_;
     std::vector<TextureEntry> textures_;
@@ -428,6 +522,8 @@ private:
 
 PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& desc)
 {
+    if (lost_)
+        return {};
     std::vector<SDL_GPUVertexBufferDescription> vertexBuffers;
     vertexBuffers.reserve(desc.vertexBuffers.size());
     for (const VertexBufferLayout& layout : desc.vertexBuffers) {
@@ -507,6 +603,8 @@ PipelineHandle SdlGpuDevice::createGraphicsPipeline(const GraphicsPipelineDesc& 
     };
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device_, &info);
+    if (pipeline == nullptr)
+        noteFailure();
     return pipeline != nullptr ? PipelineHandle{addSlot(pipelines_, pipeline)} : PipelineHandle{};
 }
 
@@ -530,8 +628,11 @@ Swapchain SdlGpuDevice::acquireSwapchain(platform::Window& window)
     SDL_GPUTexture* swapchainTexture = nullptr;
     Uint32 width = 0;
     Uint32 height = 0;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(buffer, native, &swapchainTexture, &width, &height) ||
-        swapchainTexture == nullptr) {
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(buffer, native, &swapchainTexture, &width, &height)) {
+        noteFailure();
+        return {};
+    }
+    if (swapchainTexture == nullptr) {
         // A minimized or occluded window has no backbuffer this frame. Normal,
         // not an error -- the seam says so and every caller has to handle it.
         return {};
@@ -552,6 +653,8 @@ Swapchain SdlGpuDevice::acquireSwapchain(platform::Window& window)
 
 bool SdlGpuDevice::readTexture(TextureHandle texture, std::span<std::byte> out)
 {
+    if (lost_)
+        return false;
     const TextureEntry* entry = slot(textures_, texture.id);
     if (entry == nullptr || entry->texture == nullptr)
         return false;
@@ -570,8 +673,10 @@ bool SdlGpuDevice::readTexture(TextureHandle texture, std::span<std::byte> out)
         .props = 0,
     };
     SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device_, &transferInfo);
-    if (transfer == nullptr)
+    if (transfer == nullptr) {
+        noteFailure();
         return false;
+    }
 
     SDL_GPUCommandBuffer* buffer = SDL_AcquireGPUCommandBuffer(device_);
     SDL_GPUCopyPass* pass = SDL_BeginGPUCopyPass(buffer);
@@ -599,7 +704,9 @@ bool SdlGpuDevice::readTexture(TextureHandle texture, std::span<std::byte> out)
     // Blocking by design: this is the screenshot path, and the caller was told.
     SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(buffer);
     if (fence == nullptr) {
-        SDL_ReleaseGPUTransferBuffer(device_, transfer);
+        noteFailure();
+        if (!lost_)
+            SDL_ReleaseGPUTransferBuffer(device_, transfer);
         return false;
     }
     SDL_WaitForGPUFences(device_, true, &fence, 1);
@@ -717,6 +824,11 @@ SdlGpuCmdList::Staged SdlGpuCmdList::stage(std::span<const std::byte> data, u32 
         // Cycled on the frame's first write only: every later write of the frame
         // goes to the same backing, at a range nothing else has used.
         void* mapped = SDL_MapGPUTransferBuffer(device, staging_, !stagingCycled_);
+        if (mapped == nullptr) {
+            device_.noteFailure();
+            if (device_.lost())
+                return {};
+        }
         if (mapped != nullptr) {
             stagingCycled_ = true;
             std::memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size());
@@ -734,11 +846,15 @@ SdlGpuCmdList::Staged SdlGpuCmdList::stage(std::span<const std::byte> data, u32 
         .props = 0,
     };
     SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &info);
-    if (transfer == nullptr)
+    if (transfer == nullptr) {
+        device_.noteFailure();
         return {};
+    }
     void* mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
     if (mapped == nullptr) {
-        SDL_ReleaseGPUTransferBuffer(device, transfer);
+        device_.noteFailure();
+        if (!device_.lost())
+            SDL_ReleaseGPUTransferBuffer(device, transfer);
         return {};
     }
     std::memcpy(mapped, data.data(), data.size());

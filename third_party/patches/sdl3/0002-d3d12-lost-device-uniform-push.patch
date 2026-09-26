@@ -1,0 +1,43 @@
+LuauG: a lost D3D12 device crashes SDL_PushGPU*UniformData.
+
+When the GPU is reset -- a shader that runs past the driver's timeout, TDR on
+Windows, DXGI_ERROR_DEVICE_HUNG -- every new resource fails. A uniform buffer
+is one: D3D12_INTERNAL_AcquireUniformBufferFromPool returns NULL (it has set
+the error), and D3D12_INTERNAL_PushUniformData dereferences it on the next
+line. The application never learns the device is gone; it dies on an access
+violation inside SDL.
+
+The fix returns when there is no buffer, in both places one is acquired. The
+data is dropped -- there is no device to draw it -- and the error stays set,
+so the next call the application checks (a submit, a map, a create) fails and
+says why. Found reproducing a hanging user shader (ADR 0091); still present
+upstream on 2026-09-26.
+
+diff --git a/src/gpu/d3d12/SDL_gpu_d3d12.c b/src/gpu/d3d12/SDL_gpu_d3d12.c
+index fe69dd55..d4364e75 100644
+--- a/src/gpu/d3d12/SDL_gpu_d3d12.c
++++ b/src/gpu/d3d12/SDL_gpu_d3d12.c
+@@ -4686,6 +4686,13 @@ static void D3D12_INTERNAL_PushUniformData(
+         return;
+     }
+ 
++    // LuauG: a uniform buffer cannot be made once the device is lost (or out
++    // of memory); the error is already set, so drop the data rather than
++    // dereference NULL.
++    if (uniformBuffer == NULL) {
++        return;
++    }
++
+     blockSize =
+         D3D12_INTERNAL_Align(
+             length,
+@@ -4700,6 +4707,9 @@ static void D3D12_INTERNAL_PushUniformData(
+         uniformBuffer->buffer->mapPointer = NULL;
+ 
+         uniformBuffer = D3D12_INTERNAL_AcquireUniformBufferFromPool(commandBuffer);
++        if (uniformBuffer == NULL) {
++            return;
++        }
+ 
+         uniformBuffer->drawOffset = 0;
+         uniformBuffer->writeOffset = 0;

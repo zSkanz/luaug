@@ -49,6 +49,11 @@ constexpr luaug::core::u16 kDefaultGamePort = 7777;
 // reports a skipped render test instead of a red build nobody can act on.
 constexpr int kExitNoGraphicsDevice = 4;
 
+// The graphics device was lost while the engine ran -- a driver reset, most
+// often a shader that ran too long. Its own code so a test can tell "survived
+// and said so" from a crash or a script error.
+constexpr int kExitDeviceLost = 5;
+
 // Catalogs are UTF-8 (ADR 0019); a Windows console decodes raw byte writes with
 // its own codepage and mangles anything non-ASCII, which would quietly reduce
 // "adding a locale is adding a file" to "adding a locale nobody on Windows can
@@ -286,6 +291,18 @@ int parseOptions(std::span<const std::string_view> args, luaug::app::EngineOptio
                 luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
                 return kExitUsage;
             }
+            continue;
+        }
+        if (arg.starts_with("--simulate-device-loss=")) {
+            if (!numericValue(arg.substr(23), options.simulateDeviceLossAt)) {
+                const std::array<I18nArg, 1> badValue{I18nArg{"option", arg}};
+                luaug::core::log(LogLevel::Error, LUAUG_TR("engine.cli.err.bad_value"), badValue);
+                return kExitUsage;
+            }
+            continue;
+        }
+        if (arg.starts_with("--surface-cache=")) {
+            options.surfaceCache = std::filesystem::path(arg.substr(16));
             continue;
         }
         if (arg.starts_with("--screenshot=")) {
@@ -582,6 +599,8 @@ int main(int argc, char** argv)
     }
 
     luaug::app::EngineOptions options;
+    for (int index = 1; index < argc; ++index)
+        options.arguments.emplace_back(argv[index]);
     if (hasPackagedProject)
         options.scriptPath = packagedProject;
     luaug::app::GraphicsOverrides graphicsOverrides;
@@ -736,6 +755,8 @@ int main(int argc, char** argv)
         luaug::core::logText(LogLevel::Error, error->message);
         if (!error->detail.empty())
             luaug::core::logText(LogLevel::Error, error->detail);
+        if (error->key.hash == LUAUG_TR("engine.err.device_lost").hash)
+            return kExitDeviceLost;
 
         // The key IS the identity of an engine error (ADR 0019), so matching on
         // it is the intended way to tell one failure from another -- no second

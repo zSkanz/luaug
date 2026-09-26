@@ -181,3 +181,38 @@ TEST_CASE("a game built with no compiler still packs its surfaces, and draws the
           render::SurfaceStatus::Failed);
     CHECK(program == nullptr);
 }
+
+TEST_CASE("a surface on screen when the device was lost is held back until it changes")
+{
+    if (std::string_view(LUAUG_TEST_SHADERCROSS).empty() || !std::filesystem::exists(LUAUG_TEST_SHADERCROSS)) {
+        MESSAGE("LUAUG_TEST_SKIP: no shader toolchain on this host");
+        return;
+    }
+    REQUIRE(core::engineCatalog().loadFromFile(LUAUG_TEST_CATALOG).ok);
+    Folder folder;
+    folder.write("shaders/wave.surface.hlsl", std::string(Wave));
+    asset::ContentMounts mounts;
+    mounts.mountDirectory(folder.root / "content");
+    const std::string urn = "asset://shaders/wave.surface.hlsl";
+    const render::SurfaceProgram* program = nullptr;
+    {
+        app::SurfaceCompiler compiler(mounts, LUAUG_TEST_SHADERCROSS, LUAUG_TEST_SHADER_INCLUDE, folder.root / "cache");
+        REQUIRE(settle(compiler, urn, program) == render::SurfaceStatus::Ready);
+        compiler.quarantineShown();
+        CHECK(compiler.quarantined(urn));
+    }
+
+    // The next process -- the restarted editor -- reads what was held back.
+    app::SurfaceCompiler compiler(mounts, LUAUG_TEST_SHADERCROSS, LUAUG_TEST_SHADER_INCLUDE, folder.root / "cache");
+    CHECK(compiler.quarantined(urn));
+    CHECK(settle(compiler, urn, program) == render::SurfaceStatus::Failed);
+    REQUIRE_FALSE(compiler.errors(urn).empty());
+    CHECK(compiler.errors(urn).front().message.find("held back") != std::string::npos);
+
+    // Changed and saved: tried again.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    folder.write("shaders/wave.surface.hlsl", std::string(Wave) + "// fixed\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    CHECK(settle(compiler, urn, program) == render::SurfaceStatus::Ready);
+    CHECK_FALSE(compiler.quarantined(urn));
+}

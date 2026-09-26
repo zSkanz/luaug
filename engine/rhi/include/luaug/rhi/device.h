@@ -153,6 +153,17 @@ public:
     // `out` must be at least width * height * bytesPerPixel of the texture's
     // format; false means the backend cannot read this texture back.
     [[nodiscard]] virtual bool readTexture(TextureHandle texture, std::span<std::byte> out) = 0;
+
+    // **Whether the device is gone**: the driver reset it, most often because
+    // a shader ran past the time the operating system allows one. Once true
+    // it stays true -- every create answers an empty handle, every frame is
+    // empty, every destroy is skipped -- because nothing may reach a driver
+    // that has let go of the device; the backend crashed inside itself when
+    // anything did. The only way back is a new device.
+    [[nodiscard]] virtual bool lost() const noexcept { return false; }
+    // Loses the device the way the driver would, for the test that the engine
+    // survives it. Nothing on a backend that cannot be lost.
+    virtual void simulateLoss() noexcept {}
 };
 
 } // namespace luaug::rhi

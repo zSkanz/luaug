@@ -976,3 +976,24 @@ default path lost nothing:
 | Before (package of `905e0c5a`) | 1.58, 1.63, 1.55 ms | 2.19, 2.31, 2.13 ms |
 | After (package of `4ba0d790`) | 1.51, 1.54, 1.50 ms | 1.90, 2.02, 1.91 ms |
 
+
+## User surface shaders (ADR 0091)
+
+What a surface shader costs besides its draws: the frame that first draws it
+creates its ten shaders and every pipeline on the render thread, and a built
+game carries its bytecode for three backends. Measured 2026-09-26 on
+`win-msvc-dev` (D3D12, the GPU debug layer on, as in every dev build), with a
+warm compiler cache, `luaug-host <example> --headless --frames=90`; three runs.
+
+| Surface | Shaders and pipelines created | In the pack (SPIR-V + DXIL + MSL) |
+|---|---|---|
+| `11-ocean` / `ocean.surface.hlsl` | 5.6, 5.5, 5.0 ms -- **5.5 ms** | 423 196 bytes |
+| `23-surfaces` / `flag.surface.hlsl` | 4.6, 4.2, 4.1 ms -- **4.2 ms** | 402 243 bytes |
+| `23-surfaces` / `dissolve.surface.hlsl` | 3.5, 3.4, 3.3 ms -- **3.4 ms** | 425 542 bytes |
+| `23-surfaces` / `glass.surface.hlsl` | 3.1, 3.0, 3.3 ms -- **3.1 ms** | 385 159 bytes |
+
+Once per surface per run -- the renderer keeps the pipelines until the shader
+changes -- so this is a hitch of a few milliseconds the first time a surface
+comes on screen, and nothing after. Compiling one is separate and never on a
+frame: a cold compile of the ocean is 882 ms on the editor's worker, and a warm
+one reads the cache in about 1 ms (`examples/11-ocean/README.md`).

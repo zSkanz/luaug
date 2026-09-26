@@ -174,6 +174,14 @@ struct Paths
 // find out.
 [[nodiscard]] bool startDetached(const std::vector<std::string>& args);
 
+// **Asks a question in the system's own message box**, and blocks until it is
+// answered: the index of the button chosen, or -1 when the box could not be
+// shown or was dismissed. `buttons[0]` is the default. For the moment nothing
+// else can be drawn -- a lost graphics device -- which is why it is the
+// system's box and not the editor's. `window` may be null.
+[[nodiscard]] int askChoice(Window* window, std::string_view title, std::string_view message,
+                            const std::vector<std::string>& buttons);
+
 // Whether this build can show the system's own folder picker. False on a
 // platform with none, and false in a build with `SDL_DIALOG` off -- callers ask
 // so they can say WHY the button did nothing, rather than doing nothing.

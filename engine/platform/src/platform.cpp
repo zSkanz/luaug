@@ -9,6 +9,7 @@
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_platform_defines.h>
 #include <SDL3/SDL_process.h>
 #include <SDL3/SDL_stdinc.h>
@@ -322,6 +323,34 @@ bool startDetached(const std::vector<std::string>& args)
     // releasing our side of it -- which is exactly what "detached" means here.
     SDL_DestroyProcess(process);
     return true;
+}
+
+int askChoice(Window* window, std::string_view title, std::string_view message, const std::vector<std::string>& buttons)
+{
+    std::vector<SDL_MessageBoxButtonData> native;
+    native.reserve(buttons.size());
+    for (std::size_t index = 0; index < buttons.size(); ++index) {
+        native.push_back(SDL_MessageBoxButtonData{
+            .flags = index == 0 ? static_cast<SDL_MessageBoxButtonFlags>(SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT) : 0u,
+            .buttonID = static_cast<int>(index),
+            .text = buttons[index].c_str(),
+        });
+    }
+    const std::string titleText(title);
+    const std::string messageText(message);
+    const SDL_MessageBoxData data{
+        .flags = SDL_MESSAGEBOX_WARNING | SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT,
+        .window = window != nullptr ? nativeWindow(*window) : nullptr,
+        .title = titleText.c_str(),
+        .message = messageText.c_str(),
+        .numbuttons = static_cast<int>(native.size()),
+        .buttons = native.data(),
+        .colorScheme = nullptr,
+    };
+    int chosen = -1;
+    if (!SDL_ShowMessageBox(&data, &chosen))
+        return -1;
+    return chosen;
 }
 
 bool canPickFolder()

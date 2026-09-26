@@ -1113,7 +1113,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
                 compiler = std::filesystem::path(LUAUG_DEV_SHADERCROSS);
             const std::filesystem::path user = platform::paths().userDir;
             const std::filesystem::path cache =
-                (user.empty() ? std::filesystem::temp_directory_path(missing) : user) / "surface-cache";
+                !options.surfaceCache.empty()
+                    ? options.surfaceCache
+                    : (user.empty() ? std::filesystem::temp_directory_path(missing) : user) / "surface-cache";
             surfaceCompiler = std::make_unique<SurfaceCompiler>(
                 contentMounts, compiler, platform::paths().contentDir / "shaders" / "include", cache);
             renderer->setSurfaceSource(surfaceCompiler.get());
@@ -4195,6 +4197,73 @@ std::optional<core::EngineError> run(const EngineOptions& options)
 
         if (options.frames != 0 && options.exitAfterFrames && frame.index + 1 >= options.frames)
             quit = true;
+        // **The device is gone** (a driver reset, most often a shader that ran
+        // past the driver's timeout). The frame it happened in was dropped by
+        // the RHI; nothing more can be drawn, so the loop ends and what the
+        // person has open is looked after below.
+        if (options.simulateDeviceLossAt != 0 && frame.index + 1 == options.simulateDeviceLossAt)
+            device->simulateLoss();
+        if (device->lost())
+            quit = true;
+    }
+
+    if (device->lost()) {
+        control.stop();
+#if LUAUG_DEBUG_UI
+        // The surfaces that were on screen are held back until they change,
+        // so a restarted editor does not draw the one that hung the GPU and
+        // lose its device again.
+        if (surfaceCompiler != nullptr)
+            surfaceCompiler->quarantineShown();
+#endif
+        // **Asked, and only when somebody is there to answer**: a test or a
+        // capture run exits with the device-lost code and no box.
+        const bool attended =
+            !options.headless && !(options.frames != 0 && options.exitAfterFrames) && options.screenshotPath.empty();
+        if (attended) {
+            const core::Catalog& text = core::engineCatalog();
+            if (options.editor) {
+                const int choice = platform::askChoice(window.get(), text.format(LUAUG_TR("engine.lost.title")),
+                                                       text.format(LUAUG_TR("engine.lost.editor")),
+                                                       {text.format(LUAUG_TR("engine.lost.save_restart")),
+                                                        text.format(LUAUG_TR("engine.lost.restart")),
+                                                        text.format(LUAUG_TR("engine.lost.quit"))});
+                if (choice == 0) {
+                    // What Ctrl+S saves: the scene -- and every script it
+                    // holds -- out of play mode, each script and shader that
+                    // is its own file, the open material and the open stamp.
+                    if (editor.inPlayMode())
+                        editor.stop(host->world(), inspector);
+                    (void)editor.saveOpenScene(host->world());
+                    for (std::size_t index = 0; index < scripts.count(); ++index) {
+                        const OpenScript* tab = scripts.at(index);
+                        if (tab == nullptr || !tab->dirty() || tab->file.empty())
+                            continue;
+                        const std::filesystem::path file =
+                            tab->origin == ScriptOrigin::File
+                                ? editor.content().root() / std::filesystem::path(tab->file)
+                                : options.scriptPath / tab->file;
+                        (void)platform::writeTextFile(file, tab->document.text());
+                    }
+                    if (editor.materialSession().open() && editor.materialSession().dirty())
+                        (void)editor.saveMaterial();
+                    if (editor.stampSession().open())
+                        (void)editor.saveStamp(host->world(), host->runtime().dataModel());
+                }
+                if (choice == 0 || choice == 1) {
+                    std::vector<std::string> restart{hostExecutablePath().string()};
+                    restart.insert(restart.end(), options.arguments.begin(), options.arguments.end());
+                    (void)platform::startDetached(restart);
+                }
+            }
+            else {
+                (void)platform::askChoice(window.get(), text.format(LUAUG_TR("engine.lost.title")),
+                                          text.format(LUAUG_TR("engine.lost.game")),
+                                          {text.format(LUAUG_TR("engine.lost.quit"))});
+            }
+        }
+        host->close();
+        return core::makeError(LUAUG_TR("engine.err.device_lost"));
     }
 
     control.stop();

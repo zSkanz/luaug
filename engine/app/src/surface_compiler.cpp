@@ -38,6 +38,18 @@ constexpr auto RecheckInterval = std::chrono::milliseconds(500);
     return asset::SurfaceTarget::Spirv;
 }
 
+[[nodiscard]] u64 sourceHash(std::string_view bytes) noexcept
+{
+    u64 hash = 0xCBF29CE484222325ull;
+    for (const char c : bytes) {
+        hash ^= static_cast<unsigned char>(c);
+        hash *= 0x100000001B3ull;
+    }
+    return hash;
+}
+
+constexpr std::string_view QuarantineFile = "quarantine.txt";
+
 } // namespace
 
 SurfaceCompiler::SurfaceCompiler(const asset::ContentMounts& mounts, std::filesystem::path shadercross,
@@ -48,6 +60,23 @@ SurfaceCompiler::SurfaceCompiler(const asset::ContentMounts& mounts, std::filesy
     // The engine's headers, hashed once: they change with the engine, not
     // while it runs.
     m_headers = asset::surfaceHeadersHash(m_include);
+    // What a previous process held back: `urn<TAB>hash` a line.
+    std::string held;
+    if (platform::readTextFile(m_cache / QuarantineFile, held)) {
+        std::size_t start = 0;
+        while (start < held.size()) {
+            std::size_t end = held.find('\n', start);
+            if (end == std::string::npos)
+                end = held.size();
+            const std::string_view line = std::string_view(held).substr(start, end - start);
+            start = end + 1;
+            const std::size_t tab = line.find('\t');
+            u64 hash = 0;
+            if (tab != std::string_view::npos &&
+                std::from_chars(line.data() + tab + 1, line.data() + line.size(), hash, 16).ec == std::errc{})
+                m_quarantine.emplace(std::string(line.substr(0, tab)), hash);
+        }
+    }
     m_worker = std::thread([this] { work(); });
 }
 
@@ -85,6 +114,7 @@ render::SurfaceStatus SurfaceCompiler::find(std::string_view urn, rhi::ShaderFor
         return render::SurfaceStatus::Pending;
     }
     Entry& entry = found->second;
+    entry.asked = std::chrono::steady_clock::now();
 
     // **A saved file is a recompile**: the source or anything it includes.
     const auto now = std::chrono::steady_clock::now();
@@ -113,6 +143,46 @@ std::vector<SurfaceError> SurfaceCompiler::errors(std::string_view urn) const
     const std::lock_guard<std::mutex> lock(m_mutex);
     const auto found = m_entries.find(urn);
     return found != m_entries.end() ? found->second.errors : std::vector<SurfaceError>{};
+}
+
+void SurfaceCompiler::quarantineShown()
+{
+    const auto now = std::chrono::steady_clock::now();
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    for (const auto& [urn, entry] : m_entries) {
+        if (entry.status != render::SurfaceStatus::Ready || now - entry.asked > std::chrono::seconds(10))
+            continue;
+        const asset::ResolvedContent resolved = m_mounts.resolve(urn);
+        std::string text;
+        if (resolved.source != asset::ResolvedContent::Source::Loose || !platform::readTextFile(resolved.path, text))
+            continue;
+        m_quarantine[urn] = sourceHash(text);
+        const std::array<core::I18nArg, 1> args{core::I18nArg{"urn", urn}};
+        core::log(core::LogLevel::Warn, LUAUG_TR("render.warn.surface_quarantined"), args);
+    }
+    writeQuarantine();
+}
+
+bool SurfaceCompiler::quarantined(std::string_view urn) const
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    return m_quarantine.contains(urn);
+}
+
+void SurfaceCompiler::writeQuarantine() const
+{
+    std::string text;
+    for (const auto& [urn, hash] : m_quarantine) {
+        char hex[17]{};
+        std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(hash));
+        text += urn + "\t" + hex + "\n";
+    }
+    std::error_code error;
+    std::filesystem::create_directories(m_cache, error);
+    if (text.empty())
+        std::filesystem::remove(m_cache / QuarantineFile, error);
+    else
+        (void)platform::writeTextFile(m_cache / QuarantineFile, text);
 }
 
 std::optional<render::SurfaceStatus> SurfaceCompiler::status(std::string_view urn) const
@@ -230,6 +300,28 @@ void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
         errors.push_back(SurfaceError{urn, 0, "not a file this editor can compile"});
         finish(false);
         return;
+    }
+
+    // **Held back after a lost device**, until the source is not the source
+    // that was on screen when it happened.
+    {
+        std::string text;
+        const u64 hash = platform::readTextFile(resolved.path, text) ? sourceHash(text) : 0;
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (const auto held = m_quarantine.find(urn); held != m_quarantine.end()) {
+            if (held->second == hash) {
+                lock.unlock();
+                std::error_code fsError;
+                dependencies.emplace_back(resolved.path, std::filesystem::last_write_time(resolved.path, fsError));
+                errors.push_back(
+                    SurfaceError{resolved.path.generic_string(), 0,
+                                 core::engineCatalog().format(LUAUG_TR("render.err.surface_quarantined"))});
+                finish(false);
+                return;
+            }
+            m_quarantine.erase(held);
+            writeQuarantine();
+        }
     }
 
     const asset::SurfaceBuild build = asset::buildSurface(

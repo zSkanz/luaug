@@ -45,6 +45,20 @@ struct EngineOptions
     // budget, which is the only thing that makes a headless run terminate.
     u64 frames = 0;
 
+    // What this process was started with, less the executable: what an editor
+    // restarts itself with after its graphics device is lost.
+    std::vector<std::string> arguments;
+
+    // Loses the graphics device on this frame, as a driver reset would --
+    // `--simulate-device-loss=N`, for the test that the engine survives one.
+    // Zero never does.
+    u64 simulateDeviceLossAt = 0;
+
+    // Where compiled surface shaders -- and the ones held back after a lost
+    // device -- are kept; empty is `surface-cache` in the user directory.
+    // `--surface-cache=DIR`, so a test never touches a person's own.
+    std::filesystem::path surfaceCache;
+
     // Exit when the frame budget is spent instead of continuing to run.
     bool exitAfterFrames = false;
 

@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1757,6 +1758,9 @@ u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name, boo
         if (set.ready)
             device.waitIdle();
         releaseSurface(device, set);
+        // Timed, because it is the one cost a surface adds on the frame that
+        // first draws it: ten shaders and every pipeline, on the render thread.
+        const auto started = std::chrono::steady_clock::now();
         set.revision = program->revision;
         set.reflection = program->reflection;
         for (core::usize index = 0; index < 5; ++index) {
@@ -1780,6 +1784,10 @@ u32 DefaultRenderer::surfaceFor(rhi::IDevice& device, std::string_view name, boo
             failed = true;
             return 0;
         }
+        const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started);
+        const std::array<core::I18nArg, 2> args{
+            core::I18nArg{"urn", name}, core::I18nArg{"milliseconds", std::lround(elapsed.count() * 10.0) / 10.0}};
+        core::log(core::LogLevel::Info, LUAUG_TR("render.info.surface_pipelines"), args);
         return static_cast<u32>(found) + 1u;
     }
 

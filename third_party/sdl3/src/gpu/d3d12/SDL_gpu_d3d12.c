@@ -4686,6 +4686,13 @@ static void D3D12_INTERNAL_PushUniformData(
         return;
     }
 
+    // LuauG: a uniform buffer cannot be made once the device is lost (or out
+    // of memory); the error is already set, so drop the data rather than
+    // dereference NULL.
+    if (uniformBuffer == NULL) {
+        return;
+    }
+
     blockSize =
         D3D12_INTERNAL_Align(
             length,
@@ -4700,6 +4707,9 @@ static void D3D12_INTERNAL_PushUniformData(
         uniformBuffer->buffer->mapPointer = NULL;
 
         uniformBuffer = D3D12_INTERNAL_AcquireUniformBufferFromPool(commandBuffer);
+        if (uniformBuffer == NULL) {
+            return;
+        }
 
         uniformBuffer->drawOffset = 0;
         uniformBuffer->writeOffset = 0;

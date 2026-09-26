@@ -829,6 +829,18 @@ if(LUAUG_BUILD_TESTS)
         set_tests_properties(user_surface_proof PROPERTIES
             SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
             TIMEOUT 240)
+
+        # A lost graphics device is survived, reported, and the surface that
+        # was on screen held back (ADR 0091).
+        add_test(NAME device_loss_survived
+            COMMAND ${CMAKE_COMMAND}
+                -DHOST=$<TARGET_FILE:luaug_host>
+                -DSCENE=${CMAKE_SOURCE_DIR}/tests/screenshots/usersurface/surfaced
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/device-loss
+                -P ${CMAKE_SOURCE_DIR}/tests/screenshots/run_device_loss.cmake)
+        set_tests_properties(device_loss_survived PROPERTIES
+            SKIP_REGULAR_EXPRESSION "LUAUG_TEST_SKIP"
+            TIMEOUT 240)
     endif()
 
     # M8's graphics settings family, as a differential. See the driver for why
