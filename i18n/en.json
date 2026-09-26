@@ -229,6 +229,7 @@
   "scene.err.number_positive": "It takes a number greater than zero.",
   "render.err.surface_compile": "{file}({line}): {message}",
   "render.err.surface_no_compiler": "No shader compiler was found at {path}, so surface shaders draw as the error surface. The editor folder carries shadercross beside the editor; a build tree carries it in host-tools.",
+  "render.err.surface_not_packed": "The surface shader {urn} is not in this game's content compiled for {target}, so what wears it draws as the error surface. Build the content with a shader compiler for every backend the game runs on.",
   "render.info.surface_compiled": "Surface shader {urn} ready in {milliseconds} ms ({compiled} of 10 stages compiled, the rest from the cache).",
   "render.warn.surface_unavailable": "The surface shader {name} could not be loaded or built, so what wears it draws with the built-in surface.",
   "render.warn.second_uv_set": "{mesh} has a material that samples UV set {set}; this engine's vertices carry one, so that texture is left off rather than drawn with the wrong coordinates.",

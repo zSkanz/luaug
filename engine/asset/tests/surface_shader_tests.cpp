@@ -2,6 +2,7 @@
 // source, and the HLSL it compiles around it. No compiler here -- the wrappers
 // are compiled with the engine's own shaders, which is where a contract that no
 // longer compiles fails the build.
+#include "luaug/asset/surface_build.h"
 #include "luaug/asset/surface_shader.h"
 
 #include <cstring>
@@ -161,4 +162,44 @@ TEST_CASE("a parameter's value is written where its offset says, in its own repr
     core::u32 flag = 7;
     std::memcpy(&flag, block.data() + 52, 4);
     CHECK(flag == 0u);
+}
+
+TEST_CASE("a compiled surface round-trips through its pack form, and refuses anything else")
+{
+    asset::CompiledSurface surface;
+    surface.source = "#include \"luaug/surface.hlsli\"\n";
+    asset::SurfaceCode code;
+    for (core::usize slot = 0; slot < code.size(); ++slot)
+        code[slot].assign(slot + 1, static_cast<std::byte>(slot));
+    surface.targets.emplace_back(asset::SurfaceTarget::Dxil, code);
+
+    const std::vector<std::byte> bytes = asset::encodeSurface(surface);
+    const std::optional<asset::CompiledSurface> back = asset::decodeSurface(bytes);
+    REQUIRE(back.has_value());
+    CHECK(back->source == surface.source);
+    REQUIRE(back->code(asset::SurfaceTarget::Dxil) != nullptr);
+    CHECK(*back->code(asset::SurfaceTarget::Dxil) == code);
+    // A target the build had no compiler for is absent, not empty.
+    CHECK(back->code(asset::SurfaceTarget::Spirv) == nullptr);
+
+    // Truncated, or not one at all.
+    CHECK_FALSE(asset::decodeSurface(std::span(bytes).first(bytes.size() - 1)).has_value());
+    const std::vector<std::byte> other(16, std::byte{0x4C});
+    CHECK_FALSE(asset::decodeSurface(other).has_value());
+}
+
+TEST_CASE("the compiler's output is read as errors by file and line")
+{
+    const std::vector<asset::SurfaceBuildError> errors = asset::parseSurfaceErrors(
+        "C:/p/content/shaders/sea.surface.hlsl:12:5: error: use of undeclared identifier 'Heigth'\r\n"
+        "note: something that is not an error\n");
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].file == "C:/p/content/shaders/sea.surface.hlsl");
+    CHECK(errors[0].line == 12);
+    CHECK(errors[0].message == "use of undeclared identifier 'Heigth'");
+
+    // Output with no error line in it is still said, whole.
+    const std::vector<asset::SurfaceBuildError> odd = asset::parseSurfaceErrors("it crashed");
+    REQUIRE(odd.size() == 1);
+    CHECK(odd[0].message == "it crashed");
 }

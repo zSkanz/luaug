@@ -25,6 +25,7 @@ using luaug::assetc::CompileResult;
 void usage()
 {
     std::cout << "usage: assetc --input <content-dir> --output <pack> --manifest <json> [--jobs N]\n"
+                 "              [--shadercross <exe>] [--shader-include <dir>]\n"
                  "\n"
                  "  Compiles a content directory into one .lpack and its manifest.\n"
                  "  Deterministic: the same inputs produce the same bytes, and --jobs 1 is how\n"
@@ -53,6 +54,8 @@ int main(int argc, char** argv)
     std::string output;
     std::string manifest;
     std::string jobsArgument;
+    std::string shadercross;
+    std::string shaderInclude;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0) {
@@ -60,7 +63,9 @@ int main(int argc, char** argv)
             return 0;
         }
         if (flagValue(argc, argv, i, "--input", input) || flagValue(argc, argv, i, "--output", output) ||
-            flagValue(argc, argv, i, "--manifest", manifest) || flagValue(argc, argv, i, "--jobs", jobsArgument)) {
+            flagValue(argc, argv, i, "--manifest", manifest) || flagValue(argc, argv, i, "--jobs", jobsArgument) ||
+            flagValue(argc, argv, i, "--shadercross", shadercross) ||
+            flagValue(argc, argv, i, "--shader-include", shaderInclude)) {
             continue;
         }
         std::cout << "assetc: unknown option " << argv[i] << "\n";
@@ -100,6 +105,26 @@ int main(int argc, char** argv)
 
     CompileOptions options;
     options.inputRoot = input;
+    // **The surface shader compiler** (ADR 0091): given, or beside this binary
+    // as a packaged editor carries it, or the build tree's own. The engine's
+    // headers the same way: given, staged beside the binary, or the source
+    // tree's.
+    const std::filesystem::path here = luaug::platform::paths().executableDir;
+#if defined(_WIN32)
+    const std::filesystem::path besideCompiler = here / "shadercross.exe";
+#else
+    const std::filesystem::path besideCompiler = here / "shadercross";
+#endif
+    std::error_code missing;
+    options.shadercross = !shadercross.empty() ? std::filesystem::path(shadercross)
+                          : std::filesystem::exists(besideCompiler, missing)
+                              ? besideCompiler
+                              : std::filesystem::path(LUAUG_DEV_SHADERCROSS);
+    const std::filesystem::path besideInclude = luaug::platform::paths().contentDir / "shaders" / "include";
+    options.surfaceInclude = !shaderInclude.empty() ? std::filesystem::path(shaderInclude)
+                             : std::filesystem::exists(besideInclude, missing)
+                                 ? besideInclude
+                                 : std::filesystem::path(LUAUG_DEV_SURFACE_INCLUDE);
 
     const CompileResult result = luaug::assetc::compile(options);
 
@@ -148,7 +173,16 @@ int main(int argc, char** argv)
     }
 
     std::cout << "assetc: " << result.meshCount << " mesh(es), " << result.textureCount << " texture(s), "
-              << result.materialCount << " material(s), " << result.chunkCount << " chunk(s), " << result.rawCount
-              << " raw file(s) -> " << result.pack.size() << " bytes\n";
+              << result.materialCount << " material(s), " << result.surfaceCount << " surface shader(s), "
+              << result.chunkCount << " chunk(s), " << result.rawCount << " raw file(s) -> " << result.pack.size()
+              << " bytes\n";
+    if (result.surfacesUncompiled > 0) {
+        // Said, because the pack is complete and the game will run: what it
+        // will not do is draw these, and a person should hear that now rather
+        // than from a magenta ocean.
+        std::cout << "assetc: warning: " << result.surfacesUncompiled
+                  << " surface shader(s) packed as source only -- no shader compiler at "
+                  << options.shadercross.string() << "\n";
+    }
     return 0;
 }

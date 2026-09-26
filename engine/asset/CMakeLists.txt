@@ -31,6 +31,7 @@ luaug_add_module(asset
         src/pack.cpp
         src/primitives.cpp
         src/streaming.cpp
+        src/surface_build.cpp
         src/surface_shader.cpp
         src/texture.cpp
     DEPS

@@ -55,7 +55,7 @@ void writeU64(std::vector<std::byte>& out, u64 value)
 // the table since ADR 0060 with no writer, so nothing had ever tried (ADR 0090).
 [[nodiscard]] bool knownKind(u32 value) noexcept
 {
-    return value <= static_cast<u32>(AssetKind::Material);
+    return value <= static_cast<u32>(AssetKind::Surface);
 }
 
 } // namespace
@@ -75,6 +75,8 @@ const char* assetKindName(AssetKind kind) noexcept
         return "raw";
     case AssetKind::Material:
         return "material";
+    case AssetKind::Surface:
+        return "surface";
     case AssetKind::Unknown:
         break;
     }

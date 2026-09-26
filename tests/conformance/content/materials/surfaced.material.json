@@ -1,0 +1,13 @@
+{
+  "format": "luaug-material",
+  "version": 1,
+  "parent": "",
+  "shader": "asset://shaders/wave.surface.hlsl",
+  "readsSceneColor": false,
+  "instanceParameters": [],
+  "properties": {
+    "Height": 0.5,
+    "Tint": [1, 0.5, 0.25],
+    "Foam": "asset://textures/foam.png"
+  }
+}

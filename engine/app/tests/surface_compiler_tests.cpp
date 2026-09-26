@@ -2,8 +2,10 @@
 // the engine's real headers: a surface compiles into every variant, a broken
 // one fails with its line, and a saved fix is picked up and compiled again.
 #include "luaug/app/surface_compiler.h"
+#include "luaug/assetc/compiler.h"
 #include "luaug/core/i18n.h"
 #include "luaug/platform/file.h"
+#include "luaug/render/pack_surface_source.h"
 
 #include <chrono>
 #include <doctest/doctest.h>
@@ -102,4 +104,80 @@ TEST_CASE("a surface compiles into every variant, fails with its line, and a sav
     REQUIRE(settle(compiler, urn, program) == render::SurfaceStatus::Ready);
     CHECK(program->revision > first);
     CHECK(compiler.errors(urn).empty());
+}
+
+namespace {
+
+// Builds `folder`'s content into a pack and mounts it -- the pack alone, as a
+// player has it.
+[[nodiscard]] assetc::CompileResult buildPack(const Folder& folder, const std::filesystem::path& shadercross,
+                                              asset::ContentMounts& mounts)
+{
+    assetc::CompileOptions options;
+    options.inputRoot = folder.root / "content";
+    options.cacheRoot = folder.root / "cache";
+    options.shadercross = shadercross;
+    options.surfaceInclude = LUAUG_TEST_SHADER_INCLUDE;
+    assetc::CompileResult result = assetc::compile(options);
+    REQUIRE_MESSAGE(result.ok, result.diagnostic);
+    std::string diagnostic;
+    const std::filesystem::path pack = folder.root / "game.lpack";
+    const std::filesystem::path manifest = folder.root / "game.manifest.json";
+    REQUIRE(assetc::writeFile(pack, result.pack, diagnostic));
+    REQUIRE(assetc::writeFile(
+        manifest, std::as_bytes(std::span<const char>(result.manifest.data(), result.manifest.size())), diagnostic));
+    REQUIRE_FALSE(mounts.mountPack(pack, manifest).has_value());
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("a built game carries its surfaces compiled for every target, and draws them with no compiler")
+{
+    if (std::string_view(LUAUG_TEST_SHADERCROSS).empty() || !std::filesystem::exists(LUAUG_TEST_SHADERCROSS)) {
+        MESSAGE("LUAUG_TEST_SKIP: no shader toolchain on this host");
+        return;
+    }
+    REQUIRE(core::engineCatalog().loadFromFile(LUAUG_TEST_CATALOG).ok);
+    Folder folder;
+    folder.write("shaders/wave.surface.hlsl", std::string(Wave));
+    asset::ContentMounts mounts;
+    const assetc::CompileResult result = buildPack(folder, LUAUG_TEST_SHADERCROSS, mounts);
+    CHECK(result.surfaceCount == 1);
+    CHECK(result.surfacesUncompiled == 0);
+
+    // The player's source: every backend's bytecode is there, and nothing runs.
+    const std::string urn = "asset://shaders/wave.surface.hlsl";
+    for (const rhi::ShaderFormat format : {rhi::ShaderFormat::SpirV, rhi::ShaderFormat::Dxil, rhi::ShaderFormat::Msl}) {
+        render::PackSurfaceSource source(mounts);
+        const render::SurfaceProgram* program = nullptr;
+        REQUIRE(source.find(urn, format, program) == render::SurfaceStatus::Ready);
+        REQUIRE(program != nullptr);
+        for (const std::vector<std::byte>& code : program->code)
+            CHECK_FALSE(code.empty());
+        CHECK(program->reflection.param("Height") != nullptr);
+    }
+
+    // The editor over a project it only has the build of: read back, not
+    // compiled -- it needs no compiler to draw it.
+    app::SurfaceCompiler compiler(mounts, folder.root / "no-compiler", LUAUG_TEST_SHADER_INCLUDE,
+                                  folder.root / "editor-cache");
+    const render::SurfaceProgram* program = nullptr;
+    CHECK(settle(compiler, urn, program) == render::SurfaceStatus::Ready);
+}
+
+TEST_CASE("a game built with no compiler still packs its surfaces, and draws them as the error surface")
+{
+    Folder folder;
+    folder.write("shaders/wave.surface.hlsl", std::string(Wave));
+    asset::ContentMounts mounts;
+    const assetc::CompileResult result = buildPack(folder, folder.root / "no-compiler", mounts);
+    CHECK(result.surfaceCount == 1);
+    CHECK(result.surfacesUncompiled == 1);
+
+    render::PackSurfaceSource source(mounts);
+    const render::SurfaceProgram* program = nullptr;
+    CHECK(source.find("asset://shaders/wave.surface.hlsl", rhi::ShaderFormat::SpirV, program) ==
+          render::SurfaceStatus::Failed);
+    CHECK(program == nullptr);
 }

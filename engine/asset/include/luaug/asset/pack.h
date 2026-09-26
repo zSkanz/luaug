@@ -66,6 +66,9 @@ enum class AssetKind : u32
     // material and getting a font fails at the index (`content.h`), which is
     // the whole reason this enum is in the table of contents.
     Material = 6,
+    // A compiled surface shader (ADR 0091): its source and its bytecode for
+    // each target the build could compile (`surface_build.h`).
+    Surface = 7,
 };
 
 // Stable, lowercase, and written into the content manifest -- so it is a name

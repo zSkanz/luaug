@@ -40,6 +40,15 @@ endif()
 
 add_executable(assetc src/main.cpp)
 target_link_libraries(assetc PRIVATE luaug::warnings luaug_assetc_lib luaug::platform luaug::jobs)
+# Where a surface shader's compiler and the engine's headers are in a build
+# tree (ADR 0091); a packaged editor carries both beside the binary instead.
+if(LUAUG_SHADER_TOOLCHAIN)
+    target_compile_definitions(assetc PRIVATE
+        LUAUG_DEV_SHADERCROSS="${CMAKE_BINARY_DIR}/host-tools/shadercross${CMAKE_EXECUTABLE_SUFFIX}")
+else()
+    target_compile_definitions(assetc PRIVATE LUAUG_DEV_SHADERCROSS="")
+endif()
+target_compile_definitions(assetc PRIVATE LUAUG_DEV_SURFACE_INCLUDE="${CMAKE_SOURCE_DIR}/shaders/include")
 
 # The catalog beside the binary, for the same reason `luaug-host` gets one: an
 # engine error this tool relays should read as prose rather than as a bare key.

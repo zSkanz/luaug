@@ -1,11 +1,10 @@
 #include "luaug/app/surface_compiler.h"
 
-#include "luaug/asset/surface_shader.h"
+#include "luaug/asset/surface_build.h"
 #include "luaug/core/i18n.h"
 #include "luaug/core/log.h"
 #include "luaug/core/text_key.h"
 #include "luaug/platform/file.h"
-#include "luaug/platform/process.h"
 
 #include <algorithm>
 #include <array>
@@ -25,107 +24,18 @@ namespace {
 // a person, and a hundred materials naming it cost a hundred stats a second.
 constexpr auto RecheckInterval = std::chrono::milliseconds(500);
 
-[[nodiscard]] u64 fnv(u64 hash, std::string_view bytes) noexcept
-{
-    for (const char c : bytes) {
-        hash ^= static_cast<unsigned char>(c);
-        hash *= 0x100000001B3ull;
-    }
-    return hash;
-}
-
-[[nodiscard]] std::string hex(u64 value)
-{
-    char text[17]{};
-    std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(value));
-    return text;
-}
-
-[[nodiscard]] std::optional<std::string> readText(const std::filesystem::path& path)
-{
-    std::string text;
-    if (!platform::readTextFile(path, text))
-        return std::nullopt;
-    return text;
-}
-
-// The files a surface includes, relative to itself, recursively -- what the
-// cache key has to cover. `luaug/...` is the engine's and versioned by the
-// contract; anything not found beside the file is left for the compiler to
-// report.
-void collectIncludes(const std::filesystem::path& file, std::string_view text, std::vector<std::filesystem::path>& into)
-{
-    for (std::size_t at = text.find("#include"); at != std::string_view::npos; at = text.find("#include", at + 8)) {
-        const std::size_t open = text.find('"', at);
-        const std::size_t end = text.find('\n', at);
-        if (open == std::string_view::npos || (end != std::string_view::npos && open > end))
-            continue;
-        const std::size_t close = text.find('"', open + 1);
-        if (close == std::string_view::npos)
-            continue;
-        const std::string_view name = text.substr(open + 1, close - open - 1);
-        if (name.starts_with("luaug/"))
-            continue;
-        std::error_code error;
-        const std::filesystem::path included =
-            std::filesystem::weakly_canonical(file.parent_path() / std::filesystem::path(name), error);
-        if (error || !std::filesystem::exists(included, error) ||
-            std::find(into.begin(), into.end(), included) != into.end())
-            continue;
-        into.push_back(included);
-        if (const std::optional<std::string> nested = readText(included))
-            collectIncludes(included, *nested, into);
-    }
-}
-
-// `file:line:column: error: message`, as DXC writes it. The wrapper's own
-// lines are the engine's fault, not the user's, and are kept as they are.
-[[nodiscard]] std::vector<SurfaceError> parseErrors(std::string_view output)
-{
-    std::vector<SurfaceError> errors;
-    std::size_t start = 0;
-    while (start < output.size()) {
-        std::size_t end = output.find('\n', start);
-        if (end == std::string_view::npos)
-            end = output.size();
-        std::string_view line = output.substr(start, end - start);
-        start = end + 1;
-        if (!line.empty() && line.back() == '\r')
-            line.remove_suffix(1);
-        const std::size_t marker = line.find(": error: ");
-        if (marker == std::string_view::npos)
-            continue;
-        SurfaceError error;
-        error.message = std::string(line.substr(marker + 9));
-        std::string_view location = line.substr(0, marker);
-        // Two numbers from the end, separated by colons: line and column.
-        const std::size_t column = location.rfind(':');
-        const std::size_t row = column == std::string_view::npos ? column : location.rfind(':', column - 1);
-        if (row != std::string_view::npos) {
-            const std::string_view number = location.substr(row + 1, column - row - 1);
-            (void)std::from_chars(number.data(), number.data() + number.size(), error.line);
-            error.file = std::string(location.substr(0, row));
-        }
-        else {
-            error.file = std::string(location);
-        }
-        errors.push_back(std::move(error));
-    }
-    if (errors.empty() && !output.empty())
-        errors.push_back(SurfaceError{"", 0, std::string(output.substr(0, 2000))});
-    return errors;
-}
-
-[[nodiscard]] std::string_view destination(rhi::ShaderFormat format) noexcept
+[[nodiscard]] asset::SurfaceTarget targetOf(rhi::ShaderFormat format) noexcept
 {
     switch (format) {
     case rhi::ShaderFormat::Dxil:
-        return "DXIL";
+        return asset::SurfaceTarget::Dxil;
     case rhi::ShaderFormat::Msl:
-        return "MSL";
-    default:
-        return "SPIRV";
+        return asset::SurfaceTarget::Msl;
+    case rhi::ShaderFormat::SpirV:
+    case rhi::ShaderFormat::Unknown:
+        break;
     }
+    return asset::SurfaceTarget::Spirv;
 }
 
 } // namespace
@@ -137,17 +47,7 @@ SurfaceCompiler::SurfaceCompiler(const asset::ContentMounts& mounts, std::filesy
 {
     // The engine's headers, hashed once: they change with the engine, not
     // while it runs.
-    std::error_code error;
-    std::vector<std::filesystem::path> headers;
-    for (std::filesystem::recursive_directory_iterator it(m_include, error), end; !error && it != end;
-         it.increment(error)) {
-        if (it->is_regular_file(error))
-            headers.push_back(it->path());
-    }
-    std::sort(headers.begin(), headers.end());
-    m_headers = 0xCBF29CE484222325ull;
-    for (const std::filesystem::path& header : headers)
-        m_headers = fnv(fnv(m_headers, header.filename().string()), readText(header).value_or(std::string{}));
+    m_headers = asset::surfaceHeadersHash(m_include);
     m_worker = std::thread([this] { work(); });
 }
 
@@ -291,6 +191,26 @@ void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
         }
     };
 
+    const asset::ResolvedContent resolved = m_mounts.resolve(urn);
+
+    // **A surface that is only in a pack** -- a project opened from its build
+    // -- is read back rather than compiled: its bytecode is already there, and
+    // no compiler is needed to use it.
+    if (resolved.source == asset::ResolvedContent::Source::Pack) {
+        const std::optional<asset::CompiledSurface> packed =
+            resolved.kind == asset::AssetKind::Surface ? asset::decodeSurface(resolved.bytes) : std::nullopt;
+        const asset::SurfaceCode* code = packed.has_value() ? packed->code(targetOf(format)) : nullptr;
+        if (code == nullptr) {
+            errors.push_back(SurfaceError{urn, 0, "the pack holds no bytecode of it for this backend"});
+            finish(false);
+            return;
+        }
+        program->reflection = asset::reflectSurface(packed->source);
+        program->code = *code;
+        finish(program->reflection.ok());
+        return;
+    }
+
     if (!available()) {
         bool warn = false;
         {
@@ -306,105 +226,23 @@ void SurfaceCompiler::compile(const std::string& urn, rhi::ShaderFormat format)
         return;
     }
 
-    const asset::ResolvedContent resolved = m_mounts.resolve(urn);
     if (resolved.source != asset::ResolvedContent::Source::Loose) {
         errors.push_back(SurfaceError{urn, 0, "not a file this editor can compile"});
         finish(false);
         return;
     }
+
+    const asset::SurfaceBuild build = asset::buildSurface(
+        asset::SurfaceBuildInputs{resolved.path, m_shadercross, m_include, m_cache, m_headers}, targetOf(format));
+    compiled = build.compiled;
     std::error_code fsError;
-    const std::filesystem::path file = std::filesystem::weakly_canonical(resolved.path, fsError);
-    const std::optional<std::string> source = readText(file);
-    if (!source.has_value()) {
-        errors.push_back(SurfaceError{file.string(), 0, "cannot be read"});
-        finish(false);
-        return;
-    }
-
-    std::vector<std::filesystem::path> files{file};
-    collectIncludes(file, *source, files);
-    u64 key = fnv(0xCBF29CE484222325ull, std::to_string(asset::SurfaceContractVersion));
-    key = fnv(key, destination(format));
-    for (const std::filesystem::path& path : files) {
+    for (const std::filesystem::path& path : build.files)
         dependencies.emplace_back(path, std::filesystem::last_write_time(path, fsError));
-        key = fnv(key, readText(path).value_or(std::string{}));
-    }
-
-    program->reflection = asset::reflectSurface(*source);
-    if (program->reflection.ok()) {
-        // **And everything the engine wraps it in**: the generated text and the
-        // engine's headers. A key of the user's files alone kept serving
-        // bytecode compiled around an older wrapper after the engine changed.
-        for (u32 variant = 0; variant < 5; ++variant) {
-            for (const bool fragment : {false, true}) {
-                key = fnv(key,
-                          asset::surfaceWrapper(program->reflection, static_cast<asset::SurfaceVariant>(variant),
-                                                fragment ? asset::SurfaceStage::Fragment : asset::SurfaceStage::Vertex,
-                                                file.generic_string()));
-            }
-        }
-        key ^= m_headers;
-    }
-    if (!program->reflection.ok()) {
-        for (const asset::SurfaceDiagnostic& diagnostic : program->reflection.errors) {
-            const std::array<core::I18nArg, 1> args{core::I18nArg{"subject", diagnostic.subject}};
-            errors.push_back(
-                SurfaceError{file.generic_string(), diagnostic.line,
-                             core::engineCatalog().format(core::TextKey{core::hashTextKey(diagnostic.key)}, args)});
-        }
-        finish(false);
-        return;
-    }
-
-    // **Cached by what it was built from**: a directory per key, the wrappers
-    // and the bytecode in it. A second ask -- another session, the same file
-    // -- reads the bytecode back and runs nothing.
-    const std::filesystem::path directory = m_cache / hex(key);
-    std::filesystem::create_directories(directory, fsError);
-    constexpr std::array<std::string_view, 5> Variants{"forward", "forward_instanced", "forward_blended", "depth",
-                                                       "depth_instanced"};
-    for (u32 variant = 0; variant < Variants.size(); ++variant) {
-        for (const bool fragment : {false, true}) {
-            const std::string stem = std::string(Variants[variant]) + (fragment ? ".fragment" : ".vertex");
-            const std::filesystem::path wrapper = directory / (stem + ".hlsl");
-            const std::filesystem::path output = directory / (stem + ".bin");
-            std::vector<std::byte>& code = program->code[variant * 2 + (fragment ? 1 : 0)];
-            if (platform::readFile(output, code) && !code.empty())
-                continue;
-            const std::string text = asset::surfaceWrapper(
-                program->reflection, static_cast<asset::SurfaceVariant>(variant),
-                fragment ? asset::SurfaceStage::Fragment : asset::SurfaceStage::Vertex, file.generic_string());
-            if (!platform::writeTextFile(wrapper, text)) {
-                errors.push_back(SurfaceError{wrapper.string(), 0, "cannot be written"});
-                finish(false);
-                return;
-            }
-            const platform::ProcessResult result = platform::runProcess({
-                m_shadercross.string(),
-                wrapper.string(),
-                "-s",
-                "HLSL",
-                "-d",
-                std::string(destination(format)),
-                "-t",
-                fragment ? "fragment" : "vertex",
-                "-e",
-                fragment ? "FragmentMain" : "VertexMain",
-                "-I",
-                m_include.string(),
-                "-o",
-                output.string(),
-            });
-            ++compiled;
-            if (!result.started || result.exitCode != 0 || !platform::readFile(output, code) || code.empty()) {
-                errors = parseErrors(result.output);
-                std::filesystem::remove(output, fsError);
-                finish(false);
-                return;
-            }
-        }
-    }
-    finish(true);
+    for (const asset::SurfaceBuildError& error : build.errors)
+        errors.push_back(SurfaceError{error.file, error.line, error.message});
+    program->reflection = build.reflection;
+    program->code = build.code;
+    finish(build.ok);
 }
 
 } // namespace luaug::app

@@ -34,6 +34,9 @@ using core::I18nArg;
     if (name == "material") {
         return AssetKind::Material;
     }
+    if (name == "surface") {
+        return AssetKind::Surface;
+    }
     return AssetKind::Unknown;
 }
 

@@ -17,6 +17,7 @@ luaug_add_module(render
         src/debug_draw.cpp
         src/clusters.cpp
         src/environment.cpp
+        src/pack_surface_source.cpp
         src/shader_library.cpp
         src/debug_renderer.cpp
         src/render_world.cpp

@@ -134,6 +134,12 @@ test.suite("packaging", function(suite)
             fs.exists(projectlib.joined(output, "game", ".luaug", "content.lpack")),
             "no content pack in the game"
         )
+        -- **No shader compiler** (ADR 0091). A game's surface shaders are
+        -- compiled when it is built and read out of its pack when it runs; a
+        -- player that carried the compiler could be made to compile.
+        for _, name in { "shadercross.exe", "dxcompiler.dll", "dxil.dll", "dxc.exe" } do
+            assert.that(not fs.exists(projectlib.joined(output, name)), `the game carries a shader compiler: {name}`)
+        end
 
         -- **No arguments.** That is the claim: a packaged game is a folder whose
         -- executable mounts the `game/` directory beside it, so double-clicking

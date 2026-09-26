@@ -59,6 +59,10 @@ enum class SourceKind
     // A `*.material.json` (ADR 0090): compiled to `AssetKind::Material`, its
     // parameter block and the content hashes of the textures it names.
     Material,
+    // A `*.surface.hlsl` (ADR 0091): compiled to `AssetKind::Surface`, its
+    // source and its bytecode for every target the build has a compiler for.
+    // An include beside it rides through as `Raw`.
+    Surface,
     // Copied through untouched: a font, a catalog, a shader blob. Copying
     // rather than refusing is what lets a project put anything it likes in its
     // content directory.
@@ -119,6 +123,15 @@ struct CompileOptions
     // A companion file is not listed here and does not need to be: a glTF reads
     // its own `.bin` and its own images, so naming the `.gltf` names all of it.
     std::vector<std::filesystem::path> only;
+
+    // **What a surface shader is compiled with** (ADR 0091): shadercross, and
+    // the directory `luaug/surface.hlsli` is under. With no compiler a surface
+    // goes into the pack as its source alone, and a player draws it as the
+    // error surface and says why -- a build that refused would stop every
+    // project on a machine without one, and one that dropped the file would
+    // hide it.
+    std::filesystem::path shadercross;
+    std::filesystem::path surfaceInclude;
 };
 
 // What one run actually did, as counts rather than as a duration.
@@ -174,6 +187,9 @@ struct CompileResult
     u32 textureCount = 0;
     u32 rawCount = 0;
     u32 materialCount = 0;
+    u32 surfaceCount = 0;
+    // Surfaces packed as source alone, for want of a compiler.
+    u32 surfacesUncompiled = 0;
     u32 chunkCount = 0;
 
     CompileStats stats;

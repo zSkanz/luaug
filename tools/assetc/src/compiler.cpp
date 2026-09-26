@@ -7,6 +7,7 @@
 #include "luaug/asset/material.h"
 #include "luaug/asset/mesh_format.h"
 #include "luaug/asset/model_split.h"
+#include "luaug/asset/surface_build.h"
 #include "luaug/assetc/exotic.h"
 #include "luaug/core/json.h"
 #include "luaug/core/json_writer.h"
@@ -60,6 +61,9 @@ using asset::AssetKind;
     }
     if (endsWith(name, asset::MaterialSuffix)) {
         return SourceKind::Material;
+    }
+    if (endsWith(name, ".surface.hlsl")) {
+        return SourceKind::Surface;
     }
 
     if (extension == ".gltf" || extension == ".glb") {
@@ -357,6 +361,8 @@ const char* sourceKindName(SourceKind kind) noexcept
         return "chunk";
     case SourceKind::Material:
         return "material";
+    case SourceKind::Surface:
+        return "surface";
     case SourceKind::Raw:
         return "raw";
     }
@@ -693,10 +699,17 @@ CompileResult compile(const CompileOptions& options)
     // Not cached -- a material is a few hundred bytes of JSON and compiling one
     // is cheaper than hashing a cache key for it.
     std::vector<const SourceFile*> materials;
+    // Surfaces after everything, for the reason materials are after textures:
+    // they are their own pass, with their own cache (`asset::buildSurface`).
+    std::vector<const SourceFile*> surfaces;
 
     for (const SourceFile& source : sources) {
         if (source.kind == SourceKind::Material) {
             materials.push_back(&source);
+            continue;
+        }
+        if (source.kind == SourceKind::Surface) {
+            surfaces.push_back(&source);
             continue;
         }
         std::vector<std::byte> bytes;
@@ -993,8 +1006,9 @@ CompileResult compile(const CompileOptions& options)
         }
 
         case SourceKind::Material:
+        case SourceKind::Surface:
             // Taken out before this loop: materials compile after the
-            // textures they name.
+            // textures they name, and surfaces in a pass of their own.
             break;
 
         case SourceKind::Raw: {
@@ -1059,6 +1073,55 @@ CompileResult compile(const CompileOptions& options)
         entry.storedBytes = encoded.size();
         manifest.push_back(std::move(entry));
         result.materialCount += 1;
+    }
+
+    // **Every surface, for every target there is a compiler for.** A shader
+    // that does not compile fails the build, by file and line: a game that
+    // shipped one would draw it as the error surface on every machine.
+    std::error_code surfaceError;
+    const bool canCompile = !options.shadercross.empty() && std::filesystem::exists(options.shadercross, surfaceError);
+    const std::filesystem::path surfaceCache =
+        !options.cacheRoot.empty() ? options.cacheRoot / "surfaces"
+                                   : std::filesystem::temp_directory_path(surfaceError) / "luaug-surface-cache";
+    const core::u64 surfaceHeaders = canCompile ? asset::surfaceHeadersHash(options.surfaceInclude) : 0;
+    for (const SourceFile* source : surfaces) {
+        std::vector<std::byte> bytes;
+        if (!readWhole(source->path, bytes)) {
+            result.diagnostic = "could not read " + source->path.string();
+            return result;
+        }
+        asset::CompiledSurface compiled;
+        compiled.source.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if (canCompile) {
+            for (const asset::SurfaceTarget target : asset::AllSurfaceTargets) {
+                asset::SurfaceBuild build =
+                    asset::buildSurface(asset::SurfaceBuildInputs{source->path, options.shadercross,
+                                                                  options.surfaceInclude, surfaceCache, surfaceHeaders},
+                                        target);
+                if (!build.ok) {
+                    const asset::SurfaceBuildError first =
+                        build.errors.empty() ? asset::SurfaceBuildError{} : build.errors.front();
+                    result.diagnostic = source->relative.generic_string() + " (" +
+                                        std::string(asset::surfaceTargetName(target)) +
+                                        "): " + (first.file.empty() ? std::string{} : first.file + ":") +
+                                        std::to_string(first.line) + ": " + first.message;
+                    return result;
+                }
+                compiled.targets.emplace_back(target, std::move(build.code));
+            }
+        }
+        else {
+            result.surfacesUncompiled += 1;
+        }
+        const std::vector<std::byte> encoded = asset::encodeSurface(compiled);
+        ManifestEntry entry;
+        entry.urn = urnFor(source->relative);
+        entry.hash = pack.addContent(AssetKind::Surface, encoded);
+        entry.kind = AssetKind::Surface;
+        entry.originalBytes = bytes.size();
+        entry.storedBytes = encoded.size();
+        manifest.push_back(std::move(entry));
+        result.surfaceCount += 1;
     }
 
     // The manifest is sorted by URN, which is the second determinism rule: the

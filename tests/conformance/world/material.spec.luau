@@ -8,7 +8,8 @@
 ---
 --- The files are under `tests/conformance/content/materials/`: `brick` (a base
 --- declaring `Color`), `moss` (a variant of brick that declares `Roughness`
---- too) and `plain` (a base declaring nothing).
+--- too), `plain` (a base declaring nothing) and `surfaced` (a base naming a
+--- surface shader and setting three of its parameters, ADR 0091).
 
 local testing = require("@luaug/testing")
 
@@ -18,6 +19,7 @@ local afterEach = testing.afterEach
 local Brick = "asset://materials/brick.material.json" :: Content
 local Moss = "asset://materials/moss.material.json" :: Content
 local Plain = "asset://materials/plain.material.json" :: Content
+local Surfaced = "asset://materials/surfaced.material.json" :: Content
 
 local spawned: { Instance } = {}
 
@@ -217,5 +219,51 @@ describe("material parameters", function()
         local first = wall.MaterialParameters
         first.Transparency = 0.9
         expect(wall.MaterialParameters.Transparency):ToBeCloseTo(0.25, 1e-5)
+    end)
+end)
+
+describe("surface shader parameters", function()
+    it("read off a loaded asset, as the file sets them", function()
+        local surfaced = Material.load(Surfaced)
+        expect(surfaced:GetShaderParameter("Height")):ToBe(0.5)
+        local tint = surfaced:GetShaderParameter("Tint") :: vector
+        expect(tint.x):ToBe(1)
+        expect(tint.y):ToBe(0.5)
+        expect(tint.z):ToBe(0.25)
+        expect(surfaced:GetShaderParameter("Foam")):ToBe("asset://textures/foam.png")
+        -- Left to the shader's own default: the material says nothing.
+        expect(surfaced:GetShaderParameter("Speed")):ToBe(nil)
+    end)
+
+    it("are read-only on a loaded asset", function()
+        local surfaced = Material.load(Surfaced)
+        expect(function()
+            surfaced:SetShaderParameter("Height", 1)
+        end):ToThrow("script.err.material_read_only")
+    end)
+
+    it("are written on a clone, which changes nothing else and clones on", function()
+        local surfaced = Material.load(Surfaced)
+        local copy = surfaced:Clone()
+        copy:SetShaderParameter("Height", 2)
+        copy:SetShaderParameter("Speed", true)
+        copy:SetShaderParameter("Offset", Vector2.new(0.25, 0.75))
+        expect(copy:GetShaderParameter("Height")):ToBe(2)
+        expect(copy:GetShaderParameter("Speed")):ToBe(1)
+        local offset = copy:GetShaderParameter("Offset") :: Vector2
+        expect(offset.X):ToBe(0.25)
+        expect(offset.Y):ToBe(0.75)
+        expect(surfaced:GetShaderParameter("Height")):ToBe(0.5)
+        expect(copy:Clone():GetShaderParameter("Height")):ToBe(2)
+    end)
+
+    it("refuses a value no shader parameter can hold", function()
+        local copy = Material.load(Surfaced):Clone()
+        expect(function()
+            copy:SetShaderParameter("Height", (function() end) :: any)
+        end):ToThrow("script.err.material_value_type")
+        expect(function()
+            copy:SetShaderParameter("Height", math.huge)
+        end):ToThrow("script.err.material_value_type")
     end)
 end)

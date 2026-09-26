@@ -3,6 +3,8 @@
 #include "luaug/app/script_editor.h"
 #if LUAUG_DEBUG_UI
 #include "luaug/app/surface_compiler.h"
+#else
+#include "luaug/render/pack_surface_source.h"
 #endif
 #include "luaug/script/debugger.h"
 
@@ -866,6 +868,9 @@ std::optional<core::EngineError> run(const EngineOptions& options)
     // A user's surface shaders, compiled on a worker (ADR 0091). Editor and dev
     // builds only: a shipped game carries bytecode and no compiler.
     std::unique_ptr<SurfaceCompiler> surfaceCompiler;
+#else
+    // A built game's surface shaders, read from its pack and never compiled.
+    std::unique_ptr<render::PackSurfaceSource> packSurfaces;
 #endif
     render::ShaderLibrary shaders;
     render::DebugRenderer debugRenderer;
@@ -1112,6 +1117,11 @@ std::optional<core::EngineError> run(const EngineOptions& options)
             surfaceCompiler = std::make_unique<SurfaceCompiler>(
                 contentMounts, compiler, platform::paths().contentDir / "shaders" / "include", cache);
             renderer->setSurfaceSource(surfaceCompiler.get());
+        }
+#else
+        if (renderer != nullptr) {
+            packSurfaces = std::make_unique<render::PackSurfaceSource>(contentMounts);
+            renderer->setSurfaceSource(packSurfaces.get());
         }
 #endif
     };
