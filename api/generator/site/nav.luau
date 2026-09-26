@@ -93,6 +93,7 @@ local Sections: { Section } = {
             { Slug = "lights", Title = "Point and spot lights" },
             { Slug = "particles-and-decals", Title = "Particles and decals" },
             { Slug = "post", Title = "Post effects" },
+            { Slug = "surface-shaders", Title = "Surface shaders" },
             { Slug = "quality", Title = "Graphics quality settings" },
         },
     },

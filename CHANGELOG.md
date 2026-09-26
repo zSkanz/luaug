@@ -46,6 +46,23 @@ does not is engine work and belongs in the git history rather than in this file.
 
 ### Added
 
+- **Surface shaders** (ADR 0091): a material may name a `.surface.hlsl` the
+  project writes -- two functions over the `luaug/surface.hlsli` contract, one
+  that may move a vertex and one that decides what the surface is -- and every
+  part wearing it is lit, shadowed and post-processed as any other.
+  Parameters (`LUAUG_PARAM`) and up to five textures (`LUAUG_TEXTURE`) are
+  fields of the material; a blended surface may read the scene behind it
+  (`sceneDepthAt`, and `sceneColorAt` with `readsSceneColor`).
+  `Material:GetShaderParameter` and `Material:SetShaderParameter` read and
+  write them from a script, on a clone. The editor compiles a shader in the
+  background as it is saved, writes a new one from a template, edits it with
+  HLSL highlighting and its errors on their lines, and shows its parameters in
+  the material panel. Building a game compiles every surface for SPIR-V, DXIL
+  and MSL into the pack, and the game carries no compiler. The engine carries
+  three grids a shader can displace, `luaug://mesh/grid-16`, `-64` and `-256`.
+  `examples/11-ocean` draws its sea with one (6.7 ms a frame to 0.67 ms), and
+  `examples/23-surfaces` is a flag, a dissolve and glass.
+
 - **2D joints** (ADR 0102): `HingeConstraint2D` (limits and a motor),
   `SpringConstraint2D` (a soft or rigid distance) and `WeldConstraint2D`, each
   joining `Part0` and `Part1` at `Anchor0` and `Anchor1`, under the abstract

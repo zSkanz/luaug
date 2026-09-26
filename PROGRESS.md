@@ -367,11 +367,16 @@ it is held by goldens of its own: `capture_gate_look` (every effect in one
 command stream, blocking on every tier) and ten exact lavapipe images, one per
 look, named in `tests/look/goldens.txt`.
 
-**User surface shaders (ADR 0091) follow the materials work**, since they
-build on the material asset and its panel. Their Stage 0 -- verifying that a
-source-built DXC emits DXIL retail D3D12 accepts (`U-64`) -- depends on
-nothing and may run at any time. The ledger is
-[`docs/briefs/user-shaders-kickoff.md`](docs/briefs/user-shaders-kickoff.md).
+**User surface shaders (ADR 0091) are built**, stages 0 through 8 of
+[`docs/briefs/user-shaders-kickoff.md`](docs/briefs/user-shaders-kickoff.md),
+with its findings. A material names a `.surface.hlsl`; the editor compiles it
+in the background, writes one from a template, edits it and shows its
+parameters; `assetc` packs it compiled for SPIR-V, DXIL and MSL and a player
+draws it with no compiler; DXC is built from source and ships beside the
+editor. `examples/11-ocean` is user code now (0.67 ms a frame) and
+`examples/23-surfaces` shows three more. **Not built, and said so in the
+ledger**: a shader parameter a part overrides (`instanceParameters`), surviving
+a GPU hang, and pipeline creation times in `docs/perf-baselines.md`.
 
 ## Session Log
 

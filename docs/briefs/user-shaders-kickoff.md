@@ -106,24 +106,31 @@ run at any time.
 
 ## Stage 3 — Parameters
 
-- [ ] Reflection of `LUAUG_PARAM` and `LUAUG_TEXTURE`: type, name, default and
+- [x] Reflection of `LUAUG_PARAM` and `LUAUG_TEXTURE`: type, name, default and
       annotations (`range(a, b)`, `colour`, `toggle`). The uniform block layout
       and the texture slots are the engine's and never the user's.
-- [ ] The material asset's `"shader"` field and `"readsSceneColor"`. Shader
+- [x] The material asset's `"shader"` field and `"readsSceneColor"`. Shader
       parameters are written in `properties` like the built-in fields.
 - [ ] Shader parameters are eligible for `instanceParameters` (ADR 0090), and a
-      part's `SetMaterialParameter` reaches them.
-- [ ] Luau: a shader parameter reads off any handle and writes on a clone,
-      through the same members as a built-in field. The conformance specs cover
+      part's `SetMaterialParameter` reaches them. **Not built**: a per-part
+      value is a clone per value today (`examples/23-surfaces` does exactly
+      that for its three dissolving blocks).
+- [~] Luau: a shader parameter reads off any handle and writes on a clone,
+      through `Material:GetShaderParameter` and `SetShaderParameter` -- methods
+      rather than members, since a shader's parameters are whatever its file
+      declares and a datatype's members are the IDL's closed set. The conformance specs cover
       reading, writing on a clone, the raise on a loaded asset, and a per-part
       override.
 
 ## Stage 4 — Compile, cache, report
 
-- [ ] `assetc` compiles a surface shader to SPIR-V, DXIL and MSL for each pass
+- [x] `assetc` compiles a surface shader to SPIR-V, DXIL and MSL for each pass
       variant, through SDL_shadercross. The output is cached by content hash
       (the shader, its includes and the contract version) and stored in the pack
-      under a new asset kind.
+      under a new asset kind. `AssetKind::Surface`: the source and all three
+      targets, about 400 KB a surface; a player reads it through
+      `render::PackSurfaceSource`. The compile routine is one function,
+      `asset::buildSurface`, shared with the editor's `SurfaceCompiler`.
 - [x] `#include` of `.hlsli` files in the project's `content/` works, and the
       cache key covers them.
 - [x] **Asynchronous compilation in the editor.** A surface draws with the
@@ -135,8 +142,10 @@ run at any time.
       using it (ADR 0062).
 - [ ] The editor survives a GPU device loss caused by a user shader: it reports
       the loss and recovers, and does not crash.
-- [ ] A game packaged by `luaug build` contains no compiler and never compiles.
-      The shipping gate checks this.
+- [x] A game packaged by `luaug build` contains no compiler and never compiles.
+      The player profile has no `SurfaceCompiler` at all (it is behind
+      `LUAUG_DEBUG_UI`), and `tests/packaging` asserts the built folder carries
+      neither shadercross nor DXC.
 
 ## Stage 5 — The renderer
 
@@ -162,7 +171,8 @@ run at any time.
       **If it needs anything private, fix the contract, not the example.**
 - [x] Its README's budget section re-measured: draws, frame time, and the
       property writes per tick against the 676 it has today.
-- [ ] Three more examples, each small, in one folder or three:
+- [x] Three more examples, each small, in one folder or three
+      (`examples/23-surfaces`):
       - a flag in the wind (vertex displacement on a non-water mesh);
       - a dissolve (a `Mask` surface driven by a per-part parameter);
       - glass (refraction through scene colour).
@@ -185,17 +195,19 @@ run at any time.
 
 ## Stage 8 — Documentation and close
 
-- [ ] A manual section on surface shaders. It covers:
-      - the contract reference, generated from `surface.hlsli` if that can be
-        done cleanly;
+- [x] A manual section on surface shaders (`docs/manual/rendering/surface-shaders.md`).
+      It covers:
+      - the contract reference -- summarised in tables and pointing at
+        `surface.hlsli`, which documents every member; generating it would
+        have meant a parser for the header's comments, for three tables;
       - how to write the CPU copy of a wave, and why it cannot be read back from
         the GPU (R10);
       - the GPU-hang warning;
       - the ocean as a walkthrough.
-- [ ] `docs/architecture.md` §8 (the shader toolchain) updated for a second
+- [x] `docs/architecture.md` §8 (the shader toolchain) updated for a second
       caller and a redistributed compiler.
-- [ ] `CHANGELOG.md` under Unreleased.
-- [ ] `PROGRESS.md` updated, this ledger ticked, and a **Findings** section
+- [x] `CHANGELOG.md` under Unreleased.
+- [x] `PROGRESS.md` updated, this ledger ticked, and a **Findings** section
       appended: what ADR 0091 assumed that reality corrected.
 
 ## Not in this work
@@ -269,3 +281,23 @@ shaders, and mobile -- ADR 0091, *Not decided here*.
 - **SDL_shadercross links `dxcompiler` at load time** (`DxcCreateInstance` is
   an import, not a `LoadLibrary`), so whatever links it needs the library
   beside it. The player never links it; the editor and `assetc` will.
+- **Stage 3 -- a shader's parameters are methods, not members.** The brief
+  asked for them "through the same members as a built-in field", and a
+  datatype's members are the IDL's closed set: `Material.Clarity` could not be
+  typed, documented or checked. `GetShaderParameter` and `SetShaderParameter`
+  are what the type checker can see.
+- **Stage 4 -- the build and the editor compile with one function.** Moving
+  `buildSurface` into `asset` was what made the pack's bytecode and the
+  editor's the same bytes: a second copy of "wrap, run shadercross, read back"
+  would have been a second answer. Built cold and built from the cache, the
+  pack of `examples/23-surfaces` is byte-identical.
+- **Stage 4 -- a build with no compiler must still build.** Refusing would stop
+  every project on a machine without DXC (every macOS host); dropping the file
+  would hide it. The surface goes in as source alone and the player says, once,
+  which surface and which backend it cannot draw.
+- **Stage 7 -- every file tab was one window.** The script editor keyed a tab's
+  window on its instance, and a file has none; the first two shaders opened
+  shared a window. `scriptWindowId` keys a file on its path.
+- **Stage 8 -- the editor does not survive a GPU hang.** The brief's device-loss
+  item is not built, and the manual says so in its warning rather than
+  promising a recovery that does not exist.

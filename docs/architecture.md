@@ -853,6 +853,17 @@ self-registration.**
   host tool (also used when cross-compiling) — and **DirectXShaderCompiler is
   fetched and hash-pinned rather than vendored** (ADR 0032), which is also why
   a macOS host has no shader toolchain: Microsoft publishes no macOS build.
+- **A second caller: the user's surface shaders** (ADR 0091). A project's
+  `.surface.hlsl` is wrapped by `asset::surfaceWrapper` into one entry point
+  per pass variant and compiled by `asset::buildSurface` -- the same
+  shadercross, run as a process, cached by everything the bytecode was built
+  from. The editor runs it on a worker as a file is saved (`SurfaceCompiler`);
+  `assetc` runs it for SPIR-V, DXIL and MSL when a project is built, into
+  `AssetKind::Surface`; a player only reads the pack (`PackSurfaceSource`).
+  **So the compiler is redistributed**, beside the editor and `assetc` and
+  never beside a player: `tools/repo/toolchain.luau` builds DXC from its
+  pinned source, which is also what gives a macOS host one, and the package
+  carries its licence.
 - **Packaging:** `luaug build` (CLI) produces: the platform `luaug-host`
   (shipping preset) + `game.lpack` (content-addressed assets, chunk
   manifests, bytecode, shader packs, `en.json` catalog) + launcher config.
